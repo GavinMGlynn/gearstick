@@ -463,7 +463,7 @@ platform section of `FEATURES.md` for why that line is drawn where it is.
       listens, takes up to four clients, and displays them live with the stats
       that say whether it is healthy. *Verification: four clients connect and
       appear by name; one leaves and disappears within a second.*
-- [ ] **The lobby — the server hands out the slots.** Who is player one is the
+- [x] **The lobby — the server hands out the slots.** Who is player one is the
       server's decision rather than whoever happened to host. *Verification:
       four clients get four different slots, and a fifth is turned away with a
       reason it can show its user.*

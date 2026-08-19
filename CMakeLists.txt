@@ -370,11 +370,10 @@ if(GEARSTICK_TESTS)
     # The lobby, with the server as a real process on the loopback. It is a
     # separate program in real use and it is a separate program here - starting
     # it in-process would test a server nobody runs.
-    add_executable(gearstick_server_tests
-        tests/test_server.c
-        src/net/gs_proto.c)
-    target_include_directories(gearstick_server_tests PRIVATE src)
-    target_link_libraries(gearstick_server_tests PRIVATE ${GS_SDL} ${GS_SDL_NET})
+    # Links the shell, because half of what this checks is the client the game
+    # actually ships rather than a client written for the test.
+    add_executable(gearstick_server_tests tests/test_server.c)
+    target_link_libraries(gearstick_server_tests PRIVATE gearstick_shell)
     gs_configure(gearstick_server_tests)
     add_dependencies(gearstick_server_tests gearstick_server)
 

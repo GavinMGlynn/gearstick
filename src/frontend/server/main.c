@@ -27,6 +27,10 @@
 // enough that a lobby of ghosts is not what somebody walks back to.
 #define GS_TIMEOUT_MS 15000
 
+// Overridable so a test can watch a connection die in seconds rather than in a
+// quarter of a minute. A timeout nothing can reach is a timeout nothing tests.
+static uint32_t gs_timeout_ms = GS_TIMEOUT_MS;
+
 // How often the view is redrawn. Four times a second is fast enough to feel
 // live and slow enough that a terminal over ssh is not the bottleneck.
 #define GS_DRAW_MS 250
@@ -344,6 +348,8 @@ static void gs_usage(void) {
     printf("  --players N    how many to allow, 1 to %d (default %d)\n",
            GS_PROTO_MAX_PLAYERS, GS_PROTO_MAX_PLAYERS);
     printf("  --plain        no cursor control, for a log file\n");
+    printf("  --timeout N    drop a client after N ms of silence (default %u)\n",
+           GS_TIMEOUT_MS);
     printf("  --seconds N    stop after N seconds, for tests\n");
     printf("  --help\n");
 }
@@ -361,6 +367,8 @@ int main(int argc, char **argv) {
             players = (uint8_t)SDL_clamp(n, 1, GS_PROTO_MAX_PLAYERS);
         } else if (SDL_strcmp(argv[i], "--plain") == 0) {
             gs_srv.plain = true;
+        } else if (SDL_strcmp(argv[i], "--timeout") == 0 && i + 1 < argc) {
+            gs_timeout_ms = (uint32_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
             seconds = (uint32_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--help") == 0) {
@@ -421,7 +429,7 @@ int main(int argc, char **argv) {
             gs_client *c = &gs_srv.client[i];
             if (!c->used) continue;
 
-            if (now - c->last_seen_ms > GS_TIMEOUT_MS) {
+            if (now - c->last_seen_ms > gs_timeout_ms) {
                 gs_drop(i, "went quiet");
                 continue;
             }

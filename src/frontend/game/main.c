@@ -89,6 +89,8 @@ typedef struct gs_app {
     gs_net      net;
     bool        online;
     const char *join_host;
+    const char *server_host;      // meeting at a server instead
+    const char *online_name;      // who to appear as
     uint16_t    port;
     uint8_t     online_players;   // how many the host is waiting for
     bool        net_started;      // everybody is here and the race has begun
@@ -475,6 +477,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                 argv[i + 1][1] == '\0') {
                 a->online_players = (uint8_t)SDL_atoi(argv[++i]);
             }
+        } else if (SDL_strcmp(argv[i], "--server") == 0 && i + 2 < argc) {
+            // Meet everybody at a server rather than at each other. Which
+            // player you are is then the server's decision.
+            a->online = true;
+            a->server_host = argv[++i];
+            a->port = (uint16_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--join") == 0 && i + 2 < argc) {
             a->online = true;
             a->join_host = argv[++i];
@@ -485,6 +493,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->ghost_path = argv[++i];
         } else if (SDL_strcmp(argv[i], "--audio-out") == 0 && i + 1 < argc) {
             a->audio_out = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
+            a->online_name = argv[++i];
         } else if (SDL_strcmp(argv[i], "--session") == 0) {
             // A whole session with nobody at the keyboard: the grid from the
             // setup screen, a race driven by the AI, and the results table it
@@ -533,6 +543,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --ghost-out F   with --shot: write the captured run as a ghost");
             SDL_Log("  --host PORT [N]   wait for N players in total (2-4, default 2)");
             SDL_Log("  --join HOST PORT  join somebody who is waiting");
+            SDL_Log("  --server HOST PORT  meet everybody at a server");
+            SDL_Log("  --name NAME     who to appear as online");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
@@ -586,7 +598,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             return SDL_APP_FAILURE;
         }
         uint8_t want = a->online_players > 0 ? a->online_players : 2;
-        a->wire = a->join_host != nullptr
+        const char *me = a->online_name != nullptr ? a->online_name : "driver";
+
+        a->wire = a->server_host != nullptr
+                      ? gs_wire_server(a->server_host, a->port, me)
+                  : a->join_host != nullptr
                       ? gs_wire_join(a->join_host, a->port)
                       : gs_wire_host(a->port, want);
 
@@ -596,8 +612,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             return SDL_APP_FAILURE;
         }
 
-        SDL_Log("net: %s on port %u", a->join_host != nullptr ? "joining" : "hosting",
-                a->port);
+        if (a->server_host != nullptr) {
+            SDL_snprintf(a->menu.server_text, sizeof a->menu.server_text,
+                         "%s:%u, as %s", a->server_host, a->port, me);
+            SDL_Log("net: meeting at %s", a->menu.server_text);
+        } else {
+            SDL_Log("net: %s on port %u",
+                    a->join_host != nullptr ? "joining" : "hosting", a->port);
+        }
     }
 
     // A ghost named on the command line is somebody else's run, so it survives
@@ -774,6 +796,16 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (a->shot_path != nullptr) {
         steps = 0;
         gs_clock_init(&a->clock);
+
+        // A capture of an online screen has to let the network run, or every
+        // screenshot of a lobby is a screenshot of the word "Knocking".
+        if (a->online && !a->net_started) {
+            for (uint32_t i = 0; i < a->shot_at; i++) {
+                gs_wire_poll(a->wire);
+                SDL_Delay(2);
+            }
+        }
+
         while (a->world.tick < a->shot_at) {
             gs_input in[GS_MAX_CARS];
             for (uint8_t i = 0; i < GS_MAX_CARS; i++) in[i] = GS_IN_ACCEL;
@@ -830,18 +862,36 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         // single tick is simulated - rollback can recover from a wrong guess
         // about an input and from nothing at all about a wrong starting state.
         gs_wire_poll(a->wire);
+
+        // Waiting is a thing with a picture. The menu is handed what the wire
+        // last heard and draws it; it owns no networking of its own, so a
+        // lobby screen cannot be a reason the connection behaves differently.
+        if (a->server_host != nullptr) {
+            a->menu.lobby = gs_wire_lobby(a->wire);
+            a->menu.lobby_error = gs_wire_refusal(a->wire);
+            a->menu.lobby_slot = gs_wire_local(a->wire);
+            a->menu.lobby_ready = gs_wire_ready(a->wire);
+            if (a->menu.screen == GS_SCREEN_RACE) a->menu.screen = GS_SCREEN_LOBBY;
+        }
         if (gs_wire_ready(a->wire)) {
             a->players = gs_wire_players(a->wire);
             gs_start_race(a);
             gs_net_begin(&a->net, &a->world, gs_wire_players(a->wire),
                          gs_wire_local(a->wire));
             a->net_started = true;
+            a->menu.screen = GS_SCREEN_RACE;
             SDL_Log("net: %u players, driving car %u", a->net.players, a->net.local);
         }
         steps = 0;
     }
 
     if (a->online && a->net_started) {
+        // Still saying we are here. The race goes peer to peer, so without this
+        // the server hears nothing from a racing client and eventually drops
+        // it - and being dropped mid-race is how a lobby loses somebody who
+        // never left.
+        gs_wire_poll(a->wire);
+
         for (uint32_t i = 0; i < steps; i++) {
             // Everything that has arrived, before anything is simulated: a
             // correction is worth more the earlier it lands, because it is

@@ -170,12 +170,20 @@ who is there and how far away they are:
 gearstick_server --port 47800 --players 4
 ```
 
+Then everybody else meets there:
+
+```sh
+gearstick --server their-address 47800 --name ada
+```
+
+You get a lobby screen showing who has arrived and how many are still missing.
+**Which player you are is the server's decision**, not a matter of who started
+first.
+
 The server does not run the race. Your machine does, and so does everybody
 else's — that is why your car responds to your steering immediately instead of
 waiting for the network. The server holds the lobby, and later the track library
-and the records. **Connecting the game to a server is not built yet**; today the
-server runs, accepts clients and shows them, and the game still uses `--host`
-and `--join`. See *What is missing*. The netcode is rollback: your car
+and the records. The netcode is rollback: your car
 responds to your steering on the frame you press it, and when the game guesses
 wrong about what somebody else did it quietly rewinds and replays. You will see
 another car twitch occasionally. You will not wait for the network to see your
@@ -235,8 +243,8 @@ Said here rather than discovered:
 
 - **There is one track.** The construction set can build any track and save one;
   there is no library to browse yet.
-- **The game does not talk to the server yet.** `gearstick_server` runs and
-  holds a lobby; the game still meets people with `--host` and `--join`.
+- **A server race still needs everybody on the same track**, because the
+  handshake does not send it yet — the same limitation as `--host`/`--join`.
 - **Online needs everybody on the same track already.** The handshake does not
   send the track.
 - **Only players one and two have keyboard controls** by default.

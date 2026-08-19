@@ -7,6 +7,7 @@
 // to get right that are easy to get wrong: a fifth client is refused *with a
 // reason*, and somebody who says hello twice does not occupy two slots.
 #include "net/gs_proto.h"
+#include "platform/gs_wire.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
@@ -120,8 +121,8 @@ static void gs_client_pump(gs_test_client *c) {
 // deadline so a broken test cannot leave one running.
 static SDL_Process *gs_server = nullptr;
 
-static bool gs_server_start_for(const char *port, const char *seconds,
-                                const char *players) {
+static bool gs_server_start_full(const char *port, const char *seconds,
+                                 const char *players, const char *timeout) {
     // Next to this binary, not next to whatever directory somebody happened to
     // run the test from. ctest runs it from the build directory and a person
     // runs it from wherever they are, and only one of those finds "./".
@@ -137,7 +138,7 @@ static bool gs_server_start_for(const char *port, const char *seconds,
 
     const char *args[] = {
         exe, "--port", port, "--plain", "--seconds", seconds,
-        "--players", players, nullptr,
+        "--players", players, "--timeout", timeout, nullptr,
     };
 
     // Its output goes nowhere. The server redraws a live view four times a
@@ -159,6 +160,11 @@ static bool gs_server_start_for(const char *port, const char *seconds,
     }
     SDL_Delay(400);        // let it bind before anybody knocks
     return true;
+}
+
+static bool gs_server_start_for(const char *port, const char *seconds,
+                                const char *players) {
+    return gs_server_start_full(port, seconds, players, "15000");
 }
 
 static bool gs_server_start(const char *port, const char *seconds) {
@@ -375,6 +381,186 @@ TEST(the_server_ignores_datagrams_that_are_not_ours) {
     gs_server_stop();
 }
 
+// --- the game's own client, not the test's --------------------------------
+//
+// Everything above drives a client written for the test. This drives the one
+// the game actually uses, which is the only way to know that the thing shipped
+// to players talks to the thing shipped to servers.
+
+TEST(the_games_own_client_gets_its_slot_from_the_server) {
+    if (!gs_server_start("47818", "20")) { gs_failures++; return; }
+    CHECK(gs_wire_init());
+
+    static gs_wire *w[4];
+    static const char *names[4] = { "ada", "bez", "cy", "dot" };
+
+    for (int i = 0; i < 4; i++) {
+        w[i] = gs_wire_server("127.0.0.1", 47818, names[i]);
+        CHECK(w[i] != nullptr);
+        CHECK(gs_wire_error(w[i]) == nullptr);
+    }
+
+    // Everybody polls until the server has placed all four.
+    bool all = false;
+    for (int k = 0; k < 400 && !all; k++) {
+        all = true;
+        for (int i = 0; i < 4; i++) {
+            gs_wire_poll(w[i]);
+            if (!gs_wire_ready(w[i])) all = false;
+        }
+        SDL_Delay(10);
+    }
+    CHECK(all);
+
+    // **Four different slots, decided by the server.** Not by who started
+    // first, which is the whole difference between a lobby and a host.
+    bool seen[GS_PROTO_MAX_PLAYERS] = { false, false, false, false };
+    for (int i = 0; i < 4; i++) {
+        uint8_t slot = gs_wire_local(w[i]);
+        CHECK(slot < GS_PROTO_MAX_PLAYERS);
+        if (slot < GS_PROTO_MAX_PLAYERS) {
+            CHECK(!seen[slot]);
+            seen[slot] = true;
+        }
+        CHECK(gs_wire_players(w[i]) == 4);
+    }
+
+    // And each of them can see who else is here, by name.
+    for (int i = 0; i < 4; i++) {
+        const gs_lobby *l = gs_wire_lobby(w[i]);
+        CHECK(l != nullptr);
+        if (l == nullptr) continue;
+        CHECK(l->count == 4);
+
+        for (int n = 0; n < 4; n++) {
+            bool found = false;
+            for (int p = 0; p < GS_PROTO_MAX_PLAYERS; p++) {
+                if (l->player[p].present &&
+                    SDL_strcmp(l->player[p].name, names[n]) == 0) {
+                    found = true;
+                }
+            }
+            CHECK(found);
+        }
+    }
+
+    // A fifth is turned away, and can say why in words meant for a person.
+    gs_wire *fifth = gs_wire_server("127.0.0.1", 47818, "eve");
+    CHECK(fifth != nullptr);
+    for (int k = 0; k < 200 && !gs_wire_refused(fifth); k++) {
+        gs_wire_poll(fifth);
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_refused(fifth));
+    CHECK(!gs_wire_ready(fifth));
+    CHECK(gs_wire_refusal(fifth) != nullptr);
+    if (gs_wire_refusal(fifth) != nullptr) {
+        CHECK(SDL_strstr(gs_wire_refusal(fifth), "full") != nullptr);
+    }
+
+    gs_wire_close(fifth);
+    for (int i = 0; i < 4; i++) gs_wire_close(w[i]);
+    gs_wire_quit();
+    gs_server_stop();
+}
+
+TEST(a_placed_client_is_not_dropped_for_going_quiet) {
+    // **The bug this exists for:** a client that stopped talking to the server
+    // the moment it was placed. The race itself goes peer to peer, so nothing
+    // else sends to the server once one starts - and the server drops whoever
+    // it has not heard from, which is what stops a lobby filling with people
+    // who closed their laptop. Together those two correct behaviours threw
+    // players out mid-race.
+    //
+    // Two seconds of silence is enough to see it: the server pings every two
+    // seconds and gives up after fifteen, so a client that answers nothing
+    // shows as quiet long before it is dropped, and one that keeps in touch
+    // never does.
+    // A two second patience, so a connection that stops being maintained dies
+    // inside the test rather than a quarter of a minute after it.
+    if (!gs_server_start_full("47822", "20", "2", "2000")) { gs_failures++; return; }
+    CHECK(gs_wire_init());
+
+    gs_wire *a = gs_wire_server("127.0.0.1", 47822, "ada");
+    gs_wire *b = gs_wire_server("127.0.0.1", 47822, "bez");
+    CHECK(a != nullptr && b != nullptr);
+
+    for (int k = 0; k < 400 && !(gs_wire_ready(a) && gs_wire_ready(b)); k++) {
+        gs_wire_poll(a);
+        gs_wire_poll(b);
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_ready(a));
+    CHECK(gs_wire_ready(b));
+
+    // Six seconds of a race - three times the server's patience here - with
+    // nothing but the connection maintaining itself.
+    for (int k = 0; k < 600; k++) {
+        gs_wire_poll(a);
+        gs_wire_poll(b);
+        SDL_Delay(10);
+    }
+
+    // Still here, still knowing about each other. A server that had dropped
+    // them would have told the survivor the lobby had shrunk.
+    const gs_lobby *l = gs_wire_lobby(a);
+    CHECK(l != nullptr);
+    if (l != nullptr) CHECK(l->count == 2);
+    CHECK(gs_wire_ready(a));
+    CHECK(!gs_wire_refused(a));
+
+    // And still *listening*. Keeping a connection alive by talking is half of
+    // it; a client that had stopped reading would sit on a roster from six
+    // seconds ago and never notice the person it is racing had gone. Checked by
+    // letting one of them actually go.
+    gs_wire_close(b);
+    b = nullptr;
+
+    bool noticed = false;
+    for (int k = 0; k < 500 && !noticed; k++) {
+        gs_wire_poll(a);
+        const gs_lobby *now = gs_wire_lobby(a);
+        noticed = now != nullptr && now->count == 1;
+        SDL_Delay(10);
+    }
+    CHECK(noticed);
+
+    gs_wire_close(a);
+    gs_wire_quit();
+    gs_server_stop();
+}
+
+TEST(a_client_waiting_for_others_is_not_ready_yet) {
+    // A lobby of four with one person in it is not a race. A client that called
+    // itself ready would start racing against three people who are not there.
+    if (!gs_server_start("47820", "12")) { gs_failures++; return; }
+    CHECK(gs_wire_init());
+
+    gs_wire *lonely = gs_wire_server("127.0.0.1", 47820, "ada");
+    CHECK(lonely != nullptr);
+
+    const gs_lobby *l = nullptr;
+    for (int k = 0; k < 200; k++) {
+        gs_wire_poll(lonely);
+        l = gs_wire_lobby(lonely);
+        if (l != nullptr && l->count == 1) break;
+        SDL_Delay(10);
+    }
+
+    CHECK(l != nullptr);
+    if (l != nullptr) {
+        CHECK(l->count == 1);        // seen, and placed
+        CHECK(l->capacity == 4);
+    }
+    CHECK(gs_wire_local(lonely) == 0);
+    CHECK(!gs_wire_ready(lonely));   // and not racing
+    CHECK(!gs_wire_refused(lonely));
+
+    gs_wire_close(lonely);
+    gs_wire_quit();
+    gs_server_stop();
+}
+
 int main(void) {
     printf("gearstick server tests\n");
 
@@ -387,6 +573,9 @@ int main(void) {
     run_saying_hello_twice_is_still_one_player();
     run_a_server_told_to_hold_two_holds_two();
     run_the_server_ignores_datagrams_that_are_not_ours();
+    run_the_games_own_client_gets_its_slot_from_the_server();
+    run_a_client_waiting_for_others_is_not_ready_yet();
+    run_a_placed_client_is_not_dropped_for_going_quiet();
 
     gs_server_stop();
     NET_Quit();

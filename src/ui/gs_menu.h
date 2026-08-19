@@ -21,6 +21,7 @@
 #include "core/gs_profile.h"
 #include "core/gs_records.h"
 #include "core/gs_sim.h"
+#include "net/gs_proto.h"
 #include "core/gs_track.h"
 
 typedef enum gs_screen {
@@ -30,6 +31,7 @@ typedef enum gs_screen {
     GS_SCREEN_RACE,
     GS_SCREEN_RESULTS,
     GS_SCREEN_RECORDS,
+    GS_SCREEN_LOBBY,
     GS_SCREEN_COUNT
 } gs_screen;
 
@@ -81,6 +83,15 @@ typedef struct gs_menu {
     int     picking_for;            // which player slot the roster is open for
 
     char status[160];
+
+    // Waiting at a server. The menu owns none of the networking - it is handed
+    // what the wire last heard and draws it, so a lobby screen cannot be a
+    // reason the connection behaves differently.
+    const gs_lobby *lobby;
+    const char     *lobby_error;    // a refusal, in words meant for a person
+    uint8_t         lobby_slot;
+    bool            lobby_ready;
+    char            server_text[80];
 } gs_menu;
 
 void gs_menu_init(gs_menu *m);

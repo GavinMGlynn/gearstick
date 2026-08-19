@@ -751,6 +751,101 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
     return next;
 }
 
+static gs_screen gs_lobby_screen(gs_menu *m) {
+    gs_screen next = GS_SCREEN_LOBBY;
+
+    int rows = (m->lobby != nullptr && m->lobby->capacity > 0)
+                   ? m->lobby->capacity : 4;
+    gs_centre_window("lobby", 640.0f, 220.0f + gs_row_height() * (float)(rows + 1));
+
+    if (ImGui_Begin("Lobby", nullptr,
+                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                    ImGuiWindowFlags_NoCollapse)) {
+        ImGui_TextUnformatted(m->server_text);
+
+        if (m->lobby_error != nullptr) {
+            // A refusal is the whole message. Nothing else on this screen
+            // matters if the server would not have us.
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text, (ImVec4){ 0.95f, 0.5f, 0.3f, 1.0f });
+            ImGui_TextUnformatted(m->lobby_error);
+            ImGui_PopStyleColor();
+            ImGui_Spacing();
+            ImGui_Separator();
+            ImGui_Spacing();
+            if (ImGui_ButtonEx("Back", (ImVec2){ 120.0f, 38.0f })) {
+                next = GS_SCREEN_TITLE;
+            }
+            ImGui_End();
+            return next;
+        }
+
+        gs_heading("WHO IS HERE");
+
+        // **Nothing heard yet is not an empty lobby.** A server that has not
+        // answered has no capacity either, and drawing that as a table of
+        // nobody under "waiting for 0 more players" is a screen describing a
+        // roster it has never seen.
+        bool heard = m->lobby != nullptr && m->lobby->capacity > 0;
+
+        if (!heard) {
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+            ImGui_TextUnformatted("Knocking...");
+            ImGui_PopStyleColor();
+        } else if (ImGui_BeginTable("lobby", 3,
+                                    ImGuiTableFlags_RowBg |
+                                    ImGuiTableFlags_SizingFixedFit)) {
+            ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
+            ImGui_TableSetupColumnEx("driver", ImGuiTableColumnFlags_WidthFixed, 200.0f, 0);
+            ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+            ImGui_TableHeadersRow();
+
+            for (uint8_t i = 0; i < m->lobby->capacity; i++) {
+                const gs_lobby_player *p = &m->lobby->player[i];
+                ImGui_TableNextRow();
+
+                ImGui_TableSetColumnIndex(0);
+                ImGui_Text("%u", i + 1);
+
+                ImGui_TableSetColumnIndex(1);
+                if (!p->present) {
+                    ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                               ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+                    ImGui_TextUnformatted("waiting...");
+                    ImGui_PopStyleColor();
+                } else {
+                    ImGui_TextUnformatted(p->name);
+                }
+
+                ImGui_TableSetColumnIndex(2);
+                if (p->present && i == m->lobby_slot) {
+                    float r, g, b;
+                    gs_style_accent(&r, &g, &b);
+                    ImGui_PushStyleColorImVec4(ImGuiCol_Text, (ImVec4){ r, g, b, 1.0f });
+                    ImGui_TextUnformatted("you");
+                    ImGui_PopStyleColor();
+                }
+            }
+            ImGui_EndTable();
+        }
+
+        ImGui_Spacing();
+        if (m->lobby_ready) {
+            ImGui_TextUnformatted("Everybody is here.");
+        } else if (heard) {
+            uint8_t want = (uint8_t)(m->lobby->capacity - m->lobby->count);
+            ImGui_Text("Waiting for %u more player%s.", want, want == 1 ? "" : "s");
+        }
+
+        ImGui_Spacing();
+        ImGui_Separator();
+        ImGui_Spacing();
+        if (ImGui_ButtonEx("Leave", (ImVec2){ 120.0f, 38.0f })) next = GS_SCREEN_TITLE;
+    }
+    ImGui_End();
+    return next;
+}
+
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {
     switch (m->screen) {
     case GS_SCREEN_TITLE:    return gs_title(m);
@@ -758,6 +853,7 @@ gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {
     case GS_SCREEN_SETUP:    return gs_setup_screen(m, t);
     case GS_SCREEN_RESULTS:  return gs_results_screen(m);
     case GS_SCREEN_RECORDS:  return gs_records_screen(m, t);
+    case GS_SCREEN_LOBBY:    return gs_lobby_screen(m);
     default:                 return m->screen;
     }
 }

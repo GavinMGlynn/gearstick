@@ -713,6 +713,45 @@ server displayed a round trip it never measured. Only the end that sends a ping
 can time its own reply, so a server that wants to show one has to ask — it now
 does, every two seconds, and a test fails if the asking stops.
 
+### The lobby, and a bug the test had to be sharpened twice to catch
+
+`gearstick --server HOST PORT --name ada` meets everybody at a server instead of
+at each other, and **which player you are is the server's decision** rather than
+the decision of whoever started the game first. That is the difference between
+a lobby and a host. There is a screen for it: who is here, which one is you, how
+many are still missing, and a refusal shown in words meant for a person rather
+than as a failure to connect.
+
+The same `gs_wire` either way. Once everybody is found, sending and receiving
+work identically, so nothing above that layer knows or cares how the players
+met.
+
+**The bug worth recording** was mine and it was subtle. The server's address was
+kept in slot zero of the peer table — and then the roster arrives and fills the
+peer table with players, overwriting slot zero with *player zero's* address. Any
+client not placed first lost the server completely and was dropped for silence
+a few seconds later. The server now lives outside the peer table, which is what
+the comment claiming slot zero "is the server rather than a player" should have
+meant.
+
+Finding it took sharpening the test twice, which is the part worth keeping:
+
+The first version watched a placed client for six seconds against a fifteen
+second patience, so nothing could die inside the test. The server gained a
+`--timeout` flag purely so a test can reach the behaviour — a timeout nothing
+can reach is a timeout nothing tests.
+
+The second version then passed while the client stopped reading entirely,
+because the client's own heartbeat kept the server happy on its own. Staying
+connected is only half of it: a client that had stopped listening would sit on a
+roster from six seconds ago and never notice the person it is racing had left.
+The test now closes one of the two and requires the other to notice, and
+breaking the read path fails it.
+
+One smaller thing, found by looking at a screenshot: a lobby that has not heard
+from the server yet was drawn as a table of nobody under "waiting for 0 more
+players". Nothing heard is not an empty lobby, and it says "Knocking..." now.
+
 ---
 
 ## What does not exist

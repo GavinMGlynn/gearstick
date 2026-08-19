@@ -104,8 +104,14 @@ The server runs headless and shows you what it is doing:
 ```
 
 ```sh
-gearstick_server --port 47800 --players 4
+gearstick_server --port 47800 --players 4      # the meeting point
+gearstick --server their-host 47800 --name ada # everybody else
 ```
+
+Which player you are is the server's decision, not the decision of whoever
+started first — that is the difference between a lobby and a host:
+
+![Waiting in the lobby](docs/images/lobby.png)
 
 ## Building
 

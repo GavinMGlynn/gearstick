@@ -1,5 +1,7 @@
 #include "platform/gs_wire.h"
 
+#include "net/gs_proto.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
 
@@ -34,6 +36,23 @@ typedef struct gs_peer {
 
 struct gs_wire {
     NET_DatagramSocket *sock;
+
+    // Meeting at a server rather than at each other. The peer handshake above
+    // is untouched by this: a server connection is a different way of finding
+    // out who is here, and once everybody is found the two are the same thing.
+    bool     via_server;
+
+    // **The server is not a player and does not live in the peer table.** It
+    // did, briefly, sharing slot zero - and then the roster arrived and
+    // overwrote slot zero with player zero's address, so every client that was
+    // not placed first lost the server entirely and was dropped for silence.
+    NET_Address *server_addr;
+    uint16_t     server_port;
+
+    char     me[GS_PROTO_NAME];
+    bool     refused;
+    char     refusal[64];
+    gs_lobby lobby;
 
     bool    hosting;
     uint8_t players;      // how many there will be when everybody has arrived
@@ -119,6 +138,41 @@ gs_wire *gs_wire_host(uint16_t port, uint8_t players) {
     return w;
 }
 
+gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name) {
+    gs_wire *w = gs_wire_new(0);
+    if (w == nullptr || w->sock == nullptr) return w;
+
+    w->server_addr = NET_ResolveHostname(host);
+    if (w->server_addr == nullptr ||
+        NET_WaitUntilResolved(w->server_addr, 5000) != NET_SUCCESS) {
+        SDL_snprintf(w->error, sizeof w->error, "could not look up %s: %s",
+                     host, SDL_GetError());
+        if (w->server_addr != nullptr) NET_UnrefAddress(w->server_addr);
+        w->server_addr = nullptr;
+        return w;
+    }
+
+    w->server_port = port;
+    w->via_server = true;
+    w->local = 0xffu;
+    w->players = 0;
+    SDL_strlcpy(w->me, (name != nullptr && name[0] != '\0') ? name : "driver",
+                sizeof w->me);
+    SDL_strlcpy(w->host_text, host, sizeof w->host_text);
+    w->host_port = port;
+    return w;
+}
+
+bool gs_wire_refused(const gs_wire *w) { return w != nullptr && w->refused; }
+
+const char *gs_wire_refusal(const gs_wire *w) {
+    return (w != nullptr && w->refused) ? w->refusal : nullptr;
+}
+
+const gs_lobby *gs_wire_lobby(const gs_wire *w) {
+    return (w != nullptr && w->via_server) ? &w->lobby : nullptr;
+}
+
 gs_wire *gs_wire_join(const char *host, uint16_t port) {
     gs_wire *w = gs_wire_new(0);
     if (w == nullptr || w->sock == nullptr) return w;
@@ -143,6 +197,7 @@ gs_wire *gs_wire_join(const char *host, uint16_t port) {
 
 void gs_wire_close(gs_wire *w) {
     if (w == nullptr) return;
+    if (w->server_addr != nullptr) NET_UnrefAddress(w->server_addr);
     for (int i = 0; i < GS_WIRE_PLAYERS; i++) {
         if (w->peer[i].addr != nullptr) NET_UnrefAddress(w->peer[i].addr);
     }
@@ -295,12 +350,108 @@ static void gs_take_hello(gs_wire *w, NET_Address *from, uint16_t port) {
     // a reply telling it there is a game here.
 }
 
-void gs_wire_poll(gs_wire *w) {
-    if (w == nullptr || w->sock == nullptr || w->ready) return;
+static void gs_to_server(gs_wire *w, const uint8_t *buf, size_t n);
 
-    // Joiners knock until answered. The host has nothing to say until somebody
-    // knocks, so it only listens.
-    if (!w->hosting && w->retry++ % GS_RETRY_TICKS == 0) gs_send_hello(w);
+// What the server said. Handled here rather than by the caller, for the same
+// reason the peer handshake is: the layer above wants players, not datagrams.
+static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
+    switch (gs_proto_kind(buf, len)) {
+    case GS_MSG_WELCOME: {
+        uint8_t slot = 0;
+        if (!gs_proto_read_welcome(buf, len, &slot, &w->lobby)) break;
+
+        w->local = slot;
+        w->players = w->lobby.capacity;
+        w->refused = false;
+
+        // Everybody the server named, so a race can be meshed with them
+        // directly later. Slot zero is a player here, not the server - the
+        // server's own address is kept separately in host_text.
+        // Where everybody is, for meshing with them directly later. Safe to
+        // write over slot zero now: the server keeps its own address.
+        for (uint8_t i = 0; i < GS_WIRE_PLAYERS; i++) {
+            const gs_lobby_player *p = &w->lobby.player[i];
+            if (i == slot || !p->present) continue;
+            SDL_strlcpy(w->peer[i].text, p->addr, sizeof w->peer[i].text);
+            w->peer[i].port = p->port;
+        }
+
+        // Ready when the lobby is full, which is the server's call to make.
+        w->ready = w->lobby.count >= w->lobby.capacity;
+        break;
+    }
+
+    case GS_MSG_LOBBY:
+        if (gs_proto_read_lobby(buf, len, &w->lobby)) {
+            w->players = w->lobby.capacity;
+            w->ready = w->local < GS_WIRE_PLAYERS &&
+                       w->lobby.count >= w->lobby.capacity;
+        }
+        break;
+
+    case GS_MSG_FULL:
+        // **Kept, and shown.** A client that could only say "connection
+        // failed" makes a full server and a wrong address look the same.
+        w->refused = gs_proto_read_full(buf, len, w->refusal, sizeof w->refusal);
+        break;
+
+    case GS_MSG_PING: {
+        // Only the end that sent a ping can time the reply, so answering is
+        // how the server learns how far away this machine is.
+        uint32_t stamp = 0;
+        if (gs_proto_read_stamp(buf, len, &stamp)) {
+            uint8_t out[GS_PROTO_MTU];
+            gs_to_server(w, out, gs_proto_pong(out, sizeof out, stamp));
+        }
+        break;
+    }
+
+    default:
+        break;
+    }
+}
+
+// To the server, which is not a peer.
+static void gs_to_server(gs_wire *w, const uint8_t *buf, size_t n) {
+    if (w->server_addr == nullptr || n == 0) return;
+    NET_SendDatagram(w->sock, w->server_addr, w->server_port, buf, (int)n);
+}
+
+static void gs_send_join(gs_wire *w) {
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf, gs_proto_join(buf, sizeof buf, w->me));
+}
+
+// **A connection has to keep saying it is there.** The server drops anybody it
+// has not heard from, which is what stops a lobby filling with people who
+// closed their laptop - so a client that went quiet the moment it was placed
+// would be thrown out mid-race. Nothing else sends to the server once a race
+// starts: the race itself goes peer to peer.
+#define GS_HEARTBEAT_TICKS 90        // about a second and a half at 60 fps
+
+void gs_wire_poll(gs_wire *w) {
+    if (w == nullptr || w->sock == nullptr) return;
+
+    if (w->via_server) {
+        w->retry++;
+
+        // Knocking. A refused client stops asking: a full server does not
+        // become less full by being asked again, and a client that kept
+        // knocking would be a client nobody can turn away.
+        if (!w->ready && !w->refused && w->retry % GS_RETRY_TICKS == 0) {
+            gs_send_join(w);
+        }
+
+        // And once placed, still saying so.
+        if (w->ready && w->retry % GS_HEARTBEAT_TICKS == 0) {
+            uint8_t buf[GS_PROTO_MTU];
+            gs_to_server(w, buf, gs_proto_ping(buf, sizeof buf, (uint32_t)w->retry));
+        }
+    } else if (!w->ready && !w->hosting && w->retry++ % GS_RETRY_TICKS == 0) {
+        gs_send_hello(w);
+    }
+
+    if (w->ready && !w->via_server) return;
 
     uint8_t buf[GS_WIRE_MTU];
     while (gs_wire_recv(w, buf, sizeof buf) > 0) {
@@ -345,6 +496,13 @@ size_t gs_wire_recv(gs_wire *w, uint8_t *buf, size_t cap) {
         if (!NET_ReceiveDatagram(w->sock, &d) || d == nullptr) return 0;
 
         size_t n = (size_t)d->buflen;
+
+        // The server's traffic never reaches the caller either.
+        if (w->via_server && gs_proto_kind(d->buf, n) != GS_MSG_NONE) {
+            gs_take_server(w, d->buf, n);
+            NET_DestroyDatagram(d);
+            continue;
+        }
 
         // The handshake's own traffic never reaches the caller.
         if (n >= 5 && gs_get32(d->buf) == GS_CTRL_MAGIC) {

@@ -24,6 +24,7 @@
 // For `nullptr` on a toolchain that took -std=c23 without implementing it, as
 // well as the fixed-width types. MSVC is that toolchain today.
 #include "core/gs_common.h"
+#include "net/gs_proto.h"
 
 #define GS_WIRE_MTU     512
 #define GS_WIRE_PLAYERS 4
@@ -43,6 +44,16 @@ gs_wire *gs_wire_host(uint16_t port, uint8_t players);
 // this machine turns out to be is decided by the host and arrives with the
 // roster.
 gs_wire *gs_wire_join(const char *host, uint16_t port);
+
+// Meet everybody at a server instead. **Which player you are is the server's
+// decision**, not the decision of whoever happened to start the game first -
+// which is the difference between a lobby and a host, and the reason a server
+// exists at all. `name` is who to appear as.
+//
+// The same object either way: once ready, sending and receiving work the same,
+// so nothing above this layer knows or cares which way the players found each
+// other.
+gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name);
 
 void gs_wire_close(gs_wire *w);
 
@@ -73,6 +84,19 @@ bool gs_wire_send(gs_wire *w, const uint8_t *buf, size_t len);
 size_t gs_wire_recv(gs_wire *w, uint8_t *buf, size_t cap);
 
 void gs_wire_stats(const gs_wire *w, uint32_t *sent, uint32_t *received);
+
+// --- meeting at a server ---------------------------------------------------
+
+// Turned away, and why. **The reason is meant to be shown to a person**: a
+// client that can only say "connection failed" makes a full server and a wrong
+// address look identical.
+bool        gs_wire_refused(const gs_wire *w);
+const char *gs_wire_refusal(const gs_wire *w);
+
+// Who else is here, as the server last described it. Null when this is not a
+// server connection. Waiting for people is a thing with a picture, not a
+// frozen window.
+const gs_lobby *gs_wire_lobby(const gs_wire *w);
 
 // The last thing that went wrong, for putting in front of the player rather
 // than in a log they will never see.
