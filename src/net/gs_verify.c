@@ -2,6 +2,8 @@
 
 #include "core/gs_records.h"
 
+#include <string.h>
+
 static const char *const gs_verdict_names[GS_VERDICT_COUNT] = {
     [GS_VERDICT_OK]            = "verified",
     [GS_VERDICT_NOT_A_REPLAY]  = "not a recording",
@@ -11,6 +13,7 @@ static const char *const gs_verdict_names[GS_VERDICT_COUNT] = {
     [GS_VERDICT_UNFINISHED]    = "that car never finished",
     [GS_VERDICT_LAP_TOO_GOOD]  = "the lap claimed is not the lap driven",
     [GS_VERDICT_RACE_TOO_GOOD] = "the time claimed is not the time driven",
+    [GS_VERDICT_WRONG_DRIVER]  = "somebody else drove that",
 };
 
 const char *gs_verdict_text(gs_verdict v) {
@@ -28,6 +31,30 @@ gs_verdict gs_verify(const gs_replay *r, const gs_track *t, const gs_claim *c,
     // a time set at a sixth of gravity is not a time - both are in the
     // recording, so neither has to be taken on anybody's word.
     if (r->meta.laps_to_win != c->laps) return GS_VERDICT_WRONG_RULES;
+
+    // **And driven by whoever is claiming it.**
+    //
+    // A recording that named nobody was a bearer token: it proves a time was
+    // driven, which is exactly what it should prove, and says nothing about
+    // *whose* it is - so anyone who obtained one could hand it in and be
+    // correctly told it was genuine.
+    //
+    // An empty name in the claim means the caller is not asserting an identity
+    // at all, which is what a local ghost or an offline analysis wants, and the
+    // check is skipped. An empty name in the *recording* is a version three
+    // replay that does not know, and a claim of identity against it is refused
+    // rather than waved through - "it does not say" is not "it says you".
+    if (c->who[0] != '\0') {
+        const char *drove = gs_replay_driver(r, c->car);
+
+        // Written out rather than left to the comparison below, which would
+        // catch it anyway - an empty name matches nothing. It is here because
+        // this is the case the whole feature turns on, and a future change to
+        // how names are compared should have to walk past it.
+        if (drove[0] == '\0') return GS_VERDICT_WRONG_DRIVER;
+
+        if (strncmp(drove, c->who, GS_REPLAY_NAME) != 0) return GS_VERDICT_WRONG_DRIVER;
+    }
 
     gs_world w;
     if (!gs_replay_playback(r, t, &w)) return GS_VERDICT_NOT_A_REPLAY;

@@ -53,13 +53,21 @@ cannot come along with the claim.
 Verdicts are specific — wrong track, wrong rules, no such car, never finished,
 lap too good, race too good — so a rejection says what was wrong with it.
 
-**Known gap: a replay is not bound to a driver.** `gs_replay_meta` carries the
-track, the dials, the grid and the machines, and not who was holding the
-controller. An honest replay is therefore a bearer token: anyone who obtains one
-can submit it as their own and the verifier will correctly agree that the time
-was driven. Closing this means the driver's identity travels inside the replay
-and is signed, and the server checks it against the account that submitted it.
-**This is the most serious open item in this document.**
+**Closed: a replay says who drove it.** `gs_replay_meta` carries the driver of
+each car, the claim carries who is submitting, and the verifier refuses a claim
+whose name is not the one in the recording — `GS_VERDICT_WRONG_DRIVER`. A
+recording that names nobody, which every version three replay does, backs
+nobody's claim: "it does not say" is not "it says you". A caller asserting no
+identity at all still gets an answer about the driving, which is what a local
+ghost or an offline analysis wants.
+
+**What that is worth, exactly.** It stops a replay somebody *obtained* being
+spent as their own, which was a complete break. It does not stop somebody
+claiming to *be* that driver, because the name the server checks against is the
+name they joined under, and joining under a name proves nothing until there are
+accounts. The value goes up when the transport and the accounts land, and not
+before — the binding is a precondition for those being worth anything, rather
+than a defence that stands alone.
 
 **Known gap: a submission is not bound to a session.** Records are keyed, so
 resubmitting the same replay is idempotent rather than harmful, but that is an

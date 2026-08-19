@@ -81,6 +81,10 @@ struct gs_wire {
     uint16_t host_port;
 
     uint32_t retry;
+
+    // When this client last told the server it is still here, in milliseconds.
+    // A clock rather than a count of frames: see GS_HEARTBEAT_MS.
+    uint64_t last_ping;
     uint32_t sent, received;
     char     error[256];
 };
@@ -660,7 +664,18 @@ static void gs_send_join(gs_wire *w) {
 // closed their laptop - so a client that went quiet the moment it was placed
 // would be thrown out mid-race. Nothing else sends to the server once a race
 // starts: the race itself goes peer to peer.
-#define GS_HEARTBEAT_TICKS 90        // about a second and a half at 60 fps
+// **How often a placed client says it is still here, in milliseconds.**
+//
+// A wall clock and not a frame count. The first version pinged every ninety
+// calls to gs_wire_poll - "about a second and a half at 60 fps" - while the
+// server's patience has always been in milliseconds, so the two only agreed on
+// a machine running at the frame rate somebody assumed. A client at thirty
+// frames pings every three seconds; one that hitches pings when it recovers;
+// and a slow CI runner gets thrown out of its own test, intermittently, on one
+// platform, which is exactly what happened.
+//
+// Well inside the server's two-second ping cycle and far inside its patience.
+#define GS_HEARTBEAT_MS 500u
 
 void gs_wire_poll(gs_wire *w) {
     if (w == nullptr || w->sock == nullptr) return;
@@ -686,10 +701,13 @@ void gs_wire_poll(gs_wire *w) {
             w->asked_at = w->retry;
         }
 
-        // And once placed, still saying so.
-        if (w->ready && w->retry % GS_HEARTBEAT_TICKS == 0) {
+        // And once placed, still saying so - on the clock, so how often it
+        // happens does not depend on how fast this machine is drawing.
+        uint64_t now = SDL_GetTicks();
+        if (w->ready && (w->last_ping == 0 || now - w->last_ping >= GS_HEARTBEAT_MS)) {
             uint8_t buf[GS_PROTO_MTU];
             gs_to_server(w, buf, gs_proto_ping(buf, sizeof buf, (uint32_t)w->retry));
+            w->last_ping = now;
         }
     } else if (!w->ready && !w->hosting && w->retry++ % GS_RETRY_TICKS == 0) {
         gs_send_hello(w);

@@ -1026,6 +1026,12 @@ static void gs_race_for_real(gs_track *t, gs_claim *claim, uint16_t laps) {
     gs_world_add_car(&w, t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
 
     gs_replay_begin(&gs_run, &w, t);
+
+    // **Who was driving goes into the recording**, because the server checks it
+    // against the name the client joined under. A recording that named nobody
+    // was a thing anyone who obtained one could hand in as their own.
+    gs_replay_set_driver(&gs_run, 0, "ada");
+
     for (uint32_t i = 0; i < GS_TICK_HZ * 200 && !w.over; i++) {
         gs_input in[GS_MAX_CARS] = { 0 };
         in[0] = gs_ai_drive(&w, t, 0);

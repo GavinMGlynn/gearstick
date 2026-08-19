@@ -677,13 +677,22 @@ vectors plus a handshake completed against an independent implementation. A
 protocol whose only support is its author's confidence is the thing that fails
 review, and it fails it for good reasons.
 
-- [ ] **A replay says who drove it, and cannot be submitted by anybody else.**
+- [x] **A replay says who drove it, and cannot be submitted by anybody else.**
       A recording carries the track, the dials, the grid and the machines, and
       not the driver — so an honest replay is a bearer token, and whoever obtains
       one can submit it as their own with the verifier correctly agreeing the
       time was driven. **The most serious open hole in `docs/THREATS.md`.**
       *Verification: a replay recorded by one profile and submitted by another is
-      refused; the same replay submitted twice sets one record, not two.*
+      refused, with a verdict that says why; a name that is a prefix of the real
+      one is refused too; a recording that names nobody backs nobody's claim,
+      because "it does not say" is not "it says you"; and the same replay handed
+      in three times sets one record, not three. A caller asserting no identity
+      at all — a local ghost, an offline analysis — still gets an answer about
+      the driving.*
+      *Still open, and stated in `docs/THREATS.md` rather than implied: this is
+      only as good as knowing who sent the datagram, which today is nothing. It
+      stops a replay somebody found being spent as their own, and it becomes a
+      real defence when the accounts below land.*
 - [ ] **A submission is bound to the session that asked for it.** Records are
       keyed, so resubmitting the same replay sets one record rather than two —
       but that is a property of the schema rather than a defence, and a thing

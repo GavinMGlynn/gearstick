@@ -258,6 +258,20 @@ static void gs_start_race(gs_app *a) {
     }
     gs_replay_begin(&a->recording, &a->world, &a->t);
 
+    // **Who is in each car, written into the recording as it starts.** A
+    // recording that names nobody proves a time was driven and says nothing
+    // about whose it is, so anyone who obtained one could hand it in as their
+    // own and be correctly told it was genuine. A guest leaves their car blank,
+    // which means "not recorded" - and a claim of identity against a blank is
+    // refused rather than waved through.
+    for (uint8_t i = 0; i < a->world.car_count && i < GS_MAX_CARS; i++) {
+        int8_t who = a->menu.setup.profile[i];
+        const char *name = (who >= 0 && who < (int8_t)a->menu.profiles.count)
+                               ? a->menu.profiles.entry[who].name
+                               : "";
+        gs_replay_set_driver(&a->recording, i, name);
+    }
+
     a->views = a->showroom ? 1 : a->world.car_count;
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i] = (gs_view){ 0 };

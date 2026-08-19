@@ -4000,6 +4000,115 @@ TEST(a_wrecked_car_stops_moving) {
 
 
 // ---------------------------------------------------------------------------
+// A recording knows who drove it
+// ---------------------------------------------------------------------------
+
+TEST(a_replay_recorded_by_one_driver_cannot_be_claimed_by_another) {
+    // **The most serious hole docs/THREATS.md listed.** A recording carried the
+    // track, the dials, the grid and the machines and not the driver - so an
+    // honest replay was a bearer token: anyone who obtained one could hand it in
+    // and the verifier would correctly agree the time had been driven. It had.
+    // Just not by them.
+    static gs_track t;
+    gs_claim claim;
+    gs_honest_race(&t, &claim, 2);
+    gs_replay_set_driver(&gs_proof, 0, "ada");
+
+    // Ada, who drove it, is believed.
+    memcpy(claim.who, "ada", 4);
+    CHECK(gs_verify(&gs_proof, &t, &claim, nullptr) == GS_VERDICT_OK);
+
+    // Bez, who found it, is not - and is told exactly why rather than being
+    // given a vague refusal.
+    memcpy(claim.who, "bez", 4);
+    CHECK(gs_verify(&gs_proof, &t, &claim, nullptr) == GS_VERDICT_WRONG_DRIVER);
+
+    // Nor a name that is a prefix of the real one, which a sloppy comparison
+    // would let through.
+    memcpy(claim.who, "ad", 3);
+    CHECK(gs_verify(&gs_proof, &t, &claim, nullptr) == GS_VERDICT_WRONG_DRIVER);
+
+    // **And the same replay handed in twice sets one record, not two.** A
+    // verified time is still only a time: the table is keyed on who set it under
+    // which conditions, so submitting it again improves nothing and adds
+    // nothing. Without that, a replay would be worth as many entries as somebody
+    // had patience for.
+    gs_records_clear(&gs_rec);
+    memcpy(claim.who, "ada", 4);
+    CHECK(gs_verify(&gs_proof, &t, &claim, nullptr) == GS_VERDICT_OK);
+
+    for (int again = 0; again < 3; again++) {
+        gs_record_beat beat = gs_records_submit(
+            &gs_rec, claim.track, claim.conditions, (uint8_t)GS_VEH_SPRINT_CAR,
+            (uint8_t)GS_MODE_RACE, claim.laps, claim.lap_ticks, claim.race_ticks,
+            claim.who, 1700000000ull);
+
+        // The first sets it; the rest beat nothing, because it is already theirs.
+        CHECK(beat.lap == (again == 0));
+        CHECK(beat.race == (again == 0));
+        CHECK(gs_rec.count == 1);
+    }
+}
+
+TEST(a_recording_that_names_nobody_backs_nobodys_claim) {
+    // A version three replay does not know who drove it. **"It does not say" is
+    // not "it says you"** - a claim of identity against a blank is refused,
+    // because accepting it would leave every old recording a bearer token and
+    // make the whole exercise decorative.
+    static gs_track t;
+    gs_claim claim;
+    gs_honest_race(&t, &claim, 2);
+    gs_replay_set_driver(&gs_proof, 0, "");
+
+    memcpy(claim.who, "ada", 4);
+    CHECK(gs_verify(&gs_proof, &t, &claim, nullptr) == GS_VERDICT_WRONG_DRIVER);
+
+    // And a caller who is not asserting an identity at all - a local ghost, an
+    // offline analysis - still gets an answer about the driving.
+    claim.who[0] = '\0';
+    CHECK(gs_verify(&gs_proof, &t, &claim, nullptr) == GS_VERDICT_OK);
+}
+
+TEST(the_driver_survives_the_wire_and_an_older_recording_still_loads) {
+    static gs_track t;
+    gs_claim claim;
+    gs_honest_race(&t, &claim, 2);
+    gs_replay_set_driver(&gs_proof, 0, "ada");
+    gs_replay_set_driver(&gs_proof, 1, "bez");
+
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&gs_proof, bytes, sizeof bytes);
+    CHECK(n > 0);
+
+    static gs_replay back;
+    CHECK(gs_replay_deserialize(&back, bytes, n));
+    CHECK(strcmp(gs_replay_driver(&back, 0), "ada") == 0);
+    CHECK(strcmp(gs_replay_driver(&back, 1), "bez") == 0);
+    CHECK(gs_replay_driver(&back, 2)[0] == '\0');
+
+    // A name longer than fits is cut rather than refused: a recording that
+    // silently had no driver would be the bearer token again.
+    gs_replay_set_driver(&gs_proof, 0, "a-name-far-longer-than-sixteen");
+    CHECK(strlen(gs_replay_driver(&gs_proof, 0)) == GS_REPLAY_NAME - 1);
+
+    // And version three, which did not carry drivers, still loads - with the
+    // names blank, which is the truth about it.
+    static uint8_t older[sizeof(gs_replay) + 4096];
+    memcpy(older, bytes, n);
+    older[4] = 3; older[5] = 0; older[6] = 0; older[7] = 0;
+
+    // Its header is shorter by exactly the names, so the inputs move up.
+    size_t names = (size_t)GS_MAX_CARS * GS_REPLAY_NAME;
+    size_t head = (size_t)(n - (size_t)gs_proof.meta.tick_count * GS_MAX_CARS);
+    memmove(older + head - names, older + head, n - head);
+
+    static gs_replay old_one;
+    CHECK(gs_replay_deserialize(&old_one, older, n - names));
+    CHECK(old_one.meta.tick_count == gs_proof.meta.tick_count);
+    CHECK(gs_replay_driver(&old_one, 0)[0] == '\0');
+}
+
+// ---------------------------------------------------------------------------
 // A track from somebody else's game
 // ---------------------------------------------------------------------------
 
@@ -5344,6 +5453,9 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_a_replay_recorded_by_one_driver_cannot_be_claimed_by_another();
+    run_a_recording_that_names_nobody_backs_nobodys_claim();
+    run_the_driver_survives_the_wire_and_an_older_recording_still_loads();
     run_a_track_from_stunts_reads_as_a_track();
     run_an_imported_track_can_be_validated_and_driven();
     run_bytes_that_are_not_a_stunts_track_are_refused();

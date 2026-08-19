@@ -99,9 +99,29 @@ static uint64_t gs_get_u64(const uint8_t *p) {
     return (uint64_t)gs_get_u32(p) | ((uint64_t)gs_get_u32(p + 4) << 32);
 }
 
-// magic, version, track hash, four dials, car count, vehicles, tick count.
-#define GS_REPLAY_HEADER_BYTES \
+// magic, version, track hash, four dials, car count, vehicles, grid, tick count.
+// Version four appends the drivers; everything before them is where it was,
+// which is what lets one reader handle both.
+#define GS_REPLAY_HEADER_V3 \
     (4 + 4 + 8 + 16 + 1 + 2 + 4 + GS_MAX_CARS + GS_MAX_CARS * (4 + 4 + 2) + 4)
+#define GS_REPLAY_HEADER_BYTES \
+    (GS_REPLAY_HEADER_V3 + GS_MAX_CARS * GS_REPLAY_NAME)
+
+void gs_replay_set_driver(gs_replay *r, uint8_t car, const char *name) {
+    if (car >= GS_MAX_CARS) return;
+
+    int i = 0;
+    if (name != nullptr) {
+        for (; name[i] != '\0' && i < GS_REPLAY_NAME - 1; i++) {
+            r->meta.driver[car][i] = name[i];
+        }
+    }
+    for (; i < GS_REPLAY_NAME; i++) r->meta.driver[car][i] = '\0';
+}
+
+const char *gs_replay_driver(const gs_replay *r, uint8_t car) {
+    return car < GS_MAX_CARS ? r->meta.driver[car] : "";
+}
 
 size_t gs_replay_size(const gs_replay *r) {
     return GS_REPLAY_HEADER_BYTES + (size_t)r->meta.tick_count * GS_MAX_CARS;
@@ -130,6 +150,11 @@ size_t gs_replay_serialize(const gs_replay *r, uint8_t *buf, size_t cap) {
     }
     gs_put_u32(p, r->meta.tick_count);           p += 4;
 
+    // Version four: who was in each car.
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        for (int k = 0; k < GS_REPLAY_NAME; k++) *p++ = (uint8_t)r->meta.driver[i][k];
+    }
+
     for (uint32_t i = 0; i < r->meta.tick_count; i++) {
         for (uint8_t c = 0; c < GS_MAX_CARS; c++) *p++ = r->input[i][c];
     }
@@ -137,13 +162,18 @@ size_t gs_replay_serialize(const gs_replay *r, uint8_t *buf, size_t cap) {
 }
 
 bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
-    if (len < GS_REPLAY_HEADER_BYTES) return false;
+    if (len < GS_REPLAY_HEADER_V3) return false;
 
     const uint8_t *p = buf;
     if (gs_get_u32(p) != GS_REPLAY_MAGIC) return false;
     p += 4;
-    if (gs_get_u32(p) != GS_REPLAY_VERSION) return false;
-    p += 4;
+
+    // Tolerant of the past and not of the future, like every other format here.
+    uint32_t version = gs_get_u32(p); p += 4;
+    if (version < GS_REPLAY_OLDEST || version > GS_REPLAY_VERSION) return false;
+
+    size_t header = version >= 4 ? GS_REPLAY_HEADER_BYTES : GS_REPLAY_HEADER_V3;
+    if (len < header) return false;
 
     *r = (gs_replay){ 0 };
     r->meta.track_hash     = gs_get_u64(p);                    p += 8;
@@ -162,9 +192,18 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     }
     uint32_t ticks         = gs_get_u32(p);                    p += 4;
 
+    // Version four says who was driving. Version three does not, and blank is
+    // the honest answer for it rather than a name invented here.
+    if (version >= 4) {
+        for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+            for (int k = 0; k < GS_REPLAY_NAME; k++) r->meta.driver[i][k] = (char)*p++;
+            r->meta.driver[i][GS_REPLAY_NAME - 1] = '\0';
+        }
+    }
+
     if (r->meta.car_count > GS_MAX_CARS) return false;
     if (ticks > GS_REPLAY_MAX_TICKS) return false;
-    if (len < GS_REPLAY_HEADER_BYTES + (size_t)ticks * GS_MAX_CARS) return false;
+    if (len < header + (size_t)ticks * GS_MAX_CARS) return false;
 
     for (uint32_t i = 0; i < ticks; i++) {
         for (uint8_t c = 0; c < GS_MAX_CARS; c++) r->input[i][c] = *p++;

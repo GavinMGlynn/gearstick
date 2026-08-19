@@ -28,6 +28,13 @@ typedef enum gs_verdict {
     GS_VERDICT_UNFINISHED,    // that car never finished
     GS_VERDICT_LAP_TOO_GOOD,  // the claimed lap is not the one that was driven
     GS_VERDICT_RACE_TOO_GOOD,
+
+    // **The claim is about somebody else's driving.** The recording says who
+    // was in that car and it is not who is handing it in - which is the whole
+    // reason a recording says so, because an honest replay that named nobody
+    // was a bearer token anyone who obtained one could spend.
+    GS_VERDICT_WRONG_DRIVER,
+
     GS_VERDICT_COUNT
 } gs_verdict;
 
@@ -41,6 +48,17 @@ typedef struct gs_claim {
     uint8_t  car;             // which car of the recording is being claimed
     uint32_t lap_ticks;
     uint32_t race_ticks;
+
+    // Who is claiming it. Checked against the name the recording carries for
+    // that car; an empty one here means the caller is not asserting an identity
+    // and the check is skipped, which is what a local ghost or an offline
+    // analysis wants.
+    //
+    // **This is only as good as knowing who sent it**, which today is nothing:
+    // the name on a datagram is whatever the sender typed. It stops a replay
+    // somebody found being spent as their own, and it becomes a real defence
+    // when there are accounts. See docs/THREATS.md.
+    char     who[GS_REPLAY_NAME];
 } gs_claim;
 
 // Re-race `replay` against `t` and decide. `out` may be null; when given it is

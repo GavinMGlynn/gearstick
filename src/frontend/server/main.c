@@ -447,7 +447,24 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         // **Held, not believed.** The claim waits for the inputs that produced
         // it; nothing goes in the table until the server has re-raced them.
         gs_client *cl = &gs_srv.client[at];
-        cl->claim = (gs_claim){ track, conditions, laps, 0, lap_ticks, race_ticks };
+        cl->claim = (gs_claim){ 0 };
+        cl->claim.track = track;
+        cl->claim.conditions = conditions;
+        cl->claim.laps = laps;
+        cl->claim.car = 0;
+        cl->claim.lap_ticks = lap_ticks;
+        cl->claim.race_ticks = race_ticks;
+
+        // **Who the server believes is claiming it**, which is the name they
+        // joined under and not one they put in the message. That is still only
+        // as good as knowing who is on the other end of the socket - today,
+        // nothing - but it means the recording has to name the person the server
+        // already thinks it is talking to, so a replay picked up elsewhere
+        // cannot be handed in as their own. See docs/THREATS.md.
+        for (int k = 0; k < GS_REPLAY_NAME - 1 && cl->name[k] != '\0'; k++) {
+            cl->claim.who[k] = cl->name[k];
+        }
+
         cl->claimed = true;
         gs_carrier_expect(&cl->proof, track);
         break;
