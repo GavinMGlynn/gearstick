@@ -80,6 +80,54 @@ typedef struct gs_surface_def {
 
 extern const gs_surface_def gs_surfaces[GS_SURF_COUNT];
 
+// --- what surrounds a track --------------------------------------------------
+//
+// **A shoulder, and then a drop.** Off the authored tiles the ground carries on
+// level for a few tiles as loose run-off, and then it falls away. Leaving the
+// track costs you time first and the race only if you keep going, which is the
+// consequence a player should be able to see coming.
+//
+// The alternative that was there before was neither: nothing was drawn outside
+// the track, so a player saw a cliff, and the physics clamped to the edge tile,
+// so they drove on an infinite invisible plain. What you could see and what you
+// could drive on disagreed, which is the one thing a surround must not do.
+//
+// No wall, anywhere. A car is never refused; it is charged.
+
+// How far the level run-off reaches past the edge, in tiles.
+//
+// Wide enough to gather up an honest mistake, narrow enough that cutting a
+// corner across it is never worth the time it costs. **Ten and not four**: four
+// is eight tenths of a second at racing speed, which is not a run-off, it is a
+// thinner cliff edge - a car that put a wheel over had no time to do anything
+// about it, and "recoverable if you are quick" was not true of it.
+#define GS_RUNOFF_TILES 10
+
+// How steeply the ground falls once the run-off ends, in tiles per tile. Well
+// past GS_MAX_CLIMB, so a car that has gone over cannot drive back up - the
+// shoulder is the recovery, and the drop is not.
+#define GS_RUNOFF_FALL GS_INT(3)
+
+// **And how deep it goes, because forever does not fit in a number.** A drop
+// that kept falling with distance overflowed Q16.16 for a car thrown a few
+// thousand tiles off the map at low gravity - which is not a hypothetical, it is
+// what the AI sweep did the first time this existed. The floor is far below
+// anything a car can be recovered from, so bounding it changes nothing anybody
+// can drive and stops the arithmetic wrapping into a ground that is suddenly
+// above them.
+#define GS_RUNOFF_FLOOR GS_INT(64)
+
+// What the run-off is made of.
+//
+// **Sand, because a run-off is a thing that stops you.** The first version used
+// dust, on the reasoning that it is loose - which it is, and it also has almost
+// no rolling resistance, so a car that ran wide onto it kept every bit of its
+// speed and sailed straight across to the drop. A gravel trap works by drag and
+// not by slipperiness. Sand has the highest rolling resistance of the nine and
+// enough grip left to steer with, so a car that brakes on entering it stops
+// inside it, and one that does not, does not.
+#define GS_RUNOFF_SURFACE GS_SURF_SAND
+
 // Per-tile gravity, as a multiplier on the race setting. 64 is 1x, so the byte
 // spans nothing at all up to just under 4x - Moon to well past Jupiter.
 #define GS_GRAVITY_UNIT 64
@@ -140,6 +188,9 @@ gs_fix gs_track_height(const gs_track *t, gs_fix x, gs_fix y);
 void gs_track_slope(const gs_track *t, gs_fix x, gs_fix y, gs_fix *dzdx, gs_fix *dzdy);
 
 gs_surface gs_track_surface(const gs_track *t, gs_fix x, gs_fix y);
+
+// How far outside the authored tiles a point is, in tiles. Zero on the track.
+gs_fix gs_track_outside(const gs_track *t, gs_fix x, gs_fix y);
 
 // The gravity multiplier at a point, in Q16.16 where GS_ONE is 1x. Sampled per
 // tick, never cached - see the header comment.

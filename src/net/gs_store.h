@@ -74,6 +74,16 @@ bool gs_store_put_track(gs_store *s, uint64_t hash, const char *name,
 bool gs_store_get_track(gs_store *s, uint64_t hash, uint8_t *out, size_t cap,
                         size_t *len);
 bool gs_store_has_track(gs_store *s, uint64_t hash);
+
+// When a track was added, as a Unix time. Set explicitly only by the tool that
+// builds the library shipped with the server: **a file that is committed has to
+// be the same file every time it is built**, and "now" is the one thing in this
+// schema that is not. The date a stock track was added is meaningless anyway -
+// it shipped with the game.
+bool gs_store_set_added(gs_store *s, uint64_t hash, int64_t when);
+
+// And reading it back. Negative if there is no such track.
+int64_t gs_store_added(gs_store *s, uint64_t hash);
 int  gs_store_track_count(gs_store *s);
 
 typedef struct gs_track_row {

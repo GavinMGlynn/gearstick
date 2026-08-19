@@ -194,6 +194,21 @@ static gs_fix gs_corner_height(const gs_track *t, int32_t x, int32_t y) {
            (gs_fix)(1 << GS_HEIGHT_SHIFT);
 }
 
+// How far a point is outside the track, in tiles - zero anywhere on it. Measured
+// along whichever axis is further out rather than as a diagonal distance, so the
+// run-off is a border of even width and the corners are not pinched.
+gs_fix gs_track_outside(const gs_track *t, gs_fix x, gs_fix y) {
+    // Saturating, because a car flung a long way at low gravity can be further
+    // out than the fixed-point type can express the doubling of, and a distance
+    // that wrapped would put the ground above a car that had left the world.
+    gs_fix out_x = 0, out_y = 0;
+    if (x < 0) out_x = (x == INT32_MIN) ? INT32_MAX : -x;
+    else if (x > GS_INT(t->w)) out_x = x - GS_INT(t->w);
+    if (y < 0) out_y = (y == INT32_MIN) ? INT32_MAX : -y;
+    else if (y > GS_INT(t->h)) out_y = y - GS_INT(t->h);
+    return out_x > out_y ? out_x : out_y;
+}
+
 gs_fix gs_track_height(const gs_track *t, gs_fix x, gs_fix y) {
     int32_t tx, ty;
     gs_tile_of(t, x, y, &tx, &ty);
@@ -208,12 +223,47 @@ gs_fix gs_track_height(const gs_track *t, gs_fix x, gs_fix y) {
     gs_fix h01 = gs_corner_height(t, tx,     ty + 1);
     gs_fix h11 = gs_corner_height(t, tx + 1, ty + 1);
 
-    return gs_lerp(gs_lerp(h00, h10, fx), gs_lerp(h01, h11, fx), fy);
+    gs_fix z = gs_lerp(gs_lerp(h00, h10, fx), gs_lerp(h01, h11, fx), fy);
+
+    // **The shoulder, and then the drop.** Level for GS_RUNOFF_TILES past the
+    // edge - at the height of the edge it left, so the join is seamless and a
+    // car running wide is not launched by a step - and falling away after that.
+    gs_fix out = gs_track_outside(t, x, y);
+    if (out > GS_INT(GS_RUNOFF_TILES)) {
+        gs_fix drop = gs_fix_mul(out - GS_INT(GS_RUNOFF_TILES), GS_RUNOFF_FALL);
+        if (drop > GS_RUNOFF_FLOOR) drop = GS_RUNOFF_FLOOR;
+        z -= drop;
+    }
+    return z;
 }
 
 void gs_track_slope(const gs_track *t, gs_fix x, gs_fix y, gs_fix *dzdx, gs_fix *dzdy) {
     int32_t tx, ty;
     gs_tile_of(t, x, y, &tx, &ty);
+
+    // Past the shoulder the ground is the drop, and the drop is what the car is
+    // on. Taken from the same rule the height uses rather than from the corners,
+    // which stopped meaning anything at the boundary.
+    gs_fix past = gs_track_outside(t, x, y);
+    if (past > GS_INT(GS_RUNOFF_TILES)) {
+        // Level again once the drop has bottomed out, so the slope agrees with
+        // the height rather than promising a fall that is no longer there.
+        if (gs_fix_mul(past - GS_INT(GS_RUNOFF_TILES), GS_RUNOFF_FALL) >=
+            GS_RUNOFF_FLOOR) {
+            if (dzdx != nullptr) *dzdx = 0;
+            if (dzdy != nullptr) *dzdy = 0;
+            return;
+        }
+        if (dzdx != nullptr) {
+            *dzdx = x < 0 ? GS_RUNOFF_FALL
+                          : (x > GS_INT(t->w) ? -GS_RUNOFF_FALL : 0);
+        }
+        if (dzdy != nullptr) {
+            *dzdy = y < 0 ? GS_RUNOFF_FALL
+                          : (y > GS_INT(t->h) ? -GS_RUNOFF_FALL : 0);
+        }
+        return;
+    }
 
     gs_fix h00 = gs_corner_height(t, tx,     ty);
     gs_fix h10 = gs_corner_height(t, tx + 1, ty);
@@ -228,6 +278,12 @@ void gs_track_slope(const gs_track *t, gs_fix x, gs_fix y, gs_fix *dzdx, gs_fix 
 }
 
 gs_surface gs_track_surface(const gs_track *t, gs_fix x, gs_fix y) {
+    // Off the track is run-off, whatever the edge tile happens to be made of.
+    // Inheriting the edge's surface would mean a track that ends in ice has ice
+    // for a shoulder, and the shoulder is supposed to be the thing that slows
+    // you down rather than the thing that takes you further away.
+    if (gs_track_outside(t, x, y) > 0) return GS_RUNOFF_SURFACE;
+
     int32_t tx, ty;
     gs_tile_of(t, x, y, &tx, &ty);
     uint8_t s = t->surface[GS_TILE_INDEX(tx, ty)];

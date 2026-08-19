@@ -584,10 +584,17 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       steps a copy of the world forward with the real physics, so an arc that
       disagreed with the race would mean the two were different programs. Asking
       does not move anything, and asking twice gives the same answer.*
-- [ ] **Decide what surrounds a track.** Leaving the track currently costs
-      nothing at all — the ground continues forever at the edge tile's height.
-      *Verification: whatever is decided, driving off the edge has a consequence
-      a player can see coming.*
+- [x] **Decide what surrounds a track.** **A run-off, and then a drop.** Ten
+      tiles of sand at the edge's own height, and past that the ground falls away
+      steeper than a car can climb. Leaving costs time; carrying on costs the
+      race.
+      *Verification: a car that brakes on reaching the sand stops inside it and
+      is not wrecked; a car that keeps its foot down is finished, at the lip
+      rather than after a long slide to the bottom. The surround is drawn, which
+      was the actual complaint — the ground used to continue invisibly, so a
+      player saw a cliff and drove on a plain that was not there. And the height
+      out there is a number: an unbounded drop overflowed Q16.16 for a car thrown
+      a few thousand tiles off the map, and returned ground *above* it.*
 - [ ] **Placing a gate goes into the undo history.** Undo covers terrain,
       surface and gravity but not the route, which is a promise with a footnote.
       *Verification: place a gate, undo, and the track hash is what it was

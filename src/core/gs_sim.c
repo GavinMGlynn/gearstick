@@ -273,6 +273,29 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
         c->vy = gs_fix_mul(vlong, sin_h) + gs_fix_mul(vlat, cos_h);
     }
 
+    // --- Off the world.
+    //
+    // **Measured by how far out, not by falling.** The first version of this
+    // waited for the car to be airborne and a few tiles below the ground - and a
+    // car that goes over the lip does not fall, it *drives down* the slope,
+    // because ground-following keeps up with any gradient going downhill. So it
+    // sledged twenty tiles down a three-to-one face over seven seconds and was
+    // eventually wrecked by arriving at the bottom, which is a long, silly way
+    // to say the same thing.
+    //
+    // Past the shoulder and a few tiles beyond it, a car is gone: the slope back
+    // is steeper than GS_MAX_CLIMB, so there is no way up and nothing left to
+    // simulate. It stops where it is rather than at the bottom, because what a
+    // player needs to see is where the mistake ended.
+    if (gs_track_outside(t, c->x, c->y) > GS_INT(GS_RUNOFF_TILES) + GS_FALL_DEPTH) {
+        c->damage = 255;
+        c->wrecked = true;
+        c->vx = 0;
+        c->vy = 0;
+        c->vz = 0;
+        return;
+    }
+
     // --- Mark the ground. A tyre wears a tile in proportion to how hard it is
     // working it: sliding sideways churns far more than rolling straight, which
     // is why the racing line goes off before the rest of the track does.
@@ -338,6 +361,7 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
         c->vz -= gs_fix_mul(g, dt);
         c->z  += gs_fix_mul(c->vz, dt);
         c->air_ticks++;
+
 
         if (c->z <= ground) {
             // --- Landing. What hurts is not falling speed but the *mismatch*

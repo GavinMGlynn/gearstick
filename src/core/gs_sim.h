@@ -260,6 +260,19 @@ uint8_t gs_world_arc(const gs_world *w, const gs_track *t, uint8_t car,
 // reward and not the referee.
 #define GS_WRECK_RADIUS GS_RATIO(78, 100)
 
+// **How far past the shoulder is too far**, in tiles.
+//
+// The ground outside a track falls away rather than stopping, so something has
+// to say when a car has gone. Measured as distance out rather than as depth: a
+// car that goes over the lip does not fall, it drives down the face, because
+// following the ground keeps up with any gradient going downhill. Waiting for it
+// to be airborne and low meant waiting seven seconds while it sledged to the
+// bottom.
+//
+// Three tiles past the run-off is unambiguous - the slope back is steeper than
+// GS_MAX_CLIMB, so there is no way up and the only question left is how it ends.
+#define GS_FALL_DEPTH GS_INT(3)
+
 // **The steepest ground a car will drive up, as a gradient.** About fifty
 // degrees: steeper than any road and shallower than anything anyone would call
 // a wall. Ground beyond it stops a car rather than launching it. Out here in the

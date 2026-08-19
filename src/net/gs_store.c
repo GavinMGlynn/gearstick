@@ -368,6 +368,41 @@ bool gs_store_get_track(gs_store *s, uint64_t hash, uint8_t *out, size_t cap,
     return got;
 }
 
+bool gs_store_set_added(gs_store *s, uint64_t hash, int64_t when) {
+    if (s == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "UPDATE track SET added = ?2 WHERE hash = ?1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "set added");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_int64(st, 2, when);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    if (!ok) gs_fail(s, "set added");
+    sqlite3_finalize(st);
+    return ok;
+}
+
+int64_t gs_store_added(gs_store *s, uint64_t hash) {
+    if (s == nullptr) return -1;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "SELECT added FROM track WHERE hash = ?1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "added");
+        return -1;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+
+    int64_t when = -1;
+    if (sqlite3_step(st) == SQLITE_ROW) when = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return when;
+}
+
 bool gs_store_has_track(gs_store *s, uint64_t hash) {
     return gs_store_get_track(s, hash, nullptr, 0, nullptr);
 }

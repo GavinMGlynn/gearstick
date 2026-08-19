@@ -958,7 +958,18 @@ TEST(the_same_jump_hurts_less_landed_on_a_downslope_than_landed_flat) {
         gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(4), 0);
         w.car[0].vx = GS_INT(6);
 
-        for (int i = 0; i < GS_TICK_HZ * 8; i++) gs_world_step(&w, &t, nullptr);
+        // **Measured at the landing, which is the thing being compared.** Eight
+        // seconds of running on afterwards used to be harmless, because the
+        // ground went on for ever; now the car drives off the end of the track,
+        // over the run-off, and both variants come back wrecked at 255 - which
+        // is equal, and says nothing about landings.
+        bool flew = false;
+        for (int i = 0; i < GS_TICK_HZ * 8; i++) {
+            gs_world_step(&w, &t, nullptr);
+            if (!w.car[0].grounded) flew = true;
+            if (flew && w.car[0].grounded) break;
+        }
+        CHECK(flew);
         damage[variant] = w.car[0].damage;
     }
 
@@ -1376,10 +1387,14 @@ TEST(a_car_can_be_destroyed_by_driving_and_by_being_hit) {
     static gs_track flat;
     gs_track_init(&flat, 80, 20, GS_SURF_PAVEMENT);
 
+    // **In the middle, with room either side.** A derby needs the two of them to
+    // keep meeting, and a car that bounces off towards an edge finds a run-off
+    // and then a drop - so a pair set up near the boundary stops being a derby
+    // and becomes two cars leaving the world in opposite directions.
     gs_world hit;
     gs_world_init(&hit, GS_ONE);
-    gs_world_add_car(&hit, &flat, GS_VEH_MOTORCYCLE, GS_INT(20), GS_INT(10), 0);
-    gs_world_add_car(&hit, &flat, GS_VEH_STOCK_CAR, GS_INT(60), GS_INT(10),
+    gs_world_add_car(&hit, &flat, GS_VEH_MOTORCYCLE, GS_INT(26), GS_INT(10), 0);
+    gs_world_add_car(&hit, &flat, GS_VEH_STOCK_CAR, GS_INT(38), GS_INT(10),
                      (gs_angle)(GS_QUARTER * 2));
 
     bool ever_flew = false;
@@ -3197,19 +3212,29 @@ TEST(the_race_that_sets_a_record_is_the_race_that_reports_it) {
     gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
 
     gs_records_clear(&gs_rec);
-    uint32_t times[2];
+
+    // Two real races, and **which of them is quicker is discovered rather than
+    // assumed**. The first version raced a sprint car and then a lunar rover and
+    // took it as read that the rover was slower, which the roster sweep says of
+    // the machines and which stopped being true of these two *laps* the moment
+    // leaving the track cost something: the quick car runs wider, and eight
+    // tiles into a sand trap is worth more than the difference between them.
+    //
+    // That is the game working. It is not what this test is about - the join
+    // between a race that times itself and a table that keeps the time - so the
+    // fact pinned here is the one that is actually claimed: a better time beats
+    // the record and a worse one does not.
+    uint32_t times[2] = { 0, 0 };
+    uint32_t races[2] = { 0, 0 };
+    uint8_t  machine[2] = { (uint8_t)GS_VEH_SPRINT_CAR, (uint8_t)GS_VEH_LUNAR_ROVER };
+    uint64_t conditions = 0;
 
     for (int run = 0; run < 2; run++) {
         gs_world w;
         gs_world_init(&w, GS_ONE);
         gs_world_set_mode(&w, GS_MODE_RACE);
         gs_world_set_laps(&w, 3);
-
-        // The quick car first, then the slow one.
-        gs_world_add_car(&w, &t,
-                         run == 0 ? (uint8_t)GS_VEH_SPRINT_CAR
-                                  : (uint8_t)GS_VEH_LUNAR_ROVER,
-                         GS_INT(4), GS_INT(8), 0);
+        gs_world_add_car(&w, &t, machine[run], GS_INT(4), GS_INT(8), 0);
 
         for (uint32_t i = 0; i < GS_TICK_HZ * 200 && !w.over; i++) {
             gs_input in[GS_MAX_CARS] = { 0 };
@@ -3219,25 +3244,27 @@ TEST(the_race_that_sets_a_record_is_the_race_that_reports_it) {
         CHECK(w.over);
         CHECK(w.car[0].best_lap > 0);
         times[run] = w.car[0].best_lap;
-
-        gs_record_beat beat = gs_records_submit(
-            &gs_rec, gs_track_hash(&t), gs_conditions_hash(&w),
-            w.car[0].vehicle, w.mode, w.laps_to_win,
-            w.car[0].best_lap, w.car[0].finish_tick,
-            run == 0 ? "quick" : "slow");
-
-        if (run == 0) {
-            CHECK(beat.lap);
-            CHECK(beat.race);
-        } else {
-            // The rover is slower than the sprint car everywhere on pavement,
-            // which the roster sweep says too.
-            CHECK(!beat.lap);
-            CHECK(!beat.race);
-        }
+        races[run] = w.car[0].finish_tick;
+        conditions = gs_conditions_hash(&w);
     }
 
-    CHECK(times[1] > times[0]);
+    // The quicker of the two goes in first, so the second submission is the one
+    // that has to be refused.
+    int quick = times[0] <= times[1] ? 0 : 1;
+    int slow  = 1 - quick;
+    CHECK(times[slow] > times[quick]);
+
+    gs_record_beat first = gs_records_submit(
+        &gs_rec, gs_track_hash(&t), conditions, machine[quick],
+        (uint8_t)GS_MODE_RACE, 3, times[quick], races[quick], "quick");
+    CHECK(first.lap);
+    CHECK(first.race);
+
+    gs_record_beat second = gs_records_submit(
+        &gs_rec, gs_track_hash(&t), conditions, machine[slow],
+        (uint8_t)GS_MODE_RACE, 3, times[slow], races[slow], "slow");
+    CHECK(!second.lap);
+
     const gs_record *best = gs_records_best_lap(&gs_rec, gs_track_hash(&t),
                                                 0xffffffffffffffffULL);
     CHECK(best == nullptr);        // wrong conditions, no record
@@ -3509,10 +3536,41 @@ TEST(a_time_survives_the_wire_and_is_still_verifiable) {
     CHECK(produced.car[0].best_lap == claim.lap_ticks);
     CHECK(produced.over);
 
-    // One byte different in the middle and it is not a recording any more.
-    bytes[n / 2] ^= 0xffu;
-    gs_verdict v = gs_verify_bytes(bytes, n, &t, &claim, nullptr);
-    CHECK(v != GS_VERDICT_OK);
+    // --- What corruption is and is not caught, stated exactly.
+    //
+    // This used to say "one byte different in the middle and it is not a
+    // recording any more" and flip the byte at the halfway mark. That passed by
+    // luck. **Most single bytes in a replay change nothing anybody can detect,
+    // and correctly so**: three quarters of the file is input for cars that were
+    // not in the race, and a byte that makes the recorded driver *quicker*
+    // leaves the claim slower than what the recording produces, which is not a
+    // lie and is accepted on purpose. Probing forty bytes across the file caught
+    // one.
+    //
+    // So the facts pinned here are the ones that are true.
+
+    // The header is structure, and structure has to survive intact.
+    for (size_t i = 0; i < 8; i++) {
+        uint8_t was = bytes[i];
+        bytes[i] ^= 0xffu;
+        CHECK(gs_verify_bytes(bytes, n, &t, &claim, nullptr) == GS_VERDICT_NOT_A_REPLAY);
+        bytes[i] = was;
+    }
+
+    // A recording that stops early is not the recording of a finished race.
+    CHECK(gs_verify_bytes(bytes, n - 100, &t, &claim, nullptr) != GS_VERDICT_OK);
+
+    // And driving that was not driven does not produce the time that was
+    // claimed. Half the inputs scrambled rather than one byte flipped, because
+    // one byte is a nudge and the question is whether the *race* is checked.
+    static uint8_t scrambled[sizeof(gs_replay) + 4096];
+    memcpy(scrambled, bytes, n);
+    for (size_t i = n / 2; i < n; i++) scrambled[i] ^= 0x5au;
+    CHECK(gs_verify_bytes(scrambled, n, &t, &claim, nullptr) != GS_VERDICT_OK);
+
+    // The untouched original still passes, so none of the above was the test
+    // breaking the bytes it was given.
+    CHECK(gs_verify_bytes(bytes, n, &t, &claim, nullptr) == GS_VERDICT_OK);
 }
 
 // ---------------------------------------------------------------------------
@@ -3940,6 +3998,159 @@ TEST(a_wrecked_car_stops_moving) {
 
 
 // ---------------------------------------------------------------------------
+// What surrounds a track
+// ---------------------------------------------------------------------------
+
+TEST(leaving_a_track_costs_time_before_it_costs_the_race) {
+    // **The decision this pins.** Off the authored tiles there is a run-off and
+    // then a drop: a mistake is expensive and recoverable, and only carrying on
+    // outwards is fatal. The alternative that was there before was neither -
+    // nothing was drawn outside the track and the physics clamped to the edge
+    // tile, so a player saw a cliff and drove on an invisible plain for ever.
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    // On the track: whatever it was painted with.
+    CHECK(gs_track_surface(&t, GS_INT(20), GS_INT(10)) == GS_SURF_PAVEMENT);
+    CHECK(gs_track_outside(&t, GS_INT(20), GS_INT(10)) == 0);
+
+    // Just off it: run-off, and level with the edge it left. A step here would
+    // launch a car that ran wide instead of slowing it.
+    gs_fix edge = gs_track_height(&t, GS_INT(40), GS_INT(10));
+    CHECK(gs_track_surface(&t, GS_INT(41), GS_INT(10)) == GS_RUNOFF_SURFACE);
+    CHECK(gs_track_height(&t, GS_INT(41), GS_INT(10)) == edge);
+    CHECK(gs_track_height(&t, GS_INT(40 + GS_RUNOFF_TILES), GS_INT(10)) == edge);
+
+    // Past the shoulder: falling, and falling faster the further out.
+    gs_fix near = gs_track_height(&t, GS_INT(40 + GS_RUNOFF_TILES + 2), GS_INT(10));
+    gs_fix far = gs_track_height(&t, GS_INT(40 + GS_RUNOFF_TILES + 6), GS_INT(10));
+    CHECK(near < edge);
+    CHECK(far < near);
+
+    // And the fall is steeper than anything can climb, so it is a drop and not
+    // a hill somebody could drive back up.
+    CHECK(GS_RUNOFF_FALL > GS_MAX_CLIMB);
+
+    // The same on every side, so a track has a border and not a preference.
+    CHECK(gs_track_surface(&t, -GS_ONE, GS_INT(10)) == GS_RUNOFF_SURFACE);
+    CHECK(gs_track_surface(&t, GS_INT(20), -GS_ONE) == GS_RUNOFF_SURFACE);
+    CHECK(gs_track_surface(&t, GS_INT(20), GS_INT(21)) == GS_RUNOFF_SURFACE);
+}
+
+TEST(the_run_off_is_a_thing_that_stops_you) {
+    // A run-off works by drag, not by slipperiness. The first version used dust,
+    // which is loose and has almost no rolling resistance - so a car that ran
+    // wide kept every bit of its speed and sailed across to the drop. Sand is
+    // the draggiest of the nine, and a car that brakes on reaching it stops
+    // inside it.
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(10), 0);
+
+    // Up to speed on the road, then off the end with the brakes on.
+    for (int i = 0; i < GS_TICK_HZ * 10 && w.car[0].x < GS_INT(39); i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(gs_car_speed(&w.car[0]) > GS_INT(3));
+
+    for (int i = 0; i < GS_TICK_HZ * 12; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_BRAKE, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        if (gs_car_speed(&w.car[0]) < GS_RATIO(20, 100)) break;
+    }
+
+    // Stopped, and stopped on the shoulder rather than over the edge of it.
+    CHECK(gs_car_speed(&w.car[0]) < GS_HALF);
+    CHECK(!w.car[0].wrecked);
+    CHECK(gs_track_outside(&t, w.car[0].x, w.car[0].y) <
+          GS_INT(GS_RUNOFF_TILES));
+}
+
+TEST(a_car_that_keeps_going_over_the_edge_is_finished) {
+    // The other half of the bargain: the shoulder forgives a mistake and the
+    // drop does not forgive persistence. Without an ending out there a car would
+    // fall for ever, and "leaving the track has a consequence" would be a
+    // sentence about an animation.
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(10), 0);
+
+    // When it goes over, and how far down it was when it did.
+    int over_at = -1, wrecked_at = -1;
+    gs_fix depth_at_wreck = 0;
+    for (int i = 0; i < GS_TICK_HZ * 40 && wrecked_at < 0; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+
+        if (over_at < 0 &&
+            gs_track_outside(&t, w.car[0].x, w.car[0].y) > GS_INT(GS_RUNOFF_TILES)) {
+            over_at = i;
+        }
+        if (w.car[0].wrecked) {
+            wrecked_at = i;
+            depth_at_wreck = gs_track_height(&t, GS_INT(40), GS_INT(10)) - w.car[0].z;
+        }
+    }
+
+    CHECK(w.car[0].wrecked);
+    CHECK(w.car[0].damage == 255);
+    CHECK(over_at >= 0);
+
+    // **Finished at the lip, not at the bottom of a long fall.** Without a rule
+    // saying when a car has gone, it simply falls until the drop bottoms out and
+    // is then wrecked by the landing - which looks the same from the outside and
+    // is a car falling for several seconds first. Inside a second of going over,
+    // and a few tiles down rather than dozens.
+    CHECK(wrecked_at - over_at < GS_TICK_HZ);
+    CHECK(depth_at_wreck < GS_INT(12));
+
+    // It stops rather than falling for ever, and it stays stopped.
+    gs_fix rest_x = w.car[0].x, rest_y = w.car[0].y, rest_z = w.car[0].z;
+    for (int i = 0; i < GS_TICK_HZ * 5; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].x == rest_x);
+    CHECK(w.car[0].y == rest_y);
+    CHECK(w.car[0].z == rest_z);
+}
+
+TEST(the_ground_outside_a_track_is_a_number_and_not_an_overflow) {
+    // A drop that kept falling with distance overflowed Q16.16 for a car thrown
+    // a few thousand tiles off the map at low gravity, which is not a
+    // hypothetical - it is what the roster sweep did the first time this
+    // existed, and the ground came back *above* the car.
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    gs_fix edge = gs_track_height(&t, GS_INT(40), GS_INT(10));
+
+    static const gs_fix miles[] = {
+        GS_INT(100), GS_INT(1000), GS_INT(10000), GS_INT(30000),
+    };
+    // Bounded against an absolute figure rather than against the constant that
+    // does the bounding: a test written in terms of GS_RUNOFF_FLOOR passes no
+    // matter what that is set to, including infinity, which is the case it
+    // exists to catch. A thousand tiles is far deeper than any track is tall.
+    for (size_t i = 0; i < sizeof miles / sizeof miles[0]; i++) {
+        gs_fix z = gs_track_height(&t, miles[i], GS_INT(10));
+        CHECK(z < edge);                     // still below, never wrapped above
+        CHECK(z > edge - GS_INT(1000));      // and not somewhere absurd
+
+        gs_fix back = gs_track_height(&t, -miles[i], GS_INT(10));
+        CHECK(back < edge);
+        CHECK(back > edge - GS_INT(1000));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The landing arc
 // ---------------------------------------------------------------------------
 
@@ -4177,12 +4388,17 @@ static gs_track gs_ground;
 static void gs_measure_ground(gs_surface s, gs_feel *out) {
     gs_track_init(&gs_ground, 64, 64, s);
 
+    // Flat out until the speed settles or the far side arrives, whichever comes
+    // first. **Stopping at the edge matters**: the ground outside a track is a
+    // run-off and then a drop, so a car allowed to run on measures the sand it
+    // ended up in rather than the surface it was asked about.
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &gs_ground, GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(6), 0);
     for (int i = 0; i < GS_TICK_HZ * 25; i++) {
         gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
         gs_world_step(&w, &gs_ground, in);
+        if (w.car[0].x > GS_INT(gs_ground.w) - GS_INT(4)) break;
     }
     out->top = gs_car_speed(&w.car[0]);
 
@@ -4665,6 +4881,10 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_leaving_a_track_costs_time_before_it_costs_the_race();
+    run_the_run_off_is_a_thing_that_stops_you();
+    run_a_car_that_keeps_going_over_the_edge_is_finished();
+    run_the_ground_outside_a_track_is_a_number_and_not_an_overflow();
     run_a_car_lands_where_the_arc_said_it_would();
     run_a_long_flight_is_drawn_coarsely_rather_than_cut_off();
     run_there_is_no_arc_for_a_car_on_the_ground();

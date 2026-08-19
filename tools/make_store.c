@@ -86,7 +86,15 @@ int main(int argc, char **argv) {
         name[n] = '\0';
 
         if (!gs_store_put_track(s, hash, name, GS_STOCK_AUTHOR, gs_bytes, len) ||
-            !gs_store_publish(s, hash, name, GS_STOCK_AUTHOR)) {
+            !gs_store_publish(s, hash, name, GS_STOCK_AUTHOR) ||
+            // **Dated at the epoch, because a committed file has to be the same
+            // file every time it is built.** The store stamps `added` with the
+            // time of day, which is the one thing in the schema that changes on
+            // its own - so the shipped library came out different every run, the
+            // job that diffs it against the repository would have failed for
+            // ever, and it would have been failing about a clock. The date a
+            // stock track was added means nothing: it shipped with the game.
+            !gs_store_set_added(s, hash, 0)) {
             printf("could not store %s: %s\n", argv[i], gs_store_error(s));
             gs_store_close(s);
             return 1;

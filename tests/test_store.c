@@ -354,6 +354,14 @@ TEST(the_shipped_library_holds_the_stock_tracks_and_they_are_tracks) {
     static gs_track_row rows[64];
     int n = gs_store_list_published(s, rows, 64);
 
+    // **No clock in it.** The store stamps a track with the time it was added,
+    // which is right for a running server and wrong for a file in a repository:
+    // it made the shipped library different on every build, so the job that
+    // diffs it against what is committed would have failed for ever, and failed
+    // about a clock. The tool that builds it dates the stock tracks at the
+    // epoch, and a rebuilt library is byte for byte the one that shipped.
+    for (int i = 0; i < n; i++) CHECK(gs_store_added(s, rows[i].hash) == 0);
+
     // A dozen is what a fresh install is promised. There are more than that.
     CHECK(n >= 12);
 

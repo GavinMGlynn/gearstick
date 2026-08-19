@@ -43,7 +43,12 @@
 // in corners, and low gravity takes your acceleration along with your weight.
 // Every replay and ghost time recorded before that is invalid, which is what
 // this number failing is for. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0x38f969eb07c8e74aULL
+// And once more when the world stopped going on forever. There is now a run-off
+// outside a track and a drop past it, so the ground a car finds off the edge is
+// sand at the edge's height for ten tiles and then falling away - where before
+// it was the edge tile's own surface, level, without end. The selftest race has
+// a car that leaves the track, so its hash moves. See docs/PROJECT_STATUS.md.
+#define GS_SELFTEST_WORLD_HASH 0xd831fad1fd238c26ULL
 
 // The track generator, folded over its first two hundred seeds.
 //

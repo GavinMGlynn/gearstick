@@ -1127,8 +1127,19 @@ shipped file and exercises every table the server writes to, so a schema change
 that forgets to rebuild it turns the tree red instead of failing in somebody's
 hands; and a CI job rebuilds the tracks and the database and diffs the result,
 twice, so the committed bytes are the built bytes and the choosing is
-reproducible. The database came out byte-identical across runs, which is what
-made the second guard possible at all.
+reproducible.
+
+That second guard needed one thing fixing before it could work, and the mistake
+is worth recording: **the database was not reproducible, and the check that said
+it was, was wrong.** `gs_store_put_track` stamps a track with `strftime('%s')`,
+so the file differed on every build — three builds seconds apart shared a
+timestamp and looked identical, which is what the first measurement caught and
+why it was believed. A rebuild an hour later differed in thirty-two bytes, all
+of them clock. The tool that builds the shipped library now dates its tracks at
+the epoch, because a stock track's "added" date means nothing — it shipped with
+the game — and a file in a repository has to be the same file every time it is
+built. A test reads the dates back out of the shipped copy and requires them to
+be zero.
 
 The server now takes what it serves **out of the store**. `--track FILE` still
 works and now means *import*: the file goes into the library, is published, and
@@ -1276,6 +1287,61 @@ path that stops still ends *somewhere*, which is read as the landing. It now
 halves its own sampling rate in place when it runs out of room, so the last point
 is the touchdown however long the car is up there, and a `landed` flag says
 whether the flight ended or the car has left the world entirely.
+
+### What surrounds a track
+
+**A run-off, and then a drop.** Ten tiles of sand outside the authored tiles, at
+the height of the edge they left, and past that the ground falls away at three to
+one — steeper than `GS_MAX_CLIMB`, so there is no driving back up it. A car more
+than three tiles past the shoulder is finished.
+
+The complaint that started it was that leaving cost nothing. The deeper problem
+was that **what a player could see and what they could drive on disagreed**:
+nothing outside the track was drawn, so the track ended in blackness, while the
+physics clamped to the edge tile and handed them an infinite invisible plain. The
+surround is drawn now, darkened so the racing surface is still plainly the bright
+part.
+
+Four things this taught, all of them by breaking:
+
+**A run-off works by drag, not by slipperiness.** The first version used dust, on
+the reasoning that it is loose. It is, and it also has almost no rolling
+resistance, so a car that ran wide kept every bit of its speed and sailed across
+to the drop. Sand is the draggiest of the nine grounds; a car that brakes on
+reaching it stops inside it. Switching that one constant fixed more failing tests
+than any amount of tuning had.
+
+**A car does not fall off the edge, it drives down it.** The rule that ended a
+departure lived in the airborne branch and waited for the car to be a few tiles
+below the ground — which never happened, because following the ground keeps up
+with any gradient going downhill. Cars sledged twenty tiles down the face over
+seven seconds and were eventually wrecked by arriving at the bottom. It is
+measured as distance out now, and a departure ends where it happened.
+
+**An unbounded drop is not a number.** Falling three tiles per tile forever
+overflowed Q16.16 for a car thrown a few thousand tiles off at low gravity, and
+the ground came back *above* the car. Found by the roster sweep under UBSan. The
+drop bottoms out at sixty-four tiles, far below anything recoverable.
+
+**The AI had been driving off the world all along.** It never mattered while the
+plain was infinite. Teaching it took three attempts and the lesson is the third:
+an edge-avoidance term that nudges the aim point away from the boundary fights
+the route it is meant to be following — too wide and the car drives to the middle
+of a narrow track for ever, too narrow and it never turns in time. What actually
+works is nothing to do with steering: brake for the edge the way the corner
+planner already brakes for a gate (using the run-off's grip, not the road's,
+because that is where the braking happens), aim back onto the track once off it,
+and let the sand do the rest. Removing the steering bias fixed both the sweep and
+two generated tracks it had broken.
+
+One separate AI gap came out with it: a car that had gone past a gate aimed at
+its centre from the wrong side, drove at it, arrived from the front and could not
+cross — then circled beside it for ever. It aims at a point four tiles behind the
+gate now, so an overshoot becomes a deliberate loop. That was always broken; an
+infinite plain let the car wander until it blundered back through.
+
+The golden replay moved, deliberately: the selftest race has a car that leaves
+the track.
 
 ---
 

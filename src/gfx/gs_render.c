@@ -50,7 +50,7 @@ static float gs_light(gs_fix dzdx, gs_fix dzdy) {
     return SDL_clamp(0.55f + d * 0.45f, 0.40f, 1.15f);
 }
 
-static SDL_FColor gs_tile_colour(const gs_track *t, uint8_t tx, uint8_t ty,
+static SDL_FColor gs_tile_colour(const gs_track *t, int32_t tx, int32_t ty,
                                  bool show_gravity, const gs_analysis *heat) {
     gs_fix cx = GS_INT(tx) + GS_HALF;
     gs_fix cy = GS_INT(ty) + GS_HALF;
@@ -64,13 +64,25 @@ static SDL_FColor gs_tile_colour(const gs_track *t, uint8_t tx, uint8_t ty,
 
     float r = base.r * shade, g = base.g * shade, b = base.b * shade;
 
+    // **Off the track reads as off the track.** The run-off is ground a car can
+    // be on and has to be drawn, and it is also not where the racing is - a
+    // shoulder rendered at the same weight as the circuit makes a thin ribbon of
+    // track in a field of sand, and the eye has to hunt for the part that
+    // matters. Darkened rather than recoloured, so it is plainly the same
+    // material and plainly not the road.
+    if (gs_track_outside(t, cx, cy) > 0) {
+        r *= 0.55f; g *= 0.55f; b *= 0.55f;
+    }
+
     if (heat != nullptr) {
         // Where everybody actually went, over every gravity and every machine
         // the analyser tried. The line a track *has* is rarely the line its
         // author drew, and this is the only way to be shown the difference.
         // Cold ground is left as it is; the used line runs up through green
         // into a hot white centre.
-        float k = gs_to_f(gs_analysis_heat(heat, tx, ty));
+        float k = (tx >= 0 && ty >= 0 && tx < t->w && ty < t->h)
+                      ? gs_to_f(gs_analysis_heat(heat, (uint8_t)tx, (uint8_t)ty))
+                      : 0.0f;
         if (k > 0.02f) {
             float rr = k < 0.5f ? k * 0.6f : 0.3f + (k - 0.5f) * 1.4f;
             float gg = k < 0.5f ? 0.35f + k * 0.9f : 0.8f + (k - 0.5f) * 0.4f;
@@ -123,7 +135,7 @@ static void gs_quad(SDL_Renderer *ren, const SDL_FPoint p[4], SDL_FColor c) {
 // the ground is steep, and dropping a tile that should have been drawn leaves a
 // hole in the world. Cheap and slightly wrong in the safe direction.
 static bool gs_tile_in_view(const gs_camera *cam, const gs_track *t,
-                            uint8_t tx, uint8_t ty) {
+                            int32_t tx, int32_t ty) {
     gs_fix cx = GS_INT(tx) + GS_HALF;
     gs_fix cy = GS_INT(ty) + GS_HALF;
     gs_fix cz = gs_track_height(t, cx, cy);
@@ -137,7 +149,7 @@ static bool gs_tile_in_view(const gs_camera *cam, const gs_track *t,
 }
 
 static void gs_draw_tile(SDL_Renderer *ren, const gs_camera *cam,
-                         const gs_track *t, uint8_t tx, uint8_t ty,
+                         const gs_track *t, int32_t tx, int32_t ty,
                          bool show_gravity, const gs_analysis *heat) {
     // The four corners, each at its own height - which is exactly why this is
     // geometry and not a sprite.
@@ -687,19 +699,38 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
     // axis is x + y, so sweeping the diagonals draws back to front - and
     // drawing each car as the sweep reaches its tile is what puts it behind the
     // rise it is behind.
-    int diagonals = (int)t->w + (int)t->h - 1;
+    // **The surround is drawn too, because it is ground a car can be on.**
+    // Before this, nothing outside the authored tiles was drawn and the physics
+    // clamped to the edge - so a player saw the track end in blackness and then
+    // kept driving on an invisible plain. What you can see and what you can
+    // drive on now agree: the shoulder is there, and so is the lip it falls
+    // away over.
+    //
+    // Far enough out to show the drop starting. Beyond that the ground is a long
+    // way below and there is nothing to learn from more of it.
+    const int fringe = GS_RUNOFF_TILES + 6;
+
+    int diagonals = (int)t->w + (int)t->h - 1 + fringe * 2;
     for (int d = 0; d < diagonals; d++) {
-        for (int x = 0; x <= d; x++) {
-            int y = d - x;
-            if (x >= (int)t->w || y >= (int)t->h) continue;
-            if (!gs_tile_in_view(&cam, t, (uint8_t)x, (uint8_t)y)) continue;
-            gs_draw_tile(ren, &cam, t, (uint8_t)x, (uint8_t)y, view->show_gravity,
-                         view->heat);
+        for (int i = 0; i <= d; i++) {
+            int x = i - fringe;
+            int y = d - i - fringe;
+            if (x >= (int)t->w + fringe || y >= (int)t->h + fringe) continue;
+            if (x < -fringe || y < -fringe) continue;
+            if (!gs_tile_in_view(&cam, t, x, y)) continue;
+            gs_draw_tile(ren, &cam, t, x, y, view->show_gravity, view->heat);
         }
+        // The sweep counts from the fringe, so the world diagonal this pass is
+        // drawing is `d` shifted back by the two tiles of margin it starts
+        // outside on each axis. Comparing a car's own diagonal against the raw
+        // loop counter draws every car twenty tiles too early, in front of
+        // terrain that should be hiding it.
+        int world_d = d - fringe * 2;
+
         for (uint8_t i = 0; i < now->car_count; i++) {
             gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
             int cd = gs_fix_floor(c.x) + gs_fix_floor(c.y);
-            if (cd == d) gs_draw_car(ren, &cam, t, &c, i, 1.0f);
+            if (cd == world_d) gs_draw_car(ren, &cam, t, &c, i, 1.0f);
         }
     }
 
@@ -733,10 +764,14 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
 
     // Cars that have driven off the authored track are past the last diagonal,
     // so they are drawn after everything - which is where they are.
+    // Cars beyond even the fringe are past every diagonal the sweep covered, so
+    // they are drawn after everything - which is where they are.
     for (uint8_t i = 0; i < now->car_count; i++) {
         gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
         int cd = gs_fix_floor(c.x) + gs_fix_floor(c.y);
-        if (cd >= diagonals || cd < 0) gs_draw_car(ren, &cam, t, &c, i, 1.0f);
+        if (cd >= diagonals - fringe * 2 || cd < -fringe * 2) {
+            gs_draw_car(ren, &cam, t, &c, i, 1.0f);
+        }
     }
 
     // The landing arc last of all, over everything, and only for the driver of
