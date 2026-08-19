@@ -564,10 +564,18 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       are measured too, because the first palette had gravel, dust and rock as
       one grey at three brightnesses — fine on a flat plane and invisible the
       moment the ground tilts.*
-- [ ] **Wreckage that stays.** A destroyed car leaves debris that is real track
-      geometry for the rest of the race. *Verification: a car driving the same
-      line at the same speed is deflected by the wreck of an earlier one, and is
-      not deflected when the wreck is removed.*
+- [x] **Wreckage that stays.** A destroyed car leaves debris that is real track
+      geometry for the rest of the race.
+      *Verification: most of this arrived with car-to-car collision in Phase 7 —
+      a wreck already stopped being simulated, refused to be shoved, and bent
+      the line of anybody who hit it, with three tests saying so. What was
+      missing was that debris is **bigger than the car it used to be**: a wreck
+      at exactly the car's footprint is a parked car, and "winning the fight
+      reshapes the course" would be a sentence about a parking space. A wreck now
+      reaches half again as far as a car, the renderer draws it spread and
+      flattened to match, and a car passing at an offset that clears a live car
+      does not clear a wreck. Measured on the drawn frame too: the debris covers
+      seventy per cent more ground than the car did.*
 - [ ] **A landing-prediction arc, off by default.** A dotted trajectory to the
       predicted touchdown while airborne. *Verification: the car lands where the
       arc said it would, at three gravities.*

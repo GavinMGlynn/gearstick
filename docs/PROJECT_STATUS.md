@@ -1223,6 +1223,32 @@ name that will disagree with itself. And the generator picked its ground from a
 hard-coded three; it picks from all nine, which moved the generator's golden hash
 deliberately and with a note.
 
+### Wreckage, which was mostly already there
+
+Worth recording honestly: this item was largely finished by the car-to-car
+collision work in Phase 7 and nobody had noticed. A wrecked car already stopped
+being simulated, already refused to be pushed, and already bent the line of
+anything that hit it, with three tests pinning exactly that. Checking before
+building is what found it.
+
+What was actually missing is that **debris is bigger than the car it used to
+be**. A wreck occupying precisely the footprint of the car that made it is a
+parked car, and "winning the fight reshapes the course" would be a sentence about
+a parking space. `GS_WRECK_RADIUS` is half again `GS_CAR_RADIUS`, the collision
+takes each car's own size rather than assuming both are alive, and the renderer
+spreads and flattens the mesh and its shadow to match — so what a player sees in
+the way is the size of the thing that is in the way. A wreck drawn car-sized over
+a wreck-sized obstacle would be the worst of both: it catches you on something
+you were shown you would clear.
+
+Both halves are pinned. A car passing at an offset that clears a live car does
+not clear a wreck; and on the drawn frame, the debris covers about seventy per
+cent more ground than the car did. That second measurement took two attempts —
+the first compared each pixel against the flat pavement colour from the palette,
+which marks the entire frame as interesting, because the terrain is shaded and a
+pavement pixel is nowhere near the unshaded pavement colour. The reference now
+comes from the picture rather than from the palette.
+
 ---
 
 ## What does not exist

@@ -3940,6 +3940,45 @@ TEST(a_wrecked_car_stops_moving) {
 
 
 // ---------------------------------------------------------------------------
+// Wreckage
+// ---------------------------------------------------------------------------
+
+TEST(a_wreck_takes_up_more_room_than_the_car_it_used_to_be) {
+    // Debris is a spread of parts, not a parked car. The two radii are the
+    // reason a wreck is an obstacle rather than a parking space - and the
+    // renderer draws the wreck at the size the physics uses, so what is in the
+    // way looks the size of the thing that is in the way.
+    CHECK(GS_WRECK_RADIUS > GS_CAR_RADIUS);
+
+    // Half again, and no more: debris that swallowed a lane would decide races.
+    CHECK(GS_WRECK_RADIUS < gs_fix_mul(GS_CAR_RADIUS, GS_INT(2)));
+
+    // The size difference is real and not decorative: a car passing at an offset
+    // that clears a live car does not clear a wreck.
+    static gs_track t;
+    gs_track_init(&t, 64, 24, GS_SURF_PAVEMENT);
+
+    gs_fix gap = GS_CAR_RADIUS + GS_WRECK_RADIUS - GS_RATIO(5, 100);
+
+    for (int wrecked = 0; wrecked < 2; wrecked++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(12), 0);
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(12) + gap, 0);
+        if (wrecked) { w.car[1].damage = 255; w.car[1].wrecked = true; }
+
+        for (int i = 0; i < GS_TICK_HZ * 8; i++) {
+            gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+            gs_world_step(&w, &t, in);
+        }
+
+        // At this offset a live car is missed and a wreck is not.
+        if (wrecked) CHECK(w.car[0].y != GS_INT(12));
+        else         CHECK(w.car[0].y == GS_INT(12));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The grounds
 // ---------------------------------------------------------------------------
 
@@ -4447,6 +4486,7 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_a_wreck_takes_up_more_room_than_the_car_it_used_to_be();
     run_every_ground_is_a_different_thing_to_drive_on();
     run_a_ground_is_named_once_and_the_name_is_the_surface_table();
     run_a_saved_track_keeps_the_ground_it_was_painted_with();

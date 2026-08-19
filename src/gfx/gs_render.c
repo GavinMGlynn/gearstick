@@ -273,6 +273,12 @@ static void gs_tri(SDL_Renderer *ren, const SDL_FPoint p[3], SDL_FColor c) {
     SDL_RenderGeometry(ren, nullptr, v, 3, nullptr, 0);
 }
 
+// How a wreck is drawn against how the car was: wider on the ground and lower to
+// it. The spread matches GS_WRECK_RADIUS over GS_CAR_RADIUS, so the picture and
+// the collision are the same size.
+#define GS_WRECK_SPREAD 1.5f
+#define GS_WRECK_SQUASH 0.55f
+
 static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
                         const gs_track *t, const gs_car *c, uint8_t index,
                         float alpha) {
@@ -289,7 +295,11 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
     // Nothing in src/core/ knows about these numbers today. When collision
     // arrives it must use *these* rather than the metric truth, or a car is hit
     // by something the player cannot see.
-    const float half_len = 0.65f, half_wid = 0.38f;
+    float half_len = 0.65f, half_wid = 0.38f;
+    if (c->wrecked) {
+        half_len *= GS_WRECK_SPREAD;
+        half_wid *= GS_WRECK_SPREAD;
+    }
 
     float fx[4], fy[4];
     gs_car_footprint(c, half_len, half_wid, fx, fy);
@@ -359,9 +369,23 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
         SDL_FPoint p[3];
         for (int k = 0; k < 3; k++) {
             const gs_mesh_vertex *v = &m->vertex[idx[k]];
-            wx[k] = ox + v->x * f[0] + v->y * l[0] + v->z * u[0];
-            wy[k] = oy + v->x * f[1] + v->y * l[1] + v->z * u[1];
-            wz[k] = oz + v->x * f[2] + v->y * l[2] + v->z * u[2];
+
+            // **A wreck is spread out and flattened.** The same mesh, pushed
+            // outwards and squashed down: a car that has stopped being a car
+            // reads instantly, and the wider footprint is the one the physics
+            // is already using - GS_WRECK_RADIUS - so what a player sees in the
+            // way is the size of the thing that is in the way. A wreck drawn
+            // car-sized over a wreck-sized obstacle would be the worst of both.
+            float vx = v->x, vy = v->y, vz = v->z;
+            if (c->wrecked) {
+                vx *= GS_WRECK_SPREAD;
+                vy *= GS_WRECK_SPREAD;
+                vz *= GS_WRECK_SQUASH;
+            }
+
+            wx[k] = ox + vx * f[0] + vy * l[0] + vz * u[0];
+            wy[k] = oy + vx * f[1] + vy * l[1] + vz * u[1];
+            wz[k] = oz + vx * f[2] + vy * l[2] + vz * u[2];
             gs_iso_project(cam, wx[k], wy[k], wz[k], &p[k].x, &p[k].y);
         }
 

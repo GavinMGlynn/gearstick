@@ -416,7 +416,10 @@ static void gs_collide(gs_world *w, gs_car *a, gs_car *b) {
     gs_fix dy = b->y - a->y;
     gs_fix dist = gs_fix_len2(dx, dy);
 
-    gs_fix reach = GS_CAR_RADIUS * 2;
+    // Each brings its own size to the meeting: a wreck is bigger than the car it
+    // used to be, so hitting one starts sooner than hitting a driver.
+    gs_fix reach = (a->wrecked ? GS_WRECK_RADIUS : GS_CAR_RADIUS) +
+                   (b->wrecked ? GS_WRECK_RADIUS : GS_CAR_RADIUS);
     if (dist >= reach) return;
 
     gs_fix dz = a->z - b->z;

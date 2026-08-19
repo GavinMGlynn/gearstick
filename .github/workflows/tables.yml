@@ -160,12 +160,17 @@ jobs:
       - name: Install ninja and a compiler that speaks C23
         run: sudo apt-get update && sudo apt-get install -y ninja-build gcc-14 g++-14
 
-      # Neither tool needs a window, a sound device or a network, so the server
-      # and the game are not built: only the two things that write the content.
+      # Neither tool needs a window, a sound device or a network, so only the two
+      # that write the content are built. Configuring still walks through SDL,
+      # which refuses a Unix build with no X11 or Wayland headers unless it is
+      # told the build is deliberately headless - which this one is, and saying
+      # so is cheaper than installing a desktop's worth of -dev packages to
+      # compile two programs that never open a window.
       - name: Configure and build the tools
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-                -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+                -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+                -DSDL_UNIX_CONSOLE_BUILD=ON
           cmake --build build --target gearstick_make_tracks gearstick_make_store
 
       # The tracks are chosen by racing them, so this also re-runs the choosing.

@@ -207,6 +207,17 @@ uint8_t gs_world_place(const gs_world *w, const gs_track *t, uint8_t car);
 // the honest figure, cars would pass through each other while visibly touching.
 #define GS_CAR_RADIUS GS_RATIO(52, 100)
 
+// **What a car takes up once it is wreckage**, which is more than it took up
+// while it was driving. A destroyed car does not stay car-shaped: it stops in a
+// spread of its own parts, and the spread is the point. A wreck that occupied
+// exactly the footprint of the car would be a parked car, and "winning the fight
+// reshapes the course" would be a sentence about a parking space.
+//
+// Half again, and no more. Debris that swallowed a whole lane would decide the
+// race rather than complicate it, and the ethic here is that the chaos is the
+// reward and not the referee.
+#define GS_WRECK_RADIUS GS_RATIO(78, 100)
+
 // **The steepest ground a car will drive up, as a gradient.** About fifty
 // degrees: steeper than any road and shallower than anything anyone would call
 // a wall. Ground beyond it stops a car rather than launching it. Out here in the

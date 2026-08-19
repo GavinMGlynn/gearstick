@@ -2454,6 +2454,66 @@ static int gs_hud_pixels_differing(const gs_frame *a, const gs_frame *b) {
     return n;
 }
 
+TEST(a_wreck_is_drawn_as_wide_as_the_obstacle_it_actually_is) {
+    // The physics gives a wreck a bigger radius than the car it used to be,
+    // because debris is a spread of parts. **The drawing has to agree**: a wreck
+    // drawn car-sized over a wreck-sized obstacle is the worst of both - it
+    // catches you on something you were shown you would clear.
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 24);
+
+    gs_view view = { 0 };
+    view.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    view.cam.vw = GS_W; view.cam.vh = GS_H;
+    view.cam.cx = 20.0f; view.cam.cy = 12.0f;
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+
+    int ink[2] = { 0, 0 };
+    for (int wrecked = 0; wrecked < 2; wrecked++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(12), 0);
+        if (wrecked) { w.car[0].damage = 255; w.car[0].wrecked = true; }
+
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+        SDL_RenderClear(ren);
+        gs_render_view(ren, &t, &w, &w, 1.0f, &view);
+
+        SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
+        CHECK(raw != nullptr);
+        if (raw == nullptr) return;
+        gs_frame f = { 0 };
+        f.own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(raw);
+        if (f.own == nullptr) return;
+        f.px = (uint8_t *)f.own->pixels;
+
+        // Anything that is not the ground it is standing on: the car, its
+        // shadow, the debris. The shadow matters most - it is what says how much
+        // ground a thing covers - so this cannot count the paint colour alone.
+        //
+        // **The reference is taken from the picture, not from the palette.** The
+        // terrain is shaded, so a pavement pixel is nowhere near the flat
+        // pavement colour, and comparing against the palette marks every pixel
+        // in the frame as interesting.
+        const uint8_t *bare = &f.px[((GS_H / 2) * GS_W + 4) * 4];
+        float gr = bare[0] / 255.0f, gg = bare[1] / 255.0f, gb = bare[2] / 255.0f;
+
+        for (int i = 0; i < GS_W * GS_H; i++) {
+            const uint8_t *px = &f.px[i * 4];
+            float dr = px[0] / 255.0f - gr;
+            float dg = px[1] / 255.0f - gg;
+            float db = px[2] / 255.0f - gb;
+            if (SDL_sqrtf(dr * dr + dg * dg + db * db) > 0.06f) ink[wrecked]++;
+        }
+        gs_frame_free(&f);
+    }
+
+    // Both drew something, and the wreck covers meaningfully more ground.
+    CHECK(ink[0] > 200);
+    CHECK(ink[1] > ink[0] * 5 / 4);
+}
+
 TEST(no_two_grounds_are_drawn_the_same_colour) {
     (void)ren;
 
@@ -2671,6 +2731,7 @@ int main(void) {
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
+    run_a_wreck_is_drawn_as_wide_as_the_obstacle_it_actually_is(ren);
     run_no_two_grounds_are_drawn_the_same_colour(ren);
     run_the_hud_says_what_lap_it_is_and_changes_when_the_lap_does(ren);
     run_the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed(ren);
