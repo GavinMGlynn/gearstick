@@ -17,6 +17,7 @@
 
 #include "core/gs_edit.h"
 #include "core/gs_track.h"
+#include "core/gs_analyse.h"
 #include "gfx/gs_render.h"
 #include "platform/gs_input.h"
 
@@ -68,6 +69,15 @@ typedef struct gs_editor {
     gs_world ghost;
     uint64_t ghost_track;   // the track hash it is racing; a change restarts it
     uint32_t ghost_ticks;
+
+    // The analyser's last verdict on this track: which gravities and which
+    // machines can get round it, and where they all drove. Run on demand
+    // rather than continuously - it is thirty seconds of simulation per
+    // machine per gravity step, which is a very long frame.
+    bool       heat_on;
+    bool       analysed;
+    uint64_t   heat_track;   // the track hash it was run against
+    gs_analysis heat;
 
     // Rebinding: which control is waiting to be told what it should be. -1
     // when nothing is.
@@ -135,6 +145,15 @@ void gs_editor_draw_cursor(const gs_editor *e, SDL_Renderer *ren,
 
 // Where the editor puts a track. One file for now; the editor has no browser
 // yet and a fixed path is better than a dialog that does not exist.
+// Run the sweep and keep the answer. Slow by design; call it from a button,
+// never from a frame.
+void gs_editor_analyse(gs_editor *e, const gs_track *t);
+
+// The heatmap to paint under the terrain, or null when there is nothing to
+// show. Stale results are still returned: a heatmap of the track as it was a
+// moment ago is more use than no heatmap, and the panel says which it is.
+const gs_analysis *gs_editor_heat(const gs_editor *e);
+
 bool gs_editor_save(gs_editor *e, const gs_track *t);
 bool gs_editor_load(gs_editor *e, gs_track *t);
 

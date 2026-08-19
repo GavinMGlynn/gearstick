@@ -16,6 +16,7 @@
 #define GS_PI 3.14159265358979323846
 
 #include "core/gs_ai.h"
+#include "core/gs_analyse.h"
 #include "core/gs_clock.h"
 #include "core/gs_edit.h"
 #include "core/gs_replay.h"
@@ -2015,6 +2016,106 @@ TEST(an_ai_race_is_deterministic_like_every_other_race) {
 }
 
 // ---------------------------------------------------------------------------
+// Asking questions about a track
+// ---------------------------------------------------------------------------
+
+static gs_analysis gs_report;   // 8 KB, so not on the stack
+
+TEST(the_analyser_calls_a_jump_nobody_can_clear_impossible) {
+    // A ramp to a cliff edge, a chasm, and the landing on the far side. Clearing
+    // it is a matter of how far a car flies, which is a matter of gravity - so
+    // this is completable at the light end of the dial and not at the heavy one,
+    // and that is exactly the answer a designer needs before anybody drives it.
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_fix z;
+            if (x < 12) z = 0;                                       // run up
+            else if (x < 18) z = (gs_fix)((int64_t)GS_INT(2) * (x - 12) / 6);  // ramp
+            else if (x < 34) z = -GS_INT(30);                        // the chasm
+            else z = 0;                                              // the landing
+            gs_track_set_corner(&t, x, y, z);
+        }
+    }
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(50), GS_INT(8), 0, GS_INT(6));
+
+    gs_analyse(&t, 25, &gs_report);
+
+    // Somebody, somewhere in the range, can do it - otherwise this would be
+    // testing that a broken track is broken.
+    CHECK(gs_report.completable);
+
+    // And not everybody: the envelope has a top to it, which is the whole
+    // point of reporting one.
+    CHECK(gs_report.completed[0] > 0);
+    CHECK(gs_report.completed[GS_ANALYSIS_STEPS - 1] == 0);
+    CHECK(gs_report.heaviest < gs_report.gravity[GS_ANALYSIS_STEPS - 1]);
+}
+
+TEST(the_analyser_says_so_when_a_track_cannot_be_got_round_at_all) {
+    // A wall across the road, too tall and too steep for anything.
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++)
+            gs_track_set_corner(&t, x, y, (x >= 24 && x <= 27) ? GS_INT(60) : 0);
+
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(50), GS_INT(8), 0, GS_INT(6));
+
+    gs_analyse(&t, 20, &gs_report);
+    CHECK(!gs_report.completable);
+}
+
+TEST(the_heatmap_shows_where_everybody_actually_went) {
+    static gs_track t;
+    gs_circuit(&t, GS_SURF_PAVEMENT);
+
+    gs_analyse(&t, 30, &gs_report);
+    CHECK(gs_report.completable);
+    CHECK(gs_report.busiest > 0);
+
+    // The corners of the circuit are driven; the middle of it is not. A racing
+    // line you can see is the thing that changes how a track gets built.
+    gs_fix on_the_line = gs_analysis_heat(&gs_report, 45, 15);
+    gs_fix in_the_middle = gs_analysis_heat(&gs_report, 30, 30);
+
+    CHECK(on_the_line > 0);
+    CHECK(in_the_middle < on_the_line);
+
+    // And somewhere is the busiest, at full heat, so the scale means something.
+    bool saw_peak = false;
+    for (uint8_t x = 0; x < t.w && !saw_peak; x++) {
+        for (uint8_t y = 0; y < t.h; y++) {
+            if (gs_analysis_heat(&gs_report, x, y) == GS_ONE) { saw_peak = true; break; }
+        }
+    }
+    CHECK(saw_peak);
+}
+
+TEST(the_analyser_gives_the_same_answer_twice) {
+    static gs_track t;
+    gs_circuit(&t, GS_SURF_DIRT);
+
+    static gs_analysis first;
+    gs_analyse(&t, 12, &first);
+    gs_analyse(&t, 12, &gs_report);
+
+    // A design tool that disagreed with itself between runs would be worse
+    // than none: you could not tell a change to the track from noise.
+    CHECK(first.completable == gs_report.completable);
+    CHECK(first.lightest == gs_report.lightest);
+    CHECK(first.heaviest == gs_report.heaviest);
+    CHECK(first.busiest == gs_report.busiest);
+    for (int i = 0; i < GS_ANALYSIS_STEPS; i++) {
+        CHECK(first.completed[i] == gs_report.completed[i]);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Determinism - the property everything else is built on
 // ---------------------------------------------------------------------------
 
@@ -2337,6 +2438,10 @@ int main(void) {
     run_the_same_corner_is_braked_for_differently_in_a_different_car();
     run_a_quicker_driver_carries_more_speed_through_the_same_corner();
     run_an_ai_race_is_deterministic_like_every_other_race();
+    run_the_analyser_calls_a_jump_nobody_can_clear_impossible();
+    run_the_analyser_says_so_when_a_track_cannot_be_got_round_at_all();
+    run_the_heatmap_shows_where_everybody_actually_went();
+    run_the_analyser_gives_the_same_answer_twice();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

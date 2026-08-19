@@ -55,6 +55,7 @@ typedef struct gs_app {
     float       zoom;         // 0 means the default
     uint8_t     players;      // 0 means the default of two
     bool        diverge;      // in shot mode, steer the cars apart and back
+    bool        analyse_at_start;
     bool        quit;
 } gs_app;
 
@@ -188,12 +189,16 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->diverge = true;
         } else if (SDL_strcmp(argv[i], "--editor") == 0) {
             a->start_in_editor = true;
+        } else if (SDL_strcmp(argv[i], "--heatmap") == 0) {
+            a->start_in_editor = true;
+            a->analyse_at_start = true;
         } else if (SDL_strcmp(argv[i], "--help") == 0) {
             SDL_Log("gearstick - arrows drive car one, WASD car two.");
             SDL_Log("  --shot FILE     write a frame and exit");
             SDL_Log("  --shot-at TICK  which tick to write it at (default 0)");
             SDL_Log("  --overlay       start with the painted-gravity overlay on");
             SDL_Log("  --editor        open in the construction set");
+            SDL_Log("  --heatmap       open the editor with the analyser already run");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  --players N     one to four, split-screen to match");
             SDL_Log("  --diverge       with --shot: drive the cars apart, to see the split");
@@ -243,6 +248,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     gs_layout(a);
 
     if (a->start_in_editor) gs_editor_toggle(&a->editor, &a->view[0]);
+    if (a->analyse_at_start) gs_editor_analyse(&a->editor, &a->t);
 
     SDL_Log("gearstick: assets at %s", gs_assets_dir());
     SDL_Log("gearstick: track hash 0x%016llx",
@@ -358,6 +364,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         a->view[0].cam.cy = a->editor.cam_y;
         a->view[0].cam.cz = 0.0f;
         a->view[0].cam.zoom = a->editor.zoom;
+        // Only the editor paints the heatmap. Racing over it would be reading
+        // the answers off the back of the book.
+        a->view[0].heat = gs_editor_heat(&a->editor);
 
         // Panning. Held keys rather than events, so it accelerates smoothly and
         // does not depend on the OS's key-repeat rate.
@@ -407,6 +416,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         views = gs_split_views(&a->split, &a->world, ww, wh, merged);
         for (uint8_t i = 0; i < views; i++) {
             merged[i].show_gravity = a->view[i].show_gravity;
+            merged[i].heat = nullptr;
             if (a->zoom > 0.0f) merged[i].cam.zoom = a->zoom;
             a->view[i] = merged[i];
         }

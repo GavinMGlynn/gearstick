@@ -35,7 +35,7 @@ static float gs_light(gs_fix dzdx, gs_fix dzdy) {
 }
 
 static SDL_FColor gs_tile_colour(const gs_track *t, uint8_t tx, uint8_t ty,
-                                 bool show_gravity) {
+                                 bool show_gravity, const gs_analysis *heat) {
     gs_fix cx = GS_INT(tx) + GS_HALF;
     gs_fix cy = GS_INT(ty) + GS_HALF;
 
@@ -47,6 +47,22 @@ static SDL_FColor gs_tile_colour(const gs_track *t, uint8_t tx, uint8_t ty,
     float shade = gs_light(dzdx, dzdy);
 
     float r = base.r * shade, g = base.g * shade, b = base.b * shade;
+
+    if (heat != nullptr) {
+        // Where everybody actually went, over every gravity and every machine
+        // the analyser tried. The line a track *has* is rarely the line its
+        // author drew, and this is the only way to be shown the difference.
+        // Cold ground is left as it is; the used line runs up through green
+        // into a hot white centre.
+        float k = gs_to_f(gs_analysis_heat(heat, tx, ty));
+        if (k > 0.02f) {
+            float rr = k < 0.5f ? k * 0.6f : 0.3f + (k - 0.5f) * 1.4f;
+            float gg = k < 0.5f ? 0.35f + k * 0.9f : 0.8f + (k - 0.5f) * 0.4f;
+            float bb = k < 0.5f ? k * 0.3f : 0.15f + (k - 0.5f) * 1.7f;
+            float m = SDL_clamp(0.25f + k * 0.65f, 0.0f, 0.9f);
+            r += (rr - r) * m; g += (gg - g) * m; b += (bb - b) * m;
+        }
+    }
 
     if (show_gravity) {
         // Painted gravity has to be visible while you paint it, or the brush is
@@ -106,7 +122,7 @@ static bool gs_tile_in_view(const gs_camera *cam, const gs_track *t,
 
 static void gs_draw_tile(SDL_Renderer *ren, const gs_camera *cam,
                          const gs_track *t, uint8_t tx, uint8_t ty,
-                         bool show_gravity) {
+                         bool show_gravity, const gs_analysis *heat) {
     // The four corners, each at its own height - which is exactly why this is
     // geometry and not a sprite.
     static const int ox[4] = { 0, 1, 1, 0 };
@@ -126,7 +142,7 @@ static void gs_draw_tile(SDL_Renderer *ren, const gs_camera *cam,
     }
 
     gs_stats.tiles++;
-    gs_quad(ren, p, gs_tile_colour(t, tx, ty, show_gravity));
+    gs_quad(ren, p, gs_tile_colour(t, tx, ty, show_gravity, heat));
 }
 
 // The car is a box: a footprint rotated to its heading, lifted by its ride
@@ -425,7 +441,8 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
             int y = d - x;
             if (x >= (int)t->w || y >= (int)t->h) continue;
             if (!gs_tile_in_view(&cam, t, (uint8_t)x, (uint8_t)y)) continue;
-            gs_draw_tile(ren, &cam, t, (uint8_t)x, (uint8_t)y, view->show_gravity);
+            gs_draw_tile(ren, &cam, t, (uint8_t)x, (uint8_t)y, view->show_gravity,
+                         view->heat);
         }
         for (uint8_t i = 0; i < now->car_count; i++) {
             gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);

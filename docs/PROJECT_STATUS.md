@@ -224,6 +224,43 @@ code that must never differ between machines. Both are multiplies now, and the
 golden hash did not move, which is how you know the fix changed nothing but the
 standard-conformance.
 
+### The track analyser, and the wall it found
+
+The analyser races all six vehicles round a track at nine gravities, from 0.15x
+Earth to 2.55x, and reports the band the track is actually driveable in along
+with a heatmap of everywhere anybody went. It is on a button in the editor and
+on `gearstick_cli analyse FILE`, and it is deliberately not continuous: a sweep
+is fifty-four thirty-second races, which is a very long frame.
+
+What it is *for* is the question no amount of looking at a track answers — can
+this be got round, by what, and under what gravity — and the first thing it did
+was fail. Asked to confirm that a sixty-tile wall across the track was
+impassable, it said the track was fine. It was right and the physics was wrong:
+a grounded car followed the terrain height whatever the terrain height did, so
+a vertical face demanded an enormous upward velocity and got one. The traced car
+climbed the wall and was flung to six hundred tiles up.
+
+Ground steeper than a gradient of 1.2 is now a wall rather than a ramp, and a
+car that meets one stops. That is worth more than the analyser is: it is a class
+of nonsense that any player could have found by driving at a cliff, and nothing
+in the suite had ever asked.
+
+It cost two retunes. The roster's washboard was spikes of 1.9 tiles over one
+tile of run — which is to say a row of walls, ridden over only because the
+physics permitted climbing walls. It now rises over two tiles and falls over
+two, keeping the amplitude the suspension feels while leaving a gradient a car
+can climb. That flipped "rough and twisty" from the dune buggy to the stock car
+by half a percent, so the amplitude went up until grip decided it properly: the
+buggy now wins by nearly half.
+
+And the baja bug lost its niche outright, because its old one had been an
+artifact of the bug. Its distinguishing stat is toughness, so its condition is
+now a staircase of shelves — forty seconds of landing flat, over and over. The
+sprint car, the motorcycle and the stock car are all wrecked by it; the dune
+buggy wrecks too; the baja bug finishes it undamaged, and beats the only other
+survivor by half again. All six vehicles win something, and each of them wins it
+for a reason you could describe to somebody.
+
 ---
 
 ## What does not exist

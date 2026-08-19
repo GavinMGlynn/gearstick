@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "core/gs_ai.h"
+#include "core/gs_analyse.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -292,6 +293,7 @@ typedef struct gs_scenario {
     bool        twisty;     // steer back and forth rather than run straight
     int32_t     drop;       // shelf height in tiles, 0 for flat ground
     gs_fix      bumps;      // washboard amplitude in tiles, 0 for smooth
+    int32_t     stair;      // shelf every this many tiles, 0 for one shelf only
     uint32_t    seconds;    // how long the run lasts
 
     // Ten seconds is enough where speed decides. Where *survival* decides it is
@@ -309,12 +311,31 @@ static void gs_scenario_track(gs_track *t, const gs_scenario *sc) {
 
             // A shelf that ends, so the run is decided by what the landing does
             // rather than by how fast the car got there.
-            if (sc->drop != 0 && x <= 10) z += GS_INT(sc->drop);
+            if (sc->drop != 0 && sc->stair == 0 && x <= 10) z += GS_INT(sc->drop);
+
+            // Or one shelf after another, all the way down. A single drop asks
+            // whether a car survives a mistake; a staircase asks whether it
+            // survives making the same one forty times, which is a different
+            // question and the only one toughness alone answers.
+            if (sc->stair != 0) z += GS_INT(40 - (int32_t)x / sc->stair * sc->drop);
 
             // Washboard: ridges a car cannot avoid and has to survive. This is
             // where toughness stops being insurance against a mistake and
             // becomes the thing being measured.
-            if (sc->bumps != 0 && x > 6 && (x % 3u) == 0u) z += sc->bumps;
+            //
+            // Ridges, not spikes. A one-tile step of this height is a wall,
+            // and since the physics started treating walls as walls a spiked
+            // washboard stopped every machine dead at the first one and
+            // measured nothing. Rising over two tiles and falling over two
+            // keeps the amplitude - which is what the suspension feels - while
+            // leaving a gradient a car can actually climb.
+            if (sc->bumps != 0 && x > 6) {
+                uint32_t phase = x % 4u;
+                gs_fix up = phase == 1u || phase == 3u ? sc->bumps / 2
+                          : phase == 2u                ? sc->bumps
+                                                       : 0;
+                z += up;
+            }
 
             gs_track_set_corner(t, x, y, z);
         }
@@ -352,18 +373,18 @@ static int cmd_roster(void) {
     // car - which needs a long enough run that a wreck stops mattering less
     // than it costs.
     const gs_scenario scenarios[] = {
-        { "pavement sprint",  GS_SURF_PAVEMENT, GS_ONE,             false,  0, 0, 10 },
-        { "pavement, twisty", GS_SURF_PAVEMENT, GS_ONE,             true,   0, 0, 10 },
-        { "jupiter",          GS_SURF_PAVEMENT, GS_RATIO(253, 100), false,  0, 0, 10 },
-        { "ice",              GS_SURF_ICE,      GS_ONE,             false,  0, 0, 10 },
-        { "dirt, twisty",     GS_SURF_DIRT,     GS_ONE,             true,   0, 0, 10 },
-        { "the moon",         GS_SURF_PAVEMENT, GS_RATIO(17, 100),  true,   0, 0, 10 },
-        { "ceres",            GS_SURF_PAVEMENT, GS_RATIO(3, 100),   true,   0, 0, 10 },
-        { "off a shelf",      GS_SURF_DIRT,     GS_ONE,             false, 14, 0, 10 },
+        { "pavement sprint",  GS_SURF_PAVEMENT, GS_ONE,             false,  0, 0, 0, 10 },
+        { "pavement, twisty", GS_SURF_PAVEMENT, GS_ONE,             true,   0, 0, 0, 10 },
+        { "jupiter",          GS_SURF_PAVEMENT, GS_RATIO(253, 100), false,  0, 0, 0, 10 },
+        { "ice",              GS_SURF_ICE,      GS_ONE,             false,  0, 0, 0, 10 },
+        { "dirt, twisty",     GS_SURF_DIRT,     GS_ONE,             true,   0, 0, 0, 10 },
+        { "the moon",         GS_SURF_PAVEMENT, GS_RATIO(17, 100),  true,   0, 0, 0, 10 },
+        { "ceres",            GS_SURF_PAVEMENT, GS_RATIO(3, 100),   true,   0, 0, 0, 10 },
+        { "off a shelf",      GS_SURF_DIRT,     GS_ONE,             false, 14, 0, 0, 10 },
         { "rough and twisty", GS_SURF_DIRT,     GS_ONE,             true,   0,
-          GS_RATIO(90, 100), 25 },
-        { "broken ground",    GS_SURF_DIRT,     GS_ONE,             false,  0,
-          GS_RATIO(19, 10), 30 },
+          GS_RATIO(120, 100), 0, 25 },
+        { "a staircase",      GS_SURF_DIRT,     GS_ONE,             false,  6,
+          0, 6, 40 },
     };
     const size_t count = sizeof scenarios / sizeof scenarios[0];
 
@@ -559,6 +580,54 @@ static int cmd_pace(void) {
     return 0;
 }
 
+// --- the analyser -----------------------------------------------------------
+
+static gs_analysis gs_report;
+
+static int cmd_analyse(const char *path) {
+    static gs_track t;
+
+    size_t n = 0;
+    FILE *f = fopen(path, "rb");
+    if (f == nullptr) {
+        printf("could not open %s\n", path);
+        return 1;
+    }
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+    n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+
+    if (!gs_track_deserialize(&t, buf, n)) {
+        printf("%s is not a track\n", path);
+        return 1;
+    }
+
+    gs_track_issue issue = gs_track_validate(&t);
+    printf("track  %u x %u, %u gates, id %016llx\n", t.w, t.h, t.gate_count,
+           (unsigned long long)gs_track_hash(&t));
+    printf("route  %s\n", gs_track_problem_text(issue.problem));
+    if (issue.problem != GS_TRACK_OK) return 1;
+
+    gs_analyse(&t, 30, &gs_report);
+
+    printf("\n%-14s %s\n", "gravity", "vehicles that got round");
+    for (int i = 0; i < GS_ANALYSIS_STEPS; i++) {
+        printf("%11.2fx  ", (double)gs_report.gravity[i] / (double)GS_ONE);
+        for (uint8_t v = 0; v < gs_report.completed[i]; v++) printf("#");
+        for (uint8_t v = gs_report.completed[i]; v < GS_VEH_COUNT; v++) printf(".");
+        printf("  %u of %u\n", gs_report.completed[i], (unsigned)GS_VEH_COUNT);
+    }
+
+    if (!gs_report.completable) {
+        printf("\nFAIL   nobody can get round this at any gravity\n");
+        return 1;
+    }
+    printf("\nOK     completable between %.2fx and %.2fx Earth gravity\n",
+           (double)gs_report.lightest / (double)GS_ONE,
+           (double)gs_report.heaviest / (double)GS_ONE);
+    return 0;
+}
+
 static int cmd_vehicles(void) {
     printf("%-13s %7s %7s %6s %6s %8s %6s\n",
            "vehicle", "power", "brake", "top", "grip", "steer", "tough");
@@ -593,6 +662,7 @@ static int usage(void) {
            "  track FILE           write a track, read it back, check it survived\n"
            "  validate             show what the route checker accepts and refuses\n"
            "  ai                   race the AI round a circuit in every condition\n"
+           "  analyse FILE         what gravities and machines can get round a track\n"
            "  pace                 lap times for a cautious, normal and quick driver\n"
            "  roster               race every vehicle over every condition\n"
            "  vehicles             the roster and its numbers\n"
@@ -614,6 +684,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "validate") == 0) return cmd_validate();
     if (strcmp(argv[1], "ai") == 0) return cmd_ai();
     if (strcmp(argv[1], "pace") == 0) return cmd_pace();
+    if (strcmp(argv[1], "analyse") == 0 && argc > 2) return cmd_analyse(argv[2]);
     if (strcmp(argv[1], "roster") == 0) return cmd_roster();
     if (strcmp(argv[1], "vehicles") == 0) return cmd_vehicles();
     if (strcmp(argv[1], "gravity") == 0) return cmd_gravity();

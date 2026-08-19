@@ -316,6 +316,30 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     ImGui_SameLine();
     ImGui_Text("%s", t->gate_count > 0 ? "" : "(needs a start line)");
 
+    ImGui_SeparatorText("Analysis");
+    // On demand, unlike the route check above, because the answer costs half a
+    // minute of simulation per machine per gravity step. What it buys is the
+    // question no amount of staring at a track answers: can this actually be
+    // got round, by what, and under what gravity.
+    if (ImGui_Button("analyse")) gs_editor_analyse(e, t);
+    ImGui_SameLine();
+    ImGui_BeginDisabled(!e->analysed);
+    ImGui_Checkbox("heatmap", &e->heat_on);
+    ImGui_EndDisabled();
+
+    if (e->analysed) {
+        if (e->heat.completable) {
+            ImGui_Text("driveable %.2fx to %.2fx gravity",
+                       (double)e->heat.lightest / (double)GS_ONE,
+                       (double)e->heat.heaviest / (double)GS_ONE);
+        } else {
+            ImGui_Text("NOBODY can get round this, at any gravity");
+        }
+        if (e->heat_track != gs_track_hash(t)) {
+            ImGui_Text("(the track has changed since - analyse again)");
+        }
+    }
+
     ImGui_SeparatorText("Route");
     // Continuously, rather than on demand. A check you have to ask for is a
     // check you ask for once the track is finished, which is the worst moment
@@ -653,6 +677,33 @@ static bool gs_track_path(char *out, size_t cap) {
     if (dir == nullptr) return false;
     SDL_snprintf(out, cap, "%s%s", dir, GS_TRACK_FILENAME);
     return true;
+}
+
+void gs_editor_analyse(gs_editor *e, const gs_track *t) {
+    if (gs_track_validate(t).problem != GS_TRACK_OK) {
+        SDL_snprintf(e->status, sizeof e->status,
+                     "the route has to be sound before it can be analysed");
+        return;
+    }
+
+    gs_analyse(t, 30, &e->heat);
+    e->analysed = true;
+    e->heat_track = gs_track_hash(t);
+    e->heat_on = true;
+
+    if (e->heat.completable) {
+        SDL_snprintf(e->status, sizeof e->status,
+                     "driveable between %.2fx and %.2fx gravity",
+                     (double)e->heat.lightest / (double)GS_ONE,
+                     (double)e->heat.heaviest / (double)GS_ONE);
+    } else {
+        SDL_snprintf(e->status, sizeof e->status,
+                     "nobody got round this, at any gravity");
+    }
+}
+
+const gs_analysis *gs_editor_heat(const gs_editor *e) {
+    return (e->analysed && e->heat_on) ? &e->heat : nullptr;
 }
 
 bool gs_editor_save(gs_editor *e, const gs_track *t) {

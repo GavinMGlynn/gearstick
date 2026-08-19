@@ -92,6 +92,10 @@ static gs_fix gs_steer_authority(const gs_vehicle_def *v, gs_fix speed) {
 #define GS_MINE_LIFT    GS_INT(4)
 #define GS_MINE_HURT    GS_INT(9)
 
+// The steepest ground a car will drive up, as a gradient. About fifty degrees:
+// steeper than any road and shallower than anything anyone would call a wall.
+#define GS_MAX_CLIMB GS_RATIO(120, 100)
+
 // One a second. Holding the button should leave a trail, not a carpet.
 #define GS_DROP_COOLDOWN (GS_TICK_HZ)
 
@@ -284,10 +288,34 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
 
     // --- Move.
     gs_fix z_was = c->z;
+    gs_fix was_x = c->x, was_y = c->y;
     c->x += gs_fix_mul(c->vx, dt);
     c->y += gs_fix_mul(c->vy, dt);
 
     gs_fix ground = gs_track_height(t, c->x, c->y);
+
+    // **A slope steeper than a car can climb is a wall, not a ramp.**
+    //
+    // Without this the ground-following rate is whatever the terrain demands,
+    // and a vertical face demands an enormous one: a car meeting a sixty-tile
+    // wall was catapulted to six hundred tiles up, because the ground rose
+    // faster in one tick than anything could and the physics obligingly kept
+    // the wheels on it. The analyser found it by declaring an impassable track
+    // completable, which is a better bug report than any crash.
+    //
+    // What happens instead is what happens in life: you stop.
+    if (c->grounded) {
+        gs_fix climbed = ground - z_was;
+        gs_fix moved = gs_fix_len2(c->x - was_x, c->y - was_y);
+        if (moved > 0 && climbed > gs_fix_mul(moved, GS_MAX_CLIMB)) {
+            c->x = was_x;
+            c->y = was_y;
+            c->vx = 0;
+            c->vy = 0;
+            c->vz = 0;
+            return;
+        }
+    }
 
     if (c->grounded) {
         // The rate the ground would demand if the car stayed glued to it.

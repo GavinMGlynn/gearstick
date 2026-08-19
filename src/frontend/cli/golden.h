@@ -21,6 +21,9 @@
 // them changes every recorded replay - which is why this number is allowed to
 // move during tuning and is not allowed to move by accident.
 //
+// And when ground too steep to climb became a wall rather than a catapult -
+// found by the analyser calling an impassable track completable.
+//
 // And again for car-to-car collision, which cars in the selftest race now have
 // with each other.
 //

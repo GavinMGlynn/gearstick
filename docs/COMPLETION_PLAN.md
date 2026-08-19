@@ -412,7 +412,7 @@ whatever the UI turns out to be — then the interface on top.
 
 ## Phase 9 — Sharing, ghosts and netcode
 
-- [ ] **The track analyser sweep**, reported as an envelope and drawn as a
+- [x] **The track analyser sweep**, reported as an envelope and drawn as a
       heatmap over the editor. *Verification: it correctly calls an impossible
       jump impossible.*
 - [ ] **Ghosts** — race against a recorded run, yours or someone else's.

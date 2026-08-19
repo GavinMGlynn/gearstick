@@ -1547,6 +1547,133 @@ TEST(every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The analyser's heatmap, on screen
+// ---------------------------------------------------------------------------
+
+// A green channel well ahead of red and blue: the warm end of the heat ramp,
+// and nothing else in these scenes is green - pavement is grey and the sky is
+// black.
+static bool gs_is_hot(const uint8_t *p) {
+    return p[1] > 90 && p[1] > p[0] + 25 && p[1] > p[2] + 25;
+}
+
+static int gs_count_hot(const gs_frame *f) {
+    int n = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        if (gs_is_hot(&f->px[i * 4])) n++;
+    }
+    return n;
+}
+
+static void gs_routed_pavement(gs_track *t) {
+    gs_flat_pavement(t, 40, 16);
+    gs_track_add_gate(t, GS_INT(4), GS_INT(8), 0, GS_INT(5));
+    gs_track_add_gate(t, GS_INT(34), GS_INT(8), 0, GS_INT(5));
+}
+
+TEST(the_heatmap_puts_the_line_everybody_drove_on_the_screen) {
+    static gs_track t;
+    gs_routed_pavement(&t);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 8192));
+
+    // Nothing to paint until the sweep has run.
+    CHECK(gs_editor_heat(&ed) == nullptr);
+
+    gs_editor_analyse(&ed, &t);
+    CHECK(ed.analysed);
+    CHECK(ed.heat.completable);
+    CHECK(gs_editor_heat(&ed) != nullptr);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(8), 0);
+
+    gs_camera cam = { 0 };
+    cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    cam.vw = GS_W; cam.vh = GS_H;
+    cam.cx = 20.0f; cam.cy = 8.0f;
+
+    gs_view view = { 0 };
+    view.cam = cam;
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+
+    // Cold first: the same scene with the heatmap off has nothing green in it.
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    gs_render_view(ren, &t, &w, &w, 1.0f, &view);
+    SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
+    CHECK(raw != nullptr);
+    gs_frame cold = { 0 };
+    if (raw != nullptr) {
+        cold.own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(raw);
+        if (cold.own != nullptr) cold.px = (uint8_t *)cold.own->pixels;
+    }
+
+    view.heat = gs_editor_heat(&ed);
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    gs_render_view(ren, &t, &w, &w, 1.0f, &view);
+    raw = SDL_RenderReadPixels(ren, nullptr);
+    CHECK(raw != nullptr);
+    gs_frame warm = { 0 };
+    if (raw != nullptr) {
+        warm.own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(raw);
+        if (warm.own != nullptr) warm.px = (uint8_t *)warm.own->pixels;
+    }
+
+    if (cold.px != nullptr && warm.px != nullptr) {
+        CHECK(gs_count_hot(&cold) == 0);
+        // Not "some green somewhere": the used line is a band across a forty
+        // tile track, so it is thousands of pixels.
+        CHECK(gs_count_hot(&warm) > 500);
+        // And it is a *line*, not a wash over everything - most of the track
+        // is ground nobody had any reason to drive on.
+        CHECK(gs_count_hot(&warm) < GS_W * GS_H / 4);
+    }
+    gs_frame_free(&cold);
+    gs_frame_free(&warm);
+
+    // Switching it off puts the terrain back exactly as it was.
+    ed.heat_on = false;
+    CHECK(gs_editor_heat(&ed) == nullptr);
+
+    gs_editor_quit(&ed);
+}
+
+TEST(the_analyser_refuses_a_track_with_no_route_rather_than_guessing) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 24, 12);   // no gates at all
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 4096));
+    gs_editor_analyse(&ed, &t);
+
+    CHECK(!ed.analysed);
+    CHECK(gs_editor_heat(&ed) == nullptr);
+    CHECK(SDL_strstr(ed.status, "route") != nullptr);
+
+    // Give it a route and it has something to say.
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(6), 0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(18), GS_INT(6), 0, GS_INT(4));
+    gs_editor_analyse(&ed, &t);
+    CHECK(ed.analysed);
+    CHECK(ed.heat_track == gs_track_hash(&t));
+
+    // And it knows when it is out of date, which is the difference between a
+    // stale heatmap and a lie.
+    gs_track_set_corner(&t, 10, 6, GS_INT(3));
+    CHECK(ed.heat_track != gs_track_hash(&t));
+
+    gs_editor_quit(&ed);
+}
+
 TEST(changed_controls_survive_being_written_and_read_back) {
     (void)ren;
 
@@ -1631,6 +1758,8 @@ int main(void) {
     run_the_view_does_not_jump_when_the_screen_merges_or_splits(ren);
     run_every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone(ren);
     run_changed_controls_survive_being_written_and_read_back(ren);
+    run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
+    run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

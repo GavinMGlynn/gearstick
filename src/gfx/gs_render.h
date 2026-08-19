@@ -14,6 +14,7 @@
 
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
+#include "core/gs_analyse.h"
 #include "gfx/gs_iso.h"
 
 typedef struct gs_view {
@@ -21,6 +22,12 @@ typedef struct gs_view {
     SDL_Rect  rect;      // where on the window this view lives
     uint8_t   car;       // whose view it is
     bool      show_gravity;
+
+    // The analyser's heatmap, or null for none. Borrowed, not owned: the view
+    // paints whatever the editor last worked out and never runs the sweep
+    // itself, because a sweep is thirty seconds of simulation and a frame is
+    // eight milliseconds.
+    const gs_analysis *heat;
 } gs_view;
 
 // Draw one view of the world. `alpha` in [0,1] interpolates between the
