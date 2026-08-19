@@ -595,10 +595,16 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       player saw a cliff and drove on a plain that was not there. And the height
       out there is a number: an unbounded drop overflowed Q16.16 for a car thrown
       a few thousand tiles off the map, and returned ground *above* it.*
-- [ ] **Placing a gate goes into the undo history.** Undo covers terrain,
-      surface and gravity but not the route, which is a promise with a footnote.
+- [x] **Placing a gate goes into the undo history.** Undo covered terrain,
+      surface and gravity but not the route — a promise with a footnote, and the
+      footnote was the one edit that changes what a track *is* for every record
+      and every shared code keyed on its hash.
       *Verification: place a gate, undo, and the track hash is what it was
-      before.*
+      before — the hash and not the count, because a gate put back in the wrong
+      place or the wrong order leaves the same number of them and a different
+      track. Taking one out of the middle of a route restores its position in
+      the order too, and a gate placed inside a brush stroke comes back with the
+      stroke.*
 - [ ] **The store survives a format change.** Profiles and records refuse to
       load anything they do not recognise, which is correct and means somebody's
       history vanishes the first time the format moves. *Verification: a store

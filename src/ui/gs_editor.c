@@ -188,9 +188,9 @@ void gs_editor_paint(gs_editor *e, gs_track *t, float wx, float wy) {
     // over a disc of tiles, and one click makes one of them.
     if (e->brush == GS_BRUSH_GATE) {
         gs_angle heading = (gs_angle)(int32_t)(e->gate_heading / 360.0f * 65536.0f);
-        int at = gs_track_add_gate(t, (gs_fix)(wx * (float)GS_ONE),
-                                   (gs_fix)(wy * (float)GS_ONE), heading,
-                                   (gs_fix)(e->gate_width * (float)GS_ONE));
+        int at = gs_edit_add_gate(e->log, t, (gs_fix)(wx * (float)GS_ONE),
+                                  (gs_fix)(wy * (float)GS_ONE), heading,
+                                  (gs_fix)(e->gate_width * (float)GS_ONE));
         if (at < 0) {
             SDL_snprintf(e->status, sizeof e->status,
                          "the route is full at %d gates", GS_TRACK_MAX_GATES);
@@ -278,7 +278,7 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
                        (double)gs_to_f(t->gate[i].y));
             ImGui_SameLine();
             if (ImGui_Button(label)) {
-                gs_track_remove_gate(t, i);
+                gs_edit_remove_gate(e->log, t, i);
                 break;
             }
         }

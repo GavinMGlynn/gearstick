@@ -1343,6 +1343,35 @@ infinite plain let the car wander until it blundered back through.
 The golden replay moved, deliberately: the selftest race has a car that leaves
 the track.
 
+### The route joins the undo history
+
+Undo covered the terrain, the surfaces and the gravity, and not the gates. That
+made "undo covers what you can change" a promise with a footnote, and the
+footnote was the part that decides what a track *is*: every record, every ghost
+and every shared code is keyed on the hash, and the route is in it.
+
+`gs_edit` carries a `gs_gate` now, which costs every entry sixteen bytes it does
+not use — a log twice the size, against an undo history with no gap in it. The
+second is worth more. Adding and removing are recorded as each other's reverse,
+so undo and redo need to know nothing else, and a removal remembers its *place in
+the order* as well as its numbers: a route is a list, and a gate put back on the
+end is a different track from one put back in the middle. The test checks the
+hash rather than the count for exactly that reason.
+
+### And the committed database needed its writer pinned
+
+CI caught what local testing could not. The drift job rebuilt the shipped library
+and diffed it, and it differed — not by content, which was identical row for row,
+but because the runner had **SQLite 3.45 from the system** and this machine has a
+different version. Two versions store the same rows in a different arrangement of
+pages, which no query can see and a byte-diff cannot miss.
+
+So the writer of a committed artefact is pinned, the same way the committed trig
+table is pinned to the script that bakes it: `gearstick_make_store` is built
+against the amalgamation, and the job that checks it configures with
+`-DGEARSTICK_SQLITE_AMALGAMATION=ON`. With the writer fixed the file is
+reproducible; with it floating, "reproducible" was a property of one machine.
+
 ---
 
 ## What does not exist

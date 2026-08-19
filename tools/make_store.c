@@ -14,11 +14,19 @@
 //
 // Regenerate with:
 //
-//     gearstick_make_tracks assets/tracks
-//     gearstick_make_store assets/server/gearstick.db assets/tracks/*.gstrack
+//     cmake -B build -DGEARSTICK_SQLITE_AMALGAMATION=ON
+//     cmake --build build --target gearstick_make_tracks gearstick_make_store
+//     ./build/gearstick_make_tracks assets/tracks
+//     ./build/gearstick_make_store assets/server/gearstick.db assets/tracks/*.gstrack
 //
-// The file is written from nothing every time, so the bytes depend on the
-// tracks and not on what was in it before.
+// **The amalgamation, and not whatever SQLite the machine has.** The file is
+// written from nothing every time, so its bytes depend on the tracks and on the
+// version of SQLite that laid the pages out - and those are not the same
+// version everywhere. A system 3.45 and a pinned 3.53 store identical rows in a
+// different arrangement of bytes, which is invisible to every query and fatal to
+// a job that diffs the file against what is committed. Pinning the writer is
+// what makes the artefact reproducible, exactly as the committed trig table is
+// pinned to the script that bakes it.
 #include "core/gs_track.h"
 #include "net/gs_store.h"
 

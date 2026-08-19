@@ -3998,6 +3998,134 @@ TEST(a_wrecked_car_stops_moving) {
 
 
 // ---------------------------------------------------------------------------
+// Undo, and the route
+// ---------------------------------------------------------------------------
+
+TEST(placing_a_gate_can_be_undone_like_anything_else) {
+    // **Undo used to cover everything except the one edit that decides what a
+    // track is.** Terrain, surfaces and gravity were in the history and the
+    // route was not, so "undo covers what you can change" had a footnote - and
+    // the footnote was the part that changes a track's identity, which is what
+    // every record and every shared code is keyed on.
+    static uint8_t room[65536];
+    gs_edit_log *log = (gs_edit_log *)room;
+    gs_edit_log_init(log, 256);
+
+    static gs_track t;
+    gs_track_init(&t, 32, 16, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), 0, GS_INT(5));
+
+    uint64_t before = gs_track_hash(&t);
+    CHECK(t.gate_count == 1);
+
+    CHECK(gs_edit_add_gate(log, &t, GS_INT(20), GS_INT(8), GS_DEG(90), GS_INT(6)) == 1);
+    CHECK(t.gate_count == 2);
+    CHECK(gs_track_hash(&t) != before);
+
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(t.gate_count == 1);
+
+    // **The hash, and not just the count.** A gate put back in the wrong place
+    // or the wrong order leaves the same number of them and a different track.
+    CHECK(gs_track_hash(&t) == before);
+
+    // And forward again.
+    CHECK(gs_edit_redo(log, &t));
+    CHECK(t.gate_count == 2);
+    CHECK(gs_track_hash(&t) != before);
+}
+
+TEST(removing_a_gate_puts_it_back_where_it_was_in_the_order) {
+    // A route is ordered, so restoring a gate means restoring its place in the
+    // order as well as its numbers. Taking one out of the middle is the case
+    // that tells the two apart.
+    static uint8_t room[65536];
+    gs_edit_log *log = (gs_edit_log *)room;
+    gs_edit_log_init(log, 256);
+
+    static gs_track t;
+    gs_track_init(&t, 48, 16, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), 0, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(20), GS_INT(8), GS_DEG(90), GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(8), GS_DEG(180), GS_INT(7));
+
+    uint64_t before = gs_track_hash(&t);
+
+    CHECK(gs_edit_remove_gate(log, &t, 1));
+    CHECK(t.gate_count == 2);
+    // The one after it closed up, which is what makes this an ordered list.
+    CHECK(t.gate[1].x == GS_INT(40));
+    CHECK(gs_track_hash(&t) != before);
+
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(t.gate_count == 3);
+    CHECK(t.gate[1].x == GS_INT(20));
+    CHECK(t.gate[1].heading == GS_DEG(90));
+    CHECK(t.gate[1].half_width == GS_INT(6));
+    CHECK(t.gate[2].x == GS_INT(40));
+    CHECK(gs_track_hash(&t) == before);
+}
+
+TEST(the_route_and_the_ground_undo_in_one_history) {
+    // Two histories would undo in two orders, and a player would find that the
+    // last thing they did is not the first thing that comes back.
+    static uint8_t room[65536];
+    gs_edit_log *log = (gs_edit_log *)room;
+    gs_edit_log_init(log, 256);
+
+    static gs_track t;
+    gs_track_init(&t, 32, 16, GS_SURF_PAVEMENT);
+    uint64_t empty = gs_track_hash(&t);
+
+    gs_edit_corner(log, &t, 5, 5, GS_INT(2));
+    uint64_t after_ground = gs_track_hash(&t);
+
+    gs_edit_add_gate(log, &t, GS_INT(8), GS_INT(8), 0, GS_INT(5));
+    uint64_t after_gate = gs_track_hash(&t);
+
+    gs_edit_corner(log, &t, 9, 9, GS_INT(1));
+
+    // Backwards through the lot, in the order it was done.
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(gs_track_hash(&t) == after_gate);
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(gs_track_hash(&t) == after_ground);
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(gs_track_hash(&t) == empty);
+    CHECK(!gs_edit_can_undo(log));
+
+    // And forwards through it again.
+    CHECK(gs_edit_redo(log, &t));
+    CHECK(gs_track_hash(&t) == after_ground);
+    CHECK(gs_edit_redo(log, &t));
+    CHECK(gs_track_hash(&t) == after_gate);
+}
+
+TEST(a_gate_placed_inside_a_stroke_undoes_with_the_stroke) {
+    // Placing a gate and shaping the ground under it in one action comes back
+    // as one action.
+    static uint8_t room[65536];
+    gs_edit_log *log = (gs_edit_log *)room;
+    gs_edit_log_init(log, 256);
+
+    static gs_track t;
+    gs_track_init(&t, 32, 16, GS_SURF_PAVEMENT);
+    uint64_t before = gs_track_hash(&t);
+
+    gs_edit_begin(log);
+    gs_edit_corner(log, &t, 6, 6, GS_INT(1));
+    gs_edit_add_gate(log, &t, GS_INT(6), GS_INT(6), 0, GS_INT(4));
+    gs_edit_corner(log, &t, 7, 6, GS_INT(1));
+    gs_edit_end(log);
+
+    CHECK(gs_track_hash(&t) != before);
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(gs_track_hash(&t) == before);
+    CHECK(t.gate_count == 0);
+    CHECK(!gs_edit_can_undo(log));
+}
+
+// ---------------------------------------------------------------------------
 // What surrounds a track
 // ---------------------------------------------------------------------------
 
@@ -4881,6 +5009,10 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_placing_a_gate_can_be_undone_like_anything_else();
+    run_removing_a_gate_puts_it_back_where_it_was_in_the_order();
+    run_the_route_and_the_ground_undo_in_one_history();
+    run_a_gate_placed_inside_a_stroke_undoes_with_the_stroke();
     run_leaving_a_track_costs_time_before_it_costs_the_race();
     run_the_run_off_is_a_thing_that_stops_you();
     run_a_car_that_keeps_going_over_the_edge_is_finished();

@@ -170,7 +170,8 @@ jobs:
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
                 -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
-                -DSDL_UNIX_CONSOLE_BUILD=ON
+                -DSDL_UNIX_CONSOLE_BUILD=ON \
+                -DGEARSTICK_SQLITE_AMALGAMATION=ON
           cmake --build build --target gearstick_make_tracks gearstick_make_store
 
       # The tracks are chosen by racing them, so this also re-runs the choosing.
@@ -179,6 +180,10 @@ jobs:
       - name: Re-choose the stock tracks
         run: ./build/gearstick_make_tracks assets/tracks
 
+      # The pinned SQLite, not the runner's. Identical rows laid out by two
+      # versions are two different files, which no query can see and this diff
+      # cannot miss - so the writer of a committed artefact is pinned, the same
+      # way the trig table is pinned to the script that bakes it.
       - name: Rebuild the shipped library
         run: ./build/gearstick_make_store assets/server/gearstick.db assets/tracks/*.gstrack
 

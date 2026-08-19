@@ -43,6 +43,9 @@ static int16_t gs_edit_read(const gs_track *t, gs_edit_kind kind, uint8_t x, uin
         return (int16_t)t->surface[GS_TILE_INDEX(x, y)];
     case GS_EDIT_GRAVITY:
         return (int16_t)t->gravity[GS_TILE_INDEX(x, y)];
+    case GS_EDIT_GATE_ADD:
+    case GS_EDIT_GATE_REMOVE:
+        break;      // the route is not a tile; see gs_edit_route
     }
     return 0;
 }
@@ -58,6 +61,9 @@ static void gs_edit_write(gs_track *t, gs_edit_kind kind, uint8_t x, uint8_t y, 
     case GS_EDIT_GRAVITY:
         t->gravity[GS_TILE_INDEX(x, y)] = (uint8_t)v;
         break;
+    case GS_EDIT_GATE_ADD:
+    case GS_EDIT_GATE_REMOVE:
+        break;      // the route is not a tile; see gs_edit_route
     }
 }
 
@@ -85,9 +91,11 @@ static bool gs_edit_apply(gs_edit_log *l, gs_track *t, gs_edit_kind kind,
     e->kind = (uint8_t)kind;
     e->x = x;
     e->y = y;
+    e->index = 0;
     e->pad = 0;
     e->before = before;
     e->after = after;
+    e->gate = (gs_gate){ 0 };
 
     gs_edit_write(t, kind, x, y, after);
     l->cursor++;
@@ -116,6 +124,96 @@ bool gs_edit_gravity(gs_edit_log *l, gs_track *t, uint8_t x, uint8_t y, gs_fix m
                          (int16_t)GS_CLAMP(units, 0, 255));
 }
 
+// --- the route ---------------------------------------------------------------
+//
+// Gates are a short ordered array rather than a grid, so putting one back is a
+// matter of restoring both what it was and where in the order it was. Doing the
+// shuffling here rather than in gs_track keeps the "insert at an index"
+// operation - which only an undo ever wants - out of the track's own interface.
+
+static void gs_gate_insert(gs_track *t, uint8_t at, const gs_gate *g) {
+    if (t->gate_count >= GS_TRACK_MAX_GATES) return;
+    if (at > t->gate_count) at = t->gate_count;
+
+    for (uint8_t i = t->gate_count; i > at; i--) t->gate[i] = t->gate[i - 1];
+    t->gate[at] = *g;
+    t->gate_count++;
+}
+
+static void gs_gate_delete(gs_track *t, uint8_t at) {
+    if (at >= t->gate_count) return;
+    for (uint8_t i = at; i + 1 < t->gate_count; i++) t->gate[i] = t->gate[i + 1];
+    t->gate_count--;
+    t->gate[t->gate_count] = (gs_gate){ 0 };
+}
+
+// One entry in the log for a route change. The two kinds are each other's
+// reverse, which is all undo and redo need to know.
+static bool gs_edit_route(gs_edit_log *l, gs_edit_kind kind, uint8_t index,
+                          const gs_gate *g) {
+    if (l->cursor >= l->cap) return false;
+    if (!l->open) l->group++;
+
+    gs_edit *e = &l->ops[l->cursor];
+    e->group = l->group;
+    e->kind = (uint8_t)kind;
+    e->x = 0;
+    e->y = 0;
+    e->index = index;
+    e->pad = 0;
+    e->before = 0;
+    e->after = 0;
+    e->gate = *g;
+
+    l->cursor++;
+    l->count = l->cursor;
+    return true;
+}
+
+int gs_edit_add_gate(gs_edit_log *l, gs_track *t, gs_fix x, gs_fix y,
+                     gs_angle heading, gs_fix half_width) {
+    if (l->cursor >= l->cap) return -1;
+
+    int at = gs_track_add_gate(t, x, y, heading, half_width);
+    if (at < 0) return -1;
+
+    if (!gs_edit_route(l, GS_EDIT_GATE_ADD, (uint8_t)at, &t->gate[at])) {
+        // The log is full, so the change cannot be taken back - and an edit
+        // that cannot be undone is worse than one that did not happen.
+        gs_gate_delete(t, (uint8_t)at);
+        return -1;
+    }
+    return at;
+}
+
+bool gs_edit_remove_gate(gs_edit_log *l, gs_track *t, uint8_t index) {
+    if (index >= t->gate_count) return false;
+    if (l->cursor >= l->cap) return false;
+
+    gs_gate was = t->gate[index];
+    if (!gs_edit_route(l, GS_EDIT_GATE_REMOVE, index, &was)) return false;
+
+    gs_gate_delete(t, index);
+    return true;
+}
+
+// Undoing one entry, whichever kind it is.
+static void gs_edit_reverse(gs_track *t, const gs_edit *e) {
+    switch ((gs_edit_kind)e->kind) {
+    case GS_EDIT_GATE_ADD:    gs_gate_delete(t, e->index); break;
+    case GS_EDIT_GATE_REMOVE: gs_gate_insert(t, e->index, &e->gate); break;
+    default: gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->before); break;
+    }
+}
+
+static void gs_edit_forward(gs_track *t, const gs_edit *e) {
+    switch ((gs_edit_kind)e->kind) {
+    case GS_EDIT_GATE_ADD:    gs_gate_insert(t, e->index, &e->gate); break;
+    case GS_EDIT_GATE_REMOVE: gs_gate_delete(t, e->index); break;
+    default: gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->after); break;
+    }
+}
+
 bool gs_edit_can_undo(const gs_edit_log *l) { return l->cursor > 0; }
 bool gs_edit_can_redo(const gs_edit_log *l) { return l->cursor < l->count; }
 
@@ -126,8 +224,7 @@ bool gs_edit_undo(gs_edit_log *l, gs_track *t) {
     // Backwards, so that two edits to the same tile in one stroke unwind in the
     // order they were made and the first one's `before` wins.
     while (l->cursor > 0 && l->ops[l->cursor - 1].group == group) {
-        const gs_edit *e = &l->ops[l->cursor - 1];
-        gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->before);
+        gs_edit_reverse(t, &l->ops[l->cursor - 1]);
         l->cursor--;
     }
     return true;
@@ -138,8 +235,7 @@ bool gs_edit_redo(gs_edit_log *l, gs_track *t) {
 
     uint32_t group = l->ops[l->cursor].group;
     while (l->cursor < l->count && l->ops[l->cursor].group == group) {
-        const gs_edit *e = &l->ops[l->cursor];
-        gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->after);
+        gs_edit_forward(t, &l->ops[l->cursor]);
         l->cursor++;
     }
     return true;

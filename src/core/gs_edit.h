@@ -21,15 +21,30 @@
 typedef enum gs_edit_kind {
     GS_EDIT_CORNER = 0,
     GS_EDIT_SURFACE,
-    GS_EDIT_GRAVITY
+    GS_EDIT_GRAVITY,
+
+    // **The route, which used to be outside all of this.** Undo covered the
+    // terrain, the surfaces and the gravity, and not the gates - so "undo covers
+    // everything you can change" was a promise with a footnote, and the one edit
+    // that changes what a track *is* for scoring purposes was the one you could
+    // not take back.
+    GS_EDIT_GATE_ADD,
+    GS_EDIT_GATE_REMOVE
 } gs_edit_kind;
 
 typedef struct gs_edit {
     uint32_t group;          // which transaction this belongs to
     uint8_t  kind;           // gs_edit_kind
-    uint8_t  x, y;
-    uint8_t  pad;
+    uint8_t  x, y;           // the tile, for the three tile kinds
+    uint8_t  index;          // the gate, for the two gate kinds
     int16_t  before, after;  // the stored representation, not the Q16.16 one
+    uint16_t pad;
+
+    // What the gate was, so a removal can be put back exactly where it was and
+    // in the order it was in. Only meaningful for the gate kinds, and it costs
+    // every entry sixteen bytes - which is a log that is twice the size and an
+    // undo history with no gap in it, and the second is worth more.
+    gs_gate  gate;
 } gs_edit;
 
 // A flexible array member, so the caller decides how deep the history goes and
@@ -72,6 +87,13 @@ void gs_edit_end(gs_edit_log *l);
 bool gs_edit_corner(gs_edit_log *l, gs_track *t, uint8_t x, uint8_t y, gs_fix height);
 bool gs_edit_surface(gs_edit_log *l, gs_track *t, uint8_t x, uint8_t y, gs_surface s);
 bool gs_edit_gravity(gs_edit_log *l, gs_track *t, uint8_t x, uint8_t y, gs_fix multiplier);
+
+// Add a gate to the end of the route, or take one out of the middle, with the
+// change recorded so it can be undone. Adding returns the new gate's index, or
+// -1 if the route is full; removing returns whether there was one there.
+int  gs_edit_add_gate(gs_edit_log *l, gs_track *t, gs_fix x, gs_fix y,
+                      gs_angle heading, gs_fix half_width);
+bool gs_edit_remove_gate(gs_edit_log *l, gs_track *t, uint8_t index);
 
 bool gs_edit_can_undo(const gs_edit_log *l);
 bool gs_edit_can_redo(const gs_edit_log *l);
