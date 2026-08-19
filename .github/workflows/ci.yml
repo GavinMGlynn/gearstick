@@ -48,7 +48,7 @@ jobs:
                        -o Acquire::http::Timeout=30 \
                        -o Acquire::https::Timeout=30 update
           sudo apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends \
-            gcc-14 ninja-build \
+            gcc-14 g++-14 ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
             libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols libdecor-0-dev \
@@ -57,7 +57,7 @@ jobs:
             libdbus-1-dev libudev-dev libusb-1.0-0-dev
 
       - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_C_COMPILER=gcc-14
+        run: cmake -B build -G Ninja -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
                    -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGEARSTICK_WERROR=ON
       - name: Build
         run: cmake --build build -j
@@ -101,7 +101,7 @@ jobs:
       - name: Install dependencies
         run: |
           dnf -y install epel-release
-          dnf -y --enablerepo=crb install git gcc cmake ninja-build \
+          dnf -y --enablerepo=crb install git gcc gcc-c++ cmake ninja-build \
             libX11-devel libXext-devel libXrandr-devel libXi-devel \
             libXcursor-devel libXfixes-devel libXScrnSaver-devel libXtst-devel \
             libxkbcommon-devel \

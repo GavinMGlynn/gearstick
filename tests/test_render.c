@@ -342,7 +342,12 @@ TEST(picking_a_pixel_finds_the_ground_that_was_drawn_there) {
             bool on = gs_iso_pick(&cam, &t, sx, sy, &px, &py);
             CHECK(on);
 
-            double err = SDL_fabs(px - wx) + SDL_fabs(py - wy);
+            // Widened explicitly. SDL_fabs takes a double, so passing floats
+            // promotes them silently - which GCC lets past and Clang does not,
+            // and -Werror means that difference is a broken build on one
+            // platform only.
+            double err = SDL_fabs((double)px - (double)wx) +
+                         SDL_fabs((double)py - (double)wy);
             if (err > worst) worst = err;
         }
     }
