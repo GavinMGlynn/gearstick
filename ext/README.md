@@ -11,6 +11,13 @@ this repository — a clone gets URLs and commit SHAs, not sources.
 | `sdl` | libsdl-org/SDL | `release-3.4.14` | **Linked by the shell only.** Window, renderer, input, audio, filesystem, timing | Zlib |
 | `imgui` | ocornut/imgui | `v1.92.9b` | **The editor's UI.** Not built yet — see below | MIT |
 | `dear_bindings` | dearimgui/dear_bindings | `v0.21` | **Build-time only.** Generates the C API for the above; never linked | MIT |
+| `sdl_net` | libsdl-org/SDL_net | `release-3.2.0` | **Linked by the shell only.** The datagram socket the rollback netcode sends over | Zlib |
+
+`sdl_net` is a separate submodule rather than part of `sdl` because networking
+is a separate library from SDL, and it is a submodule rather than a system
+package because no distribution ships the SDL3 version yet. It is used for
+datagrams and nothing else: the rollback netcode wants a socket that is allowed
+to drop and reorder, and every comfort above that is a round trip.
 
 Nothing links `imgui` yet. The first Phase 4 items — the track file format,
 identity by content, and the undo model — are pure C and needed whichever way

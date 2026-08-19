@@ -45,7 +45,7 @@ Needs CMake 3.28+, Ninja, and a C23 compiler: GCC 14+, Clang 19+, AppleClang 16+
 or MSVC 19.39+. Targets Linux x86_64, Windows x64 and macOS arm64, all 64-bit.
 
 ```sh
-git submodule update --init --depth 1 ext/sdl
+git submodule update --init --depth 1 ext/sdl ext/imgui ext/sdl_net
 cmake --preset linux-release
 cmake --build --preset linux-release
 ctest --preset linux-release
@@ -90,7 +90,7 @@ src/platform/   asset paths, keyboard and gamepad
 src/frontend/   one main.c per executable: game/ and cli/
 cmake/          platform gate, warning set, layer and float checks
 tools/          the trig table baker
-ext/            one pinned submodule - see ext/README.md
+ext/            pinned submodules - see ext/README.md
 docs/           FEATURES.md, COMPLETION_PLAN.md, PROJECT_STATUS.md, ASSETS.md
 ```
 

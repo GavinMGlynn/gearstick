@@ -20,6 +20,7 @@
 #include "core/gs_clock.h"
 #include "core/gs_edit.h"
 #include "core/gs_ghost.h"
+#include "core/gs_net.h"
 #include "core/gs_pack.h"
 #include "core/gs_share.h"
 #include "core/gs_replay.h"
@@ -2454,6 +2455,307 @@ TEST(a_code_is_the_same_code_on_every_machine) {
     CHECK(gs_track_hash(&back) == gs_track_hash(&t));
 }
 
+// ---------------------------------------------------------------------------
+// Rollback netcode
+// ---------------------------------------------------------------------------
+
+// A link with latency, jitter and loss, and no allocation - a fixed ring of
+// datagrams, each with the tick it becomes deliverable on. Deterministic, so a
+// failure is a failure somebody else can reproduce rather than a bad afternoon.
+#define GS_LINK_MAX 512
+#define GS_LINK_MTU 96
+
+typedef struct gs_link {
+    struct {
+        uint8_t  bytes[GS_LINK_MTU];
+        size_t   len;
+        uint32_t due;
+        bool     live;
+    } slot[GS_LINK_MAX];
+
+    uint32_t seed;
+    uint32_t latency;     // ticks
+    uint32_t jitter;      // ticks, added at random
+    uint32_t loss_pct;
+    uint32_t sent, dropped, delivered;
+} gs_link;
+
+static uint32_t gs_link_rand(gs_link *l) {
+    l->seed = l->seed * 1103515245u + 12345u;
+    return (l->seed >> 16) & 0x7fffu;
+}
+
+static void gs_link_send(gs_link *l, uint32_t now, const uint8_t *b, size_t n) {
+    l->sent++;
+    if (n > GS_LINK_MTU) return;
+    if (l->loss_pct > 0 && gs_link_rand(l) % 100u < l->loss_pct) {
+        l->dropped++;
+        return;
+    }
+    for (int i = 0; i < GS_LINK_MAX; i++) {
+        if (l->slot[i].live) continue;
+        memcpy(l->slot[i].bytes, b, n);
+        l->slot[i].len  = n;
+        l->slot[i].due  = now + l->latency +
+                          (l->jitter ? gs_link_rand(l) % (l->jitter + 1u) : 0u);
+        l->slot[i].live = true;
+        return;
+    }
+    l->dropped++;   // the link is full, which is also a kind of loss
+}
+
+// Everything that has come due, in slot order - which is not arrival order, so
+// this delivers out of order as well as late. Both are things a real link does
+// and both are things rollback has to survive.
+static void gs_link_deliver(gs_link *l, uint32_t now, gs_net *to, const gs_track *t) {
+    for (int i = 0; i < GS_LINK_MAX; i++) {
+        if (!l->slot[i].live || l->slot[i].due > now) continue;
+        gs_net_receive(to, t, l->slot[i].bytes, l->slot[i].len);
+        l->slot[i].live = false;
+        l->delivered++;
+    }
+}
+
+static void gs_net_scene(gs_track *t, gs_world *w) {
+    gs_track_init(t, 48, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++)
+        for (uint8_t x = 0; x <= t->w; x++)
+            gs_track_set_corner(t, x, y, x > 20 && x < 26 ? GS_INT(1) : 0);
+
+    gs_world_init(w, GS_ONE);
+    gs_world_add_car(w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(9), 0);
+    gs_world_add_car(w, t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(4), GS_INT(11), 0);
+}
+
+// What each player does. Deliberately not constant: a player who never changes
+// their input is a player whose every prediction is right, which would test
+// nothing.
+static gs_input gs_net_drive(uint8_t player, uint32_t tick) {
+    gs_input in = GS_IN_ACCEL;
+    if (player == 0) {
+        if ((tick / 37u) % 3u == 0u) in |= GS_IN_LEFT;
+        else if ((tick / 37u) % 3u == 1u) in |= GS_IN_RIGHT;
+        if ((tick / 91u) % 4u == 0u) in |= GS_IN_BRAKE;
+    } else {
+        if ((tick / 23u) % 2u == 0u) in |= GS_IN_RIGHT;
+        if ((tick / 53u) % 5u == 0u) in = GS_IN_BRAKE;
+    }
+    return in;
+}
+
+// Run both machines for `ticks`, over a link with the given conditions, and
+// hand back what each ended up believing. Static because two worlds and two
+// sessions are the better part of a hundred kilobytes.
+static void gs_net_race(uint32_t ticks, uint32_t latency, uint32_t jitter,
+                        uint32_t loss_pct, gs_net *a, gs_net *b, gs_link *ab,
+                        gs_link *ba, gs_track *t) {
+    gs_world w;
+    gs_net_scene(t, &w);
+
+    gs_net_begin(a, &w, 2, 0);
+    gs_net_begin(b, &w, 2, 1);
+
+    *ab = (gs_link){ 0 };
+    *ba = (gs_link){ 0 };
+    ab->seed = 0x1234u; ba->seed = 0x9876u;
+    ab->latency = ba->latency = latency;
+    ab->jitter  = ba->jitter  = jitter;
+    ab->loss_pct = ba->loss_pct = loss_pct;
+
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        gs_link_deliver(ab, tick, b, t);
+        gs_link_deliver(ba, tick, a, t);
+
+        gs_net_local_input(a, gs_net_drive(0, tick));
+        gs_net_local_input(b, gs_net_drive(1, tick));
+
+        uint8_t buf[GS_LINK_MTU];
+        size_t n = gs_net_packet(a, buf, sizeof buf);
+        gs_link_send(ab, tick, buf, n);
+        n = gs_net_packet(b, buf, sizeof buf);
+        gs_link_send(ba, tick, buf, n);
+
+        gs_net_step(a, t);
+        gs_net_step(b, t);
+    }
+
+    // Let the tail of the link drain, so both machines have every input and can
+    // confirm the whole race. Without this the last few ticks are still guesses
+    // on both sides and comparing them would be comparing predictions.
+    for (uint32_t tick = ticks; tick < ticks + latency + jitter + 8u; tick++) {
+        gs_link_deliver(ab, tick, b, t);
+        gs_link_deliver(ba, tick, a, t);
+    }
+}
+
+TEST(two_machines_race_to_the_same_finish_over_a_bad_connection) {
+    static gs_net a, b;
+    static gs_link ab, ba;
+    static gs_track t;
+
+    // 24 ticks of latency is 200 ms each way at 120 Hz - a bad connection by any
+    // standard - with 40 ms of jitter on top and one packet in eight thrown
+    // away. Nothing here asks for a retransmission; the redundancy in each
+    // datagram is what absorbs the loss.
+    const uint32_t ticks = GS_TICK_HZ * 12;
+    gs_net_race(ticks, 24, 5, 12, &a, &b, &ab, &ba, &t);
+
+    // The whole race is confirmed on both machines...
+    CHECK(a.confirmed_tick == ticks);
+    CHECK(b.confirmed_tick == ticks);
+
+    // ...and it is the same race. This is the claim: two machines, a bad link,
+    // no shared authority, and the same world at the end.
+    CHECK(gs_world_hash(&a.confirmed) == gs_world_hash(&b.confirmed));
+    CHECK(!a.desynced);
+    CHECK(!b.desynced);
+
+    // And it is the race that would have happened on one machine with no
+    // network at all, which is the stronger claim and the one that says the
+    // rollback is correct rather than merely consistent.
+    gs_world solo;
+    gs_net_scene(&t, &solo);
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        in[0] = gs_net_drive(0, tick);
+        in[1] = gs_net_drive(1, tick);
+        gs_world_step(&solo, &t, in);
+    }
+    CHECK(gs_world_hash(&solo) == gs_world_hash(&a.confirmed));
+
+    // The link really was bad and the rollback really did work for its living.
+    CHECK(ab.dropped > 0);
+    CHECK(a.rollbacks > 0);
+    CHECK(b.rollbacks > 0);
+
+    // Nobody stalled: a quarter second of redundancy covers this, so the race
+    // never had to wait for anything.
+    CHECK(a.stalls == 0);
+    CHECK(b.stalls == 0);
+
+    // And the cost is bounded. Both players change input a few times a second,
+    // and roughly that many rollbacks is what a correct predictor produces over
+    // twelve seconds. An order of magnitude more means it is rewinding on ticks
+    // it guessed right about, which is how this was first written.
+    CHECK(a.rollbacks < ticks / 8u);
+    CHECK(b.rollbacks < ticks / 8u);
+
+    // And the cars went somewhere, so this is a race rather than a grid.
+    CHECK(a.confirmed.car[0].x > GS_INT(20));
+}
+
+TEST(rollback_costs_nothing_when_the_guess_is_right) {
+    static gs_net a, b;
+    static gs_link ab, ba;
+    static gs_track t;
+
+    // A perfect link and a player who never changes their input: every
+    // prediction is right, so there is nothing to rewind. If this rolls back at
+    // all, the rollback is firing on agreement rather than on disagreement, and
+    // every real race is paying for it.
+    gs_world w;
+    gs_net_scene(&t, &w);
+    gs_net_begin(&a, &w, 2, 0);
+    gs_net_begin(&b, &w, 2, 1);
+    ab = (gs_link){ 0 };
+    ba = (gs_link){ 0 };
+    ab.latency = ba.latency = 16;
+
+    for (uint32_t tick = 0; tick < 600; tick++) {
+        gs_link_deliver(&ab, tick, &b, &t);
+        gs_link_deliver(&ba, tick, &a, &t);
+
+        gs_net_local_input(&a, GS_IN_ACCEL);
+        gs_net_local_input(&b, GS_IN_ACCEL);
+
+        uint8_t buf[GS_LINK_MTU];
+        size_t n = gs_net_packet(&a, buf, sizeof buf);
+        gs_link_send(&ab, tick, buf, n);
+        n = gs_net_packet(&b, buf, sizeof buf);
+        gs_link_send(&ba, tick, buf, n);
+
+        gs_net_step(&a, &t);
+        gs_net_step(&b, &t);
+    }
+
+    // Exactly one, and it is the unavoidable one: on the very first ticks
+    // nothing at all is known about the other player, so they are assumed idle
+    // and they were not. Every prediction after that is right, and *that* is
+    // what must cost nothing - a rollback per tick on a steady input means
+    // rollback is firing on agreement, and every real race pays for it.
+    CHECK(a.rollbacks <= 1);
+    CHECK(b.rollbacks <= 1);
+    CHECK(a.resimulated < 32);
+
+    // The confirmed state still followed along behind, a latency's distance
+    // back - which is what "no rollback" has to mean, rather than "no progress".
+    CHECK(a.confirmed_tick > 600u - 64u);
+}
+
+TEST(a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing) {
+    static gs_net a;
+    static gs_track t;
+    gs_world w;
+    gs_net_scene(&t, &w);
+    gs_net_begin(&a, &w, 2, 0);
+
+    // The other machine never says anything at all. Running on regardless would
+    // mean building a race on nothing but guesses and having no way back when
+    // the truth arrived, so the window is the limit and the race stops there.
+    for (uint32_t tick = 0; tick < GS_NET_WINDOW * 2u; tick++) {
+        gs_net_local_input(&a, GS_IN_ACCEL);
+        gs_net_step(&a, &t);
+    }
+
+    CHECK(a.local_tick == GS_NET_WINDOW - 1u);
+    CHECK(a.stalls > 0);
+    CHECK(a.confirmed_tick == 0);
+    CHECK(!a.desynced);
+}
+
+TEST(a_desync_is_noticed_rather_than_lived_with) {
+    static gs_net a, b;
+    static gs_link ab, ba;
+    static gs_track t;
+    gs_world w;
+    gs_net_scene(&t, &w);
+
+    gs_net_begin(&a, &w, 2, 0);
+
+    // The other machine starts from a world that is one nudge different. Every
+    // input will agree and every state will not, which is exactly the shape of
+    // a real desync: nothing complains, and the two people are watching
+    // different races.
+    gs_world nudged = w;
+    nudged.car[1].x += GS_RATIO(1, 64);
+    gs_net_begin(&b, &nudged, 2, 1);
+
+    ab = (gs_link){ 0 };
+    ba = (gs_link){ 0 };
+    ab.latency = ba.latency = 4;
+
+    for (uint32_t tick = 0; tick < 400; tick++) {
+        gs_link_deliver(&ab, tick, &b, &t);
+        gs_link_deliver(&ba, tick, &a, &t);
+
+        gs_net_local_input(&a, gs_net_drive(0, tick));
+        gs_net_local_input(&b, gs_net_drive(1, tick));
+
+        uint8_t buf[GS_LINK_MTU];
+        size_t n = gs_net_packet(&a, buf, sizeof buf);
+        gs_link_send(&ab, tick, buf, n);
+        n = gs_net_packet(&b, buf, sizeof buf);
+        gs_link_send(&ba, tick, buf, n);
+
+        gs_net_step(&a, &t);
+        gs_net_step(&b, &t);
+    }
+
+    CHECK(a.desynced);
+    CHECK(b.desynced);
+    CHECK(gs_world_hash(&a.confirmed) != gs_world_hash(&b.confirmed));
+}
+
 TEST(the_analyser_gives_the_same_answer_twice) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -2808,6 +3110,10 @@ int main(void) {
     run_a_track_survives_being_pasted_into_a_chat_window();
     run_a_damaged_code_never_becomes_a_different_track();
     run_a_code_is_the_same_code_on_every_machine();
+    run_two_machines_race_to_the_same_finish_over_a_bad_connection();
+    run_rollback_costs_nothing_when_the_guess_is_right();
+    run_a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing();
+    run_a_desync_is_noticed_rather_than_lived_with();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

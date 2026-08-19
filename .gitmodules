@@ -7,3 +7,6 @@
 [submodule "ext/dear_bindings"]
 	path = ext/dear_bindings
 	url = https://github.com/dearimgui/dear_bindings.git
+[submodule "ext/sdl_net"]
+	path = ext/sdl_net
+	url = https://github.com/libsdl-org/SDL_net.git

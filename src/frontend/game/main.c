@@ -19,6 +19,8 @@
 #include "gfx/gs_render.h"
 #include "platform/gs_input.h"
 #include "platform/gs_paths.h"
+#include "platform/gs_wire.h"
+#include "core/gs_net.h"
 #include "ui/gs_editor.h"
 #include "core/gs_ghost.h"
 
@@ -71,6 +73,16 @@ typedef struct gs_app {
     bool        analyse_at_start;
     const char *ghost_path;
     const char *ghost_out;   // with --shot: write the run that was captured
+
+    // Online. The rollback session knows nothing about sockets and the wire
+    // knows nothing about racing. Neither exists unless somebody asked for a
+    // network race.
+    gs_wire    *wire;
+    gs_net      net;
+    bool        online;
+    const char *join_host;
+    uint16_t    port;
+    uint32_t    waiting;     // ticks spent stalled, for telling the player
     bool        quit;
 } gs_app;
 
@@ -274,6 +286,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->diverge = true;
         } else if (SDL_strcmp(argv[i], "--editor") == 0) {
             a->start_in_editor = true;
+        } else if (SDL_strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
+            a->online = true;
+            a->port = (uint16_t)SDL_atoi(argv[++i]);
+        } else if (SDL_strcmp(argv[i], "--join") == 0 && i + 2 < argc) {
+            a->online = true;
+            a->join_host = argv[++i];
+            a->port = (uint16_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--ghost-out") == 0 && i + 1 < argc) {
             a->ghost_out = argv[++i];
         } else if (SDL_strcmp(argv[i], "--ghost") == 0 && i + 1 < argc) {
@@ -295,6 +314,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  F5 saves that run as a ghost file and F9 loads one.");
             SDL_Log("  --ghost FILE    race against a recorded run");
             SDL_Log("  --ghost-out F   with --shot: write the captured run as a ghost");
+            SDL_Log("  --host PORT     wait for one other player to join");
+            SDL_Log("  --join HOST PORT  join somebody who is waiting");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
@@ -338,6 +359,29 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
     gs_demo_track(&a->t);
     gs_start_race(a);
+
+    if (a->online) {
+        if (!gs_wire_init()) {
+            SDL_Log("net: could not start networking: %s", SDL_GetError());
+            return SDL_APP_FAILURE;
+        }
+        a->wire = a->join_host != nullptr ? gs_wire_join(a->join_host, a->port)
+                                          : gs_wire_host(a->port);
+        const char *err = gs_wire_error(a->wire);
+        if (a->wire == nullptr || err != nullptr) {
+            SDL_Log("net: %s", err != nullptr ? err : "could not open a socket");
+            return SDL_APP_FAILURE;
+        }
+
+        // The host drives car zero and whoever joins drives car one. Both
+        // machines start from the same world - the same track, the same grid -
+        // which is the one thing rollback cannot establish for itself.
+        gs_net_begin(&a->net, &a->world, 2, a->join_host != nullptr ? 1 : 0);
+
+        SDL_Log("net: %s on port %u, driving car %u",
+                a->join_host != nullptr ? "joined" : "hosting", a->port,
+                a->net.local);
+    }
 
     // A ghost named on the command line is somebody else's run, so it survives
     // the restart that would otherwise replace it with your own.
@@ -456,6 +500,34 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // The race is paused while the track is being built - a car ploughing on
     // through terrain that is changing under it helps nobody.
     if (a->editor.active) steps = 0;
+
+    if (a->online) {
+        for (uint32_t i = 0; i < steps; i++) {
+            // Everything that has arrived, before anything is simulated: a
+            // correction is worth more the earlier it lands, because it is
+            // fewer ticks to replay.
+            uint8_t buf[GS_WIRE_MTU];
+            size_t n;
+            while ((n = gs_wire_recv(a->wire, buf, sizeof buf)) > 0) {
+                gs_net_receive(&a->net, &a->t, buf, n);
+            }
+
+            gs_input in[GS_MAX_CARS];
+            gs_input_poll(&a->input, in, 1);
+            gs_net_local_input(&a->net, in[0]);
+
+            n = gs_net_packet(&a->net, buf, sizeof buf);
+            gs_wire_send(a->wire, buf, n);
+
+            a->prev = *gs_net_world(&a->net);
+            if (!gs_net_step(&a->net, &a->t)) {
+                a->waiting++;
+                break;    // the other machine has gone quiet; wait for it
+            }
+            a->world = *gs_net_world(&a->net);
+        }
+        steps = 0;
+    }
 
     for (uint32_t i = 0; i < steps; i++) {
         gs_input in[GS_MAX_CARS];
@@ -624,6 +696,10 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     gs_app *a = (gs_app *)appstate;
     if (a == nullptr) return;
 
+    if (a->wire != nullptr) {
+        gs_wire_close(a->wire);
+        gs_wire_quit();
+    }
     gs_editor_quit(&a->editor);
     if (a->ren != nullptr) {
         cImGui_ImplSDLRenderer3_Shutdown();

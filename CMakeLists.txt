@@ -57,6 +57,7 @@ add_library(gearstick_sim STATIC
     src/core/gs_ai.c
     src/core/gs_analyse.c
     src/core/gs_ghost.c
+    src/core/gs_net.c
     src/core/gs_pack.c
     src/core/gs_share.c
     src/core/gs_clock.c
@@ -120,6 +121,65 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# The wire - SDL_net
+#
+# **Datagrams only, and nothing above them.** The netcode is rollback, which
+# needs a socket that will drop and reorder and nothing else: no reliability, no
+# ordering, no connection state, because every one of those things is a round
+# trip and rollback exists so that nobody waits for a round trip. Loss is
+# absorbed by sending the last thirty-two ticks of input in every packet.
+#
+# Nothing in src/core/ can see this. The rollback session itself produces and
+# consumes byte arrays and has never heard of a socket, which is what lets a
+# whole race under 200 ms of latency and 12% loss run inside a unit test.
+# ---------------------------------------------------------------------------
+set(GS_SDL_NET "")
+if(GEARSTICK_USE_SYSTEM_SDL)
+    # Quietly, and not REQUIRED: SDL3_net is new enough that no distribution
+    # packages it yet, so "use the system SDL" cannot reasonably mean "and fail
+    # if the system has no SDL_net". The submodule is the fallback.
+    find_package(SDL3_net 3.0 QUIET CONFIG)
+    if(SDL3_net_FOUND)
+        set(GS_SDL_NET SDL3_net::SDL3_net)
+        message(STATUS "gearstick: using system SDL3_net")
+    endif()
+endif()
+
+if(NOT GS_SDL_NET)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext/sdl_net/CMakeLists.txt")
+        message(FATAL_ERROR
+            "ext/sdl_net is empty - the submodules are not checked out.\n"
+            "  git submodule update --init --depth 1 ext/sdl_net")
+    endif()
+
+    set(SDLNET_TESTS   OFF CACHE BOOL "" FORCE)
+    set(SDLNET_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(SDLNET_INSTALL OFF CACHE BOOL "" FORCE)
+
+    # SDL_net chooses static or shared from BUILD_SHARED_LIBS rather than from
+    # an option of its own, so it is set around the include and put back. A
+    # shared SDL_net would be a second file to ship beside a game that is
+    # otherwise one executable.
+    set(GS_BUILD_SHARED_WAS ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    add_subdirectory(ext/sdl_net EXCLUDE_FROM_ALL)
+    set(BUILD_SHARED_LIBS ${GS_BUILD_SHARED_WAS})
+
+    # SDL_net asks for c_std_99, which CMake renders as a *strict* -std=c99, and
+    # strict C99 hides everything POSIX - including EAI_SYSTEM and gai_strerror,
+    # which SDL_net itself calls. The extensions have to be back on for it to
+    # compile at all. This applies to SDL_net's own target and to nothing of
+    # ours: gearstick is built as strict C23 and stays that way.
+    if(TARGET SDL3_net-static)
+        set_target_properties(SDL3_net-static PROPERTIES C_EXTENSIONS ON)
+    endif()
+
+    set(GS_SDL_NET SDL3_net::SDL3_net)
+
+    message(STATUS "gearstick: SDL3_net from the ext/ submodule")
+endif()
+
+# ---------------------------------------------------------------------------
 # The editor's UI - Dear ImGui, and the generated C API over it
 #
 # **The one C++ in the project, and none of it is ours.** Palettes, property
@@ -175,10 +235,12 @@ add_library(gearstick_shell STATIC
     src/gfx/gs_render.c
     src/platform/gs_bind.c
     src/platform/gs_paths.c
-    src/platform/gs_input.c)
+    src/platform/gs_input.c
+    src/platform/gs_wire.c)
 
 target_include_directories(gearstick_shell PUBLIC src)
-target_link_libraries(gearstick_shell PUBLIC gearstick_sim gearstick_ui ${GS_SDL})
+target_link_libraries(gearstick_shell PUBLIC gearstick_sim gearstick_ui ${GS_SDL}
+    ${GS_SDL_NET})
 
 # Where the art lives when running straight out of the build tree, so the
 # ordinary edit-build-run loop needs no install step. See src/platform/gs_paths.c.
@@ -238,6 +300,18 @@ if(GEARSTICK_TESTS)
     add_executable(gearstick_render_tests tests/test_render.c)
     target_link_libraries(gearstick_render_tests PRIVATE gearstick_shell)
     gs_configure(gearstick_render_tests)
+
+    # The netcode over a real socket rather than a simulated link. Everything
+    # about *rollback* is checked against a link whose latency and loss are
+    # chosen, because a failure there reproduces; this checks the thing that
+    # cannot be simulated - that a host finds a peer it was never told about and
+    # that two ends agree once real datagrams carry the race.
+    add_executable(gearstick_wire_tests tests/test_wire.c)
+    target_link_libraries(gearstick_wire_tests PRIVATE gearstick_shell)
+    gs_configure(gearstick_wire_tests)
+
+    add_test(NAME gearstick_wire COMMAND gearstick_wire_tests)
+    set_tests_properties(gearstick_wire PROPERTIES TIMEOUT 120)
 
     add_test(NAME gearstick_render COMMAND gearstick_render_tests)
     # No display, no audio device, no pads - and the software renderer, so the

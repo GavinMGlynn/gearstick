@@ -320,6 +320,56 @@ program, it is pinned like the golden replay: a small fixed track and the exact
 string it encodes to are committed in the tests. It is byte-identical across
 gcc -O0 through -Os and clang, and clean under UBSan and ASan.
 
+### Rollback, and two bugs that both looked like something else
+
+Nothing is sent but inputs. Each machine runs the whole race and guesses what
+the other player is doing - they are usually still holding what they were
+holding a moment ago - and when the truth arrives a few ticks later, the machine
+rewinds to where the guess went wrong and replays. Nobody ever waits for a
+packet before their own car moves.
+
+All of it is downstream of two decisions made long before it: the simulation is
+deterministic, so replaying the same inputs from the same state lands in the
+same place on both machines; and the world has no pointers, so the snapshot to
+rewind to is a memcpy of 8,776 bytes. `src/core/gs_net.c` links nothing and has
+never heard of a socket - it produces and consumes byte arrays - which is what
+lets a twelve-second race under 200 ms of latency, 40 ms of jitter and twelve
+percent packet loss run inside a unit test, deterministically, with no network.
+That race ends with both machines confirming all 1,440 ticks, agreeing on the
+state hash, and agreeing with the same race run on one machine with no network
+at all. The last of those is the one that says the rollback is *correct* rather
+than merely consistent.
+
+Two bugs, and neither looked like what it was.
+
+The input history is a ring of 256 ticks, and slots were never cleared when
+reused - so tick 256 read tick 0's inputs as known truth. It does not present as
+a ring bug. It presents as a desync four seconds into an otherwise perfect race.
+Slots now carry the tick they hold.
+
+The second was worse, because everything still worked. Prediction searched back
+only as far as the confirmed tick - and the confirmed tick is precisely the one
+whose remote input has not arrived, so the search found nothing and predicted an
+idle player. On a race where both players simply held the accelerator, that
+guessed wrong on every tick and rolled back on every tick: 584 rollbacks in 600
+ticks, 8,760 ticks of wasted re-simulation, and a race that was correct
+throughout. Rollback was firing on agreement. Predicting from the whole retained
+history took the steady-input case to one rollback - the unavoidable first, when
+nothing at all is known - and the bad-connection race from 737 to 61.
+
+The socket is SDL_net, a new submodule under `ext/`, and it is used for
+datagrams and nothing else: every comfort a stream offers is a round trip, and
+rollback exists so that nobody waits one. `--host PORT` and `--join HOST PORT`
+race two machines. A separate test runs a real race over two real loopback
+sockets, because the one thing a simulated link cannot check is whether the
+socket works - whether a host finds a peer it was never told about, and whether
+the two ends still agree once real datagrams carry the race.
+
+Desync is detected rather than lived with: every packet carries the sender's
+confirmed tick and the hash of its state there, and the receiver checks it
+against its own. A desync that is noticed is a bug report. One that is not is
+two people describing different races to each other.
+
 ---
 
 ## What does not exist

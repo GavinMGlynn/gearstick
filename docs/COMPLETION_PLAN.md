@@ -419,7 +419,7 @@ whatever the UI turns out to be — then the interface on top.
       *Verification: a ghost replays identically on another machine.*
 - [x] **Track sharing as a code or URL.** *Verification: a track round-trips
       through the code and hashes equal.*
-- [ ] **Rollback netcode for two players online.** *Verification: a race under
+- [x] **Rollback netcode for two players online.** *Verification: a race under
       simulated latency and packet loss ends in the same state on both
       machines.*
 
