@@ -34,7 +34,9 @@ Gearstick continues that argument with the things 1985 could not afford:
   design choice.
 
 What it deliberately does *not* add — slip curves, progression, a chase camera —
-and why, is in [`docs/FEATURES.md`](docs/FEATURES.md).
+and why, is in [`docs/FEATURES.md`](docs/FEATURES.md). Where the art, sound and
+tracks come from, and how each is pinned, is in
+[`docs/ASSETS.md`](docs/ASSETS.md).
 
 ## Building
 
@@ -88,7 +90,7 @@ src/frontend/   one main.c per executable: game/ and cli/
 cmake/          platform gate, warning set, layer and float checks
 tools/          the trig table baker
 ext/            one pinned submodule - see ext/README.md
-docs/           FEATURES.md, COMPLETION_PLAN.md, PROJECT_STATUS.md
+docs/           FEATURES.md, COMPLETION_PLAN.md, PROJECT_STATUS.md, ASSETS.md
 ```
 
 ## Licence

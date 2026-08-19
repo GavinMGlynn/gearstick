@@ -16,6 +16,7 @@ jobs:
   linux-debian:
     name: Linux x86_64 (GCC 14, Debian family)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with: { submodules: false }
@@ -28,9 +29,22 @@ jobs:
       # naming a -D flag rather than a package. Worth knowing before deciding
       # they look skippable.
       - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-14 ninja-build \
+          # The runner image ships third-party apt sources - Microsoft, Google
+          # Chrome - that this build has no use for, and one of them wedged
+          # `apt-get update` for thirty-eight minutes. Drop them, and bound
+          # what is left: an unreachable mirror should fail in half a minute,
+          # not hang until the job times out.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+                     /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=30 \
+                       -o Acquire::https::Timeout=30 update
+          sudo apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends \
+            gcc-14 ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
             libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols libdecor-0-dev \
@@ -67,6 +81,7 @@ jobs:
   linux-rhel:
     name: Linux x86_64 (RHEL family)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container: rockylinux/rockylinux:10
     steps:
       # Three repositories, and none of it is optional:
@@ -110,6 +125,7 @@ jobs:
     # 15, which is not C23 and is correctly refused by cmake/Platform.cmake.
     # Both images are Apple Silicon, which is the architecture this targets.
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with: { submodules: false }
@@ -152,6 +168,7 @@ jobs:
   windows:
     name: Windows x64 (MSVC)
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
         with: { submodules: false }

@@ -40,7 +40,10 @@ predict what the car will do is out, however impressive it looks.
 - **Isometric, both cars on one screen.** `CORE`
   A two-car collision has to be legible at a glance. This is the whole reason
   the view is what it is, and it constrains the camera work more than anything
-  else on this list.
+  else on this list. The *view* is fixed and isometric; what it looks at is
+  real three-dimensional ground and real three-dimensional cars, which is what
+  lets a car lean into a banked turn and nose up a ramp rather than snapping
+  between a fixed set of poses.
 
 - **A construction set, not a track list.** `CORE`
   The editor is the game. Roughly half the total work, and it does not get
@@ -185,11 +188,6 @@ predict what the car will do is out, however impressive it looks.
 ---
 
 ## Open questions
-
-- **Sprites or geometry for the vehicles.** The authentic path is pre-rendered
-  rotations; the other path draws the same models live and sidesteps the
-  combinatorics of heading × pitch × roll × damage entirely. Cheap to defer, and
-  the answer probably arrives the first time the sprite count is written down.
 
 - **How far the destruction toolkit goes.** The original's hazards are the
   floor. Whether there is anything beyond dropped hazards — and whether it stays
