@@ -63,6 +63,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: frame-linux, path: smoke.bmp, if-no-files-found: ignore }
 
+
   linux-rhel:
     name: Linux x86_64 (RHEL family)
     runs-on: ubuntu-latest
@@ -139,7 +140,13 @@ jobs:
           SDL_RENDER_DRIVER: software
           SDL_AUDIODRIVER: dummy
         run: |
-          ./build/macos-release/gearstick --shot smoke.bmp --shot-at 420
+          # On macOS the game is a bundle - see the install rules in
+          # CMakeLists.txt - so the executable is inside it rather than beside
+          # the build directory. Running it directly is fine; SDL_GetBasePath
+          # then returns the bundle's resource path, which is exactly what
+          # gs_paths.c is written to probe.
+          ./build/macos-release/gearstick.app/Contents/MacOS/gearstick \
+            --shot smoke.bmp --shot-at 420 --overlay
           test -s smoke.bmp || { echo "no frame was written"; exit 1; }
 
   windows:
