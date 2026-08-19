@@ -1882,6 +1882,85 @@ TEST(the_ai_gets_round_on_surfaces_and_vehicles_it_was_not_tuned_for) {
     CHECK(gs_ai_laps(&dirt, GS_ONE, (uint8_t)GS_VEH_LUNAR_ROVER, 150).laps >= 1);
 }
 
+// How far from the corner the AI decides it must slow down.
+//
+// The car is held at a constant speed rather than left to drive, so what is
+// measured is the *decision* and not the approach. Otherwise stronger gravity
+// changes how fast it arrives as well as how late it brakes, and the two are
+// impossible to tell apart.
+static double gs_braking_distance(gs_fix gravity, uint8_t vehicle, gs_surface surface) {
+    static gs_track t;
+    gs_track_init(&t, 60, 60, surface);
+
+    // A gate square across the road, so reaching it means a right angle.
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(30), GS_QUARTER, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(50), GS_QUARTER, GS_INT(5));
+
+    gs_world w;
+    gs_world_init(&w, gravity);
+    gs_world_add_car(&w, &t, vehicle, GS_INT(6), GS_INT(30), 0);
+
+    for (int i = 0; i < GS_TICK_HZ * 20; i++) {
+        // Held at a steady five tiles a second, pointing down the straight.
+        w.car[0].vx = GS_INT(5);
+        w.car[0].vy = 0;
+        w.car[0].heading = 0;
+
+        gs_input want = gs_ai_drive(&w, &t, 0);
+        if ((want & GS_IN_BRAKE) != 0) {
+            gs_fix dx = t.gate[0].x - w.car[0].x;
+            gs_fix dy = t.gate[0].y - w.car[0].y;
+            return (double)gs_fix_len2(dx, dy) / (double)GS_ONE;
+        }
+
+        gs_input in[GS_MAX_CARS] = { want, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    return -1.0;   // never braked at all
+}
+
+TEST(the_same_corner_is_braked_for_differently_under_different_gravity) {
+    double light = gs_braking_distance(GS_RATIO(4, 10), (uint8_t)GS_VEH_STOCK_CAR,
+                                       GS_SURF_PAVEMENT);
+    double heavy = gs_braking_distance(GS_RATIO(18, 10), (uint8_t)GS_VEH_STOCK_CAR,
+                                       GS_SURF_PAVEMENT);
+
+    CHECK(light > 0.0);
+    CHECK(heavy > 0.0);
+
+    // Grip is a multiple of gravity, so heavier gravity means more of it and a
+    // corner that can be left later. A baked speed profile would give the same
+    // answer for both, which is the failure this is looking for: it would look
+    // right and be wrong the moment somebody moved the dial.
+    CHECK(light > heavy * 1.5);
+}
+
+TEST(the_same_corner_is_braked_for_differently_in_a_different_car) {
+    double slippery = gs_braking_distance(GS_ONE, (uint8_t)GS_VEH_SPRINT_CAR,
+                                          GS_SURF_PAVEMENT);
+    double grippy = gs_braking_distance(GS_ONE, (uint8_t)GS_VEH_LUNAR_ROVER,
+                                        GS_SURF_PAVEMENT);
+
+    CHECK(slippery > 0.0 && grippy > 0.0);
+
+    // The sprint car has the least grip in the roster and the rover the most,
+    // so this should be a wide gap and not a photo finish.
+    //
+    // Written as a bare `slippery > grippy` first, and it passed with the
+    // vehicle's tyres taken out of the AI entirely: the two came to 3.961 and
+    // 3.946, and the four-thousandths between them was the cars' *drag*
+    // pushing them along the straight at fractionally different rates. A
+    // comparison that can be satisfied by noise is not a comparison.
+    CHECK(slippery > grippy * 1.5);
+
+    // And the surface counts as well as the machine - ice by a mile.
+    double on_ice = gs_braking_distance(GS_ONE, (uint8_t)GS_VEH_STOCK_CAR,
+                                        GS_SURF_ICE);
+    double on_road = gs_braking_distance(GS_ONE, (uint8_t)GS_VEH_STOCK_CAR,
+                                         GS_SURF_PAVEMENT);
+    CHECK(on_ice > on_road * 3.0);
+}
+
 TEST(an_ai_race_is_deterministic_like_every_other_race) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -2224,6 +2303,8 @@ int main(void) {
     run_the_ai_steers_both_ways();
     run_the_ai_gets_round_a_circuit_it_has_never_seen();
     run_the_ai_gets_round_on_surfaces_and_vehicles_it_was_not_tuned_for();
+    run_the_same_corner_is_braked_for_differently_under_different_gravity();
+    run_the_same_corner_is_braked_for_differently_in_a_different_car();
     run_an_ai_race_is_deterministic_like_every_other_race();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();

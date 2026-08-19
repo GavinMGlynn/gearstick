@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 49 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 50 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -381,9 +381,14 @@ whatever the UI turns out to be — then the interface on top.
       *The plan said "the analyser drives every shipped track", which needs
       Phase 9 and tracks nobody has authored yet. This is the same question
       asked with what exists.*
-- [ ] **AI that re-plans for the current gravity and vehicle** rather than
-      following a baked speed profile. *Verification: the same track at 0.4g and
-      1.8g produces different braking points.*
+- [x] **AI that re-plans for the current gravity and vehicle** rather than
+      following a baked speed profile. *Verification: the same corner, the same
+      car, held at the same speed so what is measured is the decision and not
+      the approach. At 0.4g it brakes more than half again as early as at 1.8g,
+      because grip is a multiple of gravity. The sprint car brakes far earlier
+      than the lunar rover, and ice more than three times earlier than pavement.
+      Taking gravity, tyres or surface out of the estimate turns one of those
+      red.*
 - [ ] **AI that is beatable and worth racing.** *Verification: stated lap times
       against a human baseline on the shipped tracks.*
 
