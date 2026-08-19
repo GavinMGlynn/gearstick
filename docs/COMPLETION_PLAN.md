@@ -637,13 +637,19 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       each other, not that either matches the game. That needs somebody to point
       it at a downloaded track, which is a thing a person does and not a thing
       CI can.*
-- [ ] **Read the original's designer notes and build stock tracks.** The 1985
-      manual says what each of its fifty tracks was *for*. That is design
-      rationale from the authors, it needs no reverse engineering, and it should
-      inform our own stock tracks before they are built. **Needs the manual**,
-      which nobody here has yet. *Verification: at least six stock tracks ship,
-      each with a stated purpose, and each one completable — checked by the
-      analyser.*
+- [x] **Read the original's designer notes and build stock tracks.** The 1985
+      manual's section 7.0 lists all fifty of the original's tracks and says what
+      each was for. **The categories are the useful part, not the list**: shapes
+      named for their shape, challenges named for what happens on them — `jumps`
+      ("big ones"), `headon`, which "aims drivers directly at each other",
+      `whichway` with "seven different routes" — test courses after real ones,
+      and thirty-odd plain circuits whose point is that nothing is in the way.
+      The lesson is that every track had a reason somebody could say in one line.
+      *Verification: ten designed tracks ship, each with its reason printed in
+      `docs/GUIDE.md` where a player will see it, and **each one raced by the
+      analyser before it is written** — a designed track is written out by hand,
+      so nothing else checked it, which made hand-built the less verified half of
+      the set.*
 - [ ] **Sound listened to on Windows and macOS.** The synthesiser is
       platform-independent and the device path is not. **This one cannot be
       finished by whoever writes the code** — it needs a person with speakers on

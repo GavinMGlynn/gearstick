@@ -1436,6 +1436,40 @@ it at a downloaded track, because the corpus is somebody else's and does not shi
 `docs/ASSETS.md` rule 1 makes no exception for tracks, and a corpus is no
 different from a sprite sheet.
 
+### The stock tracks, and what the 1985 manual was actually worth
+
+Its section 7.0 lists all fifty of the original's tracks with a line on each.
+The list is theirs; **the categories are the part worth having**:
+
+- shapes named for their shape — a figure of eight, a clover, a spiral;
+- challenges named for what happens on them — `jumps` ("big ones"), `headon`,
+  which "aims drivers directly at each other", `whichway`, offering "seven
+  different routes";
+- test courses after real ones — Fiorano, Weissach, an oval;
+- and thirty-odd real circuits, all pavement, no jumps, Earth gravity, five laps,
+  which is itself a statement about what a plain track is for.
+
+The lesson is not which tracks to build. It is that **every one of them had a
+reason somebody could say in a line**, and a set that cannot do that is a set of
+variations. Six new designed tracks answer to those categories — the crossing,
+head on, which way, the oval, the big one, the long way round — joining the four
+that were already there, and `docs/GUIDE.md` prints each one's reason where a
+player will see it.
+
+And `gearstick_make_tracks` now races every designed track through the analyser
+before writing it. The generated twelve had always been chosen by driving them;
+the hand-built ones were only route-checked, which quietly made the designed half
+the *less* verified one. It costs a few seconds at build time. It also caught the
+first draft of the oval immediately, though not for that reason: a gate's line
+runs across its heading, so a wide gate near an edge hangs off the track, and the
+validator said so.
+
+One thing the perturbation turned up that is worth writing down: a wall built
+clean across a corridor no longer makes a track uncompletable, because a car can
+leave the track and come back round it through the run-off. That is the surround
+working as designed — going round is slow, not impossible — but it means "put a
+wall across it" is no longer a way to construct an impassable track.
+
 ---
 
 ## What does not exist

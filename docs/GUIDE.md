@@ -113,6 +113,31 @@ staircase of drops that wrecks everything else.
 
 ---
 
+## The tracks that came with it
+
+Ten of them were designed, and each one is for something. The other twelve came
+out of the generator and were kept because every vehicle could get round them —
+they are there for variety, and they are named after what they look like.
+
+| | |
+| --- | --- |
+| **first light** | A ramp, a landing, and room either side. Drive this one first. |
+| **the oval** | The shortest thing that is still a race. Nothing to learn but the car. |
+| **head on** | A corridor, out and back. Everybody meets everybody, going the other way. |
+| **the crossing** | A figure of eight. The route crosses itself, so the field meets in the middle. |
+| **which way** | Three ways between the gates: over the ramp, across the dirt, or the long clean way. Nobody can tell you which is quickest. |
+| **the big one** | One ramp, one landing, nothing else to think about. Then change the gravity. |
+| **the long way round** | No jumps, no tricks, five corners. When nothing is in the way, the driving is all of it. |
+| **the long drop** | A shelf that ends. What the landing does decides the run. |
+| **ice house** | Grip is the whole problem, and the machines sort themselves out by it. |
+| **jupiter run** | A painted low-gravity pocket over the jump — the thing this game has that the original could not. |
+
+The categories are borrowed rather than the tracks: the 1985 manual lists all
+fifty of the original's and says what each was for, and the useful part is that
+**every one of them had a reason somebody could say in a line**. Shapes named for
+their shape, challenges named for what happens on them, and a set of plain
+circuits whose point is that nothing is in the way.
+
 ## The construction set
 
 Press **Tab**. The car stops where it is; nothing is loaded and nothing is
