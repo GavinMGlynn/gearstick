@@ -29,6 +29,17 @@ typedef struct gs_view {
 void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                     const gs_world *now, float alpha, const gs_view *view);
 
+// Where each view goes, for one to four of them, in a window `w` by `h`.
+//
+// One fills the window. Two split it left and right, because a racing track is
+// wider than it is tall and two tall thin views waste the shape of it. Three and
+// four both take a two-by-two grid: three players leave a cell empty rather than
+// get a different layout each time somebody joins, which is worth more than the
+// tidiness of using every pixel.
+//
+// Returns how many rectangles it wrote.
+uint8_t gs_render_layout(uint8_t views, int w, int h, SDL_Rect *out);
+
 // Draw a single car ghosted - translucent, and without the nose flash, so it
 // reads as a prediction rather than as a competitor.
 void gs_render_ghost(SDL_Renderer *ren, const gs_track *t, const gs_car *c,

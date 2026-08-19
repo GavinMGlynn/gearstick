@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 40 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 41 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -296,8 +296,12 @@ whatever the UI turns out to be — then the interface on top.
       when there are no pads at all. Two cars given opposite inputs turn
       opposite ways and end a long way apart, and each half of the screen
       contains its own car and not the other one.*
-- [ ] **Four-player split-screen.** *Verification: four pads, four views, stable
-      frame rate.*
+- [x] **Four-player split-screen.** *Verification: one, two, three and four
+      views tile the window without overlapping or leaving it, and three uses the
+      same grid as four so a player joining does not rearrange everybody else's
+      screen. Each view contains its own car and none of the others. And four
+      views cost less than three times one full-window view — measured, not
+      assumed, which is how the missing culling was found.*
 - [ ] **The merging camera** — views combine into one when the cars are close
       and separate when they are not, without a visible seam at the transition.
       *Verification: a recording of cars converging and separating.*

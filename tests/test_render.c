@@ -1192,6 +1192,130 @@ TEST(each_half_of_a_split_screen_shows_its_own_car) {
     gs_frame_free(&half[1]);
 }
 
+// Is this pixel roughly the colour car `index` is drawn in? The bodies are
+// shaded, so this compares which channel dominates rather than exact values.
+static bool gs_looks_like_car(const uint8_t *p, uint8_t index) {
+    switch (index & 3) {
+    case 0: return p[0] > 100 && p[0] > 2 * p[1] && p[0] > 2 * p[2];      // red
+    case 1: return p[2] > 150 && p[2] > 2 * p[0];                          // blue
+    case 2: return p[0] > 140 && p[1] > 110 && p[2] < p[0] / 2;            // yellow
+    default: return p[1] > 110 && p[1] > p[0] + 40 && p[1] > p[2] + 40;    // green
+    }
+}
+
+static int gs_count_car(const gs_frame *f, uint8_t index) {
+    int n = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        if (gs_looks_like_car(&f->px[i * 4], index)) n++;
+    }
+    return n;
+}
+
+TEST(four_players_get_four_views_that_tile_the_window_without_overlapping) {
+    (void)ren;
+
+    SDL_Rect r[GS_MAX_CARS];
+
+    CHECK(gs_render_layout(1, 1280, 720, r) == 1);
+    CHECK(r[0].w == 1280 && r[0].h == 720);
+
+    CHECK(gs_render_layout(2, 1280, 720, r) == 2);
+    CHECK(r[0].h == 720 && r[1].h == 720);
+    CHECK(r[0].x + r[0].w < r[1].x);            // a gap, not an overlap
+
+    // Three and four take the same grid: a player joining should not rearrange
+    // everybody else's screen.
+    SDL_Rect three[GS_MAX_CARS], four[GS_MAX_CARS];
+    CHECK(gs_render_layout(3, 1280, 720, three) == 3);
+    CHECK(gs_render_layout(4, 1280, 720, four) == 4);
+    for (int i = 0; i < 3; i++) {
+        CHECK(three[i].x == four[i].x && three[i].y == four[i].y);
+        CHECK(three[i].w == four[i].w && three[i].h == four[i].h);
+    }
+
+    // Four quarters, none overlapping, all inside the window.
+    for (int i = 0; i < 4; i++) {
+        CHECK(four[i].w > 0 && four[i].h > 0);
+        CHECK(four[i].x >= 0 && four[i].y >= 0);
+        CHECK(four[i].x + four[i].w <= 1280);
+        CHECK(four[i].y + four[i].h <= 720);
+        for (int j = i + 1; j < 4; j++) {
+            bool apart = four[i].x + four[i].w <= four[j].x ||
+                         four[j].x + four[j].w <= four[i].x ||
+                         four[i].y + four[i].h <= four[j].y ||
+                         four[j].y + four[j].h <= four[i].y;
+            CHECK(apart);
+        }
+    }
+}
+
+TEST(each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one) {
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    // Far apart, so nobody is in anybody else's view by accident.
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(8), GS_INT(8), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(40), GS_INT(8), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(8), GS_INT(40), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(40), GS_INT(40), 0);
+    CHECK(w.car_count == 4);
+
+    for (uint8_t i = 0; i < 4; i++) {
+        gs_view v = { 0 };
+        v.car = i;
+        v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+        v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+        gs_render_track_camera(&v, &w, &w, 1.0f);
+
+        gs_frame f = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+        CHECK(f.px != nullptr);
+
+        // Its own car is there, and it is the only one.
+        CHECK(gs_count_car(&f, i) > 50);
+        for (uint8_t other = 0; other < 4; other++) {
+            if (other != i) CHECK(gs_count_car(&f, other) == 0);
+        }
+        gs_frame_free(&f);
+    }
+
+    // Four quarter-sized views are a window's worth of pixels between them, so
+    // four-up should not cost four times one-up. Measured rather than assumed,
+    // because "it should be fine" is how frame rates go.
+    SDL_Rect quarters[GS_MAX_CARS];
+    gs_render_layout(4, GS_W, GS_H, quarters);
+
+    uint64_t one_start = SDL_GetTicksNS();
+    for (int pass = 0; pass < 20; pass++) {
+        gs_view v = { 0 };
+        v.car = 0;
+        v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+        v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+        gs_render_track_camera(&v, &w, &w, 1.0f);
+        gs_render_view(ren, &t, &w, &w, 1.0f, &v);
+    }
+    uint64_t one_ns = SDL_GetTicksNS() - one_start;
+
+    uint64_t four_start = SDL_GetTicksNS();
+    for (int pass = 0; pass < 20; pass++) {
+        for (uint8_t i = 0; i < 4; i++) {
+            gs_view v = { 0 };
+            v.car = i;
+            v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+            v.rect = quarters[i];
+            gs_render_track_camera(&v, &w, &w, 1.0f);
+            gs_render_view(ren, &t, &w, &w, 1.0f, &v);
+        }
+    }
+    uint64_t four_ns = SDL_GetTicksNS() - four_start;
+
+    // Generous, because this is a software renderer on a shared machine. What
+    // it rules out is four-up costing four times a full-window view, which is
+    // what a naive "render the whole world four times" would.
+    CHECK(four_ns < one_ns * 3);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -1234,6 +1358,8 @@ int main(void) {
     run_two_cars_take_their_input_from_different_places_and_go_different_ways(ren);
     run_the_second_pad_drives_the_second_car(ren);
     run_each_half_of_a_split_screen_shows_its_own_car(ren);
+    run_four_players_get_four_views_that_tile_the_window_without_overlapping(ren);
+    run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

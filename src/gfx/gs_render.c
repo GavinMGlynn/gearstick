@@ -72,6 +72,31 @@ static void gs_quad(SDL_Renderer *ren, const SDL_FPoint p[4], SDL_FColor c) {
     SDL_RenderGeometry(ren, nullptr, v, 4, idx, 6);
 }
 
+// Is this tile anywhere near the viewport?
+//
+// Clipping happens in the rasteriser, which saves the pixels and not the work
+// of getting there - four views each submitting the whole track is four times
+// the geometry however small each one is drawn. That is what made four-player
+// cost four times one-player rather than the one window's worth of pixels it
+// actually paints.
+//
+// The margin is generous: a tile's corners can sit well outside its centre once
+// the ground is steep, and dropping a tile that should have been drawn leaves a
+// hole in the world. Cheap and slightly wrong in the safe direction.
+static bool gs_tile_in_view(const gs_camera *cam, const gs_track *t,
+                            uint8_t tx, uint8_t ty) {
+    gs_fix cx = GS_INT(tx) + GS_HALF;
+    gs_fix cy = GS_INT(ty) + GS_HALF;
+    gs_fix cz = gs_track_height(t, cx, cy);
+
+    float sx = 0, sy = 0;
+    gs_iso_project(cam, gs_to_f(cx), gs_to_f(cy), gs_to_f(cz), &sx, &sy);
+
+    float margin = (GS_ISO_TILE_W + GS_ISO_TILE_Z * 4.0f) * cam->zoom;
+    return sx >= -margin && sy >= -margin &&
+           sx <= cam->vw + margin && sy <= cam->vh + margin;
+}
+
 static void gs_draw_tile(SDL_Renderer *ren, const gs_camera *cam,
                          const gs_track *t, uint8_t tx, uint8_t ty,
                          bool show_gravity) {
@@ -180,6 +205,36 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
     gs_quad(ren, nose, (SDL_FColor){ 1.0f, 1.0f, 1.0f, 0.85f * alpha });
 }
 
+uint8_t gs_render_layout(uint8_t views, int w, int h, SDL_Rect *out) {
+    // A gap, so two views read as two views rather than as one confusing one.
+    const int gap = 2;
+
+    if (views <= 1) {
+        out[0] = (SDL_Rect){ 0, 0, w, h };
+        return 1;
+    }
+    if (views == 2) {
+        int half = w / 2;
+        out[0] = (SDL_Rect){ 0, 0, half - gap, h };
+        out[1] = (SDL_Rect){ half + gap, 0, w - half - gap, h };
+        return 2;
+    }
+
+    int hw = w / 2, hh = h / 2;
+    const int cx[4] = { 0, 1, 0, 1 };
+    const int cy[4] = { 0, 0, 1, 1 };
+
+    uint8_t n = views > 4 ? 4 : views;
+    for (uint8_t i = 0; i < n; i++) {
+        int x = cx[i] == 0 ? 0 : hw + gap;
+        int y = cy[i] == 0 ? 0 : hh + gap;
+        int cw = cx[i] == 0 ? hw - gap : w - hw - gap;
+        int ch = cy[i] == 0 ? hh - gap : h - hh - gap;
+        out[i] = (SDL_Rect){ x, y, cw, ch };
+    }
+    return n;
+}
+
 void gs_render_ghost(SDL_Renderer *ren, const gs_track *t, const gs_car *c,
                      const gs_view *view) {
     if (!c->active) return;
@@ -246,6 +301,7 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         for (int x = 0; x <= d; x++) {
             int y = d - x;
             if (x >= (int)t->w || y >= (int)t->h) continue;
+            if (!gs_tile_in_view(&cam, t, (uint8_t)x, (uint8_t)y)) continue;
             gs_draw_tile(ren, &cam, t, (uint8_t)x, (uint8_t)y, view->show_gravity);
         }
         for (uint8_t i = 0; i < now->car_count; i++) {

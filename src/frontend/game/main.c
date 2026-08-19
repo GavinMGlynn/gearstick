@@ -52,6 +52,7 @@ typedef struct gs_app {
     bool        overlay;      // start with the painted-gravity overlay on
     bool        start_in_editor;
     float       zoom;         // 0 means the default
+    uint8_t     players;      // 0 means the default of two
     bool        quit;
 } gs_app;
 
@@ -119,7 +120,7 @@ static void gs_start_test_drive(gs_app *a) {
                      x + ox, y + oy, heading);
 
     a->prev = a->world;
-    a->views = a->world.car_count < 2 ? 1 : 2;
+    a->views = a->world.car_count;
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i].car = i;
         a->view[i].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
@@ -129,12 +130,20 @@ static void gs_start_test_drive(gs_app *a) {
 }
 
 static void gs_start_race(gs_app *a) {
+    static const uint8_t grid[GS_MAX_CARS] = {
+        (uint8_t)GS_VEH_STOCK_CAR, (uint8_t)GS_VEH_DUNE_BUGGY,
+        (uint8_t)GS_VEH_SPRINT_CAR, (uint8_t)GS_VEH_BAJA_BUG,
+    };
+    uint8_t players = a->players > 0 ? a->players : 2;
+
     gs_world_init(&a->world, GS_ONE);
-    gs_world_add_car(&a->world, &a->t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(3), GS_INT(9), 0);
-    gs_world_add_car(&a->world, &a->t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(3), GS_INT(14), 0);
+    for (uint8_t i = 0; i < players; i++) {
+        gs_world_add_car(&a->world, &a->t, grid[i],
+                         GS_INT(3), GS_INT(7) + GS_INT(4) * i, 0);
+    }
     a->prev = a->world;
 
-    a->views = a->world.car_count < 2 ? 1 : 2;
+    a->views = a->world.car_count;
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i] = (gs_view){ 0 };
         a->view[i].car = i;
@@ -151,13 +160,9 @@ static void gs_layout(gs_app *a) {
     int w = 0, h = 0;
     SDL_GetRenderOutputSize(a->ren, &w, &h);
 
-    if (a->views <= 1) {
-        a->view[0].rect = (SDL_Rect){ 0, 0, w, h };
-        return;
-    }
-    int half = w / 2;
-    a->view[0].rect = (SDL_Rect){ 0, 0, half - 1, h };
-    a->view[1].rect = (SDL_Rect){ half + 1, 0, w - half - 1, h };
+    SDL_Rect rects[GS_MAX_CARS];
+    uint8_t n = gs_render_layout(a->views, w, h, rects);
+    for (uint8_t i = 0; i < n; i++) a->view[i].rect = rects[i];
 }
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
@@ -172,6 +177,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->shot_at = (uint64_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--overlay") == 0) {
             a->overlay = true;
+        } else if (SDL_strcmp(argv[i], "--players") == 0 && i + 1 < argc) {
+            int n = SDL_atoi(argv[++i]);
+            a->players = (uint8_t)(n < 1 ? 1 : (n > GS_MAX_CARS ? GS_MAX_CARS : n));
         } else if (SDL_strcmp(argv[i], "--zoom") == 0 && i + 1 < argc) {
             a->zoom = (float)SDL_atof(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--editor") == 0) {
@@ -183,6 +191,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --overlay       start with the painted-gravity overlay on");
             SDL_Log("  --editor        open in the construction set");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
+            SDL_Log("  --players N     one to four, split-screen to match");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
