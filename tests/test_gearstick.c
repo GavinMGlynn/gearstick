@@ -3140,6 +3140,216 @@ TEST(a_promise_shown_in_the_same_breath_as_its_proof_buys_nothing) {
     CHECK(!b.cheated);
 }
 
+// --- the whole race, not just the winning lap --------------------------------
+
+// What the frontend does every frame of a networked race: write down the ticks
+// everybody has agreed on, and nothing else. The visible world is built partly
+// on guesses about the other cars, and most of those are rolled back, so a
+// recording taken from it would be a recording of things that did not happen.
+static void gs_record_agreed(gs_replay *rec, const gs_net *n, uint32_t *cursor) {
+    uint32_t upto = gs_net_confirmed_tick(n);
+    while (*cursor < upto) {
+        const gs_input *in = gs_net_confirmed_input(n, *cursor);
+        if (in == nullptr) break;
+        if (!gs_replay_record(rec, in)) break;
+        (*cursor)++;
+    }
+}
+
+static gs_replay gs_agreed[4];
+
+TEST(a_four_player_race_produces_a_log_that_re_races_to_the_ending_they_agreed_on) {
+    // **Nearly free, because the simulation is exactly reproducible.** That is
+    // the argument for having built it this way, collected: four machines, a
+    // bad link, no referee, and afterwards a single log that a server can drive
+    // through the same physics and arrive exactly where they all did.
+    static gs_net net[4];
+    static gs_link link[4][4];
+    static gs_track t;
+    static uint32_t cursor[4];
+
+    gs_world w;
+    gs_net_scene(&t, &w);
+
+    for (int i = 0; i < 4; i++) {
+        gs_net_begin(&net[i], &w, 4, (uint8_t)i, gs_test_secret((uint8_t)i));
+        gs_replay_begin(&gs_agreed[i], &w, &t);
+        cursor[i] = 0;
+    }
+    for (int a = 0; a < 4; a++) {
+        for (int b = 0; b < 4; b++) {
+            link[a][b] = (gs_link){ 0 };
+            link[a][b].seed = 0x7000u + (uint32_t)a * 41u + (uint32_t)b * 13u;
+            link[a][b].latency = 14u + (uint32_t)(a + b) * 2u;
+            link[a][b].jitter = 5;
+            link[a][b].loss_pct = 9;
+        }
+    }
+
+    const uint32_t ticks = GS_TICK_HZ * 6;
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        for (int a = 0; a < 4; a++) {
+            for (int b = 0; b < 4; b++) {
+                if (a != b) gs_link_deliver(&link[a][b], tick, &net[b], &t);
+            }
+        }
+        for (int i = 0; i < 4; i++) {
+            gs_net_local_input(&net[i], gs_net_drive((uint8_t)i, tick));
+
+            uint8_t buf[GS_LINK_MTU];
+            size_t n = gs_net_packet(&net[i], buf, sizeof buf);
+            for (int b = 0; b < 4; b++) {
+                if (b != i) gs_link_send(&link[i][b], tick, buf, n);
+            }
+            gs_net_step(&net[i], &t);
+            gs_record_agreed(&gs_agreed[i], &net[i], &cursor[i]);
+        }
+    }
+
+    for (int i = 0; i < 4; i++) gs_net_finish(&net[i]);
+    for (uint32_t tick = ticks; tick < ticks + 160u; tick++) {
+        for (int a = 0; a < 4; a++) {
+            for (int b = 0; b < 4; b++) {
+                if (a != b) gs_link_deliver(&link[a][b], tick, &net[b], &t);
+            }
+        }
+        for (int i = 0; i < 4; i++) {
+            if (tick < ticks + 80u) {
+                uint8_t buf[GS_LINK_MTU];
+                size_t n = gs_net_packet(&net[i], buf, sizeof buf);
+                for (int b = 0; b < 4; b++) {
+                    if (b != i) gs_link_send(&link[i][b], tick, buf, n);
+                }
+            }
+            gs_record_agreed(&gs_agreed[i], &net[i], &cursor[i]);
+        }
+    }
+
+    // All four wrote down the same race, to the same length, ending in the same
+    // state. Everything below rests on this.
+    uint64_t agreed = gs_net_agreed_hash(&net[0]);
+    for (int i = 0; i < 4; i++) {
+        CHECK(!net[i].desynced);
+        CHECK(!net[i].cheated);
+        CHECK(gs_net_confirmed_tick(&net[i]) == ticks);
+        CHECK(gs_agreed[i].meta.tick_count == ticks);
+        CHECK(gs_net_agreed_hash(&net[i]) == agreed);
+        gs_replay_set_agreed(&gs_agreed[i], agreed);
+    }
+
+    // A claim that asserts no time at all. **Deliberately**: it means every
+    // check that existed before this one passes whatever the log says, so the
+    // only thing that can catch a doctored log is the ending it has to produce.
+    // A claim with times in it would be caught by the lap check as well, and
+    // then the test would not be testing this rule.
+    gs_claim claim = { 0 };
+    claim.track = gs_track_hash(&t);
+    claim.conditions = gs_conditions_hash(gs_net_confirmed(&net[0]));
+    claim.laps = gs_agreed[0].meta.laps_to_win;
+    claim.car = 0;
+
+    for (int i = 0; i < 4; i++) {
+        claim.car = (uint8_t)i;
+        CHECK(gs_verify(&gs_agreed[i], &t, &claim, nullptr) == GS_VERDICT_OK);
+    }
+
+    // --- One bit, somewhere in the middle, in somebody else's car.
+    claim.car = 0;
+    static gs_replay doctored;
+    doctored = gs_agreed[0];
+    uint32_t at = ticks / 2u;
+    doctored.input[at][2] = (gs_input)(doctored.input[at][2] ^ GS_IN_LEFT);
+
+    CHECK(gs_verify(&doctored, &t, &claim, nullptr) == GS_VERDICT_NOT_THAT_RACE);
+
+    // **And the same doctored log, with no agreed ending on it, passes.** That
+    // is not a bug being demonstrated - it is the size of the hole this closes.
+    // Every check that came before is about one car and one lap, and a log
+    // altered anywhere else walked straight past all of them.
+    doctored.meta.agreed_hash = 0;
+    CHECK(gs_verify(&doctored, &t, &claim, nullptr) == GS_VERDICT_OK);
+
+    // A recording that does not say is not failed for it, which is what lets a
+    // race run on one machine - and every recording made before version five -
+    // still be verified for the lap it claims.
+    static gs_replay silent;
+    silent = gs_agreed[0];
+    silent.meta.agreed_hash = 0;
+    CHECK(gs_verify(&silent, &t, &claim, nullptr) == GS_VERDICT_OK);
+
+    // **The rule, stated exactly.** A log is refused when it re-races to
+    // somewhere other than the agreed ending - not merely when its bytes have
+    // been changed. Those are different claims, and the sweep below is what
+    // keeps them apart.
+    //
+    // Not every changed byte is a changed race: by five hundred ticks in, some
+    // cars are wrecked, and a wrecked car is not taking input. Flipping the
+    // accelerator for one of those alters the log and alters nothing that
+    // happened, and answering "verified" is right. A test asserting every flip
+    // is caught would be asserting something untrue and would have to be
+    // loosened until it stopped saying anything.
+    static const uint32_t where[] = { 0, 1, 37, 200, 500 };
+    int moved = 0, checked = 0;
+    for (size_t k = 0; k < sizeof where / sizeof where[0]; k++) {
+        if (where[k] >= ticks) continue;
+        for (uint8_t car = 0; car < 4; car++) {
+            doctored = gs_agreed[0];
+            doctored.input[where[k]][car] =
+                (gs_input)(doctored.input[where[k]][car] ^ GS_IN_ACCEL);
+
+            gs_world after;
+            CHECK(gs_replay_playback(&doctored, &t, &after));
+            bool different = gs_world_hash(&after) != agreed;
+
+            doctored.meta.agreed_hash = agreed;
+            gs_verdict v = gs_verify(&doctored, &t, &claim, nullptr);
+            CHECK(v == (different ? GS_VERDICT_NOT_THAT_RACE : GS_VERDICT_OK));
+
+            checked++;
+            if (different) moved++;
+        }
+    }
+
+    // And the sweep has teeth: most of those flips really did land the race
+    // somewhere else, so the line above is doing work rather than agreeing with
+    // itself about nothing.
+    CHECK(checked >= 16);
+    CHECK(moved > checked / 2);
+}
+
+TEST(a_recording_carries_its_agreed_ending_across_a_serialise) {
+    // The ending has to survive the wire, and a reader of an older recording
+    // has to come back with "does not say" rather than a number it invented.
+    static gs_replay r;
+    static gs_track t;
+    gs_world w;
+    gs_net_scene(&t, &w);
+    gs_replay_begin(&r, &w, &t);
+    for (uint32_t i = 0; i < 40; i++) {
+        gs_input in[GS_MAX_CARS];
+        for (uint8_t c = 0; c < GS_MAX_CARS; c++) in[c] = gs_net_drive(c, i);
+        CHECK(gs_replay_record(&r, in));
+    }
+    gs_replay_set_agreed(&r, 0xfeedfacecafebeefull);
+
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&r, bytes, sizeof bytes);
+    CHECK(n > 0);
+
+    static gs_replay back;
+    CHECK(gs_replay_deserialize(&back, bytes, n));
+    CHECK(back.meta.agreed_hash == 0xfeedfacecafebeefull);
+    CHECK(back.meta.tick_count == 40);
+
+    // A version four recording says nothing about an ending, and zero is the
+    // honest answer for it - not a hash invented by the reader.
+    bytes[4] = 4;                     // the version word, little-endian
+    static gs_replay older;
+    CHECK(gs_replay_deserialize(&older, bytes, n));
+    CHECK(older.meta.agreed_hash == 0);
+    CHECK(older.meta.tick_count == 40);
+}
+
 TEST(a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing) {
     static gs_net a;
     static gs_track t;
@@ -5755,6 +5965,8 @@ int main(void) {
     run_a_peer_that_reveals_an_input_it_did_not_commit_to_is_caught();
     run_a_peer_that_promises_two_different_things_for_one_tick_is_caught();
     run_a_promise_shown_in_the_same_breath_as_its_proof_buys_nothing();
+    run_a_four_player_race_produces_a_log_that_re_races_to_the_ending_they_agreed_on();
+    run_a_recording_carries_its_agreed_ending_across_a_serialise();
     run_a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing();
     run_a_desync_is_noticed_rather_than_lived_with();
     run_the_same_inputs_produce_the_same_world_every_time();

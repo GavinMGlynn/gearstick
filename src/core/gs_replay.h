@@ -26,7 +26,12 @@
 // replay that does not name its driver is a bearer token - anyone who obtains
 // one can hand it in as their own, and the verifier will correctly agree that
 // the time was driven, because it was. It was just not driven by them.
-#define GS_REPLAY_VERSION   4u
+// **Five, because a recording now carries the ending everybody agreed on.**
+//
+// Versions four and three are still read, with the agreed hash zero - which
+// means "this recording does not say" and not "this recording agrees with
+// anything", so a claim is checked against it only when it is there.
+#define GS_REPLAY_VERSION   5u
 #define GS_REPLAY_OLDEST    3u
 #define GS_REPLAY_MAX_TICKS (GS_TICK_HZ * 60 * 10)   // ten minutes
 
@@ -62,6 +67,17 @@ typedef struct gs_replay_meta {
     // "nobody", and is why a claim against a blank name is refused rather than
     // waved through.
     char     driver[GS_MAX_CARS][GS_REPLAY_NAME];
+
+    // **The state every peer agreed the race ended in.** Re-racing the log has
+    // to arrive here, which is a much stronger statement than "the claimed lap
+    // is not better than the driven one": it says this log is the race that
+    // actually happened, all of it, for everybody in it. One flipped bit
+    // anywhere in the inputs lands somewhere else and says so.
+    //
+    // Zero means the recording does not carry one - every version four and
+    // three recording, and every race run on one machine, where there is nobody
+    // to have agreed with.
+    uint64_t agreed_hash;
 } gs_replay_meta;
 
 // Fixed capacity and no allocation, because src/core/ owns no allocator. Nearly
@@ -82,6 +98,11 @@ void gs_replay_set_driver(gs_replay *r, uint8_t car, const char *name);
 // Who a recording says was in a car. Never null; an empty string means the
 // recording does not say, which every version three recording does.
 const char *gs_replay_driver(const gs_replay *r, uint8_t car);
+
+// The state everybody agreed the race ended in, to be checked against later.
+// Only a networked race has one; a race on one machine has nobody to agree with
+// and leaves it zero.
+void gs_replay_set_agreed(gs_replay *r, uint64_t hash);
 
 // Append one tick of input. Returns false when full, which is the only failure.
 bool gs_replay_record(gs_replay *r, const gs_input *in);

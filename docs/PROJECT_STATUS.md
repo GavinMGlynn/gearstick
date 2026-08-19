@@ -1617,6 +1617,88 @@ breath as it promises them getting nowhere at all. The four-player race over a
 bad link still agrees tick for tick with the race one machine would have run
 alone, which is the claim that says the commitment costs correctness nothing.
 
+### The whole race is verified, not just the winning lap
+
+Every check the verifier had was about one car and one lap: this track, these
+rules, this driver, a claimed time no better than the driven one. A log altered
+anywhere outside the claimed lap walked past all of them.
+
+A networked recording now carries `agreed_hash` — the state every peer agreed
+the race ended in — and re-racing the log has to arrive there. That is a
+statement about every tick and every car at once, and it costs one comparison,
+because the simulation is exactly reproducible. This is the argument for having
+built it that way, collected.
+
+Replay version 5. Versions 4 and 3 still read, with the agreed ending zero,
+which means **"this recording does not say"** and not "this recording agrees
+with anything" — so a race run on one machine, where there is nobody to have
+agreed with, is still checked for the lap it claims and is not failed for the
+absence.
+
+#### An online race was recording nothing at all
+
+Found on the way, and it is bigger than the item that found it. The networked
+branch of the frame loop stepped the rollback session and never called
+`gs_replay_record`. The submission path then serialised whatever the last
+offline race had left in the buffer. **A networked time could not have been
+verified by anybody** — the item that made the server re-race every submission
+was, for online races, verifying a recording of something else.
+
+Fixing it is not a matter of adding the missing call, because there are two
+worlds and only one of them is the race:
+
+- **The visible world is built partly on guesses** about the other cars, and
+  most of those are rolled back. A recording taken from it would be a recording
+  of things that did not happen.
+- **The confirmed world is built only from inputs every peer actually sent.**
+  That is the race, and `gs_net_confirmed_input` hands it over a tick at a time
+  as it is agreed.
+
+#### And the race ends twice
+
+The visible race crosses the line about a dozen ticks before the agreed one
+does, because the reveals trail the commitments. Submitting at the moment the
+player sees the flag would hand in a recording that stops short of its own
+ending and cannot reproduce it.
+
+So the client keeps talking after the finish. `gs_net_settle` flushes what is
+still owed, keeps receiving, writes down each tick as it is agreed, and submits
+only once the *confirmed* world is over — stamping the agreed ending into the
+recording as it goes. If nobody finishes agreeing within about fifteen seconds
+it submits nothing and says so, which is better than submitting half a race.
+
+#### What is pinned
+
+Four peers race six seconds over links with different latencies, jitter and one
+datagram in eleven dropped. All four write down the same log, of the same
+length, ending in the same state, and all four logs are accepted.
+
+Then one bit is flipped in the middle of the log, in a car other than the one
+being claimed, and it is refused — **and the same flipped bit, with the agreed
+ending taken off the recording, is accepted.** That second line is the test: it
+measures the hole rather than asserting the patch.
+
+The claim used carries no times at all, deliberately. It means every check that
+existed before this one passes whatever the log says, so the only thing that can
+catch a doctored log is the ending it has to produce. A claim with times in it
+would be caught by the lap check too, and the test would no longer be testing
+this rule.
+
+The sweep across ticks and cars states the rule exactly: a log is refused when
+it re-races to somewhere other than the agreed ending, **not** merely when its
+bytes have changed. Those are different claims. By five hundred ticks in some
+cars are wrecked, and a wrecked car is not taking input, so flipping its
+accelerator alters the log and alters nothing that happened — answering
+"verified" there is right. The test asserts the correspondence in both
+directions and then asserts that most of the flips did move the ending, so it
+has teeth rather than agreeing with itself about nothing.
+
+**Not covered by an automated test:** `gs_net_settle` itself, which needs a real
+frame loop and a real socket. What the test drives is the same sequence the
+frontend drives — record each confirmed tick, stamp the agreed hash, verify —
+through the same functions, but the frontend's own wiring of it is checked by
+reading rather than by running.
+
 ---
 
 ## What does not exist

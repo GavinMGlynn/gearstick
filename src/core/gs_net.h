@@ -200,4 +200,24 @@ bool gs_net_receive(gs_net *n, const gs_track *t, const uint8_t *buf, size_t len
 // The state to draw.
 const gs_world *gs_net_world(const gs_net *n);
 
+// --- what everybody agreed happened -----------------------------------------
+//
+// `gs_net_world` is the state the player is looking at, and some of it is
+// guesses. **This is the other one**: the state built only from inputs every
+// peer has actually sent, which is the race that can be written down and handed
+// to a server. A recording made from the visible state would be a recording of
+// predictions, most of which were rolled back.
+const gs_world *gs_net_confirmed(const gs_net *n);
+uint32_t gs_net_confirmed_tick(const gs_net *n);
+
+// The hash of the confirmed state, which every peer computes for itself and
+// compares with what the others claim. Two machines that disagree here have
+// already stopped racing the same race, and say so.
+uint64_t gs_net_agreed_hash(const gs_net *n);
+
+// Every player's input for a confirmed tick, or null when that tick is not
+// confirmed yet or has fallen out of the window. The caller is expected to keep
+// up: the window is two seconds, and anything older than that is gone.
+const gs_input *gs_net_confirmed_input(const gs_net *n, uint32_t tick);
+
 #endif // GS_NET_H

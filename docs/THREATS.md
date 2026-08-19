@@ -53,6 +53,20 @@ cannot come along with the claim.
 Verdicts are specific — wrong track, wrong rules, no such car, never finished,
 lap too good, race too good — so a rejection says what was wrong with it.
 
+**Closed: the whole race, not just the winning lap.** Every one of those checks
+is about one car and one lap, so a log altered anywhere else passed all of them.
+A networked recording now carries the state every peer agreed the race ended in,
+and re-racing the log has to arrive there — a statement about every tick and
+every car at once, and nearly free because the simulation is exactly
+reproducible. That is the argument for having built it this way, collected.
+
+Two limits worth stating. A recording with no agreed ending — a race run on one
+machine, or any recording made before this landed — is not failed for the
+absence: "it does not say" is not "it disagrees", and it is still checked for
+the lap it claims. And an alteration that changes no outcome is not caught,
+because it is not a different race: by the end of a long race some cars are
+wrecked, and a wrecked car is not taking input.
+
 **Closed: a replay says who drove it.** `gs_replay_meta` carries the driver of
 each car, the claim carries who is submitting, and the verifier refuses a claim
 whose name is not the one in the recording — `GS_VERDICT_WRONG_DRIVER`. A
@@ -247,9 +261,10 @@ transport work is larger and defends a channel nobody is currently attacking.
    tick rides twelve ticks ahead of the input it promises, and a reveal that
    does not match it stops the race. The cost is the twelve ticks: the local car
    is unaffected, and a remote car's corrections land that much later.
-4. **Verify the whole race, not the winner's lap.** Every peer keeps the complete
-   input log and the end-state hash everybody agreed on; re-racing the log has to
-   produce that hash. Nearly free, given determinism.
+4. ~~**Verify the whole race, not the winner's lap.**~~ **Done.** A networked
+   recording carries the state every peer agreed the race ended in, and the
+   server's re-race has to arrive there. The checks before it were about one car
+   and one lap; a log altered anywhere else walked past all of them.
 5. **Fuzz the parsers.** Cheapest of all, and it defends the surface most likely
    to contain something exploitable today.
 6. **Seal the transport.** Everything about identity is meaningless without it.

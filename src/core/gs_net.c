@@ -120,6 +120,22 @@ const gs_world *gs_net_world(const gs_net *n) {
     return &n->current;
 }
 
+const gs_world *gs_net_confirmed(const gs_net *n) { return &n->confirmed; }
+uint32_t gs_net_confirmed_tick(const gs_net *n)   { return n->confirmed_tick; }
+
+uint64_t gs_net_agreed_hash(const gs_net *n) {
+    return n->hash[GS_SLOT(n->confirmed_tick)];
+}
+
+const gs_input *gs_net_confirmed_input(const gs_net *n, uint32_t tick) {
+    if (tick >= n->confirmed_tick) return nullptr;
+    if (n->confirmed_tick - tick > GS_NET_WINDOW) return nullptr;
+
+    uint32_t slot = GS_SLOT(tick);
+    if (n->stamp[slot] != tick) return nullptr;
+    return n->in[slot];
+}
+
 // --- the wire --------------------------------------------------------------
 //
 //   u32  magic

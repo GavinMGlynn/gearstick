@@ -35,6 +35,13 @@ typedef enum gs_verdict {
     // was a bearer token anyone who obtained one could spend.
     GS_VERDICT_WRONG_DRIVER,
 
+    // **The log does not produce the ending everybody agreed on.** Checking the
+    // claimed lap says the lap was driven; it says nothing about the rest of
+    // the race, and a log altered anywhere outside the claimed lap would pass
+    // it. This is the whole race or none of it: one flipped bit lands the
+    // re-race somewhere else, and it says so.
+    GS_VERDICT_NOT_THAT_RACE,
+
     GS_VERDICT_COUNT
 } gs_verdict;
 

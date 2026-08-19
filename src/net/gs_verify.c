@@ -14,6 +14,7 @@ static const char *const gs_verdict_names[GS_VERDICT_COUNT] = {
     [GS_VERDICT_LAP_TOO_GOOD]  = "the lap claimed is not the lap driven",
     [GS_VERDICT_RACE_TOO_GOOD] = "the time claimed is not the time driven",
     [GS_VERDICT_WRONG_DRIVER]  = "somebody else drove that",
+    [GS_VERDICT_NOT_THAT_RACE]  = "those inputs do not produce that race",
 };
 
 const char *gs_verdict_text(gs_verdict v) {
@@ -64,6 +65,21 @@ gs_verdict gs_verify(const gs_replay *r, const gs_track *t, const gs_claim *c,
     // with a lap driven on the Moon.
     uint64_t was = gs_conditions_hash(&w);
     if (was != c->conditions) return GS_VERDICT_WRONG_RULES;
+
+    // **The whole race, when the recording says what the whole race was.**
+    //
+    // Everything above this line is about one car and one lap, and a log
+    // altered anywhere else passes all of it. A networked recording carries the
+    // state every peer agreed the race ended in, and re-racing the log has to
+    // arrive there - which is a statement about every tick and every car, and
+    // is nearly free because the simulation is exactly reproducible. That is
+    // the argument for having built it that way, collected.
+    //
+    // A recording with no agreed ending - one machine, or a version before
+    // five - is not failed for it. "It does not say" is not "it disagrees".
+    if (r->meta.agreed_hash != 0 && gs_world_hash(&w) != r->meta.agreed_hash) {
+        return GS_VERDICT_NOT_THAT_RACE;
+    }
 
     const gs_car *car = &w.car[c->car];
     if (out != nullptr) *out = w;

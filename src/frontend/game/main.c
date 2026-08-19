@@ -110,6 +110,20 @@ typedef struct gs_app {
     bool     session;             // run setup -> race -> results by itself
     bool     demo_library;        // a few tracks, for looking at the screen
     uint32_t    waiting;     // ticks spent stalled, for telling the player
+
+    // **A networked race is recorded from what everybody agreed, not from what
+    // this machine is looking at.** The visible world is built partly on
+    // guesses and most of them get rolled back; the confirmed world is built
+    // only from inputs every peer actually sent. `net_recorded` is how far the
+    // recording has been filled from it.
+    uint32_t    net_recorded;
+
+    // The visible race ends a dozen ticks before the agreed one does, because
+    // the reveals run behind the commitments. Submitting at that moment would
+    // hand in a recording missing its ending, so the client keeps talking until
+    // the agreed race is over too.
+    bool        net_settling;
+    uint32_t    net_settle_frames;
     bool        quit;
 } gs_app;
 
@@ -324,6 +338,89 @@ static void gs_store_load(gs_app *a) {
                 a->menu.records.count);
     }
     SDL_free(buf);
+}
+
+// Hand a finished race to the server, with the inputs that produced it. `w` is
+// the world being claimed about, which for a networked race is the confirmed one
+// rather than the one on screen.
+static void gs_submit_result(gs_app *a, const gs_world *w) {
+    if (a->server_host == nullptr) return;
+
+    static uint8_t proof[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&a->recording, proof, sizeof proof);
+    const gs_car *me = &w->car[a->net.local];
+
+    gs_wire_send_result(a->wire, gs_track_hash(&a->t), gs_conditions_hash(w),
+                        w->laps_to_win, me->vehicle, me->best_lap,
+                        me->finish_tick, proof, n);
+}
+
+// **Write down the race everybody agreed on, as it is agreed.** Not the visible
+// one: that is built partly on guesses about the other cars and most of those
+// are rolled back, so a recording taken from it would be a recording of things
+// that did not happen.
+static void gs_record_confirmed(gs_app *a) {
+    uint32_t upto = gs_net_confirmed_tick(&a->net);
+
+    while (a->net_recorded < upto) {
+        const gs_input *in = gs_net_confirmed_input(&a->net, a->net_recorded);
+
+        // Gone out of the window, which means this machine fell two seconds
+        // behind its own network. The recording stops here rather than
+        // continuing with a hole in it - a log with a gap re-races to somewhere
+        // else and would be refused anyway, and being refused for the real
+        // reason is worth more than being refused for a mysterious one.
+        if (in == nullptr) {
+            SDL_Log("net: the recording fell behind the race and cannot be "
+                    "completed - nothing will be submitted");
+            break;
+        }
+        if (!gs_replay_record(&a->recording, in)) break;
+        a->net_recorded++;
+    }
+}
+
+// About fifteen seconds at sixty frames a second. Long enough for a peer to
+// finish sending what it owes over any link a race was playable on, short
+// enough that a machine which walked away does not leave somebody staring at a
+// results screen for ever.
+#define GS_NET_SETTLE_FRAMES 900u
+
+// Keep talking after the finish line until the agreed race has an ending, then
+// submit it. Runs once a frame, not once a tick: nothing here is simulation.
+static void gs_net_settle(gs_app *a) {
+    if (!a->net_settling) return;
+
+    gs_wire_poll(a->wire);
+
+    uint8_t buf[GS_WIRE_MTU];
+    size_t n;
+    while ((n = gs_wire_recv(a->wire, buf, sizeof buf)) > 0) {
+        gs_net_receive(&a->net, &a->t, buf, n);
+    }
+    n = gs_net_packet(&a->net, buf, sizeof buf);
+    gs_wire_send(a->wire, buf, n);
+
+    gs_record_confirmed(a);
+
+    const gs_world *agreed = gs_net_confirmed(&a->net);
+    if (agreed->over) {
+        // **The ending everybody arrived at, written into the recording.** The
+        // server re-races the log and has to land here; a log altered anywhere,
+        // in any car's inputs, lands somewhere else.
+        gs_replay_set_agreed(&a->recording, gs_net_agreed_hash(&a->net));
+        gs_submit_result(a, agreed);
+        a->net_settling = false;
+        SDL_Log("net: the race is agreed at tick %u, and submitted",
+                gs_net_confirmed_tick(&a->net));
+        return;
+    }
+
+    if (++a->net_settle_frames > GS_NET_SETTLE_FRAMES) {
+        a->net_settling = false;
+        SDL_Log("net: nobody finished agreeing what happened - nothing "
+                "submitted, which is better than submitting half a race");
+    }
 }
 
 static void gs_store_save(gs_app *a) {
@@ -965,20 +1062,26 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         // And to the server, with the inputs that produced it. The server
         // re-races them before it believes any of it, which is why the
         // recording goes along rather than the number alone.
-        if (a->online && a->server_host != nullptr) {
-            static uint8_t proof[sizeof(gs_replay) + 4096];
-            size_t n = gs_replay_serialize(&a->recording, proof, sizeof proof);
-            const gs_car *me = &a->world.car[a->net.local];
-
-            gs_wire_send_result(a->wire, gs_track_hash(&a->t),
-                                gs_conditions_hash(&a->world),
-                                a->world.laps_to_win, me->vehicle,
-                                me->best_lap, me->finish_tick, proof, n);
+        //
+        // A networked race is not submitted here. The race the player is
+        // looking at is over; the race everybody has *agreed* on is a dozen
+        // ticks behind it, because the reveals trail the commitments. Handing
+        // in a recording that stops short of its own ending would be handing in
+        // one that cannot reproduce the ending it claims, so the client keeps
+        // talking until the agreed race is over too - see gs_net_settle.
+        if (a->online && a->net_started) {
+            gs_net_finish(&a->net);
+            a->net_settling = true;
+            a->net_settle_frames = 0;
+        } else if (a->online && a->server_host != nullptr) {
+            gs_submit_result(a, &a->world);
         }
 
         a->menu.screen = GS_SCREEN_RESULTS;
         steps = 0;
     }
+
+    gs_net_settle(a);
 
     if (a->online && !a->net_started) {
         // Nobody races until everybody is here. The player count decides the
@@ -1030,6 +1133,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             }
             gs_net_begin(&a->net, &a->world, gs_wire_players(a->wire),
                          gs_wire_local(a->wire), secret);
+            a->net_recorded = 0;
+            a->net_settling = false;
+            a->net_settle_frames = 0;
             a->net_started = true;
             a->menu.screen = GS_SCREEN_RACE;
             SDL_Log("net: %u players, driving car %u", a->net.players, a->net.local);

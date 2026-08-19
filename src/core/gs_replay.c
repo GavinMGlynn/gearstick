@@ -104,8 +104,11 @@ static uint64_t gs_get_u64(const uint8_t *p) {
 // which is what lets one reader handle both.
 #define GS_REPLAY_HEADER_V3 \
     (4 + 4 + 8 + 16 + 1 + 2 + 4 + GS_MAX_CARS + GS_MAX_CARS * (4 + 4 + 2) + 4)
-#define GS_REPLAY_HEADER_BYTES \
+#define GS_REPLAY_HEADER_V4 \
     (GS_REPLAY_HEADER_V3 + GS_MAX_CARS * GS_REPLAY_NAME)
+// Version five appends the agreed ending. Again everything before it is where
+// it was, which is what lets one reader handle all three.
+#define GS_REPLAY_HEADER_BYTES (GS_REPLAY_HEADER_V4 + 8)
 
 void gs_replay_set_driver(gs_replay *r, uint8_t car, const char *name) {
     if (car >= GS_MAX_CARS) return;
@@ -121,6 +124,10 @@ void gs_replay_set_driver(gs_replay *r, uint8_t car, const char *name) {
 
 const char *gs_replay_driver(const gs_replay *r, uint8_t car) {
     return car < GS_MAX_CARS ? r->meta.driver[car] : "";
+}
+
+void gs_replay_set_agreed(gs_replay *r, uint64_t hash) {
+    r->meta.agreed_hash = hash;
 }
 
 size_t gs_replay_size(const gs_replay *r) {
@@ -155,6 +162,9 @@ size_t gs_replay_serialize(const gs_replay *r, uint8_t *buf, size_t cap) {
         for (int k = 0; k < GS_REPLAY_NAME; k++) *p++ = (uint8_t)r->meta.driver[i][k];
     }
 
+    // Version five: the ending everybody agreed on.
+    gs_put_u64(p, r->meta.agreed_hash);          p += 8;
+
     for (uint32_t i = 0; i < r->meta.tick_count; i++) {
         for (uint8_t c = 0; c < GS_MAX_CARS; c++) *p++ = r->input[i][c];
     }
@@ -172,7 +182,9 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     uint32_t version = gs_get_u32(p); p += 4;
     if (version < GS_REPLAY_OLDEST || version > GS_REPLAY_VERSION) return false;
 
-    size_t header = version >= 4 ? GS_REPLAY_HEADER_BYTES : GS_REPLAY_HEADER_V3;
+    size_t header = version >= 5 ? GS_REPLAY_HEADER_BYTES
+                  : version >= 4 ? GS_REPLAY_HEADER_V4
+                                 : GS_REPLAY_HEADER_V3;
     if (len < header) return false;
 
     *r = (gs_replay){ 0 };
@@ -200,6 +212,11 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
             r->meta.driver[i][GS_REPLAY_NAME - 1] = '\0';
         }
     }
+
+    // Version five carries the agreed ending. Older ones leave it zero, which
+    // means "does not say" - so they are checked for the lap they claim and not
+    // for a race nobody wrote down.
+    if (version >= 5) { r->meta.agreed_hash = gs_get_u64(p); p += 8; }
 
     if (r->meta.car_count > GS_MAX_CARS) return false;
     if (ticks > GS_REPLAY_MAX_TICKS) return false;

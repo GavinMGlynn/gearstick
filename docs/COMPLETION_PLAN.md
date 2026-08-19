@@ -731,15 +731,23 @@ review, and it fails it for good reasons.
       *The cost, stated rather than buried: the reveal runs twelve ticks behind,
       so a remote car's corrections land a tenth of a second later. The local
       car is unaffected.*
-- [ ] **The whole race is verified, not just the winning lap.** Every peer keeps
+- [x] **The whole race is verified, not just the winning lap.** Every peer keeps
       the complete input log and the final state hash everybody agreed on. The
       server re-races the log; a log that does not produce that hash means one of
       the clients was not running this race. Nearly free, because the simulation
       is exactly reproducible — which is the argument for having built it that
       way, collected.
-      *Verification: a race in which one peer's recorded inputs are altered by a
-      single bit afterwards fails the check, and an honest four-player race
-      passes it.*
+      *Verification: a four-player race over a lossy link produces four logs
+      that all re-race to the same ending, and all four are accepted. One
+      flipped bit is then refused — and the same flipped bit, with the agreed
+      ending taken off the recording, is accepted, which is the size of the hole
+      this closes. Removing the check turns the test red.*
+      *Said plainly rather than glossed: an alteration that changes no outcome
+      is not refused, because it is not a different race — a wrecked car is not
+      taking input. The test states the rule that way rather than pretending
+      every changed byte is a changed race.*
+      *Found on the way and fixed here: an online race recorded no input log at
+      all, so a networked time could never have been verified by anybody.*
 
 - [ ] **The parsers are fuzzed.** Every byte the server acts on came from
       somebody who may be hostile: the protocol decoder, the chunked
