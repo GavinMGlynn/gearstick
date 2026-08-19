@@ -50,6 +50,15 @@ typedef struct gs_editor {
 
     bool  placed;       // the editor camera has been positioned at least once
 
+    // The live ghost: a car re-racing the design in the background, so that
+    // changing a ramp shows you what it does to a landing a second later
+    // instead of when you next go and drive it. Editing stops being blind
+    // construction and becomes a feedback loop.
+    bool     ghost_on;
+    gs_world ghost;
+    uint64_t ghost_track;   // the track hash it is racing; a change restarts it
+    uint32_t ghost_ticks;
+
     gs_edit_log *log;
     char status[192];
 } gs_editor;
@@ -81,6 +90,15 @@ bool gs_editor_drive_start(const gs_editor *e, const gs_track *t,
 // than buried in the mouse handling. Does not open a transaction - the caller
 // decides what counts as one action.
 void gs_editor_paint(gs_editor *e, gs_track *t, float wx, float wy);
+
+// Advance the ghost. **It notices for itself that the track changed** - by its
+// hash - and starts again, which is what makes it live rather than a thing you
+// have to remember to re-run. Cheap because the simulation links nothing and
+// runs headless; this is the same code the game races.
+void gs_editor_ghost_step(gs_editor *e, const gs_track *t, uint32_t ticks);
+
+// The ghost's car, or null when it has nowhere to run.
+const gs_car *gs_editor_ghost_car(const gs_editor *e);
 
 // The cursor, drawn over the world in the view's own projection.
 void gs_editor_draw_cursor(const gs_editor *e, SDL_Renderer *ren,

@@ -20,7 +20,8 @@ bool gs_editor_init(gs_editor *e, uint32_t history) {
     e->step = 0.25f;
     e->gate_heading = 0.0f;
     e->gate_width = 2.5f;
-    e->zoom = 1.0f;
+    e->zoom = GS_ISO_DEFAULT_ZOOM;
+    e->ghost_on = true;
 
     // Sixty-five thousand edits of history is about eight hundred kilobytes,
     // which is nothing, and is far more strokes than anyone makes between
@@ -49,7 +50,7 @@ void gs_editor_toggle(gs_editor *e, const gs_view *view) {
         // That is what makes it a snap back rather than a journey home.
         e->cam_x = view->cam.cx;
         e->cam_y = view->cam.cy;
-        e->zoom = view->cam.zoom > 0.0f ? view->cam.zoom : 1.0f;
+        e->zoom = view->cam.zoom > 0.0f ? view->cam.zoom : GS_ISO_DEFAULT_ZOOM;
         e->placed = true;
     }
     e->active = !e->active;
@@ -103,6 +104,51 @@ static void gs_brush_at(gs_editor *e, gs_track *t, int tx, int ty) {
     case GS_BRUSH_COUNT:
         break;
     }
+}
+
+// How long a ghost run lasts before it starts over. Twelve seconds is enough to
+// clear any jump on a track this size and short enough that a change shows up
+// again quickly.
+#define GS_GHOST_TICKS (GS_TICK_HZ * 12)
+
+static void gs_ghost_restart(gs_editor *e, const gs_track *t) {
+    e->ghost_track = gs_track_hash(t);
+    e->ghost_ticks = 0;
+    gs_world_init(&e->ghost, GS_ONE);
+
+    if (t->gate_count == 0) return;
+    gs_world_add_car(&e->ghost, t, (uint8_t)GS_VEH_STOCK_CAR,
+                     t->gate[0].x, t->gate[0].y, t->gate[0].heading);
+}
+
+void gs_editor_ghost_step(gs_editor *e, const gs_track *t, uint32_t ticks) {
+    if (!e->ghost_on) return;
+
+    // The track changing is what restarts it, and the track's own hash is how
+    // that is noticed - no notification to forget to send, and no way for an
+    // edit to slip past.
+    if (gs_track_hash(t) != e->ghost_track || e->ghost.car_count == 0) {
+        gs_ghost_restart(e, t);
+        if (e->ghost.car_count == 0) return;
+    }
+
+    for (uint32_t i = 0; i < ticks; i++) {
+        if (e->ghost_ticks >= GS_GHOST_TICKS) {
+            gs_ghost_restart(e, t);
+            if (e->ghost.car_count == 0) return;
+        }
+        // Throttle and nothing else. There is no AI yet, and a ghost that drives
+        // straight and fast is exactly what answers "what does this ramp do" -
+        // which is the question being asked while a ramp is being built.
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&e->ghost, t, in);
+        e->ghost_ticks++;
+    }
+}
+
+const gs_car *gs_editor_ghost_car(const gs_editor *e) {
+    if (!e->ghost_on || e->ghost.car_count == 0) return nullptr;
+    return &e->ghost.car[0];
 }
 
 void gs_editor_paint(gs_editor *e, gs_track *t, float wx, float wy) {
@@ -220,6 +266,10 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     if (redo == 0) ImGui_EndDisabled();
     ImGui_SameLine();
     ImGui_Text("%u back, %u forward", undo, redo);
+
+    ImGui_Checkbox("live ghost", &e->ghost_on);
+    ImGui_SameLine();
+    ImGui_Text("%s", t->gate_count > 0 ? "" : "(needs a start line)");
 
     ImGui_SeparatorText("Route");
     // Continuously, rather than on demand. A check you have to ask for is a

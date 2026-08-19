@@ -29,6 +29,11 @@ typedef struct gs_view {
 void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                     const gs_world *now, float alpha, const gs_view *view);
 
+// Draw a single car ghosted - translucent, and without the nose flash, so it
+// reads as a prediction rather than as a competitor.
+void gs_render_ghost(SDL_Renderer *ren, const gs_track *t, const gs_car *c,
+                     const gs_view *view);
+
 // Put the camera where it should be for the car it follows.
 void gs_render_track_camera(gs_view *view, const gs_world *prev,
                             const gs_world *now, float alpha);

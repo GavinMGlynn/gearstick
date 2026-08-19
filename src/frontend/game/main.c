@@ -51,6 +51,7 @@ typedef struct gs_app {
     uint64_t    shot_at;
     bool        overlay;      // start with the painted-gravity overlay on
     bool        start_in_editor;
+    float       zoom;         // 0 means the default
     bool        quit;
 } gs_app;
 
@@ -119,7 +120,7 @@ static void gs_start_test_drive(gs_app *a) {
     a->views = a->world.car_count < 2 ? 1 : 2;
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i].car = i;
-        a->view[i].cam.zoom = 1.0f;
+        a->view[i].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
         gs_render_track_camera(&a->view[i], &a->prev, &a->world, 1.0f);
     }
     gs_layout(a);
@@ -135,7 +136,7 @@ static void gs_start_race(gs_app *a) {
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i] = (gs_view){ 0 };
         a->view[i].car = i;
-        a->view[i].cam.zoom = 1.0f;
+        a->view[i].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
         a->view[i].show_gravity = a->overlay;
         gs_render_track_camera(&a->view[i], &a->prev, &a->world, 1.0f);
     }
@@ -169,6 +170,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->shot_at = (uint64_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--overlay") == 0) {
             a->overlay = true;
+        } else if (SDL_strcmp(argv[i], "--zoom") == 0 && i + 1 < argc) {
+            a->zoom = (float)SDL_atof(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--editor") == 0) {
             a->start_in_editor = true;
         } else if (SDL_strcmp(argv[i], "--help") == 0) {
@@ -177,6 +180,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --shot-at TICK  which tick to write it at (default 0)");
             SDL_Log("  --overlay       start with the painted-gravity overlay on");
             SDL_Log("  --editor        open in the construction set");
+            SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
@@ -333,6 +337,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         }
 
         gs_editor_frame(&a->editor, &a->t, &a->view[0]);
+
+        // Two ticks a frame at sixty frames a second is the ghost running at
+        // real time. It is a headless simulation of the track being edited, so
+        // it costs almost nothing and it notices its own track changing.
+        gs_editor_ghost_step(&a->editor, &a->t, 2);
     }
 
     SDL_SetRenderDrawColor(a->ren, 18, 20, 26, 255);
@@ -345,7 +354,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         gs_render_view(a->ren, &a->t, &a->prev, &a->world, alpha, &a->view[i]);
     }
 
-    if (a->editor.active) gs_editor_draw_cursor(&a->editor, a->ren, &a->t, &a->view[0]);
+    if (a->editor.active) {
+        const gs_car *ghost = gs_editor_ghost_car(&a->editor);
+        if (ghost != nullptr) gs_render_ghost(a->ren, &a->t, ghost, &a->view[0]);
+        gs_editor_draw_cursor(&a->editor, a->ren, &a->t, &a->view[0]);
+    }
 
     // The divider between the two halves of a split screen, so it reads as two
     // views and not as one confusing one.

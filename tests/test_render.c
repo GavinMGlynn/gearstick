@@ -839,6 +839,84 @@ TEST(coming_back_from_a_drive_returns_you_to_where_you_were_building) {
     gs_editor_quit(&ed);
 }
 
+// Drive the ghost the way the frontend drives it: a couple of ticks a frame,
+// many frames - not one enormous step.
+static void gs_ghost_run(gs_editor *e, const gs_track *t, uint32_t ticks) {
+    for (uint32_t i = 0; i < ticks; i += 2) gs_editor_ghost_step(e, t, 2);
+}
+
+TEST(raising_a_ramp_changes_where_the_ghost_lands_without_being_told_to) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 12);
+    gs_track_add_gate(&t, GS_INT(2), GS_INT(6), 0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(6), 0, GS_INT(4));
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 16384));
+    CHECK(ed.ghost_on);
+
+    // Stepped two ticks at a time, a hundred and eighty times - which is how
+    // the frontend drives it, two ticks a frame at sixty frames a second.
+    //
+    // Not 360 ticks in one call. A ghost that restarts once per *call* looks
+    // identical under a single big call and never moves at all under the real
+    // usage, so a test that does not step the way the game steps cannot see the
+    // difference. It could not, until this changed.
+    gs_ghost_run(&ed, &t, 360);
+    const gs_car *g = gs_editor_ghost_car(&ed);
+    CHECK(g != nullptr);
+
+    gs_fix flat_x = g->x;
+    gs_fix flat_z = g->z;
+    CHECK(flat_x > GS_INT(4));      // it got going
+    CHECK(flat_z == 0);             // and stayed on the floor
+
+    // Build a ramp in its path. **Nothing tells the ghost.** It notices by the
+    // track's own hash, which is what makes it live rather than a thing you
+    // remember to re-run.
+    ed.brush = GS_BRUSH_RAISE;
+    ed.radius = 0;
+    ed.step = 0.3f;
+    gs_edit_begin(ed.log);
+    for (int col = 1; col <= 5; col++)
+        for (int rep = 0; rep < col; rep++)
+            for (float y = 0.0f; y <= 12.0f; y += 1.0f)
+                gs_editor_paint(&ed, &t, 9.0f + (float)col, y);
+    gs_edit_end(ed.log);
+
+    gs_ghost_run(&ed, &t, 360);
+    g = gs_editor_ghost_car(&ed);
+    CHECK(g != nullptr);
+
+    // Same number of ticks into the run, and it is somewhere else entirely:
+    // higher up, having climbed what was just drawn.
+    CHECK(g->z > flat_z);
+    CHECK(g->x != flat_x);
+
+    // Undo it, and the ghost goes back to the flat run - again with nobody
+    // telling it anything.
+    CHECK(gs_edit_undo(ed.log, &t));
+    gs_ghost_run(&ed, &t, 360);
+    g = gs_editor_ghost_car(&ed);
+    CHECK(g->x == flat_x);
+    CHECK(g->z == flat_z);
+
+    // Switched off, it does not run at all.
+    ed.ghost_on = false;
+    CHECK(gs_editor_ghost_car(&ed) == nullptr);
+
+    // And a track with no start line has nowhere to put one.
+    static gs_track routeless;
+    gs_flat_pavement(&routeless, 16, 16);
+    ed.ghost_on = true;
+    gs_ghost_run(&ed, &routeless, 120);
+    CHECK(gs_editor_ghost_car(&ed) == nullptr);
+
+    gs_editor_quit(&ed);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -875,6 +953,7 @@ int main(void) {
     run_the_gate_brush_places_a_route_where_the_pointer_is(ren);
     run_a_test_drive_starts_where_you_were_looking_and_changes_nothing(ren);
     run_coming_back_from_a_drive_returns_you_to_where_you_were_building(ren);
+    run_raising_a_ramp_changes_where_the_ghost_lands_without_being_told_to(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

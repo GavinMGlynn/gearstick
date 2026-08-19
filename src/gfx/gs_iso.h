@@ -19,6 +19,21 @@
 #define GS_ISO_TILE_H 32.0f
 #define GS_ISO_TILE_Z 32.0f
 
+// How far back the camera sits by default. One tile to 64 pixels at 1.0, so a
+// split-screen pane shows ten tiles - forty metres - of track.
+//
+// Arrived at from the other end than expected. The cars first read as specks,
+// and the reflex was to move the camera in; that was wrong, because zoom scales
+// the car and the ground together and leaves the car exactly as many tiles long
+// as it was. What was wrong was the *ratio*: an honest 2.7 m car is two thirds
+// of a tile, and the original's were never honest - they were chunky relative
+// to the view, because a two-car collision has to be legible at a glance.
+//
+// So the cars grew to about 1.3 tiles (see gs_render.c) and the camera went
+// back out, which is more track in view *and* a car you can see. Moving the
+// camera alone would have bought the second at the cost of the first.
+#define GS_ISO_DEFAULT_ZOOM 1.0f
+
 typedef struct gs_camera {
     float cx, cy, cz;   // the world point held at the centre of the viewport
     float zoom;

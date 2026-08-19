@@ -122,10 +122,21 @@ static void gs_car_footprint(const gs_car *c, float half_len, float half_wid,
 }
 
 static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
-                        const gs_track *t, const gs_car *c, uint8_t index) {
+                        const gs_track *t, const gs_car *c, uint8_t index,
+                        float alpha) {
     if (!c->active) return;
 
-    const float half_len = 0.34f, half_wid = 0.20f, body = 0.16f;
+    // **Deliberately not to scale.** A real car is 2.7 m and a tile is four, so
+    // an honest one is two thirds of a tile and reads as a speck against the
+    // ground it is driving on. These are about 1.3 tiles - roughly the
+    // proportion the original used, and for the same reason: a two-car
+    // collision has to be legible at a glance, and legibility is the entire
+    // argument for this camera.
+    //
+    // Nothing in src/core/ knows about these numbers today. When collision
+    // arrives it must use *these* rather than the metric truth, or a car is hit
+    // by something the player cannot see.
+    const float half_len = 0.65f, half_wid = 0.38f, body = 0.32f;
 
     float fx[4], fy[4];
     gs_car_footprint(c, half_len, half_wid, fx, fy);
@@ -139,12 +150,13 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
         gs_iso_project(cam, fx[i], fy[i], gs_to_f(gz) + 0.01f, &sp[i].x, &sp[i].y);
     }
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-    gs_quad(ren, sp, (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.35f });
+    gs_quad(ren, sp, (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.35f * alpha });
 
     // --- The body: a base quad, a roof quad, and the sides between them.
     float z = gs_to_f(c->z);
     SDL_FColor col = gs_car_colour[index & 3];
     if (c->wrecked) { col.r *= 0.35f; col.g *= 0.35f; col.b *= 0.35f; }
+    col.a = alpha;
 
     SDL_FPoint lo[4], hi[4];
     for (int i = 0; i < 4; i++) {
@@ -152,7 +164,7 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
         gs_iso_project(cam, fx[i], fy[i], z + 0.04f + body, &hi[i].x, &hi[i].y);
     }
 
-    SDL_FColor side = { col.r * 0.66f, col.g * 0.66f, col.b * 0.66f, 1.0f };
+    SDL_FColor side = { col.r * 0.66f, col.g * 0.66f, col.b * 0.66f, alpha };
     for (int i = 0; i < 4; i++) {
         int j = (i + 1) & 3;
         SDL_FPoint face[4] = { lo[i], lo[j], hi[j], hi[i] };
@@ -165,7 +177,27 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
     SDL_FPoint nose[4] = { hi[0], hi[1],
                            { (hi[1].x + hi[2].x) * 0.5f, (hi[1].y + hi[2].y) * 0.5f },
                            { (hi[0].x + hi[3].x) * 0.5f, (hi[0].y + hi[3].y) * 0.5f } };
-    gs_quad(ren, nose, (SDL_FColor){ 1.0f, 1.0f, 1.0f, 0.85f });
+    gs_quad(ren, nose, (SDL_FColor){ 1.0f, 1.0f, 1.0f, 0.85f * alpha });
+}
+
+void gs_render_ghost(SDL_Renderer *ren, const gs_track *t, const gs_car *c,
+                     const gs_view *view) {
+    if (!c->active) return;
+
+    SDL_SetRenderViewport(ren, &view->rect);
+    SDL_SetRenderClipRect(ren, &(SDL_Rect){ 0, 0, view->rect.w, view->rect.h });
+
+    gs_camera cam = view->cam;
+    cam.vw = (float)view->rect.w;
+    cam.vh = (float)view->rect.h;
+
+    // Drawn last and translucent rather than sorted into the terrain: a ghost
+    // that disappears behind a rise is a ghost you cannot follow, and the point
+    // of it is to be watched.
+    gs_draw_car(ren, &cam, t, c, 3, 0.45f);
+
+    SDL_SetRenderClipRect(ren, nullptr);
+    SDL_SetRenderViewport(ren, nullptr);
 }
 
 // Interpolate a car between the last two simulation states. The world advances
@@ -219,7 +251,7 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         for (uint8_t i = 0; i < now->car_count; i++) {
             gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
             int cd = gs_fix_floor(c.x) + gs_fix_floor(c.y);
-            if (cd == d) gs_draw_car(ren, &cam, t, &c, i);
+            if (cd == d) gs_draw_car(ren, &cam, t, &c, i, 1.0f);
         }
     }
 
@@ -228,7 +260,7 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
     for (uint8_t i = 0; i < now->car_count; i++) {
         gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
         int cd = gs_fix_floor(c.x) + gs_fix_floor(c.y);
-        if (cd >= diagonals || cd < 0) gs_draw_car(ren, &cam, t, &c, i);
+        if (cd >= diagonals || cd < 0) gs_draw_car(ren, &cam, t, &c, i, 1.0f);
     }
 
     SDL_SetRenderClipRect(ren, nullptr);

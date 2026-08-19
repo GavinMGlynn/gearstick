@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 33 of 61 items, every
+**Phases 0 to 3 are complete, and Phase 4 has started — 34 of 61 items, every
 one of them with its verification actually run.** Phase 4 is the editor and is
 about half the remaining work.
 
@@ -220,9 +220,14 @@ whatever the UI turns out to be — then the interface on top.
       Coming back leaves the track hash and the undo history exactly as they
       were, and returns the camera to the part of the track being built rather
       than to wherever the car stopped.*
-- [ ] **The live ghost** — a car continuously re-racing the design as it is
-      edited. *Verification: raising a ramp visibly changes the ghost's landing
-      without any explicit re-run.*
+- [x] **The live ghost** — a car continuously re-racing the design as it is
+      edited. *Verification: a ghost races a flat track; a ramp is then drawn in
+      its path with the brush and **nothing is told anything** — it notices by
+      the track's own hash and is somewhere else entirely the same number of
+      ticks into its next run. Undo the ramp and it goes back. Driven the way
+      the frontend drives it, two ticks a frame, because a ghost that restarts
+      once per call looks perfect under one big call and never moves at all
+      under the real thing.*
 - [ ] **The editor UI is usable with a pad as well as a mouse.**
       *Verification: a track built end to end from a pad alone.*
 
