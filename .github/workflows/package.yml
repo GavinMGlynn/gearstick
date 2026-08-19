@@ -1,0 +1,188 @@
+# Does a package actually work?
+#
+# **A package is a folder somebody unpacks and runs**, so that is exactly what
+# this checks: build it, unpack it somewhere else entirely, and run the thing
+# out of the unpacked copy. Not "cpack exited zero" - that says nothing about
+# whether the binary inside can find its own feet.
+#
+# Two runs per platform, deliberately:
+#   - the headless driver re-races the golden replay, proving the simulation in
+#     the package is the same simulation CI tested;
+#   - the game writes a frame, proving the packaged layout is one that
+#     src/platform/gs_paths.c can actually find assets in. That probe is easy to
+#     get wrong and impossible to notice until somebody runs an installed copy.
+#
+# Not on every push: this builds SDL from source three times over, and packaging
+# does not change when the physics does. On demand, on a tag, and whenever the
+# packaging rules themselves change.
+name: package
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+    paths:
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - '.github/workflows/package.yml'
+
+env:
+  CI_SUBMODULES: ext/sdl
+
+jobs:
+  linux:
+    name: Linux x86_64 tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: false }
+      - run: git submodule update --init --depth 1 $CI_SUBMODULES
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+                     /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+                       -o Acquire::https::Timeout=30 update
+          sudo apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends \
+            gcc-14 ninja-build \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libgl-dev libegl-dev libdrm-dev libgbm-dev \
+            libpulse-dev libasound2-dev \
+            libdbus-1-dev libudev-dev libusb-1.0-0-dev
+
+      - name: Build and package
+        run: |
+          cmake -B build -G Ninja -DCMAKE_C_COMPILER=gcc-14 \
+                -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGEARSTICK_WERROR=ON
+          cmake --build build -j
+          cd build && cpack
+
+      - name: Unpack somewhere else and run it
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+          SDL_AUDIODRIVER: dummy
+        run: |
+          mkdir -p /tmp/unpacked
+          tar xzf build/gearstick-*-linux-*.tar.gz -C /tmp/unpacked
+          cd /tmp/unpacked/gearstick-*
+          ls -la
+          ./gearstick_cli selftest --verify
+          ./gearstick --shot packaged.bmp --shot-at 120
+          test -s packaged.bmp || { echo "the packaged game drew nothing"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gearstick-linux-x86_64
+          path: build/gearstick-*.tar.gz*
+
+  macos:
+    name: macOS arm64 disk image
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: false }
+      - run: git submodule update --init --depth 1 $CI_SUBMODULES
+
+      - name: Install ninja
+        run: brew install ninja
+      - name: Use the newest Xcode on the image
+        run: |
+          latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+
+      - name: Build and package
+        run: |
+          cmake --preset macos-release
+          cmake --build --preset macos-release -j
+          cd build/macos-release && cpack
+
+      - name: Unpack somewhere else and run it
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+          SDL_AUDIODRIVER: dummy
+        run: |
+          mkdir -p /tmp/unpacked
+          tar xzf build/macos-release/gearstick-*-macos-*.tar.gz -C /tmp/unpacked
+          cd /tmp/unpacked/gearstick-*
+          ls -la
+          ./gearstick_cli selftest --verify
+          # The game is a bundle, and its assets live in Contents/Resources -
+          # which is precisely what SDL_GetBasePath hands back, so this is the
+          # step that proves the bundle layout and the path probe agree.
+          ./gearstick.app/Contents/MacOS/gearstick --shot packaged.bmp --shot-at 120
+          test -s packaged.bmp || { echo "the packaged game drew nothing"; exit 1; }
+
+      # The disk image is what a person actually downloads, so check it mounts
+      # and carries the app rather than trusting that cpack made one.
+      - name: Mount the disk image
+        run: |
+          dmg=$(ls build/macos-release/gearstick-*.dmg)
+          hdiutil attach "$dmg" -mountpoint /Volumes/gearstick-check -nobrowse
+          ls -la /Volumes/gearstick-check
+          test -d /Volumes/gearstick-check/gearstick.app || {
+            echo "the disk image has no app in it"; exit 1; }
+          hdiutil detach /Volumes/gearstick-check
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gearstick-macos-arm64
+          path: |
+            build/macos-release/gearstick-*.tar.gz*
+            build/macos-release/gearstick-*.dmg*
+
+  windows:
+    name: Windows x64 zip
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: false }
+      - run: git submodule update --init --depth 1 ext/sdl
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: { arch: x64 }
+
+      - name: Build and package
+        shell: cmd
+        run: |
+          cmake --preset windows-release
+          cmake --build --preset windows-release
+          cd build\windows-release && cpack
+
+      - name: Unpack somewhere else and run it
+        shell: pwsh
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+          SDL_AUDIODRIVER: dummy
+        run: |
+          $zip = Get-ChildItem build\windows-release\gearstick-*.zip | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path C:\unpacked | Out-Null
+          Expand-Archive -Path $zip.FullName -DestinationPath C:\unpacked -Force
+          $dir = Get-ChildItem C:\unpacked -Directory | Select-Object -First 1
+          Set-Location $dir.FullName
+          Get-ChildItem
+          & .\gearstick_cli.exe selftest --verify
+          if ($LASTEXITCODE -ne 0) { throw "the packaged headless driver failed" }
+          # gearstick.exe is built for the GUI subsystem, so it detaches and
+          # writes nothing to the console. Wait for it, then look at what it
+          # produced - the frame on disk is the only evidence either way.
+          & .\gearstick.exe --shot packaged.bmp --shot-at 120 | Out-Null
+          Start-Sleep -Seconds 5
+          if (-not (Test-Path packaged.bmp)) { throw "the packaged game drew nothing" }
+          if ((Get-Item packaged.bmp).Length -eq 0) { throw "the frame is empty" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gearstick-windows-x64
+          path: build/windows-release/gearstick-*.zip*
