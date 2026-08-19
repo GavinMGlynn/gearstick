@@ -293,10 +293,94 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
     // track costs nothing. See the tails in docs/COMPLETION_PLAN.md.
 }
 
+// How much of the closing speed comes back out of a collision.
+//
+// Over one on purpose. Real cars absorb energy and stop; that is the correct
+// physics and the wrong game - a hit that costs you two seconds and teaches
+// nothing is the "collisions that punish rather than launch" the design
+// deliberately refuses. Here a hit sends somebody somewhere funny, and the
+// person it happened to can see exactly why.
+#define GS_BOUNCE GS_RATIO(150, 100)
+
+// And a little of it goes upward, because a car that leaves the ground is the
+// difference between a shove and an event.
+#define GS_BOUNCE_LIFT GS_RATIO(35, 100)
+
+// Cars only touch if they are at roughly the same height: one flying over
+// another has cleared it, and being swatted out of the air by something passing
+// underneath would be the least readable thing in the game.
+#define GS_CAR_HEIGHT GS_RATIO(60, 100)
+
+static void gs_collide(gs_car *a, gs_car *b) {
+    if (!a->active || !b->active) return;
+
+    gs_fix dx = b->x - a->x;
+    gs_fix dy = b->y - a->y;
+    gs_fix dist = gs_fix_len2(dx, dy);
+
+    gs_fix reach = GS_CAR_RADIUS * 2;
+    if (dist >= reach) return;
+
+    gs_fix dz = a->z - b->z;
+    if (gs_fix_abs(dz) > GS_CAR_HEIGHT) return;
+
+    // Exactly on top of one another: push along x rather than dividing by zero.
+    gs_fix nx, ny;
+    if (dist <= 0) {
+        nx = GS_ONE;
+        ny = 0;
+        dist = 1;
+    } else {
+        nx = gs_fix_div(dx, dist);
+        ny = gs_fix_div(dy, dist);
+    }
+
+    // Separate them first, so a pair that ends a tick overlapping does not sit
+    // inside each other trading impulses for the rest of the race.
+    gs_fix overlap = reach - dist;
+    gs_fix half = overlap / 2;
+    a->x -= gs_fix_mul(nx, half);
+    a->y -= gs_fix_mul(ny, half);
+    b->x += gs_fix_mul(nx, half);
+    b->y += gs_fix_mul(ny, half);
+
+    // Only if they are coming together. Two cars sliding apart while still
+    // overlapping have already had their collision.
+    gs_fix closing = gs_fix_mul(b->vx - a->vx, nx) + gs_fix_mul(b->vy - a->vy, ny);
+    if (closing >= 0) return;
+
+    // Equal masses, so each takes half. Mass is not in the vehicle table and
+    // does not need to be: a heavier car that shrugged off a hit would make the
+    // choice of vehicle about winning collisions rather than about driving.
+    gs_fix impulse = gs_fix_mul(-closing, GS_ONE + GS_BOUNCE) / 2;
+
+    a->vx -= gs_fix_mul(nx, impulse);
+    a->vy -= gs_fix_mul(ny, impulse);
+    b->vx += gs_fix_mul(nx, impulse);
+    b->vy += gs_fix_mul(ny, impulse);
+
+    gs_fix lift = gs_fix_mul(impulse, GS_BOUNCE_LIFT);
+    a->vz += lift;
+    b->vz += lift;
+    if (lift > 0) {
+        a->grounded = false;
+        b->grounded = false;
+    }
+}
+
 void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
     for (uint8_t i = 0; i < w->car_count; i++) {
         gs_car_step(w, &w->car[i], t, in != nullptr ? in[i] : (gs_input)0);
     }
+
+    // After everybody has moved, in a fixed order, so the result does not
+    // depend on who was stepped first.
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        for (uint8_t j = (uint8_t)(i + 1); j < w->car_count; j++) {
+            gs_collide(&w->car[i], &w->car[j]);
+        }
+    }
+
     w->tick++;
 }
 

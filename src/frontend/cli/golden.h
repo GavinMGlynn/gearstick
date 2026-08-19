@@ -21,6 +21,9 @@
 // them changes every recorded replay - which is why this number is allowed to
 // move during tuning and is not allowed to move by accident.
 //
+// And again for car-to-car collision, which cars in the selftest race now have
+// with each other.
+//
 // And once more for surface wear, which is new state that changes the race:
 // dirt churns and loses grip on the line everyone takes, ice polishes into
 // something faster and looser, pavement is unmoved.

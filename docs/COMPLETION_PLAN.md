@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 43 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 44 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -326,8 +326,16 @@ whatever the UI turns out to be — then the interface on top.
 
 ## Phase 7 — Destruction
 
-- [ ] **Car-to-car collision that launches rather than punishes.**
-      *Verification: a head-on at speed sends both cars somewhere, repeatably.*
+- [x] **Car-to-car collision that launches rather than punishes.**
+      *Verification: a head-on at five tiles a second sends both cars back the
+      way they came with more speed than they arrived with — the bounce is over
+      one on purpose, because a hit that costs two seconds and teaches nothing
+      is the punishment this design refuses. A harder one puts them in the air.
+      Their closest approach is watched rather than where they finish, since
+      cars that pass through each other and are shoved apart afterwards look
+      identical at the end. Cars already overlapping and not closing are pushed
+      apart, which no impulse can do. A car flying overhead does not touch the
+      one below. Three runs of the same collision hash identical.*
 - [ ] **Damage and wrecking**, from collisions and from bad landings.
       *Verification: a car can be destroyed by driving alone and by being hit.*
 - [ ] **Droppable hazards.** *Verification: a hazard dropped by one car affects

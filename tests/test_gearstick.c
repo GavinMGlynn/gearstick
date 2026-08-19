@@ -1251,6 +1251,141 @@ TEST(wear_belongs_to_the_race_and_not_to_the_track) {
 }
 
 // ---------------------------------------------------------------------------
+// Hitting each other
+// ---------------------------------------------------------------------------
+
+TEST(a_head_on_at_speed_sends_both_cars_somewhere) {
+    static gs_track t;
+    gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(10),
+                     (gs_angle)(GS_QUARTER * 2));
+
+    // Driving straight at each other at five tiles a second.
+    w.car[0].vx = GS_INT(5);
+    w.car[1].vx = -GS_INT(5);
+
+    // Watch the *closest* they ever get, not where they finish. Two cars that
+    // pass through each other and are shoved apart afterwards end up looking
+    // exactly like two cars that never overlapped.
+    gs_fix closest = INT32_MAX;
+    for (int i = 0; i < GS_TICK_HZ * 3; i++) {
+        gs_world_step(&w, &t, nullptr);
+        gs_fix d = gs_fix_len2(w.car[0].x - w.car[1].x, w.car[0].y - w.car[1].y);
+        if (d < closest) closest = d;
+    }
+
+    // Never meaningfully inside one another: they are pushed apart on the tick
+    // they touch, rather than left to trade impulses from inside each other.
+    CHECK(closest > GS_CAR_RADIUS * 2 - GS_ONE / 4);
+    CHECK(w.car[0].x < w.car[1].x);       // still on their own sides of it
+
+    // Both are going *backwards* now, which is the whole point: a hit is an
+    // event that sends people somewhere, not a two-second penalty.
+    CHECK(w.car[0].vx < 0);
+    CHECK(w.car[1].vx > 0);
+
+    // And with more energy than they arrived with, because the bounce is
+    // deliberately exaggerated - real cars absorb and stop, which is correct
+    // physics and the wrong game.
+    CHECK(gs_fix_abs(w.car[0].vx) > GS_INT(4));
+}
+
+TEST(the_same_collision_happens_the_same_way_every_time) {
+    static gs_track t;
+    gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
+
+    uint64_t first = 0;
+    for (int run = 0; run < 3; run++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+        gs_world_add_car(&w, &t, GS_VEH_DUNE_BUGGY, GS_INT(30), GS_INT(10) + GS_HALF,
+                         (gs_angle)(GS_QUARTER * 2));
+        w.car[0].vx = GS_INT(6);
+        w.car[1].vx = -GS_INT(4);
+
+        for (int i = 0; i < GS_TICK_HZ * 4; i++) {
+            gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, GS_IN_ACCEL, 0, 0 };
+            gs_world_step(&w, &t, in);
+        }
+
+        uint64_t h = gs_world_hash(&w);
+        if (run == 0) first = h;
+        CHECK(h == first);
+    }
+}
+
+TEST(cars_that_are_already_overlapping_push_apart_rather_than_sit_inside_each_other) {
+    // The case the separation step exists for, and the one an impulse cannot
+    // handle: two cars occupying the same ground and *not* approaching. There
+    // is no closing speed, so there is no impulse - without a push they would
+    // sit inside one another for the rest of the race.
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+
+    // Exactly coincident, which is also the divide-by-zero the normal would hit
+    // if nothing handled it.
+    CHECK(w.car[0].x == w.car[1].x && w.car[0].y == w.car[1].y);
+
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+
+    gs_fix apart = gs_fix_len2(w.car[0].x - w.car[1].x, w.car[0].y - w.car[1].y);
+    CHECK(apart >= GS_CAR_RADIUS * 2 - GS_ONE / 16);
+}
+
+TEST(a_hard_enough_hit_puts_a_car_in_the_air) {
+    static gs_track t;
+    gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(24), GS_INT(10),
+                     (gs_angle)(GS_QUARTER * 2));
+    w.car[0].vx = GS_INT(7);
+    w.car[1].vx = -GS_INT(7);
+
+    bool flew = false;
+    for (int i = 0; i < GS_TICK_HZ * 2; i++) {
+        gs_world_step(&w, &t, nullptr);
+        if (!w.car[0].grounded || !w.car[1].grounded) flew = true;
+    }
+    CHECK(flew);
+}
+
+TEST(a_car_flying_over_another_does_not_hit_it) {
+    static gs_track t;
+    gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+
+    // One of them well overhead and staying there.
+    w.car[1].z = GS_INT(3);
+    w.car[1].grounded = false;
+    w.car[1].vz = GS_INT(2);
+
+    gs_fix was = w.car[0].x;
+    for (int i = 0; i < 10; i++) gs_world_step(&w, &t, nullptr);
+
+    // Being swatted sideways by something passing overhead would be the least
+    // readable thing in the game.
+    CHECK(w.car[0].x == was);
+    CHECK(gs_car_speed(&w.car[0]) == 0);
+}
+
+// ---------------------------------------------------------------------------
 // Determinism - the property everything else is built on
 // ---------------------------------------------------------------------------
 
@@ -1549,6 +1684,11 @@ int main(void) {
     run_ice_polishes_into_something_faster_and_looser();
     run_a_sliding_tyre_churns_the_ground_more_than_a_rolling_one();
     run_wear_belongs_to_the_race_and_not_to_the_track();
+    run_a_head_on_at_speed_sends_both_cars_somewhere();
+    run_the_same_collision_happens_the_same_way_every_time();
+    run_cars_that_are_already_overlapping_push_apart_rather_than_sit_inside_each_other();
+    run_a_hard_enough_hit_puts_a_car_in_the_air();
+    run_a_car_flying_over_another_does_not_hit_it();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

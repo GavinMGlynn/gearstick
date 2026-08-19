@@ -106,6 +106,16 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in);
 // exchanges to prove two machines still agree.
 uint64_t gs_world_hash(const gs_world *w);
 
+// How big a car is when it hits something. A circle rather than the drawn box:
+// two rectangles need a separating-axis test and a contact point, and all of
+// that buys is corners catching corners - which is a source of surprise rather
+// than of skill. A circle is predictable, and predictable is the whole ethic.
+//
+// **Matched to the drawn size and not to the metric one.** A car is drawn about
+// 1.3 tiles long because an honest 2.7 m car reads as a speck; if collision used
+// the honest figure, cars would pass through each other while visibly touching.
+#define GS_CAR_RADIUS GS_RATIO(52, 100)
+
 // How worn the ground is at a point, 0 to GS_ONE. The renderer wants it, and so
 // will the analyser when it starts asking where the line has moved to.
 gs_fix gs_world_wear(const gs_world *w, gs_fix x, gs_fix y);
