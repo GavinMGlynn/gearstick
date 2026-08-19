@@ -15,6 +15,7 @@
 // the trigonometry test has to come from somewhere, so it comes from here.
 #define GS_PI 3.14159265358979323846
 
+#include "core/gs_ai.h"
 #include "core/gs_clock.h"
 #include "core/gs_edit.h"
 #include "core/gs_replay.h"
@@ -1790,6 +1791,121 @@ TEST(a_wreck_is_still_there_much_later_and_has_not_moved) {
 }
 
 // ---------------------------------------------------------------------------
+// Somebody to race
+// ---------------------------------------------------------------------------
+
+// Lay out a rectangular circuit of gates on a plain of the given surface, and
+// let the AI drive it. Reports how many laps it managed.
+typedef struct gs_ai_run { uint16_t laps; gs_fix travelled; bool wrecked; } gs_ai_run;
+
+static void gs_circuit(gs_track *t, gs_surface surface) {
+    gs_track_init(t, 60, 60, surface);
+    // Four corners, driven anticlockwise, each gate facing the way you go
+    // through it.
+    gs_track_add_gate(t, GS_INT(45), GS_INT(15), 0, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(45), GS_INT(45), GS_QUARTER, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(15), GS_INT(45), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
+    gs_track_add_gate(t, GS_INT(15), GS_INT(15), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
+}
+
+static gs_ai_run gs_ai_laps(const gs_track *t, gs_fix gravity, uint8_t vehicle,
+                            uint32_t seconds) {
+    gs_world w;
+    gs_world_init(&w, gravity);
+    gs_world_add_car(&w, t, vehicle, GS_INT(20), GS_INT(15), 0);
+
+    gs_fix last_x = w.car[0].x, last_y = w.car[0].y, travelled = 0;
+    for (uint32_t i = 0; i < GS_TICK_HZ * seconds; i++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, t, 0), 0, 0, 0 };
+        gs_world_step(&w, t, in);
+        travelled += gs_fix_len2(w.car[0].x - last_x, w.car[0].y - last_y);
+        last_x = w.car[0].x;
+        last_y = w.car[0].y;
+    }
+    return (gs_ai_run){ w.car[0].laps, travelled, w.car[0].wrecked };
+}
+
+TEST(the_ai_steers_both_ways) {
+    // Pinned directly rather than inferred from a lap. The circuit below turns
+    // the same way at every corner, so an AI that had lost the ability to steer
+    // one of the two directions still got round it - which is a test proving
+    // half of what it claims.
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(40), 0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(20), 0, GS_INT(4));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+
+    // Facing along +x with the gate off to one side, then the other.
+    w.car[0].next_gate = 0;                       // the gate at greater y
+    gs_input toward_y = gs_ai_drive(&w, &t, 0);
+    CHECK((toward_y & GS_IN_RIGHT) != 0);
+    CHECK((toward_y & GS_IN_LEFT) == 0);
+
+    w.car[0].next_gate = 1;                       // the gate at lesser y
+    gs_input away_from_y = gs_ai_drive(&w, &t, 0);
+    CHECK((away_from_y & GS_IN_LEFT) != 0);
+    CHECK((away_from_y & GS_IN_RIGHT) == 0);
+
+    // And straight at it, no steering at all - a driver that cannot hold a line
+    // weaves down every straight.
+    w.car[0].y = GS_INT(20);
+    gs_input dead_ahead = gs_ai_drive(&w, &t, 0);
+    CHECK((dead_ahead & (gs_input)(GS_IN_LEFT | GS_IN_RIGHT)) == 0);
+}
+
+TEST(the_ai_gets_round_a_circuit_it_has_never_seen) {
+    static gs_track t;
+    gs_circuit(&t, GS_SURF_PAVEMENT);
+
+    gs_ai_run run = gs_ai_laps(&t, GS_ONE, (uint8_t)GS_VEH_STOCK_CAR, 90);
+
+    // Round, repeatedly, without help and without a recorded line.
+    CHECK(run.laps >= 2);
+    CHECK(!run.wrecked);
+}
+
+TEST(the_ai_gets_round_on_surfaces_and_vehicles_it_was_not_tuned_for) {
+    static gs_track dirt, ice;
+    gs_circuit(&dirt, GS_SURF_DIRT);
+    gs_circuit(&ice, GS_SURF_ICE);
+
+    // Dirt has two thirds of the grip and ice has a sixth of it. Nothing about
+    // the driver changes; what changes is what it works out it can do.
+    CHECK(gs_ai_laps(&dirt, GS_ONE, (uint8_t)GS_VEH_DUNE_BUGGY, 90).laps >= 1);
+    CHECK(gs_ai_laps(&ice, GS_ONE, (uint8_t)GS_VEH_MOTORCYCLE, 150).laps >= 1);
+
+    // And in a machine with completely different numbers.
+    CHECK(gs_ai_laps(&dirt, GS_ONE, (uint8_t)GS_VEH_LUNAR_ROVER, 150).laps >= 1);
+}
+
+TEST(an_ai_race_is_deterministic_like_every_other_race) {
+    static gs_track t;
+    gs_circuit(&t, GS_SURF_DIRT);
+
+    uint64_t first = 0;
+    for (int run = 0; run < 3; run++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(15), 0);
+        gs_world_add_car(&w, &t, GS_VEH_DUNE_BUGGY, GS_INT(20), GS_INT(18), 0);
+
+        for (int i = 0; i < GS_TICK_HZ * 30; i++) {
+            gs_input in[GS_MAX_CARS] = {
+                gs_ai_drive(&w, &t, 0), gs_ai_drive(&w, &t, 1), 0, 0
+            };
+            gs_world_step(&w, &t, in);
+        }
+        uint64_t h = gs_world_hash(&w);
+        if (run == 0) first = h;
+        CHECK(h == first);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Determinism - the property everything else is built on
 // ---------------------------------------------------------------------------
 
@@ -2105,6 +2221,10 @@ int main(void) {
     run_a_destruction_race_fought_out_between_two_cars_finishes_by_itself();
     run_a_wreck_changes_the_racing_line_for_the_rest_of_the_race();
     run_a_wreck_is_still_there_much_later_and_has_not_moved();
+    run_the_ai_steers_both_ways();
+    run_the_ai_gets_round_a_circuit_it_has_never_seen();
+    run_the_ai_gets_round_on_surfaces_and_vehicles_it_was_not_tuned_for();
+    run_an_ai_race_is_deterministic_like_every_other_race();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

@@ -513,8 +513,32 @@ static void gs_mines(gs_world *w) {
 }
 
 void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
+    // Where everybody was, for the gate crossings below.
+    struct { gs_fix x, y; } was[GS_MAX_CARS];
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        was[i].x = w->car[i].x;
+        was[i].y = w->car[i].y;
+    }
+
     for (uint8_t i = 0; i < w->car_count; i++) {
         gs_car_step(w, &w->car[i], t, in != nullptr ? in[i] : (gs_input)0, i);
+    }
+
+    // Route progress. Checked against where each car was *before* this tick, so
+    // a gate cannot be missed by a car fast enough to step clean over it.
+    if (t->gate_count > 0) {
+        for (uint8_t i = 0; i < w->car_count; i++) {
+            gs_car *c = &w->car[i];
+            if (!c->active) continue;
+
+            const gs_gate *g = &t->gate[c->next_gate % t->gate_count];
+            if (!gs_gate_crossed(g, was[i].x, was[i].y, c->x, c->y)) continue;
+
+            c->next_gate = (uint8_t)((c->next_gate + 1) % t->gate_count);
+            // Back at the start line is a lap, which is the only place a lap can
+            // be counted without deciding arbitrarily where one begins.
+            if (c->next_gate == 0) c->laps++;
+        }
     }
 
     gs_mines(w);
@@ -598,6 +622,8 @@ uint64_t gs_world_hash(const gs_world *w) {
         gs_hash_u64(&h, (uint64_t)c->active);
         gs_hash_u64(&h, c->air_ticks);
         gs_hash_u64(&h, c->drop_cooldown);
+        gs_hash_u64(&h, c->next_gate);
+        gs_hash_u64(&h, c->laps);
     }
 
     // Hazards are state that changes the race, so they are hashed like

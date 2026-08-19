@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core/gs_ai.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -414,6 +415,69 @@ static int cmd_roster(void) {
     return 0;
 }
 
+// --- the AI, over every surface and every machine ---------------------------
+//
+// The claim is that it *plans* rather than follows: no recorded line, no baked
+// speed profile, nothing tuned per track. So the check is to hand it conditions
+// nobody tuned it for and see whether it still gets round.
+
+static void gs_ai_circuit(gs_track *t, gs_surface surface) {
+    gs_track_init(t, 60, 60, surface);
+    gs_track_add_gate(t, GS_INT(45), GS_INT(15), 0, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(45), GS_INT(45), GS_QUARTER, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(15), GS_INT(45), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
+    gs_track_add_gate(t, GS_INT(15), GS_INT(15), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
+}
+
+static int cmd_ai(void) {
+    static const struct { const char *name; gs_surface surface; gs_fix gravity; }
+    conditions[] = {
+        { "pavement, Earth",   GS_SURF_PAVEMENT, GS_ONE },
+        { "dirt, Earth",       GS_SURF_DIRT,     GS_ONE },
+        { "ice, Earth",        GS_SURF_ICE,      GS_ONE },
+        { "pavement, Moon",    GS_SURF_PAVEMENT, GS_RATIO(17, 100) },
+        { "pavement, Jupiter", GS_SURF_PAVEMENT, GS_RATIO(253, 100) },
+        { "dirt, Mars",        GS_SURF_DIRT,     GS_RATIO(38, 100) },
+    };
+    const size_t count = sizeof conditions / sizeof conditions[0];
+    const uint32_t seconds = 150;
+
+    printf("%-20s", "");
+    for (uint8_t v = 0; v < GS_VEH_COUNT; v++) printf("%12s", gs_vehicle(v)->name);
+    printf("\n");
+
+    int stuck = 0;
+    for (size_t i = 0; i < count; i++) {
+        static gs_track t;
+        gs_ai_circuit(&t, conditions[i].surface);
+
+        printf("%-20s", conditions[i].name);
+        for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
+            gs_world w;
+            gs_world_init(&w, conditions[i].gravity);
+            gs_world_add_car(&w, &t, v, GS_INT(20), GS_INT(15), 0);
+
+            for (uint32_t k = 0; k < GS_TICK_HZ * seconds; k++) {
+                gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &t, 0), 0, 0, 0 };
+                gs_world_step(&w, &t, in);
+            }
+
+            printf("%11u%s ", w.car[0].laps, w.car[0].wrecked ? "X" : " ");
+            if (w.car[0].laps == 0) stuck++;
+        }
+        printf("\n");
+    }
+
+    printf("\n%u seconds each, no recorded line and nothing tuned per track.\n",
+           seconds);
+    if (stuck != 0) {
+        printf("FAIL   %d of them could not get round at all\n", stuck);
+        return 1;
+    }
+    printf("OK     every vehicle completes a lap in every condition\n");
+    return 0;
+}
+
 static int cmd_vehicles(void) {
     printf("%-13s %7s %7s %6s %6s %8s %6s\n",
            "vehicle", "power", "brake", "top", "grip", "steer", "tough");
@@ -447,6 +511,7 @@ static int usage(void) {
            "hash\n"
            "  track FILE           write a track, read it back, check it survived\n"
            "  validate             show what the route checker accepts and refuses\n"
+           "  ai                   race the AI round a circuit in every condition\n"
            "  roster               race every vehicle over every condition\n"
            "  vehicles             the roster and its numbers\n"
            "  gravity              the presets\n\n"
@@ -465,6 +530,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "track") == 0 && argc > 2) return cmd_track(argv[2]);
     if (strcmp(argv[1], "validate") == 0) return cmd_validate();
+    if (strcmp(argv[1], "ai") == 0) return cmd_ai();
     if (strcmp(argv[1], "roster") == 0) return cmd_roster();
     if (strcmp(argv[1], "vehicles") == 0) return cmd_vehicles();
     if (strcmp(argv[1], "gravity") == 0) return cmd_gravity();

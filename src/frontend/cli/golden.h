@@ -33,6 +33,6 @@
 // in corners, and low gravity takes your acceleration along with your weight.
 // Every replay and ghost time recorded before that is invalid, which is what
 // this number failing is for. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0x3df6b84382e084caULL
+#define GS_SELFTEST_WORLD_HASH 0xf2da4016b8762ccaULL
 
 #endif // GS_GOLDEN_H

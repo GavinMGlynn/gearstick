@@ -54,6 +54,7 @@ gs_check_layering()
 # in CI, and rollback netcode later. See cmake/Layering.cmake, which enforces it.
 # ---------------------------------------------------------------------------
 add_library(gearstick_sim STATIC
+    src/core/gs_ai.c
     src/core/gs_clock.c
     src/core/gs_edit.c
     src/core/gs_fixed.c
@@ -251,6 +252,11 @@ if(GEARSTICK_TESTS)
     # Every way a route can be broken is refused, and named.
     add_test(NAME gearstick_validate COMMAND gearstick_cli validate)
     set_tests_properties(gearstick_validate PROPERTIES TIMEOUT 60)
+
+    # The AI gets round, on every surface and in every machine, with no
+    # recorded line and nothing tuned per track.
+    add_test(NAME gearstick_ai COMMAND gearstick_cli ai)
+    set_tests_properties(gearstick_ai PROPERTIES TIMEOUT 180)
 
     # Every vehicle is best at something. A roster where one machine wins
     # everything is a roster of one and five decorations, and this is what

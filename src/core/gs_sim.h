@@ -81,6 +81,12 @@ typedef struct gs_car {
     bool     wrecked;
     bool     active;
 
+    // Where it has got to round the route. Needed by anything that has to know
+    // what "ahead" means: the AI aiming at something, a race deciding who won,
+    // and eventually a ghost worth comparing against.
+    uint8_t  next_gate;
+    uint16_t laps;
+
     // Ticks until this car can drop another. Without it, holding the button
     // paves the track at a hundred and twenty hazards a second.
     uint16_t drop_cooldown;

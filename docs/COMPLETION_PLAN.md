@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 48 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 49 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -369,8 +369,18 @@ whatever the UI turns out to be — then the interface on top.
 
 ## Phase 8 — Opponents
 
-- [ ] **AI that completes any valid track.** *Verification: the analyser drives
-      every shipped track to completion at default settings.*
+- [x] **AI that completes any valid track.** *Verification: `gearstick_cli ai`
+      races every vehicle round a circuit in six conditions — three surfaces and
+      three gravities — for two and a half minutes each, and fails if any of
+      them cannot complete a lap. All thirty-six get round, none wrecks, and
+      none of it is tuned per track: there is no recorded line and no baked
+      speed profile. Steering is pinned in both directions separately, because
+      the circuit turns the same way at every corner and an AI that had lost one
+      direction still got round it.*
+
+      *The plan said "the analyser drives every shipped track", which needs
+      Phase 9 and tracks nobody has authored yet. This is the same question
+      asked with what exists.*
 - [ ] **AI that re-plans for the current gravity and vehicle** rather than
       following a baked speed profile. *Verification: the same track at 0.4g and
       1.8g produces different braking points.*
