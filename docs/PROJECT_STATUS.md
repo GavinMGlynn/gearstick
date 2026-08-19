@@ -1470,6 +1470,78 @@ leave the track and come back round it through the run-off. That is the surround
 working as designed — going round is slow, not impossible — but it means "put a
 wall across it" is no longer a way to construct an impassable track.
 
+### A recording says who drove it
+
+`docs/THREATS.md` called this the most serious open hole and it was: a replay
+carried the track, the dials, the grid and the machines and not the driver, so
+an honest recording was a bearer token. Anybody who obtained one could hand it
+in and the verifier would correctly agree the time had been driven — it had,
+just not by them.
+
+`gs_replay_meta` now carries a driver per car. That is replay version 4; version
+3 is still read, with its names blank. The claim carries who is submitting, and
+`gs_verify` refuses a mismatch with `GS_VERDICT_WRONG_DRIVER`. A recording that
+names nobody backs nobody's claim, because "it does not say" is not "it says
+you" — and a caller asserting no identity at all still gets an answer about the
+driving, which is what a local ghost or an offline analysis wants.
+
+### A submission is bound to the session that asked for it
+
+Records are keyed on track, conditions and lap count, so handing the same replay
+in twice already set one record rather than two. That was **idempotent by
+accident of the schema, not a defence** — and a thing that is safe by accident
+stops being safe the next time the schema changes.
+
+The server now issues a one-shot nonce when it places a client and again after
+every claim it resolves. `GS_MSG_SESSION` carries it out, the claim carries it
+back, and `gs_store_spend_session` retires it. Four things have to hold: the
+nonce was issued, it was issued to *this* driver, it is unspent, and it is in
+date.
+
+Three decisions in that are worth the words:
+
+- **All four conditions live in one `UPDATE`, and the change count is the
+  answer.** Reading the row and then writing it would be two steps with a gap
+  between them, and the gap is exactly where the same nonce gets spent twice.
+- **The nonce is spent after the re-race, not before.** Re-racing is what says
+  the time is real; a nonce burnt on a claim that turned out to be nonsense
+  would cost an honest client its next submission for somebody else's mistake.
+  A rejected claim gets a fresh nonce rather than a dead end.
+- **Sessions are rows in the database, like everything else the server knows.**
+  A server holding them in memory would forget every one on restart, and a nonce
+  nobody can retire is a nonce that can be handed in for ever — which is the
+  whole thing it exists to stop.
+
+The expiry check is the part that had to be watched fail. It was written into
+the comment before it was written into the SQL, where the fourth condition sat
+as a placeholder that was true for every row; the store test that asks for a
+token to be refused an hour after it was issued is what said so.
+
+**Six tests, and every one of them seen red.** Two in `test_store.c` pin the
+mechanism — a token is good once, only to whoever it was issued to, and only in
+date; and a token spent by one process is still spent when another opens the
+same file. Four in `test_server.c` pin it through an actual server: a claim
+carrying a nonce the server never issued is refused, one carrying a nonce issued
+to a different driver is refused, a second submission on the same nonce is
+refused, and a nonce spent before a restart is still spent after it. Removing
+the check turns all six red, which is how they are known to be testing it.
+
+The three server tests each carry a **positive control**: the same driver, the
+same recording, the same time, resubmitted with a nonce that *is* good, and it
+lands. Without that, a refusal proves only that something went wrong, and the
+test would pass just as happily if the claim were being rejected for a reason
+nobody intended. The cross-driver test needs a recording that is honestly bez's
+for the same reason — a bez claim backed by ada's recording is refused for
+naming the wrong driver and never reaches the session check at all.
+
+**Two limits, stated in `THREATS.md` rather than left to be discovered.** The
+nonce comes from `SDL_rand_bits`, which is not a cryptographic generator: this
+is the shape the defence will take and not yet a defence against somebody who
+can predict it. And it travels in clear over the same unauthenticated channel as
+everything else, so anybody on the path can read one — what stops them spending
+it is the name it was issued to, and a name is worth something only once the
+transport and the accounts land.
+
 ---
 
 ## What does not exist

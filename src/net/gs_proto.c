@@ -341,10 +341,23 @@ bool gs_proto_read_proof_chunk(const uint8_t *buf, size_t len, uint64_t *track,
     return true;
 }
 
+size_t gs_proto_session(uint8_t *buf, size_t cap, uint64_t nonce) {
+    if (cap < GS_HEAD + 8) return 0;
+    size_t n = gs_head(buf, cap, GS_MSG_SESSION);
+    gs_put64(buf + n, nonce); n += 8;
+    return n;
+}
+
+bool gs_proto_read_session(const uint8_t *buf, size_t len, uint64_t *nonce) {
+    if (!gs_expect(buf, len, GS_MSG_SESSION, GS_HEAD + 8)) return false;
+    *nonce = gs_get64(buf + GS_HEAD);
+    return true;
+}
+
 size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
                        uint64_t conditions, uint16_t laps, uint8_t vehicle,
-                       uint32_t lap_ticks, uint32_t race_ticks) {
-    if (cap < GS_HEAD + 8 + 8 + 2 + 1 + 4 + 4) return 0;
+                       uint32_t lap_ticks, uint32_t race_ticks, uint64_t nonce) {
+    if (cap < GS_HEAD + 8 + 8 + 2 + 1 + 4 + 4 + 8) return 0;
     size_t n = gs_head(buf, cap, GS_MSG_RESULT);
     gs_put64(buf + n, track);      n += 8;
     gs_put64(buf + n, conditions); n += 8;
@@ -352,20 +365,23 @@ size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
     buf[n++] = vehicle;
     gs_put32(buf + n, lap_ticks);  n += 4;
     gs_put32(buf + n, race_ticks); n += 4;
+    gs_put64(buf + n, nonce);      n += 8;
     return n;
 }
 
 bool gs_proto_read_result(const uint8_t *buf, size_t len, uint64_t *track,
                           uint64_t *conditions, uint16_t *laps, uint8_t *vehicle,
-                          uint32_t *lap_ticks, uint32_t *race_ticks) {
-    if (!gs_expect(buf, len, GS_MSG_RESULT, GS_HEAD + 27)) return false;
+                          uint32_t *lap_ticks, uint32_t *race_ticks,
+                          uint64_t *nonce) {
+    if (!gs_expect(buf, len, GS_MSG_RESULT, GS_HEAD + 35)) return false;
     size_t n = GS_HEAD;
     *track = gs_get64(buf + n);      n += 8;
     *conditions = gs_get64(buf + n); n += 8;
     *laps = gs_get16(buf + n);       n += 2;
     *vehicle = buf[n++];
     *lap_ticks = gs_get32(buf + n);  n += 4;
-    *race_ticks = gs_get32(buf + n);
+    *race_ticks = gs_get32(buf + n); n += 4;
+    *nonce = gs_get64(buf + n);
     return true;
 }
 

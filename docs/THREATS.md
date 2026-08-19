@@ -69,10 +69,31 @@ accounts. The value goes up when the transport and the accounts land, and not
 before — the binding is a precondition for those being worth anything, rather
 than a defence that stands alone.
 
-**Known gap: a submission is not bound to a session.** Records are keyed, so
-resubmitting the same replay is idempotent rather than harmful, but that is an
-accident of the schema rather than a defence. A server-chosen nonce in the claim
-makes it deliberate.
+**Closed: a submission is bound to the session that asked for it.** The server
+issues a one-shot nonce when it places a client and again after each claim is
+resolved; a claim carries the one it was given, and the server spends it. A
+nonce it never issued, one it issued to somebody else, one already spent or one
+out of date buys nothing. Records were already keyed, so a resubmission was
+idempotent — but idempotent by accident of the schema, and a thing that is safe
+by accident stops being safe when the schema changes. This makes it deliberate.
+
+The nonce is checked and retired in **one** `UPDATE`, with all four conditions in
+the statement, because reading the row and then writing it leaves a gap and the
+gap is where one nonce is spent twice. It is spent *after* the re-race rather
+than before: re-racing is what says the time is real, and a nonce burnt on a
+claim that turned out to be nonsense would cost an honest client its next
+submission for somebody else's mistake. Sessions live in the database with
+everything else the server knows, because a server that held them in memory
+would forget every one on restart, and a nonce nobody can retire is one that can
+be handed in for ever — which is the whole thing it exists to stop.
+
+**What *that* is worth, exactly.** Two limits, stated rather than left to be
+found. The nonce comes from `SDL_rand_bits`, which is not a cryptographic
+generator: this is the shape the defence will take and not yet a defence against
+somebody who can predict it. And a nonce travels in clear over the same
+unauthenticated channel as everything else, so anybody on the path can read one
+— it is refused from a different *name*, and the name is only worth something
+once the transport and the accounts below land.
 
 ### Cheating inside a race — A2
 
@@ -187,15 +208,12 @@ there is no authentication behind "whoever", so today that check is a formality.
 what depends on what. The first four are open holes today and are cheap; the
 transport work is larger and defends a channel nobody is currently attacking.
 
-1. **Bind a replay to its driver.** A recording carries the track, the dials, the
-   grid and the machines, and not who was holding the controller — so an honest
-   replay is a bearer token and anyone who obtains one can hand it in as theirs.
-   The driver goes inside the signed metadata and the server checks it against
-   the account submitting. Cheap, and a complete break until it is done.
-2. **Bind a submission to a session.** The same valid replay can be submitted
-   again. Records are keyed, so that is idempotent rather than harmful — but by
-   accident of the schema and not by design. A server-chosen nonce in the claim
-   makes it deliberate.
+1. ~~**Bind a replay to its driver.**~~ **Done.** The driver is inside the
+   recording's metadata and the verifier refuses a claim naming anybody else.
+2. ~~**Bind a submission to a session.**~~ **Done.** A server-chosen one-shot
+   nonce rides in the claim and is spent once, so a resubmission is refused by
+   design rather than being harmless by accident of the schema. Sessions are in
+   the database, so a nonce stays spent across a restart.
 3. **Commit then reveal for race inputs.** Rollback hands every peer the others'
    inputs for a tick before it must commit its own, so a modified client can
    delay and choose. Nothing desyncs, because everybody then simulates the

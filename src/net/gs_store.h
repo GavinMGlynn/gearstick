@@ -96,6 +96,32 @@ typedef struct gs_track_row {
 // The library, newest first. Returns how many rows were written.
 int gs_store_list_tracks(gs_store *s, gs_track_row *out, int cap);
 
+// --- sessions ---------------------------------------------------------------
+//
+// **A nonce the server issued to somebody, once.** A submission carries the one
+// it was given, and a nonce that was never issued, was issued to somebody else,
+// has already been spent or has expired buys nothing.
+//
+// Kept here rather than in memory for the same reason as everything else the
+// server knows: a server that forgot its sessions on restart could not say
+// whether a nonce had been spent, and a nonce nobody can retire can be handed in
+// for ever - which is exactly what it exists to stop.
+
+// Record one. False if that nonce is already known, which is the collision case
+// and means the caller should pick another.
+bool gs_store_issue_session(gs_store *s, uint64_t nonce, const char *who,
+                            int64_t now, int64_t lifetime);
+
+// Spend one. **True only if it was issued, to this person, unspent and still in
+// date** - all four checked in the one statement, because reading a row and then
+// updating it leaves a gap, and the gap is where the same nonce is spent twice.
+bool gs_store_spend_session(gs_store *s, uint64_t nonce, const char *who,
+                            int64_t now);
+
+// Throw away the ones that have expired. Returns how many went.
+int gs_store_forget_sessions(gs_store *s, int64_t before);
+int gs_store_session_count(gs_store *s);
+
 // --- publishing ------------------------------------------------------------
 //
 // **Published is a separate thing from stored.** The server holds every track

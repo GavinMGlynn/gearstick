@@ -82,7 +82,23 @@ static bool gs_migrate(gs_store *s) {
         // track it has been handed - it needs them to verify times - and shows
         // only the ones somebody chose to put up.
         "  published INTEGER NOT NULL DEFAULT 0,"
-        "  bytes     BLOB NOT NULL);")) {
+        "  bytes     BLOB NOT NULL);"
+
+        // **A session is a nonce the server issued to somebody, once.**
+        //
+        // In the database rather than in memory, for the reason everything else
+        // here is: a server that forgot its sessions on restart could not say
+        // whether a nonce had already been spent, and a nonce nobody can retire
+        // is a nonce that can be handed in for ever - which is the whole thing
+        // it exists to stop.
+        "CREATE TABLE IF NOT EXISTS session ("
+        "  nonce   INTEGER PRIMARY KEY,"
+        "  driver  TEXT NOT NULL,"
+        "  issued  INTEGER NOT NULL,"
+        "  expires INTEGER NOT NULL,"
+        "  spent   INTEGER NOT NULL DEFAULT 0);"
+
+        "CREATE INDEX IF NOT EXISTS session_by_driver ON session (driver);")) {
         return false;
     }
 
@@ -366,6 +382,75 @@ bool gs_store_get_track(gs_store *s, uint64_t hash, uint8_t *out, size_t cap,
     }
     sqlite3_finalize(st);
     return got;
+}
+
+// --- sessions ---------------------------------------------------------------
+
+bool gs_store_issue_session(gs_store *s, uint64_t nonce, const char *who,
+                            int64_t now, int64_t lifetime) {
+    if (s == nullptr || who == nullptr || nonce == 0) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "INSERT INTO session (nonce, driver, issued, expires, spent)"
+            "  VALUES (?1, ?2, ?3, ?4, 0)"
+            "  ON CONFLICT(nonce) DO NOTHING",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "issue session");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)nonce);
+    sqlite3_bind_text(st, 2, who, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, now);
+    sqlite3_bind_int64(st, 4, now + lifetime);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) > 0;
+    if (!ok) gs_fail(s, "issue session");
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_spend_session(gs_store *s, uint64_t nonce, const char *who,
+                            int64_t now) {
+    if (s == nullptr || who == nullptr || nonce == 0) return false;
+
+    // **All four conditions in the statement, and the change count is the
+    // answer.** Reading the row and then updating it would be two steps with a
+    // gap between them, and the gap is where the same nonce gets spent twice.
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "UPDATE session SET spent = 1"
+            "  WHERE nonce = ?1 AND driver = ?2 AND spent = 0 AND expires > ?3",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "spend session");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)nonce);
+    sqlite3_bind_text(st, 2, who, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, now);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+int gs_store_forget_sessions(gs_store *s, int64_t before) {
+    if (s == nullptr) return 0;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "DELETE FROM session WHERE expires <= ?1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "forget sessions");
+        return 0;
+    }
+    sqlite3_bind_int64(st, 1, before);
+    int gone = sqlite3_step(st) == SQLITE_DONE ? sqlite3_changes(s->db) : 0;
+    sqlite3_finalize(st);
+    return gone;
+}
+
+int gs_store_session_count(gs_store *s) {
+    return gs_count(s, "SELECT COUNT(*) FROM session");
 }
 
 bool gs_store_set_added(gs_store *s, uint64_t hash, int64_t when) {

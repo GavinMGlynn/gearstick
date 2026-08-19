@@ -85,6 +85,10 @@ struct gs_wire {
     // When this client last told the server it is still here, in milliseconds.
     // A clock rather than a count of frames: see GS_HEARTBEAT_MS.
     uint64_t last_ping;
+
+    // The one-shot token the server last issued, spent by the next claim. Zero
+    // means none has arrived, and a claim carrying zero is refused.
+    uint64_t session;
     uint32_t sent, received;
     char     error[256];
 };
@@ -199,10 +203,14 @@ void gs_wire_send_result(gs_wire *w, uint64_t track, uint64_t conditions,
                          size_t proof_len) {
     if (w == nullptr || !w->via_server) return;
 
+    // **The token the server last handed out.** A claim without one, or with a
+    // stale one, buys nothing - so a client that has not been given a session
+    // yet sends zero and is refused, which is the honest outcome rather than a
+    // quietly accepted claim.
     uint8_t buf[GS_PROTO_MTU];
     gs_to_server(w, buf,
                  gs_proto_result(buf, sizeof buf, track, conditions, laps,
-                                 vehicle, lap_ticks, race_ticks));
+                                 vehicle, lap_ticks, race_ticks, w->session));
 
     // The claim first, then what backs it. The server holds the one until it
     // has the other, so the order matters and the reverse would be a proof
@@ -367,6 +375,7 @@ void gs_wire_close(gs_wire *w) {
 }
 
 bool gs_wire_ready(const gs_wire *w) { return w != nullptr && w->ready; }
+uint64_t gs_wire_session(const gs_wire *w) { return w != nullptr ? w->session : 0; }
 uint8_t gs_wire_local(const gs_wire *w) { return w != nullptr ? w->local : 0; }
 uint8_t gs_wire_players(const gs_wire *w) { return w != nullptr ? w->players : 0; }
 
@@ -539,6 +548,12 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
         // before the track has arrived would be racing on whatever was loaded
         // locally, which is exactly the bug this item exists to remove.
         w->ready = w->lobby.count >= w->lobby.capacity && gs_wire_settled(w);
+        break;
+    }
+
+    case GS_MSG_SESSION: {
+        uint64_t nonce = 0;
+        if (gs_proto_read_session(buf, len, &nonce)) w->session = nonce;
         break;
     }
 

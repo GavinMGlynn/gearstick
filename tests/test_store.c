@@ -383,6 +383,77 @@ TEST(the_shipped_library_holds_the_stock_tracks_and_they_are_tracks) {
     remove(path);
 }
 
+TEST(a_session_token_is_good_once_and_only_for_who_it_was_issued_to) {
+    gs_store *s = gs_store_open(":memory:");
+    CHECK(s != nullptr);
+    if (s == nullptr) return;
+
+    const int64_t now = 1700000000;
+    const int64_t hour = 3600;
+
+    CHECK(gs_store_issue_session(s, 0x1111, "ada", now, hour));
+    CHECK(gs_store_session_count(s) == 1);
+
+    // The same nonce twice is a collision, and the caller is told so rather
+    // than quietly overwriting somebody else's session.
+    CHECK(!gs_store_issue_session(s, 0x1111, "bez", now, hour));
+
+    // **Issued to somebody else buys nothing**, which is the whole point: a
+    // token seen on the wire is no use to whoever saw it.
+    CHECK(!gs_store_spend_session(s, 0x1111, "bez", now));
+
+    // Nor one that was never issued.
+    CHECK(!gs_store_spend_session(s, 0x2222, "ada", now));
+
+    // Nor one that has expired.
+    CHECK(!gs_store_spend_session(s, 0x1111, "ada", now + hour + 1));
+
+    // Ada's own, in date: once.
+    CHECK(gs_store_spend_session(s, 0x1111, "ada", now + 10));
+    CHECK(!gs_store_spend_session(s, 0x1111, "ada", now + 11));
+
+    // Expired ones are swept, and a live one is left alone.
+    CHECK(gs_store_issue_session(s, 0x3333, "ada", now, 10));
+    CHECK(gs_store_issue_session(s, 0x4444, "ada", now, hour));
+    CHECK(gs_store_forget_sessions(s, now + 20) >= 1);
+    CHECK(gs_store_spend_session(s, 0x4444, "ada", now + 20));
+
+    gs_store_close(s);
+}
+
+TEST(a_session_outlives_the_process_that_issued_it) {
+    // **The reason sessions are in the database.** A server that kept them in
+    // memory would forget every one on restart, and a nonce nobody can retire is
+    // a nonce that can be handed in for ever - which is exactly what it exists
+    // to stop.
+    const char *path = "sessions.db";
+    remove(path);
+    remove("sessions.db-wal");
+    remove("sessions.db-shm");
+
+    const int64_t now = 1700000000;
+
+    gs_store *first = gs_store_open(path);
+    CHECK(first != nullptr);
+    if (first == nullptr) return;
+    CHECK(gs_store_issue_session(first, 0xabcd, "ada", now, 3600));
+    CHECK(gs_store_spend_session(first, 0xabcd, "ada", now + 1));
+    gs_store_close(first);
+
+    // A new process, the same store: the token is still spent.
+    gs_store *again = gs_store_open(path);
+    CHECK(again != nullptr);
+    if (again != nullptr) {
+        CHECK(!gs_store_spend_session(again, 0xabcd, "ada", now + 2));
+        CHECK(gs_store_session_count(again) == 1);
+        gs_store_close(again);
+    }
+
+    remove(path);
+    remove("sessions.db-wal");
+    remove("sessions.db-shm");
+}
+
 int main(void) {
     printf("gearstick store tests\n");
 
@@ -393,6 +464,8 @@ int main(void) {
     run_publishing_is_a_separate_thing_from_storing();
     run_a_name_with_a_quote_in_it_is_a_name_and_not_an_instruction();
     run_what_is_written_is_still_there_after_a_reopen();
+    run_a_session_token_is_good_once_and_only_for_who_it_was_issued_to();
+    run_a_session_outlives_the_process_that_issued_it();
     run_the_shipped_library_is_a_database_this_code_can_still_use();
     run_the_shipped_library_holds_the_stock_tracks_and_they_are_tracks();
 

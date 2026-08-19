@@ -41,6 +41,7 @@ typedef enum gs_msg {
     GS_MSG_WANT_TRACK, // "send me the track for this race"
     GS_MSG_RELAY,      // "pass this to the others for me"
     GS_MSG_RESULT,     // "this is what I did" - a time, offered
+    GS_MSG_SESSION,    // "here is a token; spend it when you claim something"
     GS_MSG_WANT_BEST,  // "what is the record here?"
     GS_MSG_PROOF,      // one chunk of the replay behind a claimed time
     GS_MSG_PUBLISH,    // "keep this track, and let people have it"
@@ -112,12 +113,24 @@ bool gs_proto_read_proof_chunk(const uint8_t *buf, size_t len, uint64_t *track,
                                uint16_t *chunk, uint16_t *chunks,
                                const uint8_t **data, uint16_t *data_len);
 
+// **A one-shot token, and the claim that spends it.**
+//
+// The server hands one out when it places a client and again after each claim
+// is resolved. A claim carries the token it was given; one that was never
+// issued, was issued to somebody else, has been spent or has expired buys
+// nothing. Records are keyed, so a resubmitted time was already harmless - but
+// harmless by accident of the schema, and a thing that is safe by accident stops
+// being safe when the schema changes.
+size_t gs_proto_session(uint8_t *buf, size_t cap, uint64_t nonce);
+bool   gs_proto_read_session(const uint8_t *buf, size_t len, uint64_t *nonce);
+
 size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
                        uint64_t conditions, uint16_t laps, uint8_t vehicle,
-                       uint32_t lap_ticks, uint32_t race_ticks);
+                       uint32_t lap_ticks, uint32_t race_ticks, uint64_t nonce);
 bool gs_proto_read_result(const uint8_t *buf, size_t len, uint64_t *track,
                           uint64_t *conditions, uint16_t *laps, uint8_t *vehicle,
-                          uint32_t *lap_ticks, uint32_t *race_ticks);
+                          uint32_t *lap_ticks, uint32_t *race_ticks,
+                          uint64_t *nonce);
 
 size_t gs_proto_want_best(uint8_t *buf, size_t cap, uint64_t track,
                           uint64_t conditions, uint16_t laps);

@@ -693,7 +693,7 @@ review, and it fails it for good reasons.
       only as good as knowing who sent the datagram, which today is nothing. It
       stops a replay somebody found being spent as their own, and it becomes a
       real defence when the accounts below land.*
-- [ ] **A submission is bound to the session that asked for it.** Records are
+- [x] **A submission is bound to the session that asked for it.** Records are
       keyed, so resubmitting the same replay sets one record rather than two —
       but that is a property of the schema rather than a defence, and a thing
       that is safe by accident stops being safe when the schema changes. A
@@ -706,7 +706,13 @@ review, and it fails it for good reasons.
       *Verification: a claim carrying a nonce the server did not issue, or one it
       issued to somebody else, or one it has already retired, is refused — and
       still refused after the server has been restarted, because the session
-      outlived the process that made it.*
+      outlived the process that made it. Each refusal is checked against a
+      control that does land, so a pass cannot come from the claim failing for
+      some other reason. Removing the check turns all six tests red.*
+      *Still open, and stated in `docs/THREATS.md` rather than implied: the nonce
+      is not from a cryptographic generator and it crosses the wire in clear, so
+      it is the shape of the defence rather than the whole of it until the
+      transport and the accounts below land.*
 - [ ] **A race commits to its inputs before it sees anybody else's.** Rollback
       hands every peer the others' inputs for a tick, so a modified client can
       wait and choose. Nothing desyncs, because everybody then simulates the
@@ -903,3 +909,13 @@ worth as much as what was decided about it.
       looked exactly like crashing and cost everybody else the full silence
       timeout. The roster now rides along with the ping, and a client says
       goodbye on its way out.
+- [ ] **`PROJECT_STATUS.md`'s "What does not exist" section is years out of
+      date.** *(Found while writing up the session binding.)* It still says
+      there is no race, no AI, no sound, no front end and no shipped tracks, all
+      of which have been built and ticked here. A reader sent to that file to
+      learn what works is being told the opposite by a section that is supposed
+      to be its honest half. Two commits also landed their item without touching
+      the file at all, which is how it got this far behind.
+      *Verification: every claim in the section is either true or gone, and
+      somebody who has not seen the code can still say what works from the file
+      alone.*

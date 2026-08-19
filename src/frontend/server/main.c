@@ -69,6 +69,12 @@ typedef struct gs_client {
     bool       claimed;
     gs_claim   claim;
 
+    // The one-shot token this client was last issued, and the one it offered
+    // with its claim. The first is what the server believes; the second is what
+    // arrived, and they have to be the same thing and still unspent.
+    uint64_t   session;
+    uint64_t   nonce;
+
     // A track on its way up, for publishing. Separate from the proof carrier
     // because somebody can perfectly well be submitting a time on one track
     // while uploading another.
@@ -159,6 +165,44 @@ static void gs_send(gs_client *c, const uint8_t *buf, size_t len) {
 
 // Everybody hears about everybody. A lobby that only told the newcomer who was
 // there would leave the people already waiting looking at a stale list.
+// The wall clock in Unix seconds, for dating a session. The server links SDL, so
+// unlike src/core/ it may ask what time it is.
+static int64_t gs_now(void) {
+    SDL_Time now = 0;
+    if (!SDL_GetCurrentTime(&now)) return 0;
+    return (int64_t)(now / 1000000000);
+}
+
+// How long a token is good for. Long enough that a race and its proof fit
+// comfortably inside one, short enough that a machine which walked away does not
+// leave something spendable lying about for a week.
+#define GS_SESSION_SECONDS 3600
+
+// Hand a client a fresh one-shot token, and remember it.
+//
+// **Random, and not a counter.** A predictable token is one somebody else can
+// present, which would make the whole exercise decorative. SDL's generator is
+// not a cryptographic one and this is not yet a cryptographic defence - it is
+// the shape the defence will take, and the note in docs/THREATS.md says so
+// rather than leaving a reader to assume otherwise.
+static void gs_issue_session(gs_client *c) {
+    if (gs_srv.store == nullptr || !c->used) return;
+
+    for (int tries = 0; tries < 8; tries++) {
+        uint64_t nonce = ((uint64_t)SDL_rand_bits() << 32) ^ (uint64_t)SDL_rand_bits();
+        if (nonce == 0) continue;
+
+        if (gs_store_issue_session(gs_srv.store, nonce, c->name, gs_now(),
+                                   GS_SESSION_SECONDS)) {
+            c->session = nonce;
+
+            uint8_t buf[GS_PROTO_MTU];
+            gs_send(c, buf, gs_proto_session(buf, sizeof buf, nonce));
+            return;
+        }
+    }
+}
+
 static void gs_send_lobby(gs_client *c) {
     gs_lobby l;
     gs_build_lobby(&l);
@@ -261,6 +305,11 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
         if (gs_present() > gs_srv.peak) gs_srv.peak = gs_present();
         gs_broadcast_lobby();
     }
+
+    // A token to spend on the next claim. Issued on every join, fresh or
+    // repeated, so a client that lost its welcome gets another rather than being
+    // left unable to submit anything.
+    gs_issue_session(c);
 }
 
 // --- the view ---------------------------------------------------------------
@@ -437,8 +486,9 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         uint32_t lap_ticks = 0, race_ticks = 0;
 
         if (at < 0 || gs_srv.store == nullptr) break;
+        uint64_t nonce = 0;
         if (!gs_proto_read_result(d->buf, len, &track, &conditions, &laps,
-                                  &vehicle, &lap_ticks, &race_ticks)) {
+                                  &vehicle, &lap_ticks, &race_ticks, &nonce)) {
             break;
         }
 
@@ -465,6 +515,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
             cl->claim.who[k] = cl->name[k];
         }
 
+        cl->nonce = nonce;
         cl->claimed = true;
         gs_carrier_expect(&cl->proof, track);
         break;
@@ -517,8 +568,31 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         if (v != GS_VERDICT_OK) {
             SDL_Log("%s: time rejected - %s", cl->name, gs_verdict_text(v));
             gs_srv.rejected++;
+            gs_issue_session(cl);
             break;
         }
+
+        // **The token, spent once.**
+        //
+        // After the driving is verified rather than before: re-racing is what
+        // says the time is real, and a token burnt on a claim that turned out to
+        // be nonsense would cost an honest client its next submission for
+        // somebody else's mistake.
+        //
+        // The store does the checking, in one statement - issued, to this
+        // person, unspent, in date - because reading a row and then updating it
+        // leaves a gap, and the gap is where one token is spent twice.
+        if (!gs_store_spend_session(gs_srv.store, cl->nonce, cl->name, gs_now())) {
+            SDL_Log("%s: time rejected - the session token was not one I issued, "
+                    "or it has been used already", cl->name);
+            gs_srv.rejected++;
+            gs_issue_session(cl);
+            break;
+        }
+
+        // And another for next time, so a client can submit again without
+        // rejoining.
+        gs_issue_session(cl);
 
         if (gs_store_put_record(gs_srv.store, cl->claim.track,
                                 cl->claim.conditions, cl->claim.laps, cl->name,

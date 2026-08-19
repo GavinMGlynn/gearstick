@@ -53,6 +53,10 @@ typedef struct gs_test_client {
     char why[64];
     bool pinged;              // the server asked how far away we are
     int  lobbies;             // how many rosters have arrived, ever
+
+    uint64_t session;         // the one-shot token the server issued
+    bool     heard_best;
+    uint32_t best_lap, best_race;
 } gs_test_client;
 
 static bool gs_client_open(gs_test_client *c, uint16_t server_port) {
@@ -103,6 +107,20 @@ static void gs_client_pump(gs_test_client *c) {
             gs_proto_read_lobby(d->buf, len, &c->lobby);
             c->lobbies++;
             break;
+        case GS_MSG_SESSION:
+            gs_proto_read_session(d->buf, len, &c->session);
+            break;
+        case GS_MSG_BEST: {
+            uint64_t track = 0, cond = 0;
+            uint16_t laps = 0;
+            char lap_who[GS_PROTO_NAME], race_who[GS_PROTO_NAME];
+            if (gs_proto_read_best(d->buf, len, &track, &cond, &laps,
+                                   &c->best_lap, lap_who, sizeof lap_who,
+                                   &c->best_race, race_who, sizeof race_who)) {
+                c->heard_best = true;
+            }
+            break;
+        }
         case GS_MSG_FULL:
             c->refused = gs_proto_read_full(d->buf, len, c->why, sizeof c->why);
             break;
@@ -1011,7 +1029,13 @@ TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
 // a client claims afterwards, this is what actually happened.
 static gs_replay gs_run;
 
-static void gs_race_for_real(gs_track *t, gs_claim *claim, uint16_t laps) {
+// The driver is a parameter because one test needs a recording that is honest
+// about somebody other than ada: to ask whether a token issued to one driver is
+// refused from another, the *driving* has to check out for the second driver.
+// A bez-driven claim backed by ada's recording would be refused for naming the
+// wrong driver and would never reach the session check at all.
+static void gs_race_for_real_as(gs_track *t, gs_claim *claim, uint16_t laps,
+                                const char *driver) {
     gs_track_init(t, 40, 16, GS_SURF_PAVEMENT);
     for (uint8_t y = 0; y <= t->h; y++) {
         for (uint8_t x = 0; x <= t->w; x++) gs_track_set_corner(t, x, y, 0);
@@ -1030,7 +1054,7 @@ static void gs_race_for_real(gs_track *t, gs_claim *claim, uint16_t laps) {
     // **Who was driving goes into the recording**, because the server checks it
     // against the name the client joined under. A recording that named nobody
     // was a thing anyone who obtained one could hand in as their own.
-    gs_replay_set_driver(&gs_run, 0, "ada");
+    gs_replay_set_driver(&gs_run, 0, driver);
 
     for (uint32_t i = 0; i < GS_TICK_HZ * 200 && !w.over; i++) {
         gs_input in[GS_MAX_CARS] = { 0 };
@@ -1045,6 +1069,10 @@ static void gs_race_for_real(gs_track *t, gs_claim *claim, uint16_t laps) {
     claim->laps = laps;
     claim->lap_ticks = w.car[0].best_lap;
     claim->race_ticks = w.car[0].finish_tick;
+}
+
+static void gs_race_for_real(gs_track *t, gs_claim *claim, uint16_t laps) {
+    gs_race_for_real_as(t, claim, laps, "ada");
 }
 
 static void gs_pump(gs_wire *w, int times) {
@@ -1142,6 +1170,468 @@ TEST(a_time_is_kept_only_if_re_racing_it_produces_it) {
     gs_wire_quit();
     gs_server_stop();
     remove("verified.db");
+    remove(track_path);
+}
+
+TEST(a_time_offered_without_the_servers_token_is_refused) {
+    // **The claim carries a token the server issued, and spends it once.**
+    // Records are keyed, so resubmitting a time was already harmless - but
+    // harmless by accident of the schema, and a thing that is safe by accident
+    // stops being safe when the schema changes.
+    CHECK(gs_wire_init());
+
+    static gs_track t;
+    gs_claim honest;
+    gs_race_for_real(&t, &honest, 3);
+
+    static uint8_t track_bytes[GS_CARRIER_MAX_BYTES];
+    size_t track_len = gs_track_serialize(&t, track_bytes, sizeof track_bytes);
+    const char *track_path = "session.gstrack";
+    SDL_IOStream *io = SDL_IOFromFile(track_path, "wb");
+    CHECK(io != nullptr);
+    if (io != nullptr) { SDL_WriteIO(io, track_bytes, track_len); SDL_CloseIO(io); }
+
+    remove("session.db");
+    remove("session.db-wal");
+    remove("session.db-shm");
+    if (!gs_server_start_verifying("47842", GS_SERVER_LIFETIME, "1", track_path,
+                                   "session.db")) {
+        gs_failures++;
+        return;
+    }
+
+    static uint8_t proof[sizeof(gs_replay) + 4096];
+    size_t proof_len = gs_replay_serialize(&gs_run, proof, sizeof proof);
+    CHECK(proof_len > 0);
+
+    gs_wire *a = gs_wire_server("127.0.0.1", 47842, "ada");
+    CHECK(a != nullptr);
+
+    uint64_t until = SDL_GetTicks() + 8000;
+    while (SDL_GetTicks() < until && gs_wire_session(a) == 0) {
+        gs_wire_poll(a);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
+        SDL_Delay(10);
+    }
+
+    // A token arrived at all, which is the thing the rest of this rests on.
+    CHECK(gs_wire_session(a) != 0);
+
+    // --- The honest submission, with the token it was given.
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+                        honest.lap_ticks, honest.race_ticks, proof, proof_len);
+    gs_pump(a, 80);
+
+    gs_wire_ask_best(a, honest.track, honest.conditions, honest.laps);
+    bool kept = false;
+    for (int k = 0; k < 80 && !kept; k++) {
+        gs_pump(a, 10);
+        kept = gs_wire_best_here(a)->known && gs_wire_best_here(a)->lap_ticks > 0;
+    }
+    CHECK(kept);
+
+    // --- And the same submission again. The token it used is spent, and the
+    // server has issued another - so this is a *fresh* token against a time
+    // that is no better than the one already there. It is accepted and beats
+    // nothing, which is the honest outcome: replaying a submission is not an
+    // attack, it is just pointless.
+    uint32_t was = gs_wire_best_here(a)->lap_ticks;
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+                        honest.lap_ticks, honest.race_ticks, proof, proof_len);
+    gs_pump(a, 80);
+    gs_wire_ask_best(a, honest.track, honest.conditions, honest.laps);
+    gs_pump(a, 30);
+    CHECK(gs_wire_best_here(a)->lap_ticks == was);
+
+    gs_wire_close(a);
+    gs_wire_quit();
+    gs_server_stop();
+
+    remove("session.db");
+    remove("session.db-wal");
+    remove("session.db-shm");
+    remove(track_path);
+}
+
+TEST(a_time_offered_with_a_token_the_server_never_issued_is_refused) {
+    // **The check the honest path cannot exercise.** A real client always sends
+    // the token it was handed, so the only way to ask whether the server is
+    // actually looking is to speak the protocol directly and offer one it was
+    // not given.
+    static gs_track t;
+    gs_claim honest;
+    gs_race_for_real(&t, &honest, 3);
+
+    static uint8_t track_bytes[GS_CARRIER_MAX_BYTES];
+    size_t track_len = gs_track_serialize(&t, track_bytes, sizeof track_bytes);
+    const char *track_path = "forged.gstrack";
+    SDL_IOStream *io = SDL_IOFromFile(track_path, "wb");
+    CHECK(io != nullptr);
+    if (io != nullptr) { SDL_WriteIO(io, track_bytes, track_len); SDL_CloseIO(io); }
+
+    remove("forged.db");
+    remove("forged.db-wal");
+    remove("forged.db-shm");
+    if (!gs_server_start_verifying("47844", GS_SERVER_LIFETIME, "1", track_path,
+                                   "forged.db")) {
+        gs_failures++;
+        return;
+    }
+
+    static uint8_t proof[sizeof(gs_replay) + 4096];
+    size_t proof_len = gs_replay_serialize(&gs_run, proof, sizeof proof);
+    CHECK(proof_len > 0);
+
+    gs_test_client c;
+    CHECK(gs_client_open(&c, 47844));
+    gs_client_say_hello(&c, "ada");
+
+    uint64_t until = SDL_GetTicks() + 8000;
+    while (SDL_GetTicks() < until && c.session == 0) {
+        gs_client_pump(&c);
+        SDL_Delay(10);
+    }
+    CHECK(c.session != 0);
+
+    // A perfectly good time, an honest recording, and **a token the server never
+    // issued**. Everything about the driving checks out; the submission does not.
+    uint8_t buf[GS_PROTO_MTU];
+    gs_client_send(&c, buf,
+                   gs_proto_result(buf, sizeof buf, honest.track,
+                                   honest.conditions, honest.laps, 0,
+                                   honest.lap_ticks, honest.race_ticks,
+                                   c.session ^ 0x5a5a5a5aull));
+
+    uint16_t chunks = gs_carrier_chunks(proof_len);
+    for (uint16_t i = 0; i < chunks; i++) {
+        size_t at = (size_t)i * GS_CHUNK_BYTES;
+        size_t take = proof_len - at;
+        if (take > GS_CHUNK_BYTES) take = GS_CHUNK_BYTES;
+        gs_client_send(&c, buf,
+                       gs_proto_proof_chunk(buf, sizeof buf, honest.track, i,
+                                            chunks, proof + at, (uint16_t)take));
+        gs_client_pump(&c);
+    }
+
+    until = SDL_GetTicks() + 3000;
+    while (SDL_GetTicks() < until) { gs_client_pump(&c); SDL_Delay(10); }
+
+    // Nothing was kept.
+    c.heard_best = false;
+    gs_client_send(&c, buf,
+                   gs_proto_want_best(buf, sizeof buf, honest.track,
+                                      honest.conditions, honest.laps));
+    until = SDL_GetTicks() + 5000;
+    while (SDL_GetTicks() < until && !c.heard_best) {
+        gs_client_pump(&c);
+        SDL_Delay(10);
+    }
+    CHECK(c.heard_best);
+    CHECK(c.best_lap == 0);
+    CHECK(c.best_race == 0);
+
+    gs_client_close(&c);
+    gs_server_stop();
+
+    remove("forged.db");
+    remove("forged.db-wal");
+    remove("forged.db-shm");
+    remove(track_path);
+}
+
+// --- speaking the claim protocol by hand -------------------------------------
+//
+// A real client always sends the token it was handed. These tests have to
+// choose the token, so they build the claim themselves.
+
+static void gs_client_offer(gs_test_client *c, const gs_claim *claim,
+                            const uint8_t *proof, size_t proof_len,
+                            uint64_t nonce) {
+    uint8_t buf[GS_PROTO_MTU];
+    gs_client_send(c, buf,
+                   gs_proto_result(buf, sizeof buf, claim->track,
+                                   claim->conditions, claim->laps, 0,
+                                   claim->lap_ticks, claim->race_ticks, nonce));
+
+    uint16_t chunks = gs_carrier_chunks(proof_len);
+    for (uint16_t i = 0; i < chunks; i++) {
+        size_t at = (size_t)i * GS_CHUNK_BYTES;
+        size_t take = proof_len - at;
+        if (take > GS_CHUNK_BYTES) take = GS_CHUNK_BYTES;
+        gs_client_send(c, buf,
+                       gs_proto_proof_chunk(buf, sizeof buf, claim->track, i,
+                                            chunks, proof + at, (uint16_t)take));
+        gs_client_pump(c);
+    }
+}
+
+// Wait for the server to hand this client a token. Everything else rests on one
+// arriving at all, so a test that carried on without it would be testing
+// nothing.
+static bool gs_client_wait_for_token(gs_test_client *c) {
+    uint64_t until = SDL_GetTicks() + 8000;
+    while (SDL_GetTicks() < until && c->session == 0) {
+        gs_client_pump(c);
+        SDL_Delay(10);
+    }
+    return c->session != 0;
+}
+
+// Pump for a while, so the server has had time to re-race a claim and answer.
+static void gs_client_settle(gs_test_client *c, int ms) {
+    uint64_t until = SDL_GetTicks() + (uint64_t)ms;
+    while (SDL_GetTicks() < until) {
+        gs_client_pump(c);
+        SDL_Delay(10);
+    }
+}
+
+// The best *race* here, which is the one keyed by lap count - a best lap is a
+// best lap whatever the race length, so it is shared across every record on the
+// track and cannot say which of two claims landed. Asked more than once,
+// because a datagram is allowed to vanish and a test that asked once would fail
+// on a bad afternoon.
+static uint32_t gs_client_best_race(gs_test_client *c, const gs_claim *claim) {
+    uint8_t buf[GS_PROTO_MTU];
+    c->heard_best = false;
+    c->best_lap = 0;
+    c->best_race = 0;
+
+    for (int tries = 0; tries < 5 && !c->heard_best; tries++) {
+        gs_client_send(c, buf,
+                       gs_proto_want_best(buf, sizeof buf, claim->track,
+                                          claim->conditions, claim->laps));
+        uint64_t until = SDL_GetTicks() + 1000;
+        while (SDL_GetTicks() < until && !c->heard_best) {
+            gs_client_pump(c);
+            SDL_Delay(10);
+        }
+    }
+    return c->best_race;
+}
+
+// Write a track where the server's --track can find it.
+static bool gs_put_track_file(const gs_track *t, const char *path) {
+    static uint8_t bytes[GS_CARRIER_MAX_BYTES];
+    size_t len = gs_track_serialize(t, bytes, sizeof bytes);
+    if (len == 0) return false;
+
+    SDL_IOStream *io = SDL_IOFromFile(path, "wb");
+    if (io == nullptr) return false;
+    SDL_WriteIO(io, bytes, len);
+    SDL_CloseIO(io);
+    return true;
+}
+
+static void gs_forget_store(const char *stem) {
+    char path[256];
+    SDL_snprintf(path, sizeof path, "%s", stem);          remove(path);
+    SDL_snprintf(path, sizeof path, "%s-wal", stem);      remove(path);
+    SDL_snprintf(path, sizeof path, "%s-shm", stem);      remove(path);
+}
+
+TEST(a_token_issued_to_one_driver_is_refused_from_another) {
+    // **A token seen on the wire is no use to whoever saw it.** The recording
+    // here is honestly bez's, so the driving checks out for bez and the claim
+    // reaches the session check instead of being turned away earlier for naming
+    // the wrong driver. The only thing wrong with the first submission is that
+    // the token belongs to ada.
+    static gs_track t;
+    gs_claim honest;
+    gs_race_for_real_as(&t, &honest, 3, "bez");
+
+    const char *track_path = "borrowed.gstrack";
+    CHECK(gs_put_track_file(&t, track_path));
+
+    gs_forget_store("borrowed.db");
+    if (!gs_server_start_verifying("47846", GS_SERVER_LIFETIME, "2", track_path,
+                                   "borrowed.db")) {
+        gs_failures++;
+        return;
+    }
+
+    static uint8_t proof[sizeof(gs_replay) + 4096];
+    size_t proof_len = gs_replay_serialize(&gs_run, proof, sizeof proof);
+    CHECK(proof_len > 0);
+
+    gs_test_client ada, bez;
+    CHECK(gs_client_open(&ada, 47846));
+    CHECK(gs_client_open(&bez, 47846));
+    gs_client_say_hello(&ada, "ada");
+    gs_client_say_hello(&bez, "bez");
+    CHECK(gs_client_wait_for_token(&ada));
+    CHECK(gs_client_wait_for_token(&bez));
+    CHECK(ada.session != bez.session);
+
+    // --- bez, driving honestly, spending ada's token.
+    gs_client_offer(&bez, &honest, proof, proof_len, ada.session);
+    gs_client_settle(&bez, 3000);
+    CHECK(gs_client_best_race(&bez, &honest) == 0);
+
+    // --- The control. The same driver, the same recording, the same time - and
+    // bez's own token. If this did not land, the refusal above would prove
+    // nothing about tokens.
+    gs_client_settle(&bez, 500);
+    CHECK(bez.session != 0);
+    gs_client_offer(&bez, &honest, proof, proof_len, bez.session);
+    gs_client_settle(&bez, 3000);
+    CHECK(gs_client_best_race(&bez, &honest) > 0);
+
+    gs_client_close(&ada);
+    gs_client_close(&bez);
+    gs_server_stop();
+
+    gs_forget_store("borrowed.db");
+    remove(track_path);
+}
+
+TEST(a_token_buys_one_submission_and_the_second_time_it_buys_nothing) {
+    // **Spent once.** Two times on the one track, keyed apart by their lap
+    // count, so the second submission has somewhere of its own to land - and
+    // whether it landed is then a thing the test can see, rather than being
+    // hidden behind a record that would have looked the same either way.
+    static gs_track t;
+    gs_claim three, two;
+
+    static uint8_t proof_three[sizeof(gs_replay) + 4096];
+    gs_race_for_real(&t, &three, 3);
+    size_t three_len = gs_replay_serialize(&gs_run, proof_three,
+                                           sizeof proof_three);
+
+    static uint8_t proof_two[sizeof(gs_replay) + 4096];
+    gs_race_for_real(&t, &two, 2);
+    size_t two_len = gs_replay_serialize(&gs_run, proof_two, sizeof proof_two);
+
+    CHECK(three_len > 0);
+    CHECK(two_len > 0);
+    CHECK(three.track == two.track);   // the same track, two different records
+    CHECK(three.race_ticks > 0);       // both finished, so both have a race time
+    CHECK(two.race_ticks > 0);
+
+    const char *track_path = "spent.gstrack";
+    CHECK(gs_put_track_file(&t, track_path));
+
+    gs_forget_store("spent.db");
+    if (!gs_server_start_verifying("47848", GS_SERVER_LIFETIME, "1", track_path,
+                                   "spent.db")) {
+        gs_failures++;
+        return;
+    }
+
+    gs_test_client c;
+    CHECK(gs_client_open(&c, 47848));
+    gs_client_say_hello(&c, "ada");
+    CHECK(gs_client_wait_for_token(&c));
+
+    uint64_t first = c.session;
+
+    // --- Spend it, honestly.
+    gs_client_offer(&c, &three, proof_three, three_len, first);
+    gs_client_settle(&c, 3000);
+    CHECK(gs_client_best_race(&c, &three) > 0);
+
+    // --- And spend it again on the other time. Nothing wrong with the driving;
+    // the token is used up.
+    gs_client_offer(&c, &two, proof_two, two_len, first);
+    gs_client_settle(&c, 3000);
+    CHECK(gs_client_best_race(&c, &two) == 0);
+
+    // --- The control: the same time again, with the token the server issued
+    // after the refusal. It lands, so what stopped it was the spent token.
+    CHECK(c.session != 0);
+    CHECK(c.session != first);
+    gs_client_offer(&c, &two, proof_two, two_len, c.session);
+    gs_client_settle(&c, 3000);
+    CHECK(gs_client_best_race(&c, &two) > 0);
+
+    gs_client_close(&c);
+    gs_server_stop();
+
+    gs_forget_store("spent.db");
+    remove(track_path);
+}
+
+TEST(a_spent_token_is_still_spent_after_the_server_restarts) {
+    // **The whole reason sessions live in the database.** A server that held
+    // them in memory would come back up remembering nothing, and a token it can
+    // no longer retire is one that can be handed in for ever - which is exactly
+    // what it exists to stop.
+    static gs_track t;
+    gs_claim three, two;
+
+    static uint8_t proof_three[sizeof(gs_replay) + 4096];
+    gs_race_for_real(&t, &three, 3);
+    size_t three_len = gs_replay_serialize(&gs_run, proof_three,
+                                           sizeof proof_three);
+
+    static uint8_t proof_two[sizeof(gs_replay) + 4096];
+    gs_race_for_real(&t, &two, 2);
+    size_t two_len = gs_replay_serialize(&gs_run, proof_two, sizeof proof_two);
+
+    CHECK(three_len > 0);
+    CHECK(two_len > 0);
+    CHECK(three.race_ticks > 0);       // both finished, so both have a race time
+    CHECK(two.race_ticks > 0);
+
+    const char *track_path = "restart.gstrack";
+    CHECK(gs_put_track_file(&t, track_path));
+
+    // A file, not ":memory:" - a store that vanished with the process could not
+    // answer the question this test asks.
+    gs_forget_store("restart.db");
+    if (!gs_server_start_verifying("47850", GS_SERVER_LIFETIME, "1", track_path,
+                                   "restart.db")) {
+        gs_failures++;
+        return;
+    }
+
+    gs_test_client c;
+    CHECK(gs_client_open(&c, 47850));
+    gs_client_say_hello(&c, "ada");
+    CHECK(gs_client_wait_for_token(&c));
+
+    uint64_t before_restart = c.session;
+    gs_client_offer(&c, &three, proof_three, three_len, before_restart);
+    gs_client_settle(&c, 3000);
+    CHECK(gs_client_best_race(&c, &three) > 0);
+    gs_client_close(&c);
+
+    // --- A different process, the same database.
+    gs_server_stop();
+    if (!gs_server_start_verifying("47850", GS_SERVER_LIFETIME, "1", track_path,
+                                   "restart.db")) {
+        gs_failures++;
+        gs_forget_store("restart.db");
+        remove(track_path);
+        return;
+    }
+
+    gs_test_client again;
+    CHECK(gs_client_open(&again, 47850));
+    gs_client_say_hello(&again, "ada");
+    CHECK(gs_client_wait_for_token(&again));
+    CHECK(again.session != before_restart);
+
+    // The record set before the restart is still there, which says the store is
+    // the same one and not a fresh file.
+    CHECK(gs_client_best_race(&again, &three) > 0);
+
+    // --- The token spent by the process that died is still spent.
+    gs_client_offer(&again, &two, proof_two, two_len, before_restart);
+    gs_client_settle(&again, 3000);
+    CHECK(gs_client_best_race(&again, &two) == 0);
+
+    // --- The control, against the new process's own token.
+    CHECK(again.session != 0);
+    gs_client_offer(&again, &two, proof_two, two_len, again.session);
+    gs_client_settle(&again, 3000);
+    CHECK(gs_client_best_race(&again, &two) > 0);
+
+    gs_client_close(&again);
+    gs_server_stop();
+
+    gs_forget_store("restart.db");
     remove(track_path);
 }
 
@@ -1344,6 +1834,11 @@ int main(void) {
     run_a_client_with_a_different_track_is_given_the_right_one();
     run_two_clients_that_cannot_see_each_other_race_through_the_server();
     run_a_time_is_kept_only_if_re_racing_it_produces_it();
+    run_a_time_offered_without_the_servers_token_is_refused();
+    run_a_time_offered_with_a_token_the_server_never_issued_is_refused();
+    run_a_token_issued_to_one_driver_is_refused_from_another();
+    run_a_token_buys_one_submission_and_the_second_time_it_buys_nothing();
+    run_a_spent_token_is_still_spent_after_the_server_restarts();
     run_a_record_set_on_one_client_is_seen_by_another();
     run_a_published_track_is_browsable_from_another_client_and_can_be_taken_down();
 

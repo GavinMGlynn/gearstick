@@ -158,6 +158,11 @@ void gs_wire_publish(gs_wire *w, const gs_track *t, const char *name);
 // have to stay checkable - it simply stops being listed.
 void gs_wire_withdraw(gs_wire *w, uint64_t track);
 
+// The one-shot token the server last issued to this client, or zero if none has
+// arrived. Exposed so a test can see whether a session exists at all; the claim
+// path spends it without being asked.
+uint64_t gs_wire_session(const gs_wire *w);
+
 // Ask what is published, and read what comes back.
 void gs_wire_ask_published(gs_wire *w);
 
