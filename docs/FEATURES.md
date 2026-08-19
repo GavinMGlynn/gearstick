@@ -239,6 +239,21 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   somebody else's track is a new track with a new identity, so nothing can be
   altered underneath anyone even by accident.
 
+- **Nothing on the wire in the clear.** `CANDIDATE`
+  Every datagram between a client and the server, and between two players,
+  sealed — so what crosses somebody's network is not readable by them and cannot
+  be altered on the way. The server's key is its identity, pinned the first time
+  you meet it the way an SSH host key is; there are no certificates and nothing
+  to expire.
+  **It has to be sealed one datagram at a time**, because the racing tolerates
+  loss and reordering and a design that recovers a stream would turn a dropped
+  packet into a stall. That also means replay protection is a sliding window
+  rather than a counter, or ordinary reordering would look like an attack.
+  Worth being clear about what it does not do: it cannot stop somebody cheating
+  in a game running on their own machine. Re-racing a submitted time is what
+  handles that. This stops the different problem of being watched or interfered
+  with in transit — and it is what makes a password possible at all.
+
 - **A profile you can prove is yours.** `CANDIDATE`
   The moment a name owns published work and a place on a leaderboard, it is worth
   taking, and a name typed at a prompt proves nothing. A password at least, and a

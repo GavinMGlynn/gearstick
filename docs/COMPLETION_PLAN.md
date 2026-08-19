@@ -568,14 +568,28 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       with and to nobody else; and every write path aimed at a track that shipped
       with the game is refused, including by the profile that happens to be
       called the same thing as its author.*
+- [ ] **Nothing on the wire in the clear.** Every datagram sealed with
+      ChaCha20-Poly1305 under a key agreed by X25519, from Monocypher as a
+      submodule under `ext/` — two files, public domain, and no certificates
+      because the server's public key *is* its identity, pinned on first meeting.
+      Sealed per datagram, because the racing tolerates loss and reordering and
+      anything that recovers a stream turns a dropped packet into a stall.
+      *Verification: a captured exchange contains none of the plaintext it
+      carried; a datagram with one bit changed is refused rather than acted on; a
+      captured datagram replayed later is refused; and a relayed four-player race
+      still agrees tick for tick with datagrams arriving out of order and one in
+      twenty dropped.*
 - [ ] **A profile you can prove is yours.** A password, and a second factor for
-      anybody who wants one. **Neither ever crosses the wire**: the server offers
-      a challenge and the client returns a proof over it, because the protocol has
-      no confidentiality and a password sent in the clear is not a password.
-      *Verification: a recorded exchange, replayed at the server verbatim, is
-      refused; the password does not appear anywhere in the bytes on the wire;
-      and a one-time code that has been used once does not work a second time
-      inside the window it is still valid for.*
+      anybody who wants one. **This comes after the tunnel and is small because
+      of it**: inside a sealed channel a password can simply be sent, and a
+      one-time code is the arithmetic it should always have been. Before the
+      tunnel it would have needed a challenge-response construction to avoid
+      sending either in the clear.
+      *Verification: a profile with a password cannot be used without it; a
+      one-time code that has been used once does not work a second time inside
+      the window it is still valid for; and a profile with no password set still
+      works, because a racing game that demands an account before anybody can
+      drive has lost the argument.*
 - [ ] **Wreckage that stays.** A destroyed car leaves debris that is real track
       geometry for the rest of the race. *Verification: a car driving the same
       line at the same speed is deflected by the wreck of an earlier one, and is
