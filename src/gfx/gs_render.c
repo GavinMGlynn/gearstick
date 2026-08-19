@@ -17,18 +17,22 @@ gs_render_stats gs_render_stats_now(void) { return gs_stats; }
 // Far apart on purpose: a player has to be able to tell what they are about to
 // drive onto from a glance at a 64-pixel diamond.
 static const gs_rgb gs_surface_colour[GS_SURF_COUNT] = {
-    [GS_SURF_PAVEMENT] = { 0.42f, 0.44f, 0.47f },
-    [GS_SURF_DIRT]     = { 0.55f, 0.40f, 0.24f },
-    [GS_SURF_ICE]      = { 0.68f, 0.82f, 0.92f },
-    // Told apart by hue as well as by lightness, because a shaded slope changes
-    // a tile's brightness by more than these differ by - two surfaces separated
-    // only by how pale they are would be one surface on a hillside.
-    [GS_SURF_SAND]     = { 0.78f, 0.68f, 0.42f },
-    [GS_SURF_GRAVEL]   = { 0.52f, 0.50f, 0.46f },
-    [GS_SURF_ROCK]     = { 0.36f, 0.33f, 0.34f },
-    [GS_SURF_DUST]     = { 0.62f, 0.59f, 0.54f },
-    [GS_SURF_SLUSH]    = { 0.58f, 0.64f, 0.68f },
-    [GS_SURF_GRASS]    = { 0.34f, 0.52f, 0.28f },
+    [GS_SURF_PAVEMENT] = { 0.42f, 0.44f, 0.48f },
+    [GS_SURF_DIRT]     = { 0.56f, 0.38f, 0.22f },
+    [GS_SURF_ICE]      = { 0.70f, 0.84f, 0.94f },
+
+    // **No two of these are near each other**, and the first attempt had three
+    // that were: gravel, dust and rock came out as the same grey at three
+    // brightnesses. That is fine on a flat plane and useless the moment the
+    // ground tilts, because shading changes a tile's brightness by more than
+    // those differed by - so two surfaces separated only by how pale they are
+    // become one surface on a hillside. A test measures the whole palette.
+    [GS_SURF_SAND]     = { 0.82f, 0.70f, 0.38f },
+    [GS_SURF_GRAVEL]   = { 0.50f, 0.58f, 0.46f },
+    [GS_SURF_ROCK]     = { 0.38f, 0.29f, 0.33f },
+    [GS_SURF_DUST]     = { 0.72f, 0.62f, 0.50f },
+    [GS_SURF_SLUSH]    = { 0.48f, 0.62f, 0.74f },
+    [GS_SURF_GRASS]    = { 0.26f, 0.50f, 0.22f },
 };
 
 // Fixed light, up and to the left. Nothing here casts a real shadow except the
@@ -192,6 +196,12 @@ void gs_render_set_car_paint(uint8_t car, uint8_t colour) {
 
 uint8_t gs_render_car_paint(uint8_t car) {
     return car < GS_MAX_CARS ? gs_car_paint[car] : 0;
+}
+
+SDL_FColor gs_render_surface_colour(gs_surface surface) {
+    const gs_rgb *c = &gs_surface_colour[surface < GS_SURF_COUNT ? surface
+                                                                 : GS_SURF_PAVEMENT];
+    return (SDL_FColor){ c->r, c->g, c->b, 1.0f };
 }
 
 SDL_FColor gs_render_paint_colour(uint8_t colour) {

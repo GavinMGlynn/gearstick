@@ -54,6 +54,12 @@
 // define, and gcc and clang chose differently. Changing the generator's output
 // deliberately means moving this number and saying so; changing it by accident
 // means somebody's shared seed no longer names the track they meant.
-#define GS_SELFTEST_GENERATOR_HASH 0x82a752b422e39812ULL
+// Moved once, deliberately, when the surfaces went from three to nine: the
+// generator picks the ground it builds on, so six more grounds is six times as
+// many things it can pick and every seed lands somewhere new. Nobody had shared
+// a seed yet. The *world* hash below did not move, because the three original
+// surfaces kept their numbers and their physics - which is what appending to
+// that enum rather than renumbering it is for.
+#define GS_SELFTEST_GENERATOR_HASH 0xab0105176f872f72ULL
 
 #endif // GS_GOLDEN_H

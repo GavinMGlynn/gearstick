@@ -1180,6 +1180,49 @@ captures, so the pixels in the HUD's corner differed whatever the HUD did, and
 pinning the position to a constant did not fail it. Perturbing all three of the
 numbers it draws now fails the test that names them.
 
+### Nine grounds, and how they were kept apart
+
+The gravity dial has always named eight worlds, and there were three surfaces,
+all of which could have been a car park. There are now nine: sand, gravel, rock,
+dust, slush and grass beside pavement, dirt and ice. The enum is **appended to
+and never renumbered** — the value is what a saved track stores, so moving one
+would silently change the ground under every track anybody has built. The world
+hash confirms it: it did not move.
+
+**The rule each one had to pass is that it is a different thing to drive on.**
+That is measured rather than argued, on four counts: flat-out speed, how long to
+reach three tiles a second, how fast a full-lock circle settles, and how much
+that circle changes once the tiles under it are ground flat. Every pair of the
+nine differs by at least a sixth on at least one.
+
+Getting there took two corrections worth recording.
+
+*Lap time alone does not separate them.* The first measurement was one car round
+one track, and it put gravel and grass 0.07 seconds apart and dust and slush 0.06
+apart. Two grounds can reach the same lap time by being bad at different things —
+one robs you of drive, the other of grip — so a single number folds a real
+difference into a coincidence.
+
+*Neither does a fresh surface.* Adding wear to the measurement is what finally
+separated dirt from gravel, which sit close on every fresh-surface figure and
+behave differently the moment anybody has driven on them. Wear is one of the
+three things a surface definition controls and ignoring it under-counted the
+distinctions the design had already made.
+
+The palette was measured too, and failed first time. Gravel, dust and rock came
+out as the same grey at three brightnesses — which reads perfectly well on a flat
+plane and disappears the moment the ground tilts, because shading changes a
+tile's brightness by more than those differed by. Two surfaces separated only by
+how pale they are are one surface on a hillside. Every pair is now more than 0.15
+apart in RGB, and a test says so.
+
+Two smaller things fell out. The editor kept its own list of three surface names
+against nine surfaces — a combo box reading past the end of its own array — and
+now takes them from the surface table, because a name written down twice is a
+name that will disagree with itself. And the generator picked its ground from a
+hard-coded three; it picks from all nine, which moved the generator's golden hash
+deliberately and with a note.
+
 ---
 
 ## What does not exist

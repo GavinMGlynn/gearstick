@@ -98,6 +98,12 @@ uint8_t gs_render_car_paint(uint8_t car);
 // The colour itself, for a swatch next to somebody's name on a menu.
 SDL_FColor gs_render_paint_colour(uint8_t colour);
 
+// The ground colour a surface is drawn in, before any shading. Out here so a
+// test can check the whole palette apart rather than a person checking it by
+// looking - three of these were the same grey at three brightnesses once, which
+// is invisible on a flat plane and obvious the moment the ground tilts.
+SDL_FColor gs_render_surface_colour(gs_surface surface);
+
 void gs_render_reset_stats(void);
 gs_render_stats gs_render_stats_now(void);
 

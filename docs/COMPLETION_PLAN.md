@@ -549,16 +549,21 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       camera came in to twice the distance it was: a car was three and a half
       percent of the screen's width against the original's seven and a half, and
       the comment claiming a split pane showed ten tiles was describing twenty.*
-- [ ] **A ground for every world on the dial.** The gravity dial names eight
-      bodies and there are three surfaces, all of which could be a car park.
-      Dust, sand, gravel, rock and slush alongside pavement, dirt and ice — each
-      one earning its place in grip, rolling resistance, how much engine reaches
-      the ground, and what it turns into once it has been driven on. Nothing that
-      is only a different colour.
-      *Verification: on a track of one surface, the same car with the same inputs
-      finishes at a measurably different time on every one of them, and no two
-      are within a hair of each other — so the set is a menu of behaviours rather
-      than a palette.*
+- [x] **A ground for every world on the dial.** Nine now: sand, gravel, rock,
+      dust, slush and grass alongside pavement, dirt and ice — each earning its
+      place in grip, rolling resistance, how much engine reaches the ground, and
+      what it turns into once it has been driven on. Nothing that is only a
+      different colour.
+      *Verification: each ground is measured on four counts — flat-out speed,
+      how long it takes to reach three tiles a second, how fast a full-lock
+      circle settles, and how much that circle changes once the tiles under it
+      are worn out. **No two of the nine are within a sixth of each other on all
+      four.** Lap time alone was not enough: two grounds can reach the same lap
+      time by being bad at different things, and how a surface changes under use
+      is a difference a fresh-surface measurement cannot see at all. The colours
+      are measured too, because the first palette had gravel, dust and rock as
+      one grey at three brightnesses — fine on a flat plane and invisible the
+      moment the ground tilts.*
 - [ ] **Wreckage that stays.** A destroyed car leaves debris that is real track
       geometry for the rest of the race. *Verification: a car driving the same
       line at the same speed is deflected by the wreck of an earlier one, and is

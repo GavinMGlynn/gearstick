@@ -132,10 +132,11 @@ void gs_generate_shape(gs_track *t, uint32_t seed, gs_track_shape shape) {
     uint8_t w = (uint8_t)(36 + gs_pick(&r, 5) * 4);   // 36 to 52
     uint8_t h = (uint8_t)(18 + gs_pick(&r, 4) * 2);   // 18 to 24
 
-    static const gs_surface ground[3] = {
-        GS_SURF_PAVEMENT, GS_SURF_DIRT, GS_SURF_ICE,
-    };
-    gs_surface base = ground[gs_pick(&r, 3)];
+    // **Every ground, not the three there used to be.** A generator that only
+    // knew about pavement, dirt and ice would keep producing 1985 while the
+    // editor offered nine worlds - and the surfaces nobody generates are the
+    // surfaces nobody drives on.
+    gs_surface base = (gs_surface)gs_pick(&r, GS_SURF_COUNT);
 
     switch (shape) {
     case GS_SHAPE_CIRCUIT: {
@@ -150,7 +151,7 @@ void gs_generate_shape(gs_track *t, uint32_t seed, gs_track_shape shape) {
             gs_lay_ridge(t, at, width, height);
         }
         uint8_t edge = (uint8_t)(4 + gs_pick(&r, 4));
-        gs_surface edge_surface = ground[gs_pick(&r, 3)];
+        gs_surface edge_surface = (gs_surface)gs_pick(&r, GS_SURF_COUNT);
         gs_lay_band(t, 0, edge, edge_surface);
         break;
     }
@@ -181,7 +182,7 @@ void gs_generate_shape(gs_track *t, uint32_t seed, gs_track_shape shape) {
         gs_lay_ridge(t, GS_GEN_RUNUP, 8, gs_height(&r, 6));
         for (uint8_t k = 0; k < 3; k++) {
             uint8_t width = (uint8_t)(6 + gs_pick(&r, 6));
-            gs_surface s = ground[gs_pick(&r, 3)];
+            gs_surface s = (gs_surface)gs_pick(&r, GS_SURF_COUNT);
             gs_lay_band(t, (uint8_t)(4 + k * (w / 3)), width, s);
         }
         break;
@@ -197,10 +198,10 @@ void gs_generate_shape(gs_track *t, uint32_t seed, gs_track_shape shape) {
         gs_lay_ridge(t, GS_GEN_RUNUP, width, height);
 
         uint8_t near_edge = (uint8_t)(4 + gs_pick(&r, 4));
-        gs_surface near_surface = ground[gs_pick(&r, 3)];
+        gs_surface near_surface = (gs_surface)gs_pick(&r, GS_SURF_COUNT);
         gs_lay_band(t, 0, near_edge, near_surface);
 
-        gs_surface far_surface = ground[gs_pick(&r, 3)];
+        gs_surface far_surface = (gs_surface)gs_pick(&r, GS_SURF_COUNT);
         gs_lay_band(t, (uint8_t)(w - 8), 8, far_surface);
         break;
     }

@@ -3940,6 +3940,150 @@ TEST(a_wrecked_car_stops_moving) {
 
 
 // ---------------------------------------------------------------------------
+// The grounds
+// ---------------------------------------------------------------------------
+
+// What a surface is like to drive on, measured rather than asserted: how fast a
+// car ends up going flat out, how long it takes to get to three tiles a second,
+// how fast a full-lock circle settles at, and how much that circle changes once
+// it has been driven into the ground.
+typedef struct gs_feel {
+    gs_fix top;
+    int32_t to_speed;   // ticks
+    gs_fix corner;
+    int32_t wear;       // per cent change in the circle, once worn
+} gs_feel;
+
+static gs_track gs_ground;
+
+static void gs_measure_ground(gs_surface s, gs_feel *out) {
+    gs_track_init(&gs_ground, 64, 64, s);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &gs_ground, GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(6), 0);
+    for (int i = 0; i < GS_TICK_HZ * 25; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &gs_ground, in);
+    }
+    out->top = gs_car_speed(&w.car[0]);
+
+    gs_world a;
+    gs_world_init(&a, GS_ONE);
+    gs_world_add_car(&a, &gs_ground, GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(6), 0);
+    out->to_speed = GS_TICK_HZ * 30;
+    for (int i = 0; i < GS_TICK_HZ * 30; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&a, &gs_ground, in);
+        if (gs_car_speed(&a.car[0]) >= GS_INT(3)) { out->to_speed = i; break; }
+    }
+
+    // A circle, held long enough to grind the tiles under it flat.
+    gs_world c;
+    gs_world_init(&c, GS_ONE);
+    gs_world_add_car(&c, &gs_ground, GS_VEH_STOCK_CAR, GS_INT(32), GS_INT(32), 0);
+    gs_fix early = 0;
+    for (int i = 0; i < GS_TICK_HZ * 150; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL | GS_IN_LEFT, 0, 0, 0 };
+        gs_world_step(&c, &gs_ground, in);
+        if (i == GS_TICK_HZ * 20) early = gs_car_speed(&c.car[0]);
+    }
+    out->corner = early;
+    gs_fix late = gs_car_speed(&c.car[0]);
+    out->wear = early > GS_RATIO(1, 100)
+                    ? (int32_t)(((int64_t)(late - early) * 100) / early)
+                    : 0;
+}
+
+// How far apart two of them are, as a percentage, on whichever of the four they
+// differ by most.
+static int32_t gs_ground_gap(const gs_feel *a, const gs_feel *b) {
+    int32_t best = 0;
+    int64_t pairs[3][2] = {
+        { a->top, b->top }, { a->to_speed, b->to_speed }, { a->corner, b->corner },
+    };
+    for (int i = 0; i < 3; i++) {
+        int64_t mean = (pairs[i][0] + pairs[i][1]) / 2;
+        if (mean <= 0) continue;
+        int64_t d = pairs[i][0] - pairs[i][1];
+        if (d < 0) d = -d;
+        int32_t pct = (int32_t)(d * 100 / mean);
+        if (pct > best) best = pct;
+    }
+    int32_t dw = a->wear - b->wear;
+    if (dw < 0) dw = -dw;
+    if (dw > best) best = dw;
+    return best;
+}
+
+TEST(every_ground_is_a_different_thing_to_drive_on) {
+    // **The rule that makes a surface a surface and not a colour.** The gravity
+    // dial names eight worlds; grounds for them are worth having only if the car
+    // behaves differently on each, and a set where two of them drive the same is
+    // a set with a spare entry in it.
+    //
+    // Measured on four counts, because two grounds can arrive at the same lap
+    // time by being bad at different things - and because how a surface changes
+    // under use is a difference a fresh-surface measurement cannot see at all.
+    static gs_feel feel[GS_SURF_COUNT];
+    for (uint8_t s = 0; s < GS_SURF_COUNT; s++) {
+        gs_measure_ground((gs_surface)s, &feel[s]);
+
+        // Every one of them is driveable: a ground nobody can move on is not a
+        // ground, it is a wall painted on the floor.
+        CHECK(feel[s].top > GS_INT(2));
+        CHECK(feel[s].to_speed < GS_TICK_HZ * 20);
+    }
+
+    for (uint8_t i = 0; i < GS_SURF_COUNT; i++) {
+        for (uint8_t j = (uint8_t)(i + 1); j < GS_SURF_COUNT; j++) {
+            // A sixth apart on *something*. Two grounds closer than that are one
+            // ground with two names.
+            CHECK(gs_ground_gap(&feel[i], &feel[j]) >= 15);
+        }
+    }
+}
+
+TEST(a_ground_is_named_once_and_the_name_is_the_surface_table) {
+    // Nine surfaces and a hard-coded list of three names was a combo box reading
+    // past the end of its own array. Nothing may keep a second list.
+    for (uint8_t s = 0; s < GS_SURF_COUNT; s++) {
+        CHECK(gs_surfaces[s].name != nullptr);
+        CHECK(gs_surfaces[s].name[0] != '\0');
+        for (uint8_t o = (uint8_t)(s + 1); o < GS_SURF_COUNT; o++) {
+            CHECK(strcmp(gs_surfaces[s].name, gs_surfaces[o].name) != 0);
+        }
+    }
+}
+
+TEST(a_saved_track_keeps_the_ground_it_was_painted_with) {
+    // The stored value is the enum, so appending is safe and renumbering is not:
+    // a surface that moved would silently change the ground under every track
+    // anybody had built.
+    static gs_track t;
+    gs_track_init(&t, 16, 16, GS_SURF_PAVEMENT);
+    for (uint8_t s = 0; s < GS_SURF_COUNT; s++) {
+        gs_track_set_surface(&t, (uint8_t)s, 0, (gs_surface)s);
+    }
+
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+    size_t n = gs_track_serialize(&t, buf, sizeof buf);
+    CHECK(n > 0);
+
+    static gs_track back;
+    CHECK(gs_track_deserialize(&back, buf, n));
+    for (uint8_t s = 0; s < GS_SURF_COUNT; s++) {
+        CHECK(gs_track_surface(&back, GS_INT(s) + GS_HALF, GS_HALF) == (gs_surface)s);
+    }
+
+    // And the first three are where they always were, because tracks in the
+    // world were saved against those numbers.
+    CHECK(GS_SURF_PAVEMENT == 0);
+    CHECK(GS_SURF_DIRT == 1);
+    CHECK(GS_SURF_ICE == 2);
+}
+
+// ---------------------------------------------------------------------------
 // Where everybody is in the race
 // ---------------------------------------------------------------------------
 
@@ -4303,6 +4447,9 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_every_ground_is_a_different_thing_to_drive_on();
+    run_a_ground_is_named_once_and_the_name_is_the_surface_table();
+    run_a_saved_track_keeps_the_ground_it_was_painted_with();
     run_the_leader_is_whoever_is_furthest_round_the_route();
     run_every_car_has_a_place_and_no_two_share_one();
     run_a_car_that_has_finished_keeps_the_place_it_finished_in();

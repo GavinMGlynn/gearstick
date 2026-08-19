@@ -42,13 +42,13 @@ const gs_surface_def gs_surfaces[GS_SURF_COUNT] = {
     // Gravel gives you grip only while it is still there. It rolls under the
     // tyre, so the first car through has more of it than the fifth - the only
     // surface here that gets *better* on the line for the person behind.
-    [GS_SURF_GRAVEL]   = { "gravel",   GS_RATIO( 74, 100), GS_RATIO(13, 100), GS_RATIO(82, 100),
-                           GS_RATIO(8, 100), GS_RATIO(118, 100), GS_RATIO(80, 100) },
+    [GS_SURF_GRAVEL]   = { "gravel",   GS_RATIO( 60, 100), GS_RATIO(10, 100), GS_RATIO(64, 100),
+                           GS_RATIO(8, 100), GS_RATIO(125, 100), GS_RATIO(78, 100) },
 
     // Basalt: more grip than pavement and it costs you. Rolling resistance is
     // high and it does not wear at all, so a fast line on rock is fast on the
     // last lap too - and every landing on it is taken at full violence.
-    [GS_SURF_ROCK]     = { "rock",     GS_RATIO(128, 100), GS_RATIO(11, 100), GS_ONE,
+    [GS_SURF_ROCK]     = { "rock",     GS_RATIO(155, 100), GS_RATIO(20, 100), GS_ONE,
                            0, GS_ONE, GS_ONE },
 
     // Regolith, never weathered, never swept. Almost no rolling resistance and
@@ -67,8 +67,8 @@ const gs_surface_def gs_surfaces[GS_SURF_COUNT] = {
     // Grass is fine until it is not. Nearly dirt's grip while it is whole, and
     // it tears into mud faster than dirt ruts - the surface that punishes the
     // car in front for having found the good line.
-    [GS_SURF_GRASS]    = { "grass",    GS_RATIO( 80, 100), GS_RATIO(15, 100), GS_RATIO(88, 100),
-                           GS_RATIO(14, 100), GS_RATIO(55, 100), GS_RATIO(140, 100) },
+    [GS_SURF_GRASS]    = { "grass",    GS_RATIO( 90, 100), GS_RATIO(19, 100), GS_RATIO(94, 100),
+                           GS_RATIO(14, 100), GS_RATIO(55, 100), GS_RATIO(150, 100) },
 };
 
 void gs_track_init(gs_track *t, uint8_t w, uint8_t h, gs_surface surface) {

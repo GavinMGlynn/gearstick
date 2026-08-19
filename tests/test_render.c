@@ -2454,6 +2454,30 @@ static int gs_hud_pixels_differing(const gs_frame *a, const gs_frame *b) {
     return n;
 }
 
+TEST(no_two_grounds_are_drawn_the_same_colour) {
+    (void)ren;
+
+    // **Measured, not looked at.** The first version of this palette had gravel,
+    // dust and rock as the same grey at three brightnesses, which reads fine on
+    // a flat plane and vanishes the moment the ground tilts: shading changes a
+    // tile's brightness by more than those differed by, so on a hillside they
+    // were one surface. A player has to know what they are about to drive onto.
+    for (uint8_t a = 0; a < GS_SURF_COUNT; a++) {
+        SDL_FColor ca = gs_render_surface_colour((gs_surface)a);
+
+        // In range, and not so dark or so pale that shading has nowhere to go.
+        CHECK(ca.r > 0.1f && ca.r < 0.98f);
+        CHECK(ca.g > 0.1f && ca.g < 0.98f);
+        CHECK(ca.b > 0.1f && ca.b < 0.98f);
+
+        for (uint8_t b = (uint8_t)(a + 1); b < GS_SURF_COUNT; b++) {
+            SDL_FColor cb = gs_render_surface_colour((gs_surface)b);
+            float dr = ca.r - cb.r, dg = ca.g - cb.g, db = ca.b - cb.b;
+            CHECK(SDL_sqrtf(dr * dr + dg * dg + db * db) > 0.15f);
+        }
+    }
+}
+
 TEST(the_hud_says_what_lap_it_is_and_changes_when_the_lap_does) {
     // **The fact the HUD exists for.** A race whose state you can only learn
     // afterwards is a scoreboard, not a race - so what the simulation knows has
@@ -2647,6 +2671,7 @@ int main(void) {
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
+    run_no_two_grounds_are_drawn_the_same_colour(ren);
     run_the_hud_says_what_lap_it_is_and_changes_when_the_lap_does(ren);
     run_the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);

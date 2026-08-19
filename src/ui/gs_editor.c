@@ -220,7 +220,15 @@ static void gs_brush_stroke(gs_editor *e, gs_track *t) {
     gs_editor_paint(e, t, e->hover_x, e->hover_y);
 }
 
-static const char *const gs_surface_names[] = { "pavement", "dirt", "ice" };
+// **Taken from the surface table rather than typed out again.** A second list of
+// names is a list that will disagree with the first one, and it disagreed the
+// moment six more grounds were added: three names against nine surfaces is a
+// combo box reading past the end of its own array.
+static const char *gs_surface_names[GS_SURF_COUNT];
+
+static void gs_name_surfaces(void) {
+    for (int i = 0; i < GS_SURF_COUNT; i++) gs_surface_names[i] = gs_surfaces[i].name;
+}
 
 static void gs_editor_palette(gs_editor *e, gs_track *t) {
     // Placed and sized explicitly rather than left to auto-fit. Two reasons,
@@ -254,6 +262,7 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     if (e->brush == GS_BRUSH_RAISE || e->brush == GS_BRUSH_LOWER) {
         ImGui_SliderFloat("step (tiles)", &e->step, 0.05f, 2.0f);
     } else if (e->brush == GS_BRUSH_SURFACE) {
+        gs_name_surfaces();
         ImGui_ComboChar("surface", &e->surface, gs_surface_names, GS_SURF_COUNT);
     } else if (e->brush == GS_BRUSH_GATE) {
         // The route. Gate zero is the start and the finish; the rest say which
