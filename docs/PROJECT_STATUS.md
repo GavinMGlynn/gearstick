@@ -790,6 +790,34 @@ same as the track being right, and two machines racing on tracks they each
 believe are the same one is the one failure rollback cannot absorb — every input
 would agree and every state would differ.
 
+### The relay, and a poll that ate the race
+
+`--relay` sends everything through the server instead of to the other players.
+It is a last resort and a real one: peers that can reach each other should race
+each other directly, because that is the shortest path and this game is about
+response — but a meaningful number of home connections will not accept anything
+unsolicited, and for those the choice is a relay or no game.
+
+**The server forwards without understanding.** The payload is a rollback
+datagram; the server stamps who it came from and passes it on. A server that
+parsed race traffic would be a server that could disagree with the race, and the
+whole design rests on it never being able to.
+
+The bug was mine and it was a good one. `gs_wire_poll` used to return early once
+everybody was found, and making it keep running — so a connection could maintain
+itself — left it draining every datagram and throwing away whatever was not
+control traffic. A relayed race therefore delivered *nothing*: every forwarded
+packet was swallowed by the poll that was supposed to be idle. Poll now drains
+only while still finding people; once a race is running the caller's own receive
+loop is the pump, and control traffic is handled on the way past.
+
+One test detail worth keeping. The first version fired seven hundred datagrams
+in a few microseconds and failed — and it was right to, but not for the reason
+it looked. The netcode absorbs loss by design; what it cannot absorb is a kernel
+socket buffer overflowing because nothing paced the sender. A race sends one
+packet per player per tick at 120 Hz, so the test does too, and the server's
+drain loop sleeps a millisecond rather than five.
+
 ---
 
 ## What does not exist

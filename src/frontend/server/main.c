@@ -355,6 +355,28 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         break;
     }
 
+    case GS_MSG_RELAY: {
+        // **Forwarded, not understood.** The payload is a rollback datagram
+        // and the server has no idea what is in it - it stamps who it came
+        // from and passes it on. A server that parsed race traffic would be a
+        // server that could disagree with the race.
+        uint8_t from = 0;
+        size_t payload_len = 0;
+        const uint8_t *payload = gs_proto_payload(d->buf, len, &from,
+                                                  &payload_len);
+        if (at < 0 || payload == nullptr) break;
+
+        uint8_t out[GS_PROTO_MTU];
+        size_t n = gs_proto_forward(out, sizeof out, (uint8_t)at, payload,
+                                    payload_len);
+        for (int k = 0; k < GS_PROTO_MAX_PLAYERS; k++) {
+            if (k == at) continue;
+            gs_send(&gs_srv.client[k], out, n);
+            if (gs_srv.client[k].used) gs_srv.relayed++;
+        }
+        break;
+    }
+
     case GS_MSG_WANT_TRACK: {
         // Asked for again rather than acknowledged, which is the vocabulary
         // everywhere else here: a client that is missing a piece asks for the
@@ -533,7 +555,11 @@ int main(int argc, char **argv) {
 
         if (seconds > 0 && (now - gs_srv.started_ms) / 1000u >= seconds) break;
 
-        SDL_Delay(5);
+        // A relayed race is one datagram per player per tick at 120 Hz coming
+        // through here and going straight back out. Sleeping five milliseconds
+        // between drains lets a burst pile up in the socket buffer and be
+        // dropped; one keeps the queue short without spinning a core.
+        SDL_Delay(1);
     }
 
     printf("\nstopping\n");

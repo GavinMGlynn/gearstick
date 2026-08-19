@@ -119,6 +119,18 @@ float gs_wire_track_progress(const gs_wire *w);
 // recovered, because there is nothing here that acknowledges anything.
 void gs_wire_want_track(gs_wire *w);
 
+// --- getting through a router that will not cooperate ----------------------
+
+// Send everything through the server rather than to the other players.
+//
+// **A last resort, and a real one.** Peers that can reach each other should
+// race each other directly, because that is the shortest path and this game is
+// about response - a relay costs an extra hop each way. But a meaningful number
+// of home connections will not accept anything unsolicited, and for those the
+// choice is a relay or no game at all.
+void gs_wire_use_relay(gs_wire *w, bool on);
+bool gs_wire_relaying(const gs_wire *w);
+
 // The last thing that went wrong, for putting in front of the player rather
 // than in a log they will never see.
 const char *gs_wire_error(const gs_wire *w);

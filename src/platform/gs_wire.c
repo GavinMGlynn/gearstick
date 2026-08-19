@@ -55,6 +55,7 @@ struct gs_wire {
     // they turn up.
     uint64_t   want_track;
     bool       heard_start;    // the server has said what the race is on
+    bool       relay;          // everything goes through the server
     gs_carrier carrier;
     uint32_t   asked_at;
 
@@ -181,6 +182,14 @@ gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name) {
     SDL_strlcpy(w->host_text, host, sizeof w->host_text);
     w->host_port = port;
     return w;
+}
+
+void gs_wire_use_relay(gs_wire *w, bool on) {
+    if (w != nullptr && w->via_server) w->relay = on;
+}
+
+bool gs_wire_relaying(const gs_wire *w) {
+    return w != nullptr && w->relay;
 }
 
 uint64_t gs_wire_track_hash(const gs_wire *w) {
@@ -530,7 +539,15 @@ void gs_wire_poll(gs_wire *w) {
         gs_send_hello(w);
     }
 
-    if (w->ready && !w->via_server) return;
+    // **Only while still finding everybody.** Once a race is running the
+    // caller's own receive loop is the pump: draining here would swallow race
+    // traffic and drop it on the floor, which is exactly what it did the first
+    // time - a relayed race delivered nothing at all, because every forwarded
+    // datagram was consumed by the poll that was supposed to be idle.
+    //
+    // Control traffic is still handled during a race, because gs_wire_recv
+    // handles it on the way past and returns only what the caller wants.
+    if (w->ready) return;
 
     uint8_t buf[GS_WIRE_MTU];
     while (gs_wire_recv(w, buf, sizeof buf) > 0) {
@@ -544,6 +561,18 @@ void gs_wire_poll(gs_wire *w) {
 bool gs_wire_send(gs_wire *w, const uint8_t *buf, size_t len) {
     if (w == nullptr || w->sock == nullptr || len == 0 || len > GS_WIRE_MTU) {
         return false;
+    }
+
+    // Through the server, when the mesh is not an option. One datagram rather
+    // than one per peer, and the server fans it out - which is the whole cost
+    // of a relay: an extra hop, paid only by the people who need it.
+    if (w->relay) {
+        uint8_t wrapped[GS_PROTO_MTU];
+        size_t n = gs_proto_relay(wrapped, sizeof wrapped, buf, len);
+        if (n == 0) return false;
+        gs_to_server(w, wrapped, n);
+        w->sent++;
+        return true;
     }
 
     // To everybody else, directly. The rollback packet is identical for every
@@ -575,6 +604,24 @@ size_t gs_wire_recv(gs_wire *w, uint8_t *buf, size_t cap) {
         if (!NET_ReceiveDatagram(w->sock, &d) || d == nullptr) return 0;
 
         size_t n = (size_t)d->buflen;
+
+        // A relayed datagram is somebody's race traffic in an envelope. The
+        // envelope is opened here, so nothing above this layer can tell a
+        // relayed race from a direct one.
+        if (w->via_server && gs_proto_kind(d->buf, n) == GS_MSG_FORWARD) {
+            uint8_t from = 0;
+            size_t payload_len = 0;
+            const uint8_t *payload = gs_proto_payload(d->buf, n, &from,
+                                                      &payload_len);
+            if (payload != nullptr && payload_len > 0 && payload_len <= cap) {
+                SDL_memcpy(buf, payload, payload_len);
+                NET_DestroyDatagram(d);
+                w->received++;
+                return payload_len;
+            }
+            NET_DestroyDatagram(d);
+            continue;
+        }
 
         // The server's traffic never reaches the caller either.
         if (w->via_server && gs_proto_kind(d->buf, n) != GS_MSG_NONE) {

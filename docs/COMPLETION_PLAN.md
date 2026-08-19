@@ -472,7 +472,7 @@ platform section of `FEATURES.md` for why that line is drawn where it is.
       told to expect. *Verification: a client holding a completely different
       track receives the right one and agrees about its hash before the race
       starts.*
-- [ ] **The relay, for players whose routers will not cooperate.** Peers that
+- [x] **The relay, for players whose routers will not cooperate.** Peers that
       can reach each other still race directly; the rest are forwarded by the
       server. *Verification: a race between two clients that cannot see each
       other at all ends in the same state on both.*

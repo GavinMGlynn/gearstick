@@ -184,6 +184,11 @@ You get a lobby screen showing who has arrived and how many are still missing.
 **Which player you are is the server's decision**, not a matter of who started
 first.
 
+If your router will not let the other players reach you — which is common, and
+not something you did wrong — add `--relay` and everything goes through the
+server instead. It costs one extra hop, so use it only if a direct race will not
+connect.
+
 The server does not run the race. Your machine does, and so does everybody
 else's — that is why your car responds to your steering immediately instead of
 waiting for the network. The server holds the lobby, and later the track library

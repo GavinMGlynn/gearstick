@@ -91,6 +91,7 @@ typedef struct gs_app {
     const char *join_host;
     const char *server_host;      // meeting at a server instead
     const char *online_name;      // who to appear as
+    bool        use_relay;        // go through the server, for awkward routers
     uint16_t    port;
     uint8_t     online_players;   // how many the host is waiting for
     bool        net_started;      // everybody is here and the race has begun
@@ -493,6 +494,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->ghost_path = argv[++i];
         } else if (SDL_strcmp(argv[i], "--audio-out") == 0 && i + 1 < argc) {
             a->audio_out = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--relay") == 0) {
+            a->use_relay = true;
         } else if (SDL_strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
             a->online_name = argv[++i];
         } else if (SDL_strcmp(argv[i], "--session") == 0) {
@@ -545,6 +548,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --join HOST PORT  join somebody who is waiting");
             SDL_Log("  --server HOST PORT  meet everybody at a server");
             SDL_Log("  --name NAME     who to appear as online");
+            SDL_Log("  --relay         send through the server, if peers cannot connect");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
@@ -613,8 +617,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         }
 
         if (a->server_host != nullptr) {
+            gs_wire_use_relay(a->wire, a->use_relay);
             SDL_snprintf(a->menu.server_text, sizeof a->menu.server_text,
-                         "%s:%u, as %s", a->server_host, a->port, me);
+                         "%s:%u, as %s%s", a->server_host, a->port, me,
+                         a->use_relay ? "  (through the server)" : "");
             SDL_Log("net: meeting at %s", a->menu.server_text);
         } else {
             SDL_Log("net: %s on port %u",

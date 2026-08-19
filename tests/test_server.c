@@ -7,6 +7,7 @@
 // to get right that are easy to get wrong: a fifth client is refused *with a
 // reason*, and somebody who says hello twice does not occupy two slots.
 #include "net/gs_proto.h"
+#include "core/gs_net.h"
 #include "core/gs_track.h"
 #include "net/gs_carrier.h"
 #include "platform/gs_wire.h"
@@ -125,6 +126,20 @@ static SDL_Process *gs_server = nullptr;
 
 // A track for the server to hand out, when a test wants one.
 static const char *gs_track_arg = nullptr;
+
+// Two drivers on different rhythms, so no two players ever change their minds
+// together and a session that mixed them up would be caught.
+static gs_input gs_drive(uint8_t player, uint32_t tick) {
+    uint32_t turn = 19u + (uint32_t)player * 13u;
+    gs_input in = GS_IN_ACCEL;
+    if ((tick / turn) % 2u == 0u) {
+        in = (gs_input)(in | ((player & 1u) ? GS_IN_RIGHT : GS_IN_LEFT));
+    }
+    if ((tick / (47u + (uint32_t)player * 11u)) % 4u == 0u) {
+        in = (gs_input)(in | GS_IN_BRAKE);
+    }
+    return in;
+}
 
 static bool gs_server_start_full(const char *port, const char *seconds,
                                  const char *players, const char *timeout) {
@@ -517,8 +532,11 @@ TEST(a_placed_client_is_not_dropped_for_going_quiet) {
     // Six seconds of a race - three times the server's patience here - with
     // nothing but the connection maintaining itself.
     for (int k = 0; k < 600; k++) {
+        uint8_t drain[GS_WIRE_MTU];
         gs_wire_poll(a);
         gs_wire_poll(b);
+        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
+        while (gs_wire_recv(b, drain, sizeof drain) > 0) { }
         SDL_Delay(10);
     }
 
@@ -539,7 +557,13 @@ TEST(a_placed_client_is_not_dropped_for_going_quiet) {
 
     bool noticed = false;
     for (int k = 0; k < 500 && !noticed; k++) {
+        // As a racing client does: poll to keep the connection, and receive to
+        // take everything that has arrived. The control traffic is handled on
+        // the way past.
         gs_wire_poll(a);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
+
         const gs_lobby *now = gs_wire_lobby(a);
         noticed = now != nullptr && now->count == 1;
         SDL_Delay(10);
@@ -663,6 +687,122 @@ TEST(a_client_with_a_different_track_is_given_the_right_one) {
     gs_server_stop();
 }
 
+TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
+    // **The verification this item exists for.** The two wires below are given
+    // no way to reach each other: the roster's addresses are never used,
+    // because everything they send goes to the server in an envelope and comes
+    // back out of it. If the relay did not work there would be no race at all.
+    CHECK(gs_wire_init());
+
+    if (!gs_server_start_for("47826", "30", "2")) { gs_failures++; return; }
+
+    gs_wire *a = gs_wire_server("127.0.0.1", 47826, "ada");
+    gs_wire *b = gs_wire_server("127.0.0.1", 47826, "bez");
+    CHECK(a != nullptr && b != nullptr);
+
+    gs_wire_use_relay(a, true);
+    gs_wire_use_relay(b, true);
+    CHECK(gs_wire_relaying(a));
+    CHECK(gs_wire_relaying(b));
+
+    for (int k = 0; k < 600 && !(gs_wire_ready(a) && gs_wire_ready(b)); k++) {
+        gs_wire_poll(a);
+        gs_wire_poll(b);
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_ready(a));
+    CHECK(gs_wire_ready(b));
+
+    // A real race, driven by the real rollback session, over the relay.
+    static gs_track t;
+    static gs_net n[2];
+    gs_world start;
+
+    gs_track_init(&t, 48, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_track_set_corner(&t, x, y, x > 20 && x < 26 ? GS_INT(1) : 0);
+        }
+    }
+    gs_world_init(&start, GS_ONE);
+    gs_world_add_car(&start, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(9), 0);
+    gs_world_add_car(&start, &t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(4), GS_INT(11), 0);
+
+    gs_net_begin(&n[0], &start, 2, gs_wire_local(a));
+    gs_net_begin(&n[1], &start, 2, gs_wire_local(b));
+
+    gs_wire *wires[2] = { a, b };
+
+    // Two seconds, paced. **Not because the netcode needs pacing** - it
+    // absorbs loss by design - but because a test that fires seven hundred
+    // datagrams in a few microseconds is testing the size of a kernel socket
+    // buffer rather than the relay. A race sends one packet per player per
+    // tick at 120 Hz, so this does too.
+    const uint32_t ticks = GS_TICK_HZ * 2;
+
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        uint8_t buf[GS_WIRE_MTU];
+        size_t got;
+
+        for (int i = 0; i < 2; i++) {
+            gs_wire_poll(wires[i]);
+            while ((got = gs_wire_recv(wires[i], buf, sizeof buf)) > 0) {
+                gs_net_receive(&n[i], &t, buf, got);
+            }
+        }
+        for (int i = 0; i < 2; i++) {
+            gs_net_local_input(&n[i], gs_drive(gs_wire_local(wires[i]), tick));
+            size_t len = gs_net_packet(&n[i], buf, sizeof buf);
+            gs_wire_send(wires[i], buf, len);
+            gs_net_step(&n[i], &t);
+        }
+        SDL_Delay(2);
+    }
+
+    // Drain, so both can confirm the finish.
+    for (int i = 0; i < 300; i++) {
+        uint8_t buf[GS_WIRE_MTU];
+        size_t got;
+        for (int k = 0; k < 2; k++) {
+            gs_wire_poll(wires[k]);
+            while ((got = gs_wire_recv(wires[k], buf, sizeof buf)) > 0) {
+                gs_net_receive(&n[k], &t, buf, got);
+            }
+        }
+        SDL_Delay(2);
+    }
+
+    // The claim: the same race on both machines, with neither able to reach
+    // the other.
+    CHECK(n[0].confirmed_tick == ticks);
+    CHECK(n[1].confirmed_tick == ticks);
+    CHECK(gs_world_hash(&n[0].confirmed) == gs_world_hash(&n[1].confirmed));
+    CHECK(!n[0].desynced);
+    CHECK(!n[1].desynced);
+
+    // And it is the race one machine with no network would have run.
+    gs_world solo = start;
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        in[0] = gs_drive(0, tick);
+        in[1] = gs_drive(1, tick);
+        gs_world_step(&solo, &t, in);
+    }
+    CHECK(gs_world_hash(&solo) == gs_world_hash(&n[0].confirmed));
+
+    // The cars went somewhere, so this is a race rather than a grid. Measured
+    // against where they started rather than against a number picked by hand:
+    // two seconds of a car that is also turning does not cover much ground, and
+    // a threshold guessed at is a test that fails when the driving changes.
+    CHECK(n[0].confirmed.car[0].x > start.car[0].x + GS_INT(1));
+    CHECK(n[0].confirmed.car[1].x > start.car[1].x + GS_INT(1));
+
+    gs_wire_close(a);
+    gs_wire_close(b);
+    gs_wire_quit();
+    gs_server_stop();
+}
+
 int main(void) {
     printf("gearstick server tests\n");
 
@@ -679,6 +819,7 @@ int main(void) {
     run_a_client_waiting_for_others_is_not_ready_yet();
     run_a_placed_client_is_not_dropped_for_going_quiet();
     run_a_client_with_a_different_track_is_given_the_right_one();
+    run_two_clients_that_cannot_see_each_other_race_through_the_server();
 
     gs_server_stop();
     NET_Quit();
