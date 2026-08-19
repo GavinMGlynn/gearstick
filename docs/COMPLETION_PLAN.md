@@ -502,7 +502,7 @@ hard-coded demo track that has been sitting in the frontend since Phase 3.
       C and ships one built in the editor instead. *Verification: no track
       geometry remains in `src/frontend/`, and a fresh install still has
       something to race on.*
-- [ ] **Publish a track to a server, and take one down again.** *Verification: a
+- [x] **Publish a track to a server, and take one down again.** *Verification: a
       track published from one client is browsable and playable from another,
       and disappears from it when withdrawn.*
 - [ ] **A generator that fills the library with tracks worth driving.** Seeded,

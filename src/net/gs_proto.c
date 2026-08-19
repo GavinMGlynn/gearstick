@@ -423,6 +423,71 @@ bool gs_proto_read_best(const uint8_t *buf, size_t len, uint64_t *track,
     return true;
 }
 
+// --- publishing -----------------------------------------------------------
+
+size_t gs_proto_publish(uint8_t *buf, size_t cap, uint64_t track,
+                        const char *name) {
+    if (cap < GS_HEAD + 8 + 48) return 0;
+    size_t n = gs_head(buf, cap, GS_MSG_PUBLISH);
+    gs_put64(buf + n, track); n += 8;
+    n += gs_put_str(buf + n, name, 48);
+    return n;
+}
+
+bool gs_proto_read_publish(const uint8_t *buf, size_t len, uint64_t *track,
+                           char *name, size_t cap) {
+    if (!gs_expect(buf, len, GS_MSG_PUBLISH, GS_HEAD + 56)) return false;
+    *track = gs_get64(buf + GS_HEAD);
+    gs_get_str(buf + GS_HEAD + 8, 48, name, cap);
+    return true;
+}
+
+size_t gs_proto_withdraw(uint8_t *buf, size_t cap, uint64_t track) {
+    if (cap < GS_HEAD + 8) return 0;
+    size_t n = gs_head(buf, cap, GS_MSG_WITHDRAW);
+    gs_put64(buf + n, track);
+    return n + 8;
+}
+
+bool gs_proto_read_withdraw(const uint8_t *buf, size_t len, uint64_t *track) {
+    if (!gs_expect(buf, len, GS_MSG_WITHDRAW, GS_HEAD + 8)) return false;
+    *track = gs_get64(buf + GS_HEAD);
+    return true;
+}
+
+size_t gs_proto_want_list(uint8_t *buf, size_t cap) {
+    return gs_head(buf, cap, GS_MSG_WANT_LIST);
+}
+
+// One track per datagram. A listing that packed as many as would fit would
+// need a size nobody can exceed, and the library is meant to grow.
+size_t gs_proto_listing(uint8_t *buf, size_t cap, uint16_t index, uint16_t total,
+                        uint64_t track, const char *name, const char *author) {
+    if (cap < GS_HEAD + 2 + 2 + 8 + 48 + GS_PROTO_NAME) return 0;
+    size_t n = gs_head(buf, cap, GS_MSG_LISTING);
+    gs_put16(buf + n, index); n += 2;
+    gs_put16(buf + n, total); n += 2;
+    gs_put64(buf + n, track); n += 8;
+    n += gs_put_str(buf + n, name, 48);
+    n += gs_put_str(buf + n, author, GS_PROTO_NAME);
+    return n;
+}
+
+bool gs_proto_read_listing(const uint8_t *buf, size_t len, uint16_t *index,
+                           uint16_t *total, uint64_t *track, char *name,
+                           size_t name_cap, char *author, size_t author_cap) {
+    size_t need = GS_HEAD + 2 + 2 + 8 + 48 + GS_PROTO_NAME;
+    if (!gs_expect(buf, len, GS_MSG_LISTING, need)) return false;
+
+    size_t n = GS_HEAD;
+    *index = gs_get16(buf + n); n += 2;
+    *total = gs_get16(buf + n); n += 2;
+    *track = gs_get64(buf + n); n += 8;
+    gs_get_str(buf + n, 48, name, name_cap); n += 48;
+    gs_get_str(buf + n, GS_PROTO_NAME, author, author_cap);
+    return true;
+}
+
 // --- relaying --------------------------------------------------------------
 
 size_t gs_proto_relay(uint8_t *buf, size_t cap, const uint8_t *data, size_t len) {

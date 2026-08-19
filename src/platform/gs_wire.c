@@ -57,6 +57,10 @@ struct gs_wire {
     bool       heard_start;    // the server has said what the race is on
     bool       relay;          // everything goes through the server
     gs_wire_best best;         // what the server says stands here
+
+    gs_wire_listing listing[GS_WIRE_LISTINGS];
+    uint16_t        listings;   // how many have arrived
+    uint16_t        listed;     // how many the server said there were
     gs_carrier carrier;
     uint32_t   asked_at;
 
@@ -223,6 +227,57 @@ void gs_wire_ask_best(gs_wire *w, uint64_t track, uint64_t conditions,
 
 const gs_wire_best *gs_wire_best_here(const gs_wire *w) {
     return (w != nullptr && w->via_server) ? &w->best : nullptr;
+}
+
+void gs_wire_ask_track(gs_wire *w, uint64_t hash) {
+    if (w == nullptr || !w->via_server || hash == 0) return;
+
+    w->want_track = hash;
+    gs_carrier_expect(&w->carrier, hash);
+    w->asked_at = w->retry;
+
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf, gs_proto_want_track(buf, sizeof buf, hash));
+}
+
+void gs_wire_publish(gs_wire *w, const gs_track *t, const char *name) {
+    if (w == nullptr || !w->via_server) return;
+
+    static uint8_t bytes[GS_CARRIER_MAX_BYTES];
+    size_t len = gs_track_serialize(t, bytes, sizeof bytes);
+    if (len == 0) return;
+
+    uint64_t hash = gs_track_hash(t);
+    uint16_t chunks = gs_carrier_chunks(len);
+
+    uint8_t buf[GS_PROTO_MTU];
+    for (uint16_t i = 0; i < chunks; i++) {
+        gs_to_server(w, buf, gs_carrier_chunk(buf, sizeof buf, hash, bytes, len, i));
+    }
+
+    // The track first, then the claim about it. The server publishes only
+    // things it already has, so the reverse would be a claim about nothing.
+    gs_to_server(w, buf, gs_proto_publish(buf, sizeof buf, hash, name));
+}
+
+void gs_wire_withdraw(gs_wire *w, uint64_t track) {
+    if (w == nullptr || !w->via_server) return;
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf, gs_proto_withdraw(buf, sizeof buf, track));
+}
+
+void gs_wire_ask_published(gs_wire *w) {
+    if (w == nullptr || !w->via_server) return;
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf, gs_proto_want_list(buf, sizeof buf));
+}
+
+uint16_t gs_wire_published(const gs_wire *w, const gs_wire_listing **out,
+                           uint16_t *total) {
+    if (w == nullptr || !w->via_server) return 0;
+    if (out != nullptr) *out = w->listing;
+    if (total != nullptr) *total = w->listed;
+    return w->listings;
 }
 
 void gs_wire_use_relay(gs_wire *w, bool on) {
@@ -522,6 +577,35 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
             w->best.race_ticks = race_ticks;
             SDL_strlcpy(w->best.lap_who, lap_who, sizeof w->best.lap_who);
             SDL_strlcpy(w->best.race_who, race_who, sizeof w->best.race_who);
+        }
+        break;
+    }
+
+    case GS_MSG_LISTING: {
+        uint16_t index = 0, total = 0;
+        uint64_t track = 0;
+        char name[48] = { 0 }, author[GS_PROTO_NAME] = { 0 };
+
+        if (!gs_proto_read_listing(buf, len, &index, &total, &track, name,
+                                   sizeof name, author, sizeof author)) {
+            break;
+        }
+
+        // A new answer replaces the last one. Merging two would leave a list
+        // holding tracks that have since been taken down.
+        if (total != w->listed) {
+            w->listed = total;
+            w->listings = 0;
+            SDL_memset(w->listing, 0, sizeof w->listing);
+        }
+        if (total == 0) break;          // "nothing published" is an answer
+
+        if (index < GS_WIRE_LISTINGS) {
+            gs_wire_listing *l = &w->listing[index];
+            l->track = track;
+            SDL_strlcpy(l->name, name, sizeof l->name);
+            SDL_strlcpy(l->author, author, sizeof l->author);
+            if (index + 1 > w->listings) w->listings = (uint16_t)(index + 1);
         }
         break;
     }

@@ -74,11 +74,15 @@ static bool gs_migrate(gs_store *s) {
 
         // Content-addressed, so uploading the same track twice stores it once.
         "CREATE TABLE IF NOT EXISTS track ("
-        "  hash   INTEGER PRIMARY KEY,"
-        "  name   TEXT NOT NULL DEFAULT '',"
-        "  author TEXT NOT NULL DEFAULT '',"
-        "  added  INTEGER NOT NULL DEFAULT 0,"
-        "  bytes  BLOB NOT NULL);")) {
+        "  hash      INTEGER PRIMARY KEY,"
+        "  name      TEXT NOT NULL DEFAULT '',"
+        "  author    TEXT NOT NULL DEFAULT '',"
+        "  added     INTEGER NOT NULL DEFAULT 0,"
+        // Published is a separate thing from stored. The server holds every
+        // track it has been handed - it needs them to verify times - and shows
+        // only the ones somebody chose to put up.
+        "  published INTEGER NOT NULL DEFAULT 0,"
+        "  bytes     BLOB NOT NULL);")) {
         return false;
     }
 
@@ -370,6 +374,95 @@ bool gs_store_has_track(gs_store *s, uint64_t hash) {
 
 int gs_store_track_count(gs_store *s) {
     return gs_count(s, "SELECT COUNT(*) FROM track");
+}
+
+bool gs_store_publish(gs_store *s, uint64_t hash, const char *name,
+                      const char *author) {
+    if (s == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "UPDATE track SET published = 1,"
+            "  name = CASE WHEN ?2 <> '' THEN ?2 ELSE name END,"
+            "  author = ?3"
+            " WHERE hash = ?1",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "publish");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_text(st, 2, name != nullptr ? name : "", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, author != nullptr ? author : "", -1, SQLITE_TRANSIENT);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) > 0;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_withdraw(gs_store *s, uint64_t hash, const char *author) {
+    if (s == nullptr) return false;
+
+    // **Only by whoever put it up.** The track itself stays - times set on it
+    // still have to be verifiable - it simply stops being listed.
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            // `published <> 0` matters: SQLite counts writing a value that is
+            // already there as a change, so without it withdrawing something
+            // already down reports success.
+            "UPDATE track SET published = 0"
+            " WHERE hash = ?1 AND author = ?2 AND published <> 0",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "withdraw");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_text(st, 2, author != nullptr ? author : "", -1, SQLITE_TRANSIENT);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) > 0;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_is_published(gs_store *s, uint64_t hash) {
+    if (s == nullptr) return false;
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "SELECT published FROM track WHERE hash = ?1", -1, &st,
+            nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    bool yes = sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) != 0;
+    sqlite3_finalize(st);
+    return yes;
+}
+
+int gs_store_list_published(gs_store *s, gs_track_row *out, int cap) {
+    if (s == nullptr || out == nullptr || cap <= 0) return 0;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "SELECT hash, name, author, LENGTH(bytes) FROM track"
+            " WHERE published <> 0 ORDER BY added DESC, hash DESC LIMIT ?1",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "list published");
+        return 0;
+    }
+    sqlite3_bind_int(st, 1, cap);
+
+    int n = 0;
+    while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
+        gs_track_row *r = &out[n++];
+        memset(r, 0, sizeof *r);
+        r->hash = (uint64_t)sqlite3_column_int64(st, 0);
+        const unsigned char *name = sqlite3_column_text(st, 1);
+        const unsigned char *who = sqlite3_column_text(st, 2);
+        snprintf(r->name, sizeof r->name, "%s", name != nullptr ? (const char *)name : "");
+        snprintf(r->author, sizeof r->author, "%s", who != nullptr ? (const char *)who : "");
+        r->bytes = (uint32_t)sqlite3_column_int64(st, 3);
+    }
+    sqlite3_finalize(st);
+    return n;
 }
 
 int gs_store_list_tracks(gs_store *s, gs_track_row *out, int cap) {

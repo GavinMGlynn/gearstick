@@ -203,6 +203,14 @@ static bool gs_server_start_for(const char *port, const char *seconds,
     return gs_server_start_full(port, seconds, players, "15000");
 }
 
+static bool gs_server_start_with_store(const char *port, const char *seconds,
+                                       const char *players, const char *store) {
+    gs_store_arg = store;
+    bool ok = gs_server_start_full(port, seconds, players, "15000");
+    gs_store_arg = nullptr;
+    return ok;
+}
+
 static bool gs_server_start_verifying(const char *port, const char *seconds,
                                       const char *players, const char *track,
                                       const char *store) {
@@ -1018,6 +1026,110 @@ TEST(a_record_set_on_one_client_is_seen_by_another) {
     remove(track_path);
 }
 
+TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
+    // **The verification this item exists for.** ada publishes; bez, who has
+    // never seen it, finds it and can fetch it; ada takes it down and it stops
+    // being listed.
+    CHECK(gs_wire_init());
+
+    remove("published.db");
+    if (!gs_server_start_with_store("47834", "30", "2", "published.db")) {
+        gs_failures++;
+        return;
+    }
+
+    static gs_track mine;
+    gs_track_init(&mine, 36, 20, GS_SURF_DIRT);
+    for (uint8_t y = 0; y <= mine.h; y++) {
+        for (uint8_t x = 0; x <= mine.w; x++) {
+            gs_track_set_corner(&mine, x, y, x > 12 && x < 18 ? GS_INT(2) : 0);
+        }
+    }
+    gs_track_add_gate(&mine, GS_INT(4), GS_INT(10), 0, GS_INT(6));
+    gs_track_add_gate(&mine, GS_INT(30), GS_INT(10), 0, GS_INT(6));
+    uint64_t hash = gs_track_hash(&mine);
+
+    gs_wire *a = gs_wire_server("127.0.0.1", 47834, "ada");
+    gs_wire *b = gs_wire_server("127.0.0.1", 47834, "bez");
+    CHECK(a != nullptr && b != nullptr);
+    for (int k = 0; k < 400; k++) {
+        gs_wire_poll(a);
+        gs_wire_poll(b);
+        if (gs_wire_lobby(a) != nullptr && gs_wire_lobby(a)->count == 2) break;
+        SDL_Delay(10);
+    }
+
+    // Nothing published yet, and the server says so rather than saying nothing.
+    gs_wire_ask_published(b);
+    const gs_wire_listing *rows = nullptr;
+    uint16_t total = 1;
+    for (int k = 0; k < 60; k++) {
+        gs_pump(b, 5);
+        gs_wire_published(b, &rows, &total);
+        if (total == 0) break;
+    }
+    CHECK(total == 0);
+
+    // ada puts one up.
+    gs_wire_publish(a, &mine, "the dirt loop");
+    gs_pump(a, 40);
+
+    // bez finds it, by name and by author, having never seen the track.
+    bool found = false;
+    for (int k = 0; k < 80 && !found; k++) {
+        gs_wire_ask_published(b);
+        gs_pump(b, 10);
+        uint16_t n = gs_wire_published(b, &rows, &total);
+        found = n == 1 && total == 1 && rows[0].track == hash;
+    }
+    CHECK(found);
+    if (found) {
+        CHECK(SDL_strcmp(rows[0].name, "the dirt loop") == 0);
+        CHECK(SDL_strcmp(rows[0].author, "ada") == 0);
+    }
+
+    // **And it is playable**, which a listing alone does not prove: the track
+    // itself has to be fetchable and has to be the track.
+    gs_wire_ask_track(b, hash);
+    static gs_track got;
+    bool fetched = false;
+    for (int k = 0; k < 120 && !fetched; k++) {
+        gs_pump(b, 5);
+        fetched = gs_wire_track(b, &got) && gs_track_hash(&got) == hash;
+    }
+    CHECK(fetched);
+    if (fetched) {
+        CHECK(got.w == mine.w && got.h == mine.h);
+        CHECK(got.gate_count == mine.gate_count);
+    }
+
+    // bez cannot take down somebody else's.
+    gs_wire_withdraw(b, hash);
+    gs_pump(b, 40);
+    gs_wire_ask_published(b);
+    gs_pump(b, 20);
+    CHECK(gs_wire_published(b, &rows, &total) == 1);
+
+    // ada can.
+    gs_wire_withdraw(a, hash);
+    gs_pump(a, 40);
+
+    bool gone = false;
+    for (int k = 0; k < 80 && !gone; k++) {
+        gs_wire_ask_published(b);
+        gs_pump(b, 10);
+        gs_wire_published(b, &rows, &total);
+        gone = total == 0;
+    }
+    CHECK(gone);
+
+    gs_wire_close(a);
+    gs_wire_close(b);
+    gs_wire_quit();
+    gs_server_stop();
+    remove("published.db");
+}
+
 int main(void) {
     printf("gearstick server tests\n");
 
@@ -1037,6 +1149,7 @@ int main(void) {
     run_two_clients_that_cannot_see_each_other_race_through_the_server();
     run_a_time_is_kept_only_if_re_racing_it_produces_it();
     run_a_record_set_on_one_client_is_seen_by_another();
+    run_a_published_track_is_browsable_from_another_client_and_can_be_taken_down();
 
     gs_server_stop();
     NET_Quit();

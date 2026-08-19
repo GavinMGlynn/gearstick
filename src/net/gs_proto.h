@@ -43,6 +43,9 @@ typedef enum gs_msg {
     GS_MSG_RESULT,     // "this is what I did" - a time, offered
     GS_MSG_WANT_BEST,  // "what is the record here?"
     GS_MSG_PROOF,      // one chunk of the replay behind a claimed time
+    GS_MSG_PUBLISH,    // "keep this track, and let people have it"
+    GS_MSG_WITHDRAW,   // "take mine down again"
+    GS_MSG_WANT_LIST,  // "what is published?"
 
     // Server to client.
     GS_MSG_WELCOME,    // "you are player N of M, and here is everyone"
@@ -53,6 +56,7 @@ typedef enum gs_msg {
     GS_MSG_PONG,
     GS_MSG_FORWARD,    // a relayed datagram from another player
     GS_MSG_BEST,       // the record on a track, and who holds it
+    GS_MSG_LISTING,    // one published track: its hash, name and author
 
     GS_MSG_COUNT
 } gs_msg;
@@ -128,6 +132,29 @@ bool gs_proto_read_best(const uint8_t *buf, size_t len, uint64_t *track,
                         uint64_t *conditions, uint16_t *laps,
                         uint32_t *lap_ticks, char *lap_who, size_t lap_cap,
                         uint32_t *race_ticks, char *race_who, size_t race_cap);
+
+// --- publishing -----------------------------------------------------------
+//
+// A published track is a track the server keeps and hands to anybody who asks.
+// The track itself travels the way it always does - in chunks, checked against
+// its own hash - so publishing is a *claim about a track the server already
+// has*, and the name that goes with it.
+
+size_t gs_proto_publish(uint8_t *buf, size_t cap, uint64_t track,
+                        const char *name);
+bool gs_proto_read_publish(const uint8_t *buf, size_t len, uint64_t *track,
+                           char *name, size_t cap);
+
+size_t gs_proto_withdraw(uint8_t *buf, size_t cap, uint64_t track);
+bool gs_proto_read_withdraw(const uint8_t *buf, size_t len, uint64_t *track);
+
+size_t gs_proto_want_list(uint8_t *buf, size_t cap);
+
+size_t gs_proto_listing(uint8_t *buf, size_t cap, uint16_t index, uint16_t total,
+                        uint64_t track, const char *name, const char *author);
+bool gs_proto_read_listing(const uint8_t *buf, size_t len, uint16_t *index,
+                           uint16_t *total, uint64_t *track, char *name,
+                           size_t name_cap, char *author, size_t author_cap);
 
 // A datagram to be passed on. `from` is filled in by the server on the way out.
 size_t gs_proto_relay(uint8_t *buf, size_t cap, const uint8_t *data, size_t len);

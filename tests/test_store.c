@@ -170,6 +170,51 @@ TEST(a_track_is_stored_by_what_it_is) {
     gs_store_close(s);
 }
 
+TEST(publishing_is_a_separate_thing_from_storing) {
+    gs_store *s = gs_store_open(":memory:");
+    if (s == nullptr) { gs_failures++; return; }
+
+    uint8_t bytes[256];
+    memset(bytes, 0x5a, sizeof bytes);
+
+    const uint64_t mine = 0x1111ull, theirs = 0x2222ull;
+    CHECK(gs_store_put_track(s, mine, "the loop", "ada", bytes, sizeof bytes));
+    CHECK(gs_store_put_track(s, theirs, "the drop", "bez", bytes, sizeof bytes));
+
+    // **Stored is not published.** The server holds every track it is handed,
+    // because it needs them to check times; being listed is a separate choice.
+    CHECK(gs_store_track_count(s) == 2);
+    CHECK(!gs_store_is_published(s, mine));
+
+    gs_track_row rows[8];
+    CHECK(gs_store_list_published(s, rows, 8) == 0);
+
+    CHECK(gs_store_publish(s, mine, "the loop", "ada"));
+    CHECK(gs_store_is_published(s, mine));
+    CHECK(gs_store_list_published(s, rows, 8) == 1);
+    CHECK(rows[0].hash == mine);
+    CHECK(strcmp(rows[0].author, "ada") == 0);
+
+    // Publishing something that is not here is not a silent success.
+    CHECK(!gs_store_publish(s, 0xdeadull, "nope", "ada"));
+
+    // **Only whoever put it up can take it down.**
+    CHECK(!gs_store_withdraw(s, mine, "bez"));
+    CHECK(gs_store_is_published(s, mine));
+    CHECK(gs_store_withdraw(s, mine, "ada"));
+    CHECK(!gs_store_is_published(s, mine));
+    CHECK(gs_store_list_published(s, rows, 8) == 0);
+
+    // And the track itself stays, so times set on it are still checkable.
+    CHECK(gs_store_has_track(s, mine));
+    CHECK(gs_store_track_count(s) == 2);
+
+    // Withdrawing twice is not an error the second time so much as nothing.
+    CHECK(!gs_store_withdraw(s, mine, "ada"));
+
+    gs_store_close(s);
+}
+
 TEST(a_name_with_a_quote_in_it_is_a_name_and_not_an_instruction) {
     // A driver's name arrives over a network from somebody this server has
     // never met. There is exactly one way to be safe about that and it is bound
@@ -236,6 +281,7 @@ int main(void) {
     run_a_driver_is_remembered_once_however_often_they_appear();
     run_a_record_is_a_time_on_a_track_under_conditions_over_a_distance();
     run_a_track_is_stored_by_what_it_is();
+    run_publishing_is_a_separate_thing_from_storing();
     run_a_name_with_a_quote_in_it_is_a_name_and_not_an_instruction();
     run_what_is_written_is_still_there_after_a_reopen();
 

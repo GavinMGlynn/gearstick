@@ -67,6 +67,11 @@ typedef struct gs_client {
     gs_carrier proof;
     bool       claimed;
     gs_claim   claim;
+
+    // A track on its way up, for publishing. Separate from the proof carrier
+    // because somebody can perfectly well be submitting a time on one track
+    // while uploading another.
+    gs_carrier upload;
 } gs_client;
 
 static struct {
@@ -84,7 +89,7 @@ static struct {
     bool quit;
     bool plain;                // no ANSI, for a log file or a dumb terminal
 
-    // The track this lobby will race on. **The server hands it out**, so
+    // Uploads in progress, one per client, and the track this lobby races on. **The server hands it out**, so
     // everybody races the same ground - which is the one thing rollback cannot
     // recover from being wrong about. Held as bytes rather than as a gs_track:
     // the server never simulates anything, so the only thing it needs to do
@@ -491,6 +496,97 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         break;
     }
 
+    case GS_MSG_TRACK: {
+        // A track arriving *from* a client, for the library. The same chunks
+        // the server sends, going the other way - and checked the same way,
+        // because a track that arrived damaged is not a track.
+        if (at < 0 || gs_srv.store == nullptr) break;
+
+        gs_client *up = &gs_srv.client[at];
+        uint64_t hash = 0;
+        uint16_t chunk = 0, chunks = 0, data_len = 0;
+        const uint8_t *data = nullptr;
+        if (!gs_proto_read_track_chunk(d->buf, len, &hash, &chunk, &chunks,
+                                       &data, &data_len)) {
+            break;
+        }
+
+        if (up->upload.hash != hash) gs_carrier_expect(&up->upload, hash);
+        if (!gs_carrier_take(&up->upload, d->buf, len)) break;
+        if (!gs_carrier_done(&up->upload)) break;
+
+        static gs_track arrived;
+        if (!gs_carrier_track(&up->upload, &arrived)) {
+            SDL_Log("%s uploaded a track that did not survive the trip", up->name);
+            break;
+        }
+
+        gs_store_put_track(gs_srv.store, hash, "", up->name,
+                           up->upload.bytes, up->upload.len);
+        SDL_Log("%s uploaded %016llx", up->name, (unsigned long long)hash);
+        break;
+    }
+
+    case GS_MSG_PUBLISH: {
+        uint64_t track = 0;
+        char name[48] = { 0 };
+        if (at < 0 || gs_srv.store == nullptr) break;
+        if (!gs_proto_read_publish(d->buf, len, &track, name, sizeof name)) break;
+
+        // **Only a track the server has.** Publishing is a claim about
+        // something already here; the track itself arrives the way tracks
+        // always do, checked against its own hash on the way in.
+        if (!gs_store_has_track(gs_srv.store, track)) {
+            SDL_Log("%s tried to publish a track this server does not have",
+                    gs_srv.client[at].name);
+            break;
+        }
+        if (gs_store_publish(gs_srv.store, track, name,
+                             gs_srv.client[at].name)) {
+            SDL_Log("%s published %016llx (%s)", gs_srv.client[at].name,
+                    (unsigned long long)track, name);
+        }
+        break;
+    }
+
+    case GS_MSG_WITHDRAW: {
+        uint64_t track = 0;
+        if (at < 0 || gs_srv.store == nullptr) break;
+        if (!gs_proto_read_withdraw(d->buf, len, &track)) break;
+
+        if (gs_store_withdraw(gs_srv.store, track, gs_srv.client[at].name)) {
+            SDL_Log("%s withdrew %016llx", gs_srv.client[at].name,
+                    (unsigned long long)track);
+        }
+        break;
+    }
+
+    case GS_MSG_WANT_LIST: {
+        if (at < 0 || gs_srv.store == nullptr) break;
+
+        static gs_track_row rows[64];
+        int n = gs_store_list_published(gs_srv.store, rows, 64);
+
+        // One per datagram, each saying how many there are, so a client knows
+        // when it has them all without anybody counting acknowledgements.
+        for (int i = 0; i < n; i++) {
+            uint8_t out[GS_PROTO_MTU];
+            size_t m = gs_proto_listing(out, sizeof out, (uint16_t)i,
+                                        (uint16_t)n, rows[i].hash, rows[i].name,
+                                        rows[i].author);
+            gs_send(&gs_srv.client[at], out, m);
+        }
+
+        // Nothing published is still an answer. Without it a client cannot tell
+        // an empty library from a server that ignored the question.
+        if (n == 0) {
+            uint8_t out[GS_PROTO_MTU];
+            size_t m = gs_proto_listing(out, sizeof out, 0, 0, 0, "", "");
+            gs_send(&gs_srv.client[at], out, m);
+        }
+        break;
+    }
+
     case GS_MSG_WANT_BEST: {
         uint64_t track = 0, conditions = 0;
         uint16_t laps = 0;
@@ -519,13 +615,25 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         // costs one datagram and no bookkeeping at all.
         uint64_t want = 0;
         if (at < 0 || !gs_proto_read_want_track(d->buf, len, &want)) break;
-        if (gs_srv.track_len == 0 || want != gs_srv.track_hash) break;
 
-        uint16_t chunks = gs_carrier_chunks(gs_srv.track_len);
+        // Any track the server has, not only the one this lobby is racing: a
+        // client browsing what is published wants to fetch one of those.
+        static uint8_t bytes[GS_CARRIER_MAX_BYTES];
+        size_t bytes_len = 0;
+
+        if (gs_srv.track_len > 0 && want == gs_srv.track_hash) {
+            SDL_memcpy(bytes, gs_srv.track, gs_srv.track_len);
+            bytes_len = gs_srv.track_len;
+        } else if (gs_srv.store == nullptr ||
+                   !gs_store_get_track(gs_srv.store, want, bytes, sizeof bytes,
+                                       &bytes_len)) {
+            break;
+        }
+
+        uint16_t chunks = gs_carrier_chunks(bytes_len);
         for (uint16_t i = 0; i < chunks; i++) {
             uint8_t out[GS_PROTO_MTU];
-            size_t n = gs_carrier_chunk(out, sizeof out, gs_srv.track_hash,
-                                        gs_srv.track, gs_srv.track_len, i);
+            size_t n = gs_carrier_chunk(out, sizeof out, want, bytes, bytes_len, i);
             gs_send(&gs_srv.client[at], out, n);
             gs_srv.chunks_sent++;
         }

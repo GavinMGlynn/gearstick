@@ -86,4 +86,21 @@ typedef struct gs_track_row {
 // The library, newest first. Returns how many rows were written.
 int gs_store_list_tracks(gs_store *s, gs_track_row *out, int cap);
 
+// --- publishing ------------------------------------------------------------
+//
+// **Published is a separate thing from stored.** The server holds every track
+// it has been handed, because it needs them to verify times on them; publishing
+// is somebody saying "and let people have this one". Taking it down stops it
+// being listed and leaves the track where it is, so times set on it stay
+// checkable.
+
+bool gs_store_publish(gs_store *s, uint64_t hash, const char *name,
+                      const char *author);
+
+// Only by whoever put it up. False if it is not theirs, or not there.
+bool gs_store_withdraw(gs_store *s, uint64_t hash, const char *author);
+
+bool gs_store_is_published(gs_store *s, uint64_t hash);
+int  gs_store_list_published(gs_store *s, gs_track_row *out, int cap);
+
 #endif // GS_STORE_H

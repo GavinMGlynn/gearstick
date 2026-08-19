@@ -975,6 +975,34 @@ design decision rather than a bug. And **the server was not in the install rules
 at all**, while `docs/RELEASES.md` already listed it as something a release
 contains. A document describing a file nobody has is worse than no document.
 
+### Publishing
+
+A client sends a track up and asks for it to be listed; anybody else can browse
+what is published, fetch one and race it; and whoever put a track up can take it
+down again.
+
+**Published is a separate thing from stored**, and that distinction is the
+design. The server holds every track it has ever been handed, because it needs
+them to verify times set on them — publishing is somebody saying "and let people
+have this one". Withdrawing stops it being listed and leaves the track exactly
+where it is, so a record set on it stays checkable long after its author lost
+interest in showing it off.
+
+Only whoever put a track up can take it down. That check has a SQL wrinkle worth
+recording: `sqlite3_changes()` counts writing a value that is already there as a
+change, so a withdrawal of something already down reported success. The `WHERE`
+requires `published <> 0` now, and a test withdraws twice.
+
+The track travels the way tracks always travel — in chunks, checked against its
+own hash at the far end — so publishing is a claim about something the server
+already has, which is why the upload goes first and the claim second. A publish
+naming a track the server has never seen is refused rather than recorded as an
+empty promise.
+
+The server will now serve any track it holds rather than only the one its lobby
+is racing, which is what makes a published track *playable* rather than merely
+listed. A listing alone would have passed a weaker test.
+
 ---
 
 ## What does not exist

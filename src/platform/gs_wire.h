@@ -119,6 +119,10 @@ float gs_wire_track_progress(const gs_wire *w);
 // recovered, because there is nothing here that acknowledges anything.
 void gs_wire_want_track(gs_wire *w);
 
+// Ask for a particular track - one found in the published list, rather than the
+// one the server named for the race.
+void gs_wire_ask_track(gs_wire *w, uint64_t hash);
+
 // --- what the server remembers --------------------------------------------
 
 // Offer a time, **with the inputs that produced it**. The server re-races them
@@ -143,6 +147,32 @@ typedef struct gs_wire_best {
 } gs_wire_best;
 
 const gs_wire_best *gs_wire_best_here(const gs_wire *w);
+
+// --- publishing ------------------------------------------------------------
+
+// Send a track up and ask for it to be listed. The track travels in chunks and
+// is checked against its own hash at the far end, like every other track.
+void gs_wire_publish(gs_wire *w, const gs_track *t, const char *name);
+
+// Take one of yours down again. The server keeps the track - times set on it
+// have to stay checkable - it simply stops being listed.
+void gs_wire_withdraw(gs_wire *w, uint64_t track);
+
+// Ask what is published, and read what comes back.
+void gs_wire_ask_published(gs_wire *w);
+
+typedef struct gs_wire_listing {
+    uint64_t track;
+    char     name[48];
+    char     author[GS_PROTO_NAME];
+} gs_wire_listing;
+
+#define GS_WIRE_LISTINGS 32
+
+// How many have arrived, and them. `total` is what the server said there were,
+// so a caller can tell a short list from a partial one.
+uint16_t gs_wire_published(const gs_wire *w, const gs_wire_listing **out,
+                           uint16_t *total);
 
 // --- getting through a router that will not cooperate ----------------------
 
