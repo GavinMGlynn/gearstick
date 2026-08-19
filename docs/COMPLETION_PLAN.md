@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 29 of 60 items, every
+**Phases 0 to 3 are complete, and Phase 4 has started — 30 of 60 items, every
 one of them with its verification actually run.** Phase 4 is the editor and is
 about half the remaining work.
 
@@ -178,8 +178,12 @@ whatever the UI turns out to be — then the interface on top.
       measures as a quarter tile per tile, throws a car off its crest at that
       exact gradient, and the jump lands where that launch predicts to within
       six percent.*
-- [ ] **Paint surface, and paint gravity.** *Verification: painted tiles change
-      the car's behaviour in a test drive.*
+- [x] **Paint surface, and paint gravity.** *Verification: two identical cars
+      driven identically over two identical tracks differing only by the paint.
+      Pavement catches a four-tile-per-second slide inside two seconds; a
+      painted ice field does not. A painted one-third-gravity pocket over a
+      landing lengthens the jump by more than half, without the race gravity
+      changing at all.*
 - [ ] **Track validation** — is the loop closed, is the lap order derivable, can
       it be completed. *Verification: a deliberately broken track is refused with
       a message naming the problem.*

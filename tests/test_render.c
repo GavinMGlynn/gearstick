@@ -576,6 +576,122 @@ TEST(a_ramp_drawn_in_the_editor_drives_like_the_ramp_that_was_drawn) {
     gs_editor_quit(&ed);
 }
 
+// Paint a broad band across a flat track with whatever brush the editor is
+// currently set to, so the two halves of a comparison differ only by the paint.
+static void gs_paint_band(gs_editor *ed, gs_track *t, float x0, float x1) {
+    gs_edit_begin(ed->log);
+    for (float x = x0; x <= x1; x += 1.0f)
+        for (float y = 0.0f; y <= 12.0f; y += 1.0f)
+            gs_editor_paint(ed, t, x, y);
+    gs_edit_end(ed->log);
+}
+
+TEST(painting_ice_changes_what_the_car_does_when_it_gets_there) {
+    (void)ren;
+
+    static gs_track plain, painted;
+    gs_flat_pavement(&plain, 32, 12);
+    gs_flat_pavement(&painted, 32, 12);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 8192));
+    ed.brush = GS_BRUSH_SURFACE;
+    ed.surface = GS_SURF_ICE;
+    ed.radius = 1;
+    gs_paint_band(&ed, &painted, 0.0f, 31.0f);
+
+    // Two identical cars, sliding sideways, driven identically. The only
+    // difference between the runs is what the brush did.
+    gs_fix slip[2];
+    for (int variant = 0; variant < 2; variant++) {
+        const gs_track *t = variant == 0 ? &plain : &painted;
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(6), 0);
+        w.car[0].vx = GS_INT(4);
+        w.car[0].vy = GS_INT(4);
+
+        // Two seconds: pavement bears about 2.7 tiles/s^2 sideways, so it has
+        // four tiles/s of slip gone well inside that, and ice bears a sixth of
+        // it and is still going.
+        for (int i = 0; i < GS_TICK_HZ * 2; i++) gs_world_step(&w, t, nullptr);
+        slip[variant] = gs_fix_abs(w.car[0].vy);
+    }
+
+    CHECK(slip[0] == 0);              // pavement caught it
+    CHECK(slip[1] > GS_INT(2));       // the painted ice did not
+    gs_editor_quit(&ed);
+}
+
+TEST(painting_gravity_changes_how_far_the_car_flies_over_it) {
+    (void)ren;
+
+    static gs_track plain, painted;
+    gs_flat_pavement(&plain, 40, 12);
+    gs_flat_pavement(&painted, 40, 12);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 16384));
+
+    // The same ramp drawn on both, with the same brush, so the launch is
+    // identical and only the air the car flies through differs.
+    for (int which = 0; which < 2; which++) {
+        gs_track *t = which == 0 ? &plain : &painted;
+        ed.brush = GS_BRUSH_RAISE;
+        ed.radius = 0;
+        ed.step = 0.25f;
+        gs_edit_begin(ed.log);
+        for (int col = 1; col <= 4; col++)
+            for (int rep = 0; rep < col; rep++)
+                for (float y = 0.0f; y <= 12.0f; y += 1.0f)
+                    gs_editor_paint(&ed, t, 8.0f + (float)col, y);
+        for (float x = 13.0f; x <= 40.0f; x += 1.0f)
+            for (int rep = 0; rep < 4; rep++)
+                for (float y = 0.0f; y <= 12.0f; y += 1.0f)
+                    gs_editor_paint(&ed, t, x, y);
+        gs_edit_end(ed.log);
+    }
+
+    // A pocket of one-third gravity painted over the landing - the brush being
+    // used as a design material rather than as a race setting.
+    ed.brush = GS_BRUSH_GRAVITY;
+    ed.gravity = 0.33f;
+    ed.radius = 1;
+    gs_paint_band(&ed, &painted, 14.0f, 26.0f);
+
+    double flight[2];
+    for (int variant = 0; variant < 2; variant++) {
+        const gs_track *t = variant == 0 ? &plain : &painted;
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        w.drag_scale = 0;
+        w.friction_scale = 0;
+        gs_world_add_car(&w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(6), 0);
+        w.car[0].vx = GS_INT(5);
+
+        double launch = 0;
+        bool flew = false;
+        flight[variant] = 0.0;
+        for (int i = 0; i < GS_TICK_HZ * 20; i++) {
+            bool was_air = !w.car[0].grounded;
+            gs_world_step(&w, t, nullptr);
+            bool is_air = !w.car[0].grounded;
+            if (!was_air && is_air) { launch = (double)gs_to_f(w.car[0].x); flew = true; }
+            if (was_air && !is_air && flew) {
+                flight[variant] = (double)gs_to_f(w.car[0].x) - launch;
+                break;
+            }
+        }
+        CHECK(flew);
+    }
+
+    CHECK(flight[0] > 0.0);
+    // Gravity is sampled where the car is, every tick, so a pocket painted
+    // under the flight path lengthens the jump without touching the race dial.
+    CHECK(flight[1] > flight[0] * 1.5);
+    gs_editor_quit(&ed);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -607,6 +723,8 @@ int main(void) {
     run_a_track_built_with_the_brushes_saves_reloads_and_races(ren);
     run_the_elevation_brush_moves_the_ground_by_exactly_the_step_it_is_set_to(ren);
     run_a_ramp_drawn_in_the_editor_drives_like_the_ramp_that_was_drawn(ren);
+    run_painting_ice_changes_what_the_car_does_when_it_gets_there(ren);
+    run_painting_gravity_changes_how_far_the_car_flies_over_it(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
