@@ -490,3 +490,10 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
     SDL_SetRenderClipRect(ren, nullptr);
     SDL_SetRenderViewport(ren, nullptr);
 }
+
+void gs_render_ghost_lerp(SDL_Renderer *ren, const gs_track *t,
+                          const gs_car *prev, const gs_car *now, float alpha,
+                          const gs_view *view) {
+    gs_car c = gs_car_lerp(prev, now, alpha);
+    gs_render_ghost(ren, t, &c, view);
+}

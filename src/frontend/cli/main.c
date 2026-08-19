@@ -13,6 +13,7 @@
 
 #include "core/gs_ai.h"
 #include "core/gs_analyse.h"
+#include "core/gs_ghost.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -111,14 +112,14 @@ static int cmd_selftest(bool verify) {
     printf("world  hash 0x%016llx\n", (unsigned long long)world_hash);
 
     // The replay has to re-race to the same place, or the recording is a lie.
+    // Nothing is set up for it here on purpose: a recording that needs the
+    // caller to remember where the cars stood is not a recording anybody can
+    // send you.
     gs_world back;
-    if (!gs_replay_restore(&rec, &back, &t)) {
+    if (!gs_replay_playback(&rec, &t, &back)) {
         printf("FAIL   the replay refused its own track\n");
         return 1;
     }
-    selftest_world(&back, &t);
-    back.gravity = rec.meta.gravity;
-    gs_replay_playback(&rec, &t, &back);
 
     if (gs_world_hash(&back) != world_hash) {
         printf("FAIL   the replay did not re-race to the same world\n");
@@ -126,6 +127,48 @@ static int cmd_selftest(bool verify) {
     }
     printf("replay %u ticks, %zu bytes, re-races exactly\n",
            rec.meta.tick_count, gs_replay_size(&rec));
+
+    // --- And the same recording as a ghost, through the bytes.
+    //
+    // A ghost is the same simulation stepped in lockstep beside a live one, so
+    // the claim worth checking is not that it ends in the same place. It is
+    // that it is in the same place at *every* tick, having gone out to disk
+    // format and back on the way - because a ghost that agrees only at the end
+    // is a ghost you cannot race against.
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    size_t rn = gs_replay_serialize(&rec, bytes, sizeof bytes);
+    if (rn == 0) {
+        printf("FAIL   the replay did not fit its own buffer\n");
+        return 1;
+    }
+
+    static gs_ghost ghost;
+    if (!gs_ghost_load(&ghost, &t, bytes, rn)) {
+        printf("FAIL   the ghost refused the track it was recorded on\n");
+        return 1;
+    }
+
+    gs_world beside;
+    selftest_world(&beside, &t);
+    for (uint32_t i = 0; i < GS_SELFTEST_TICKS; i++) {
+        gs_input in[GS_MAX_CARS];
+        selftest_inputs(i, in);
+        gs_world_step(&beside, &t, in);
+        gs_ghost_step(&ghost, &t);
+
+        if (gs_world_hash(&ghost.world) != gs_world_hash(&beside)) {
+            printf("FAIL   the ghost diverged from the race it recorded, at "
+                   "tick %u of %u\n", i, GS_SELFTEST_TICKS);
+            return 1;
+        }
+    }
+    if (!ghost.finished) {
+        printf("FAIL   the ghost still had recording left after %u ticks\n",
+               GS_SELFTEST_TICKS);
+        return 1;
+    }
+    printf("ghost  %u ticks, agrees at every one of them\n",
+           gs_ghost_length(&ghost));
 
     if (!verify) return 0;
 

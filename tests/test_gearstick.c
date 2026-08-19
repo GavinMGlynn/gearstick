@@ -19,6 +19,7 @@
 #include "core/gs_analyse.h"
 #include "core/gs_clock.h"
 #include "core/gs_edit.h"
+#include "core/gs_ghost.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -2096,6 +2097,183 @@ TEST(the_heatmap_shows_where_everybody_actually_went) {
     CHECK(saw_peak);
 }
 
+// ---------------------------------------------------------------------------
+// Ghosts
+// ---------------------------------------------------------------------------
+
+// A short scripted race on a flat track: two cars, one of them turning, so a
+// recording of it has something in it worth comparing.
+static void gs_ghost_scene(gs_track *t, gs_world *w) {
+    gs_track_init(t, 40, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++)
+        for (uint8_t x = 0; x <= t->w; x++) gs_track_set_corner(t, x, y, 0);
+
+    gs_world_init(w, GS_ONE);
+    gs_world_add_car(w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(5), 0);
+    gs_world_add_car(w, t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(4), GS_INT(11),
+                     GS_DEG(45));
+}
+
+static void gs_ghost_inputs(uint32_t tick, gs_input *in) {
+    in[0] = GS_IN_ACCEL | ((tick / 40u) % 2u == 0u ? GS_IN_LEFT : GS_IN_RIGHT);
+    in[1] = GS_IN_ACCEL;
+    in[2] = 0;
+    in[3] = 0;
+}
+
+TEST(a_ghost_is_the_race_that_made_it_not_a_picture_of_it) {
+    static gs_track t;
+    gs_world w;
+    gs_ghost_scene(&t, &w);
+
+    static gs_replay rec;
+    gs_replay_begin(&rec, &w, &t);
+
+    const uint32_t ticks = GS_TICK_HZ * 4;
+    for (uint32_t i = 0; i < ticks; i++) {
+        gs_input in[GS_MAX_CARS];
+        gs_ghost_inputs(i, in);
+        gs_replay_record(&rec, in);
+        gs_world_step(&w, &t, in);
+    }
+
+    // Out to the wire and back, which is the only form a ghost ever arrives in.
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&rec, bytes, sizeof bytes);
+    CHECK(n > 0);
+
+    static gs_ghost g;
+    CHECK(gs_ghost_load(&g, &t, bytes, n));
+    CHECK(g.ready);
+    CHECK(gs_ghost_length(&g) == ticks);
+
+    // Stepped beside a fresh run of the same race, it has to be in the same
+    // place at *every* tick. Agreeing only at the end would be a ghost you
+    // could not race against - it would drift and then arrive.
+    gs_world beside;
+    gs_ghost_scene(&t, &beside);
+    for (uint32_t i = 0; i < ticks; i++) {
+        gs_input in[GS_MAX_CARS];
+        gs_ghost_inputs(i, in);
+        gs_world_step(&beside, &t, in);
+        gs_ghost_step(&g, &t);
+        CHECK(gs_world_hash(&g.world) == gs_world_hash(&beside));
+    }
+    CHECK(g.finished);
+
+    // And it went somewhere. A ghost that agrees perfectly by not moving would
+    // pass everything above.
+    const gs_car *c = gs_ghost_car(&g);
+    CHECK(c != nullptr);
+    if (c != nullptr) CHECK(c->x > GS_INT(10));
+}
+
+TEST(a_ghost_from_another_track_is_refused_rather_than_raced) {
+    static gs_track t, other;
+    gs_world w;
+    gs_ghost_scene(&t, &w);
+
+    static gs_replay rec;
+    gs_replay_begin(&rec, &w, &t);
+    for (uint32_t i = 0; i < 240; i++) {
+        gs_input in[GS_MAX_CARS];
+        gs_ghost_inputs(i, in);
+        gs_replay_record(&rec, in);
+        gs_world_step(&w, &t, in);
+    }
+
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&rec, bytes, sizeof bytes);
+
+    // One corner different. The hash is the whole track, so this is a different
+    // track and the same inputs would be a different race on it.
+    gs_ghost_scene(&other, &w);
+    gs_track_set_corner(&other, 20, 8, GS_INT(2));
+    CHECK(gs_track_hash(&other) != gs_track_hash(&t));
+
+    static gs_ghost g;
+    CHECK(!gs_ghost_load(&g, &other, bytes, n));
+    CHECK(!g.ready);
+    CHECK(gs_ghost_car(&g) == nullptr);   // and it draws nothing
+
+    // The bytes were kept, though: the right track afterwards works.
+    CHECK(gs_ghost_load(&g, &t, bytes, n));
+    CHECK(g.ready);
+}
+
+TEST(a_ghost_carries_its_own_starting_grid) {
+    static gs_track t;
+    gs_world w;
+    gs_ghost_scene(&t, &w);
+
+    // Move the grid somewhere nothing would guess, so that a replay which
+    // quietly re-created the default one would be caught.
+    w.car[0].x = GS_INT(17);
+    w.car[0].y = GS_INT(3);
+    w.car[0].heading = GS_DEG(90);
+    w.car[1].x = GS_INT(29);
+    w.car[1].y = GS_INT(13);
+
+    static gs_replay rec;
+    gs_replay_begin(&rec, &w, &t);
+    for (uint32_t i = 0; i < 120; i++) {
+        gs_input in[GS_MAX_CARS];
+        gs_ghost_inputs(i, in);
+        gs_replay_record(&rec, in);
+        gs_world_step(&w, &t, in);
+    }
+
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&rec, bytes, sizeof bytes);
+
+    // Nothing here is told where the cars stood. It has to come out of the
+    // recording, or a ghost somebody sends you starts from the wrong square.
+    static gs_ghost g;
+    CHECK(gs_ghost_load(&g, &t, bytes, n));
+    const gs_car *c = gs_ghost_car(&g);
+    CHECK(c != nullptr);
+    if (c != nullptr) {
+        CHECK(c->x == GS_INT(17));
+        CHECK(c->y == GS_INT(3));
+        CHECK(c->heading == GS_DEG(90));
+    }
+
+    gs_world played;
+    CHECK(gs_replay_playback(&rec, &t, &played));
+    CHECK(gs_world_hash(&played) == gs_world_hash(&w));
+}
+
+TEST(a_ghost_that_runs_out_stays_where_it_finished) {
+    static gs_track t;
+    gs_world w;
+    gs_ghost_scene(&t, &w);
+
+    static gs_replay rec;
+    gs_replay_begin(&rec, &w, &t);
+    for (uint32_t i = 0; i < 200; i++) {
+        gs_input in[GS_MAX_CARS];
+        gs_ghost_inputs(i, in);
+        gs_replay_record(&rec, in);
+        gs_world_step(&w, &t, in);
+    }
+
+    static gs_ghost g;
+    CHECK(gs_ghost_take(&g, &rec, &t));
+    for (uint32_t i = 0; i < 200; i++) gs_ghost_step(&g, &t);
+    CHECK(g.finished);
+
+    // The last thing anybody wants to know is where it beat them, so it stops
+    // rather than vanishing or coasting on under no input.
+    gs_fix x = gs_ghost_car(&g)->x;
+    for (uint32_t i = 0; i < 600; i++) gs_ghost_step(&g, &t);
+    CHECK(gs_ghost_car(&g)->x == x);
+
+    // And it can be sent back to the start line to run again.
+    gs_ghost_reset(&g, &t);
+    CHECK(!g.finished);
+    CHECK(gs_ghost_car(&g)->x == GS_INT(4));
+}
+
 TEST(the_analyser_gives_the_same_answer_twice) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -2442,6 +2620,10 @@ int main(void) {
     run_the_analyser_says_so_when_a_track_cannot_be_got_round_at_all();
     run_the_heatmap_shows_where_everybody_actually_went();
     run_the_analyser_gives_the_same_answer_twice();
+    run_a_ghost_is_the_race_that_made_it_not_a_picture_of_it();
+    run_a_ghost_from_another_track_is_refused_rather_than_raced();
+    run_a_ghost_carries_its_own_starting_grid();
+    run_a_ghost_that_runs_out_stays_where_it_finished();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

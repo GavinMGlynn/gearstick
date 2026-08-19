@@ -415,7 +415,7 @@ whatever the UI turns out to be — then the interface on top.
 - [x] **The track analyser sweep**, reported as an envelope and drawn as a
       heatmap over the editor. *Verification: it correctly calls an impossible
       jump impossible.*
-- [ ] **Ghosts** — race against a recorded run, yours or someone else's.
+- [x] **Ghosts** — race against a recorded run, yours or someone else's.
       *Verification: a ghost replays identically on another machine.*
 - [ ] **Track sharing as a code or URL.** *Verification: a track round-trips
       through the code and hashes equal.*

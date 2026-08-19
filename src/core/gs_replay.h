@@ -15,7 +15,7 @@
 #include "core/gs_sim.h"
 
 #define GS_REPLAY_MAGIC     0x50525347u   // "GSRP"
-#define GS_REPLAY_VERSION   1u
+#define GS_REPLAY_VERSION   2u
 #define GS_REPLAY_MAX_TICKS (GS_TICK_HZ * 60 * 10)   // ten minutes
 
 typedef struct gs_replay_meta {
@@ -26,6 +26,17 @@ typedef struct gs_replay_meta {
     gs_fix   damage_scale;
     uint8_t  car_count;
     uint8_t  vehicle[GS_MAX_CARS];
+
+    // **The grid, so a recording is self-contained.** Version 1 stored the
+    // conditions and the inputs and left the starting positions to the caller,
+    // which is fine while the only thing replaying a race is the program that
+    // recorded it and useless the moment somebody sends you a ghost: the same
+    // inputs from a different square are a different race. A replay that does
+    // not know where it started is not a replay of anything.
+    gs_fix   start_x[GS_MAX_CARS];
+    gs_fix   start_y[GS_MAX_CARS];
+    gs_angle start_heading[GS_MAX_CARS];
+
     uint32_t tick_count;
 } gs_replay_meta;
 
@@ -45,12 +56,15 @@ bool gs_replay_record(gs_replay *r, const gs_input *in);
 // The input for a tick, or all-zero past the end.
 const gs_input *gs_replay_at(const gs_replay *r, uint32_t tick);
 
-// Set `w` up as the replay's conditions describe, ready to be stepped against a
-// track whose hash matches. Returns false if it does not.
+// Set `w` up as the replay describes - the conditions, the vehicles and the
+// grid they started from - ready to be stepped against a track whose hash
+// matches. Returns false if it does not.
 bool gs_replay_restore(const gs_replay *r, gs_world *w, const gs_track *t);
 
 // Re-race the whole thing and hand back the final world. Same track, same
-// bytes, same answer, on any machine gearstick builds on.
+// bytes, same answer, on any machine gearstick builds on. The world is set up
+// from the recording, so this needs nothing from the caller but somewhere to
+// put the answer.
 bool gs_replay_playback(const gs_replay *r, const gs_track *t, gs_world *out);
 
 // On disk, little-endian and explicit, so a replay recorded on one machine

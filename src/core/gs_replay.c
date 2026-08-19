@@ -11,7 +11,12 @@ void gs_replay_begin(gs_replay *r, const gs_world *w, const gs_track *t) {
     r->meta.friction_scale = w->friction_scale;
     r->meta.damage_scale   = w->damage_scale;
     r->meta.car_count      = w->car_count;
-    for (uint8_t i = 0; i < w->car_count; i++) r->meta.vehicle[i] = w->car[i].vehicle;
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        r->meta.vehicle[i]       = w->car[i].vehicle;
+        r->meta.start_x[i]       = w->car[i].x;
+        r->meta.start_y[i]       = w->car[i].y;
+        r->meta.start_heading[i] = w->car[i].heading;
+    }
     r->meta.tick_count     = 0;
 }
 
@@ -41,13 +46,17 @@ bool gs_replay_restore(const gs_replay *r, gs_world *w, const gs_track *t) {
     w->drag_scale     = r->meta.drag_scale;
     w->friction_scale = r->meta.friction_scale;
     w->damage_scale   = r->meta.damage_scale;
+
+    for (uint8_t i = 0; i < r->meta.car_count; i++) {
+        gs_world_add_car(w, t, r->meta.vehicle[i], r->meta.start_x[i],
+                         r->meta.start_y[i], r->meta.start_heading[i]);
+    }
     return true;
 }
 
 bool gs_replay_playback(const gs_replay *r, const gs_track *t, gs_world *out) {
-    // Caller places the cars: a replay pins the conditions and the inputs, and
-    // the starting grid belongs to the track. Playback only needs the world it
-    // is handed to be the world the recording started from.
+    if (!gs_replay_restore(r, out, t)) return false;
+
     for (uint32_t i = 0; i < r->meta.tick_count; i++) {
         gs_world_step(out, t, gs_replay_at(r, i));
     }
@@ -55,6 +64,15 @@ bool gs_replay_playback(const gs_replay *r, const gs_track *t, gs_world *out) {
 }
 
 // --- the wire format ------------------------------------------------------
+
+static void gs_put_u16(uint8_t *p, uint16_t v) {
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+}
+
+static uint16_t gs_get_u16(const uint8_t *p) {
+    return (uint16_t)((uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8));
+}
 
 static void gs_put_u32(uint8_t *p, uint32_t v) {
     p[0] = (uint8_t)(v & 0xffu);
@@ -78,7 +96,8 @@ static uint64_t gs_get_u64(const uint8_t *p) {
 }
 
 // magic, version, track hash, four dials, car count, vehicles, tick count.
-#define GS_REPLAY_HEADER_BYTES (4 + 4 + 8 + 16 + 4 + GS_MAX_CARS + 4)
+#define GS_REPLAY_HEADER_BYTES \
+    (4 + 4 + 8 + 16 + 4 + GS_MAX_CARS + GS_MAX_CARS * (4 + 4 + 2) + 4)
 
 size_t gs_replay_size(const gs_replay *r) {
     return GS_REPLAY_HEADER_BYTES + (size_t)r->meta.tick_count * GS_MAX_CARS;
@@ -98,6 +117,11 @@ size_t gs_replay_serialize(const gs_replay *r, uint8_t *buf, size_t cap) {
     gs_put_u32(p, (uint32_t)r->meta.damage_scale);   p += 4;
     gs_put_u32(p, (uint32_t)r->meta.car_count);  p += 4;
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) *p++ = r->meta.vehicle[i];
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_put_u32(p, (uint32_t)r->meta.start_x[i]);       p += 4;
+        gs_put_u32(p, (uint32_t)r->meta.start_y[i]);       p += 4;
+        gs_put_u16(p, (uint16_t)r->meta.start_heading[i]); p += 2;
+    }
     gs_put_u32(p, r->meta.tick_count);           p += 4;
 
     for (uint32_t i = 0; i < r->meta.tick_count; i++) {
@@ -123,6 +147,11 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     r->meta.damage_scale   = (gs_fix)gs_get_u32(p);            p += 4;
     r->meta.car_count      = (uint8_t)gs_get_u32(p);           p += 4;
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) r->meta.vehicle[i] = *p++;
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        r->meta.start_x[i]       = (gs_fix)gs_get_u32(p);   p += 4;
+        r->meta.start_y[i]       = (gs_fix)gs_get_u32(p);   p += 4;
+        r->meta.start_heading[i] = (gs_angle)gs_get_u16(p); p += 2;
+    }
     uint32_t ticks         = gs_get_u32(p);                    p += 4;
 
     if (r->meta.car_count > GS_MAX_CARS) return false;

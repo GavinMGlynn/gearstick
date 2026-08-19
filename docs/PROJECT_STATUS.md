@@ -261,6 +261,36 @@ buggy wrecks too; the baja bug finishes it undamaged, and beats the only other
 survivor by half again. All six vehicles win something, and each of them wins it
 for a reason you could describe to somebody.
 
+### Ghosts, and the grid a replay was not carrying
+
+A ghost is a recorded run stepped through the same simulation as the live race,
+one tick for one tick. It is not an animation and holds no positions: the same
+input log that makes a replay makes a ghost, at half a kilobyte a second, and
+the car you are chasing is the car somebody actually drove rather than a video
+of where it went.
+
+Finishing a race hands the recording straight to the ghost, so racing yourself
+costs one keypress and no files. `F5` writes that run out, `F9` reads one back,
+and `--ghost FILE` starts against somebody else's - which is refused outright if
+it was recorded on a different track, because the same inputs somewhere else are
+a different race and pretending otherwise would put a car through the scenery
+and call it a lap time. A borrowed ghost survives restarting; your own is
+replaced by every run you finish, which is the point of it.
+
+Building it exposed that replays were not self-contained. Version 1 stored the
+conditions, the vehicles and the inputs, and left the starting positions to the
+caller - fine while the only thing replaying a race was the program that
+recorded it, and useless the moment somebody sends you one. The format is
+version 2 and carries the grid: position and heading per car. `gs_replay_playback`
+now needs nothing from its caller but somewhere to put the answer.
+
+The verification runs on every platform in CI, inside `selftest --verify`, and it
+is deliberately stronger than the plan asked for. The recording goes out to the
+wire format and back, and the ghost is then required to agree with a fresh run
+of the same race at *every one* of the nine hundred ticks - not merely at the
+end. A ghost that agrees only at the end is one that drifts and then arrives,
+which is exactly the ghost nobody can race against.
+
 ---
 
 ## What does not exist

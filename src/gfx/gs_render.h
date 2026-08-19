@@ -96,6 +96,13 @@ gs_render_stats gs_render_stats_now(void);
 void gs_render_ghost(SDL_Renderer *ren, const gs_track *t, const gs_car *c,
                      const gs_view *view);
 
+// The same, interpolated between two ticks. A ghost you are racing has to move
+// as smoothly as the car you are driving, or the thing you are chasing stutters
+// and the comparison stops being fair to look at.
+void gs_render_ghost_lerp(SDL_Renderer *ren, const gs_track *t,
+                          const gs_car *prev, const gs_car *now, float alpha,
+                          const gs_view *view);
+
 // Put the camera where it should be for the car it follows.
 void gs_render_track_camera(gs_view *view, const gs_world *prev,
                             const gs_world *now, float alpha);

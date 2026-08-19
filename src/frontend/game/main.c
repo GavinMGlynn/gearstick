@@ -20,6 +20,7 @@
 #include "platform/gs_input.h"
 #include "platform/gs_paths.h"
 #include "ui/gs_editor.h"
+#include "core/gs_ghost.h"
 
 #include "dcimgui.h"
 #include "backends/dcimgui_impl_sdl3.h"
@@ -42,6 +43,18 @@ typedef struct gs_app {
     gs_editor      editor;
     gs_split       split;
 
+    // The run in progress, and the last one finished. Restarting hands the
+    // recording to the ghost, so racing yourself costs one keypress and no
+    // files at all - which is the version of the feature people actually use.
+    gs_replay recording;
+    gs_ghost  ghost;
+    bool      show_ghost;
+
+    // Whose ghost it is. Your own is replaced by every run you finish, which is
+    // the point of it. Somebody else's is the thing you are trying to beat, and
+    // replacing that with your own first attempt would be absurd.
+    bool      ghost_borrowed;
+
     uint64_t last_ns;
     gs_clock clock;
 
@@ -56,6 +69,8 @@ typedef struct gs_app {
     uint8_t     players;      // 0 means the default of two
     bool        diverge;      // in shot mode, steer the cars apart and back
     bool        analyse_at_start;
+    const char *ghost_path;
+    const char *ghost_out;   // with --shot: write the run that was captured
     bool        quit;
 } gs_app;
 
@@ -146,6 +161,17 @@ static void gs_start_race(gs_app *a) {
     }
     a->prev = a->world;
 
+    // Whatever was just raced becomes the thing to beat. A recording of zero
+    // ticks - the first race, or a restart from the grid - is not worth
+    // carrying, so it is left alone and the previous ghost stays.
+    if (a->recording.meta.tick_count > 0 && !a->ghost_borrowed) {
+        gs_ghost_take(&a->ghost, &a->recording, &a->t);
+        a->show_ghost = true;
+    } else {
+        gs_ghost_reset(&a->ghost, &a->t);
+    }
+    gs_replay_begin(&a->recording, &a->world, &a->t);
+
     a->views = a->world.car_count;
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i] = (gs_view){ 0 };
@@ -154,6 +180,65 @@ static void gs_start_race(gs_app *a) {
         a->view[i].show_gravity = a->overlay;
         gs_render_track_camera(&a->view[i], &a->prev, &a->world, 1.0f);
     }
+}
+
+// --- ghosts on disk --------------------------------------------------------
+//
+// A ghost you race yourself never needs a file - restarting hands the last run
+// straight over. A file is for the other half of the feature: the run somebody
+// else did, sent to you, raced against on your machine. Same bytes, same
+// simulation, same car.
+
+#define GS_GHOST_FILENAME "ghost.gsreplay"
+
+static bool gs_ghost_path(char *out, size_t cap) {
+    const char *dir = gs_pref_dir();
+    if (dir == nullptr) return false;
+    SDL_snprintf(out, cap, "%s%s", dir, GS_GHOST_FILENAME);
+    return true;
+}
+
+static void gs_ghost_save(gs_app *a) {
+    char path[1024];
+    if (a->recording.meta.tick_count == 0 || !gs_ghost_path(path, sizeof path)) {
+        SDL_Log("ghost: nothing recorded yet");
+        return;
+    }
+
+    static uint8_t buf[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&a->recording, buf, sizeof buf);
+    if (n == 0 || !SDL_SaveFile(path, buf, n)) {
+        SDL_Log("ghost: save failed: %s", SDL_GetError());
+        return;
+    }
+    SDL_Log("ghost: wrote %zu bytes to %s", n, path);
+    a->ghost_borrowed = false;
+}
+
+static void gs_ghost_open(gs_app *a) {
+    char path[1024];
+    if (!gs_ghost_path(path, sizeof path)) return;
+
+    size_t n = 0;
+    void *buf = SDL_LoadFile(path, &n);
+    if (buf == nullptr) {
+        SDL_Log("ghost: nothing saved at %s", path);
+        return;
+    }
+
+    // A ghost recorded on another track is refused rather than raced. The same
+    // inputs somewhere else are a different race, and pretending otherwise
+    // would put a car through the scenery and call it a lap time.
+    bool ok = gs_ghost_load(&a->ghost, &a->t, (const uint8_t *)buf, n);
+    SDL_free(buf);
+
+    if (!ok) {
+        SDL_Log("ghost: that recording is for a different track");
+        return;
+    }
+    a->show_ghost = true;
+    a->ghost_borrowed = true;
+    SDL_Log("ghost: loaded %u ticks", gs_ghost_length(&a->ghost));
 }
 
 // Two views side by side. Four will merge into one when the cars are close -
@@ -189,6 +274,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->diverge = true;
         } else if (SDL_strcmp(argv[i], "--editor") == 0) {
             a->start_in_editor = true;
+        } else if (SDL_strcmp(argv[i], "--ghost-out") == 0 && i + 1 < argc) {
+            a->ghost_out = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--ghost") == 0 && i + 1 < argc) {
+            a->ghost_path = argv[++i];
         } else if (SDL_strcmp(argv[i], "--heatmap") == 0) {
             a->start_in_editor = true;
             a->analyse_at_start = true;
@@ -202,6 +291,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  --players N     one to four, split-screen to match");
             SDL_Log("  --diverge       with --shot: drive the cars apart, to see the split");
+            SDL_Log("  H shows or hides the ghost of your last run,");
+            SDL_Log("  F5 saves that run as a ghost file and F9 loads one.");
+            SDL_Log("  --ghost FILE    race against a recorded run");
+            SDL_Log("  --ghost-out F   with --shot: write the captured run as a ghost");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
@@ -245,6 +338,26 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
     gs_demo_track(&a->t);
     gs_start_race(a);
+
+    // A ghost named on the command line is somebody else's run, so it survives
+    // the restart that would otherwise replace it with your own.
+    if (a->ghost_path != nullptr) {
+        size_t n = 0;
+        void *buf = SDL_LoadFile(a->ghost_path, &n);
+        if (buf == nullptr) {
+            SDL_Log("ghost: could not read %s", a->ghost_path);
+        } else {
+            if (gs_ghost_load(&a->ghost, &a->t, (const uint8_t *)buf, n)) {
+                a->show_ghost = true;
+                a->ghost_borrowed = true;
+                SDL_Log("ghost: %s, %u ticks", a->ghost_path,
+                        gs_ghost_length(&a->ghost));
+            } else {
+                SDL_Log("ghost: %s is for a different track", a->ghost_path);
+            }
+            SDL_free(buf);
+        }
+    }
     gs_layout(a);
 
     if (a->start_in_editor) gs_editor_toggle(&a->editor, &a->view[0]);
@@ -278,6 +391,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
                 a->view[i].show_gravity = !a->view[i].show_gravity;
         }
         if (e->key.key == SDLK_R) gs_start_race(a);
+        if (e->key.key == SDLK_H) a->show_ghost = !a->show_ghost;
+        if (e->key.key == SDLK_F5) gs_ghost_save(a);
+        if (e->key.key == SDLK_F9) gs_ghost_open(a);
         // Tab is the whole loop: build, drive, build. No load step between
         // them, which is the single biggest thing the original could not do.
         if (e->key.key == SDLK_TAB) {
@@ -325,7 +441,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             }
 
             a->prev = a->world;
+            gs_replay_record(&a->recording, in);
             gs_world_step(&a->world, &a->t, in);
+            if (a->show_ghost) gs_ghost_step(&a->ghost, &a->t);
 
             // The split is a function of time as well as distance, so it has to
             // be advanced alongside the simulation rather than only at the end.
@@ -344,7 +462,13 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         gs_input_poll(&a->input, in, a->world.car_count);
 
         a->prev = a->world;
+        gs_replay_record(&a->recording, in);
         gs_world_step(&a->world, &a->t, in);
+
+        // Lockstep, one tick for one tick. The ghost is a race, not a
+        // playback, so it has to be stepped by the same clock as everything
+        // else or it drifts against the thing it is being compared to.
+        if (a->show_ghost) gs_ghost_step(&a->ghost, &a->t);
     }
 
     float alpha = gs_to_f(gs_clock_alpha(&a->clock));
@@ -426,6 +550,19 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         gs_render_view(a->ren, &a->t, &a->prev, &a->world, alpha, &a->view[i]);
     }
 
+    // The ghost of your last run, in every view, under the cars. It is drawn
+    // after the terrain and before nothing: a ghost that hid a real car would
+    // be worse than no ghost at all.
+    if (!a->editor.active && a->show_ghost) {
+        const gs_car *gp = gs_ghost_prev_car(&a->ghost);
+        const gs_car *gn = gs_ghost_car(&a->ghost);
+        if (gp != nullptr && gn != nullptr) {
+            for (uint8_t i = 0; i < views; i++) {
+                gs_render_ghost_lerp(a->ren, &a->t, gp, gn, alpha, &a->view[i]);
+            }
+        }
+    }
+
     if (a->editor.active) {
         const gs_car *ghost = gs_editor_ghost_car(&a->editor);
         if (ghost != nullptr) gs_render_ghost(a->ren, &a->t, ghost, &a->view[0]);
@@ -464,6 +601,17 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         SDL_Log("wrote %s at tick %llu", a->shot_path,
                 (unsigned long long)a->world.tick);
         SDL_DestroySurface(s);
+
+        if (a->ghost_out != nullptr) {
+            static uint8_t buf[sizeof(gs_replay) + 4096];
+            size_t n = gs_replay_serialize(&a->recording, buf, sizeof buf);
+            if (n == 0 || !SDL_SaveFile(a->ghost_out, buf, n)) {
+                SDL_Log("could not write %s: %s", a->ghost_out, SDL_GetError());
+                return SDL_APP_FAILURE;
+            }
+            SDL_Log("wrote %s, %u ticks", a->ghost_out,
+                    a->recording.meta.tick_count);
+        }
         return SDL_APP_SUCCESS;
     }
 
