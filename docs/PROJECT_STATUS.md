@@ -752,6 +752,44 @@ One smaller thing, found by looking at a screenshot: a lobby that has not heard
 from the server yet was drawn as a table of nobody under "waiting for 0 more
 players". Nothing heard is not an empty lobby, and it says "Knocking..." now.
 
+### The track travels with the race
+
+`gearstick_server --track FILE` hands the track out. It goes in chunks, because
+a track is a few kilobytes and a datagram is not, and **the hash is the whole
+reassembly protocol**: every chunk carries the hash of the track it belongs to,
+and the rebuilt track has to hash to it before anybody races. A track already
+knows what it is, so nothing needs a transfer id or a session, and two transfers
+cannot be confused with each other.
+
+Loss is handled the way everything else here handles it — by asking again rather
+than by acknowledging. The receiver knows which pieces are missing because it
+knows how many there are, so it asks for the track again and gets all of it; a
+chunk that arrives twice is written twice to the same place and costs nothing.
+
+The client is **not ready to race until the ground is agreed**, and the last
+part of getting that right is the part worth recording.
+
+The first version inferred "there is no track to wait for" from the server not
+having mentioned one. That is inferring a fact from silence, and it was wrong in
+a way no amount of loopback testing would show: the roster and the track
+announcement are two datagrams, the roster usually arrives first, and in the gap
+the client believed there was nothing to wait for and was ready to race on
+whatever it had loaded locally. The server now *always* says what the race is
+on, including when the answer is "nothing", and a client that has not heard yet
+counts as not settled.
+
+The test took three goes to catch that, and the shape of the failure is the
+lesson. Waiting for the transfer to finish and then checking it proved nothing,
+because on the loopback the track lands milliseconds after the roster — a client
+that ignored the transfer entirely looked identical by the time anybody looked.
+What is checked now is every intermediate state and the rule that has to hold in
+all of them: never ready while the ground is still arriving.
+
+A damaged track is refused rather than raced. All the pieces arriving is not the
+same as the track being right, and two machines racing on tracks they each
+believe are the same one is the one failure rollback cannot absorb — every input
+would agree and every state would differ.
+
 ---
 
 ## What does not exist

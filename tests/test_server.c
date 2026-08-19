@@ -7,6 +7,8 @@
 // to get right that are easy to get wrong: a fifth client is refused *with a
 // reason*, and somebody who says hello twice does not occupy two slots.
 #include "net/gs_proto.h"
+#include "core/gs_track.h"
+#include "net/gs_carrier.h"
 #include "platform/gs_wire.h"
 
 #include <SDL3/SDL.h>
@@ -117,9 +119,12 @@ static void gs_client_pump(gs_test_client *c) {
     }
 }
 
-// The server is a process in real life and a thread here. Started with a
+// The server is a process in real life and a process here too. Started with a
 // deadline so a broken test cannot leave one running.
 static SDL_Process *gs_server = nullptr;
+
+// A track for the server to hand out, when a test wants one.
+static const char *gs_track_arg = nullptr;
 
 static bool gs_server_start_full(const char *port, const char *seconds,
                                  const char *players, const char *timeout) {
@@ -136,10 +141,18 @@ static bool gs_server_start_full(const char *port, const char *seconds,
                  "");
 #endif
 
-    const char *args[] = {
-        exe, "--port", port, "--plain", "--seconds", seconds,
-        "--players", players, "--timeout", timeout, nullptr,
-    };
+    const char *args[16];
+    int n = 0;
+    args[n++] = exe;
+    args[n++] = "--port";     args[n++] = port;
+    args[n++] = "--plain";
+    args[n++] = "--seconds";  args[n++] = seconds;
+    args[n++] = "--players";  args[n++] = players;
+    args[n++] = "--timeout";  args[n++] = timeout;
+    if (gs_track_arg != nullptr) {
+        args[n++] = "--track"; args[n++] = gs_track_arg;
+    }
+    args[n] = nullptr;
 
     // Its output goes nowhere. The server redraws a live view four times a
     // second, and interleaving that with the test's own output makes a failure
@@ -165,6 +178,14 @@ static bool gs_server_start_full(const char *port, const char *seconds,
 static bool gs_server_start_for(const char *port, const char *seconds,
                                 const char *players) {
     return gs_server_start_full(port, seconds, players, "15000");
+}
+
+static bool gs_server_start_with_track(const char *port, const char *seconds,
+                                       const char *players, const char *track) {
+    gs_track_arg = track;
+    bool ok = gs_server_start_full(port, seconds, players, "15000");
+    gs_track_arg = nullptr;
+    return ok;
 }
 
 static bool gs_server_start(const char *port, const char *seconds) {
@@ -561,6 +582,87 @@ TEST(a_client_waiting_for_others_is_not_ready_yet) {
     gs_server_stop();
 }
 
+TEST(a_client_with_a_different_track_is_given_the_right_one) {
+    // **The verification this item exists for.** Two machines racing on tracks
+    // they each believe are the same one is the single failure rollback cannot
+    // absorb: every input would agree and every state would differ.
+    CHECK(gs_wire_init());
+
+    // A track nobody has by accident, written where the server can read it.
+    static gs_track served;
+    gs_track_init(&served, 44, 20, GS_SURF_DIRT);
+    for (uint8_t y = 0; y <= served.h; y++) {
+        for (uint8_t x = 0; x <= served.w; x++) {
+            gs_fix h = (x > 10 && x < 16) ? (gs_fix)((int64_t)GS_INT(2) * (x - 10) / 6) : 0;
+            gs_track_set_corner(&served, x, y, h);
+        }
+    }
+    for (uint8_t x = 24; x < served.w; x++) {
+        for (uint8_t y = 0; y < served.h; y++) {
+            gs_track_set_surface(&served, x, y, GS_SURF_ICE);
+        }
+    }
+    gs_track_add_gate(&served, GS_INT(4), GS_INT(10), 0, GS_INT(6));
+    gs_track_add_gate(&served, GS_INT(38), GS_INT(10), 0, GS_INT(6));
+
+    static uint8_t bytes[GS_CARRIER_MAX_BYTES];
+    size_t len = gs_track_serialize(&served, bytes, sizeof bytes);
+    CHECK(len > GS_CHUNK_BYTES);        // more than one chunk, or nothing is reassembled
+
+    const char *path = "served.gstrack";
+    SDL_IOStream *io = SDL_IOFromFile(path, "wb");
+    CHECK(io != nullptr);
+    if (io != nullptr) {
+        SDL_WriteIO(io, bytes, len);
+        SDL_CloseIO(io);
+    }
+
+    if (!gs_server_start_with_track("47824", "25", "1", path)) {
+        gs_failures++;
+        return;
+    }
+
+    gs_wire *w = gs_wire_server("127.0.0.1", 47824, "ada");
+    CHECK(w != nullptr);
+
+    // **Never ready while the ground is still arriving.** Waiting for the last
+    // check to pass would prove nothing here: on the loopback the track lands a
+    // few milliseconds after the roster, so a client that ignored the transfer
+    // entirely would look identical by the time anybody looked. What is watched
+    // instead is every intermediate state, and the rule that must hold in all
+    // of them.
+    bool raced_too_early = false;
+    for (int k = 0; k < 600 && !gs_wire_ready(w); k++) {
+        gs_wire_poll(w);
+        if (gs_wire_ready(w) && gs_wire_track_progress(w) < 1.0f) {
+            raced_too_early = true;
+        }
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_ready(w));
+    CHECK(!raced_too_early);
+
+    // The server named a track, all of it arrived, and it is that track.
+    CHECK(gs_wire_track_hash(w) == gs_track_hash(&served));
+    CHECK(gs_wire_track_progress(w) >= 1.0f);
+
+    static gs_track got;
+    CHECK(gs_wire_track(w, &got));
+    CHECK(gs_track_hash(&got) == gs_track_hash(&served));
+    CHECK(got.w == served.w && got.h == served.h);
+    CHECK(got.gate_count == served.gate_count);
+
+    // And it is not the track a client would have had otherwise. A demo track
+    // that happened to match would make all of the above pass for free.
+    static gs_track local;
+    gs_track_init(&local, 40, 24, GS_SURF_PAVEMENT);
+    CHECK(gs_track_hash(&local) != gs_track_hash(&served));
+
+    gs_wire_close(w);
+    gs_wire_quit();
+    gs_server_stop();
+}
+
 int main(void) {
     printf("gearstick server tests\n");
 
@@ -576,6 +678,7 @@ int main(void) {
     run_the_games_own_client_gets_its_slot_from_the_server();
     run_a_client_waiting_for_others_is_not_ready_yet();
     run_a_placed_client_is_not_dropped_for_going_quiet();
+    run_a_client_with_a_different_track_is_given_the_right_one();
 
     gs_server_stop();
     NET_Quit();

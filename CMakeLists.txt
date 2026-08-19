@@ -254,7 +254,8 @@ add_library(gearstick_shell STATIC
     src/platform/gs_paths.c
     src/platform/gs_input.c
     src/platform/gs_wire.c
-    src/net/gs_proto.c)
+    src/net/gs_proto.c
+    src/net/gs_carrier.c)
 
 target_include_directories(gearstick_shell PUBLIC src)
 target_link_libraries(gearstick_shell PUBLIC gearstick_sim gearstick_ui ${GS_SDL}
@@ -320,10 +321,13 @@ gs_add_sqlite()
 
 add_executable(gearstick_server
     src/frontend/server/main.c
-    src/net/gs_proto.c)
+    src/net/gs_proto.c
+    src/net/gs_carrier.c)
+# The carrier rebuilds a track, so the server needs the track format - and with
+# it the simulation, which it will need anyway the day it verifies a lap time.
 target_include_directories(gearstick_server PRIVATE src)
 target_link_libraries(gearstick_server PRIVATE ${GS_SDL} ${GS_SDL_NET}
-    gearstick_sqlite)
+    gearstick_sim gearstick_sqlite)
 gs_configure(gearstick_server)
 set_target_properties(gearstick_server PROPERTIES C_VISIBILITY_PRESET hidden)
 endif()
@@ -333,7 +337,10 @@ endif()
 # ---------------------------------------------------------------------------
 if(GEARSTICK_TESTS)
     enable_testing()
-    add_executable(gearstick_tests tests/test_gearstick.c)
+    add_executable(gearstick_tests
+        tests/test_gearstick.c
+        src/net/gs_proto.c
+        src/net/gs_carrier.c)
     target_link_libraries(gearstick_tests PRIVATE gearstick_sim)
 
     # The tests link libm and the simulation does not. That asymmetry is the

@@ -24,6 +24,7 @@
 #include "core/gs_pack.h"
 #include "core/gs_profile.h"
 #include "core/gs_records.h"
+#include "net/gs_carrier.h"
 #include "core/gs_share.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
@@ -3207,6 +3208,137 @@ TEST(the_race_that_sets_a_record_is_the_race_that_reports_it) {
     CHECK(best == nullptr);        // wrong conditions, no record
 }
 
+// ---------------------------------------------------------------------------
+// A track, in pieces
+// ---------------------------------------------------------------------------
+
+static gs_carrier gs_carry;
+
+static void gs_carried_track(gs_track *t) {
+    gs_track_init(t, 48, 24, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) {
+            gs_fix h = 0;
+            if (x > 12 && x < 18) h = (gs_fix)((int64_t)GS_INT(2) * (x - 12) / 6);
+            gs_track_set_corner(t, x, y, h);
+        }
+    }
+    for (uint8_t x = 0; x < t->w; x++) {
+        for (uint8_t y = 0; y < t->h; y++) {
+            if (x >= 30) gs_track_set_surface(t, x, y, GS_SURF_ICE);
+            if (x >= 12 && x < 18) gs_track_set_gravity(t, x, y, GS_RATIO(40, 100));
+        }
+    }
+    gs_track_add_gate(t, GS_INT(4), GS_INT(12), 0, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(40), GS_INT(12), 0, GS_INT(6));
+}
+
+TEST(a_track_arrives_in_pieces_and_is_the_same_track) {
+    static gs_track sent, got;
+    gs_carried_track(&sent);
+
+    static uint8_t bytes[GS_CARRIER_MAX_BYTES];
+    size_t len = gs_track_serialize(&sent, bytes, sizeof bytes);
+    CHECK(len > 0);
+
+    uint64_t hash = gs_track_hash(&sent);
+    uint16_t chunks = gs_carrier_chunks(len);
+    CHECK(chunks > 1);          // or this is not testing reassembly at all
+
+    gs_carrier_expect(&gs_carry, hash);
+    CHECK(!gs_carrier_done(&gs_carry));
+
+    // Deliberately out of order, because a datagram socket makes no promises
+    // and a reassembler that only works in order works only on a good day.
+    static const int order[] = { 3, 0, 2, 1 };
+    for (size_t k = 0; k < sizeof order / sizeof order[0]; k++) {
+        uint16_t c = (uint16_t)order[k];
+        if (c >= chunks) continue;
+
+        uint8_t dg[GS_PROTO_MTU];
+        size_t n = gs_carrier_chunk(dg, sizeof dg, hash, bytes, len, c);
+        CHECK(n > 0);
+        CHECK(gs_carrier_take(&gs_carry, dg, n));
+    }
+    for (uint16_t c = 0; c < chunks; c++) {
+        uint8_t dg[GS_PROTO_MTU];
+        size_t n = gs_carrier_chunk(dg, sizeof dg, hash, bytes, len, c);
+        gs_carrier_take(&gs_carry, dg, n);
+    }
+
+    CHECK(gs_carrier_done(&gs_carry));
+    CHECK(gs_carrier_track(&gs_carry, &got));
+
+    // The same track, not merely a track. Every corner, every tile, the route.
+    CHECK(gs_track_hash(&got) == hash);
+    CHECK(got.w == sent.w && got.h == sent.h);
+    CHECK(got.gate_count == sent.gate_count);
+    for (uint8_t y = 0; y <= sent.h; y++) {
+        for (uint8_t x = 0; x <= sent.w; x++) {
+            size_t c = (size_t)y * GS_CORNER_STRIDE + x;
+            CHECK(got.corner[c] == sent.corner[c]);
+        }
+    }
+    for (uint8_t x = 0; x < sent.w; x++) {
+        for (uint8_t y = 0; y < sent.h; y++) {
+            gs_fix cx = GS_INT(x) + GS_HALF, cy = GS_INT(y) + GS_HALF;
+            CHECK(gs_track_surface(&got, cx, cy) == gs_track_surface(&sent, cx, cy));
+            CHECK(gs_track_gravity(&got, cx, cy) == gs_track_gravity(&sent, cx, cy));
+        }
+    }
+}
+
+TEST(a_track_that_arrives_damaged_is_refused_rather_than_raced) {
+    static gs_track sent, got;
+    gs_carried_track(&sent);
+
+    static uint8_t bytes[GS_CARRIER_MAX_BYTES];
+    size_t len = gs_track_serialize(&sent, bytes, sizeof bytes);
+    uint64_t hash = gs_track_hash(&sent);
+    uint16_t chunks = gs_carrier_chunks(len);
+
+    // Every chunk arrives, and one of them is wrong. **This is the case the
+    // hash is for**: the pieces being counted is not the same as the track
+    // being right, and two machines racing on tracks they both believe are the
+    // same one is the one failure rollback cannot absorb.
+    gs_carrier_expect(&gs_carry, hash);
+    for (uint16_t c = 0; c < chunks; c++) {
+        uint8_t dg[GS_PROTO_MTU];
+        size_t n = gs_carrier_chunk(dg, sizeof dg, hash, bytes, len, c);
+        if (c == 1) dg[n - 1] ^= 0xffu;      // one byte, in the middle
+        CHECK(gs_carrier_take(&gs_carry, dg, n));
+    }
+
+    CHECK(gs_carrier_done(&gs_carry));          // all the pieces are here...
+    CHECK(!gs_carrier_track(&gs_carry, &got));  // ...and it is not the track
+
+    // A chunk belonging to a different track is ignored rather than mixed in.
+    gs_carrier_expect(&gs_carry, hash);
+    uint8_t dg[GS_PROTO_MTU];
+    size_t n = gs_carrier_chunk(dg, sizeof dg, hash ^ 1u, bytes, len, 0);
+    CHECK(!gs_carrier_take(&gs_carry, dg, n));
+    CHECK(gs_carry.got == 0);
+
+    // Missing a piece is not done, however many times the others arrive.
+    gs_carrier_expect(&gs_carry, hash);
+    for (int repeat = 0; repeat < 3; repeat++) {
+        for (uint16_t c = 1; c < chunks; c++) {
+            size_t m = gs_carrier_chunk(dg, sizeof dg, hash, bytes, len, c);
+            gs_carrier_take(&gs_carry, dg, m);
+        }
+    }
+    CHECK(!gs_carrier_done(&gs_carry));
+    CHECK(gs_carrier_progress(&gs_carry) < 1.0f);
+    CHECK(!gs_carrier_track(&gs_carry, &got));
+
+    // And the missing one completes it.
+    size_t m = gs_carrier_chunk(dg, sizeof dg, hash, bytes, len, 0);
+    CHECK(gs_carrier_take(&gs_carry, dg, m));
+    CHECK(gs_carrier_done(&gs_carry));
+    CHECK(gs_carrier_track(&gs_carry, &got));
+    CHECK(gs_track_hash(&got) == hash);
+}
+
 TEST(the_analyser_gives_the_same_answer_twice) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -3552,6 +3684,8 @@ int main(void) {
     run_the_analyser_calls_a_jump_nobody_can_clear_impossible();
     run_the_analyser_says_so_when_a_track_cannot_be_got_round_at_all();
     run_the_heatmap_shows_where_everybody_actually_went();
+    run_a_track_arrives_in_pieces_and_is_the_same_track();
+    run_a_track_that_arrives_damaged_is_refused_rather_than_raced();
     run_a_record_belongs_to_a_track_and_the_conditions_it_was_set_under();
     run_beating_a_record_is_reported_and_not_beating_one_is_not();
     run_records_survive_being_written_and_read_back();

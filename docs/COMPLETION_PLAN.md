@@ -467,7 +467,7 @@ platform section of `FEATURES.md` for why that line is drawn where it is.
       server's decision rather than whoever happened to host. *Verification:
       four clients get four different slots, and a fifth is turned away with a
       reason it can show its user.*
-- [ ] **The track travels with the race.** The server sends the track for the
+- [x] **The track travels with the race.** The server sends the track for the
       race it is starting, and every client checks it against the hash it was
       told to expect. *Verification: a client holding a completely different
       track receives the right one and agrees about its hash before the race
@@ -635,7 +635,9 @@ worth as much as what was decided about it.
       of it is on screen while you are driving — you find out what happened on
       the results table afterwards. Everything needed is in the simulation
       already; this is a rendering job.
-- [ ] **Online races assume everybody already has the same track.** *(Now Phase 11.)* The
+- [x] **Online races assume everybody already has the same track.** *(Closed in
+      Phase 11: the server hands the track out, in chunks, and a client is not
+      ready to race until the rebuilt track hashes to what it was promised.)* The
       handshake exchanges player slots and addresses but not the track itself,
       so two people racing must be on the same build. A track is a few hundred
       compressed bytes and the hash is already checked everywhere else — it

@@ -50,6 +50,14 @@ struct gs_wire {
     uint16_t     server_port;
 
     char     me[GS_PROTO_NAME];
+
+    // The track the server says this lobby races on, and the pieces of it as
+    // they turn up.
+    uint64_t   want_track;
+    bool       heard_start;    // the server has said what the race is on
+    gs_carrier carrier;
+    uint32_t   asked_at;
+
     bool     refused;
     char     refusal[64];
     gs_lobby lobby;
@@ -70,6 +78,18 @@ struct gs_wire {
     uint32_t sent, received;
     char     error[256];
 };
+
+// Sending to the server, which is not a peer. Declared here because both the
+// handshake below and the accessors above it need it.
+static void gs_to_server(gs_wire *w, const uint8_t *buf, size_t n);
+
+// Is the ground agreed? **Not knowing counts as no.** A client that has not yet
+// been told what the race is on cannot tell that from having been told there is
+// nothing to fetch, and one that guessed would race on whatever it had loaded.
+static bool gs_wire_settled(const gs_wire *w) {
+    if (!w->heard_start) return false;
+    return w->want_track == 0 || gs_carrier_done(&w->carrier);
+}
 
 static int gs_wire_users = 0;
 
@@ -161,6 +181,26 @@ gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name) {
     SDL_strlcpy(w->host_text, host, sizeof w->host_text);
     w->host_port = port;
     return w;
+}
+
+uint64_t gs_wire_track_hash(const gs_wire *w) {
+    return w != nullptr ? w->want_track : 0;
+}
+
+bool gs_wire_track(const gs_wire *w, gs_track *out) {
+    if (w == nullptr) return false;
+    return gs_carrier_track(&w->carrier, out);
+}
+
+float gs_wire_track_progress(const gs_wire *w) {
+    return w != nullptr ? gs_carrier_progress(&w->carrier) : 0.0f;
+}
+
+void gs_wire_want_track(gs_wire *w) {
+    if (w == nullptr || w->want_track == 0) return;
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf, gs_proto_want_track(buf, sizeof buf, w->want_track));
+    w->asked_at = w->retry;
 }
 
 bool gs_wire_refused(const gs_wire *w) { return w != nullptr && w->refused; }
@@ -350,8 +390,6 @@ static void gs_take_hello(gs_wire *w, NET_Address *from, uint16_t port) {
     // a reply telling it there is a game here.
 }
 
-static void gs_to_server(gs_wire *w, const uint8_t *buf, size_t n);
-
 // What the server said. Handled here rather than by the caller, for the same
 // reason the peer handshake is: the layer above wants players, not datagrams.
 static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
@@ -376,8 +414,10 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
             w->peer[i].port = p->port;
         }
 
-        // Ready when the lobby is full, which is the server's call to make.
-        w->ready = w->lobby.count >= w->lobby.capacity;
+        // Ready when the lobby is full *and* the ground is agreed. Racing
+        // before the track has arrived would be racing on whatever was loaded
+        // locally, which is exactly the bug this item exists to remove.
+        w->ready = w->lobby.count >= w->lobby.capacity && gs_wire_settled(w);
         break;
     }
 
@@ -385,7 +425,35 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
         if (gs_proto_read_lobby(buf, len, &w->lobby)) {
             w->players = w->lobby.capacity;
             w->ready = w->local < GS_WIRE_PLAYERS &&
-                       w->lobby.count >= w->lobby.capacity;
+                       w->lobby.count >= w->lobby.capacity &&
+                       gs_wire_settled(w);
+        }
+        break;
+
+    case GS_MSG_START: {
+        uint64_t hash = 0;
+        uint8_t players = 0, mode = 0;
+        uint16_t laps = 0;
+        if (!gs_proto_read_start(buf, len, &hash, &players, &laps, &mode)) break;
+
+        if (hash != w->want_track) {
+            w->want_track = hash;
+            gs_carrier_expect(&w->carrier, hash);
+            w->asked_at = 0;          // ask for it on the next poll
+        }
+        w->heard_start = true;
+
+        // The roster may have arrived first and left this client thinking it
+        // was ready before it knew there was any ground to wait for.
+        w->ready = w->lobby.count >= w->lobby.capacity && gs_wire_settled(w);
+        break;
+    }
+
+    case GS_MSG_TRACK:
+        gs_carrier_take(&w->carrier, buf, len);
+        if (gs_carrier_done(&w->carrier)) {
+            w->ready = w->local < GS_WIRE_PLAYERS &&
+                       w->lobby.count >= w->lobby.capacity && gs_wire_settled(w);
         }
         break;
 
@@ -440,6 +508,17 @@ void gs_wire_poll(gs_wire *w) {
         // knocking would be a client nobody can turn away.
         if (!w->ready && !w->refused && w->retry % GS_RETRY_TICKS == 0) {
             gs_send_join(w);
+        }
+
+        // Asking for the track until it is here. There is nothing that
+        // acknowledges a chunk, so a piece that went missing is recovered by
+        // asking again rather than by anybody keeping a list.
+        if (w->want_track != 0 && !gs_carrier_done(&w->carrier) &&
+            (w->asked_at == 0 || w->retry - w->asked_at > 120u)) {
+            uint8_t buf[GS_PROTO_MTU];
+            gs_to_server(w, buf,
+                         gs_proto_want_track(buf, sizeof buf, w->want_track));
+            w->asked_at = w->retry;
         }
 
         // And once placed, still saying so.

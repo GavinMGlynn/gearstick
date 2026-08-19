@@ -91,6 +91,7 @@ typedef struct gs_menu {
     const char     *lobby_error;    // a refusal, in words meant for a person
     uint8_t         lobby_slot;
     bool            lobby_ready;
+    float           track_progress;   // 1.0 when there is nothing to wait for
     char            server_text[80];
 } gs_menu;
 

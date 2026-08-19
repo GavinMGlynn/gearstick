@@ -10,6 +10,9 @@
 // It runs headless. SDL is initialised with no subsystems at all - SDL_net
 // needs SDL, not a display - so this is something you can leave running on a
 // machine with no screen, which is what a server is.
+#include "core/gs_sim.h"
+#include "core/gs_track.h"
+#include "net/gs_carrier.h"
 #include "net/gs_proto.h"
 
 #include <SDL3/SDL.h>
@@ -71,6 +74,16 @@ static struct {
 
     bool quit;
     bool plain;                // no ANSI, for a log file or a dumb terminal
+
+    // The track this lobby will race on. **The server hands it out**, so
+    // everybody races the same ground - which is the one thing rollback cannot
+    // recover from being wrong about. Held as bytes rather than as a gs_track:
+    // the server never simulates anything, so the only thing it needs to do
+    // with a track is send it and hash it.
+    uint8_t  track[GS_CARRIER_MAX_BYTES];
+    size_t   track_len;
+    uint64_t track_hash;
+    uint32_t chunks_sent;
 } gs_srv;
 
 // --- the lobby --------------------------------------------------------------
@@ -198,6 +211,14 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
     size_t n = gs_proto_welcome(buf, sizeof buf, (uint8_t)at, &l);
     gs_send(c, buf, n);
 
+    // And what the race will be on - **always**, even when the answer is "no
+    // track". A client cannot tell "there is nothing to wait for" from "the
+    // message has not arrived yet" by looking at silence, and one that guessed
+    // would start racing on whatever it had loaded locally.
+    n = gs_proto_start(buf, sizeof buf, gs_srv.track_hash, gs_srv.capacity, 3,
+                       (uint8_t)GS_MODE_RACE);
+    gs_send(c, buf, n);
+
     if (fresh) {
         SDL_Log("player %d (%s) joined from %s:%u", at, c->name, c->text, port);
         if (gs_present() > gs_srv.peak) gs_srv.peak = gs_present();
@@ -261,6 +282,12 @@ static void gs_draw(uint64_t now) {
            gs_present(), gs_srv.capacity, gs_srv.peak, gs_srv.refused);
     printf("  datagrams  in %u (%s)   out %u (%s)   relayed %u\n",
            gs_srv.total_in, in_b, gs_srv.total_out, out_b, gs_srv.relayed);
+
+    if (gs_srv.track_len > 0) {
+        printf("  track      %016llx, %zu bytes, %u chunks sent\n",
+               (unsigned long long)gs_srv.track_hash, gs_srv.track_len,
+               gs_srv.chunks_sent);
+    }
 
     if (up > 0) {
         printf("  rate       %.1f in/s   %.1f out/s\n",
@@ -328,9 +355,29 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         break;
     }
 
+    case GS_MSG_WANT_TRACK: {
+        // Asked for again rather than acknowledged, which is the vocabulary
+        // everywhere else here: a client that is missing a piece asks for the
+        // track, and gets all of it. Resending a chunk somebody already has
+        // costs one datagram and no bookkeeping at all.
+        uint64_t want = 0;
+        if (at < 0 || !gs_proto_read_want_track(d->buf, len, &want)) break;
+        if (gs_srv.track_len == 0 || want != gs_srv.track_hash) break;
+
+        uint16_t chunks = gs_carrier_chunks(gs_srv.track_len);
+        for (uint16_t i = 0; i < chunks; i++) {
+            uint8_t out[GS_PROTO_MTU];
+            size_t n = gs_carrier_chunk(out, sizeof out, gs_srv.track_hash,
+                                        gs_srv.track, gs_srv.track_len, i);
+            gs_send(&gs_srv.client[at], out, n);
+            gs_srv.chunks_sent++;
+        }
+        break;
+    }
+
     default:
-        // Everything else belongs to items not built yet - the track, the
-        // relay, records. Ignored rather than guessed at.
+        // Everything else belongs to items not built yet - the relay, records.
+        // Ignored rather than guessed at.
         break;
     }
 }
@@ -342,11 +389,31 @@ static void gs_on_signal(int sig) {
     gs_srv.quit = true;
 }
 
+// The track the server will hand out. Without one it is still a lobby, and
+// everybody has to already agree about the ground - which is exactly the
+// limitation this removes.
+static bool gs_load_track(const char *path) {
+    SDL_IOStream *io = SDL_IOFromFile(path, "rb");
+    if (io == nullptr) return false;
+
+    size_t n = SDL_ReadIO(io, gs_srv.track, sizeof gs_srv.track);
+    SDL_CloseIO(io);
+    if (n == 0) return false;
+
+    static gs_track probe;
+    if (!gs_track_deserialize(&probe, gs_srv.track, n)) return false;
+
+    gs_srv.track_len = n;
+    gs_srv.track_hash = gs_track_hash(&probe);
+    return true;
+}
+
 static void gs_usage(void) {
     printf("gearstick_server - the meeting point for online races\n\n");
     printf("  --port N       listen on this port (default %u)\n", GS_DEFAULT_PORT);
     printf("  --players N    how many to allow, 1 to %d (default %d)\n",
            GS_PROTO_MAX_PLAYERS, GS_PROTO_MAX_PLAYERS);
+    printf("  --track FILE   the track this lobby races on\n");
     printf("  --plain        no cursor control, for a log file\n");
     printf("  --timeout N    drop a client after N ms of silence (default %u)\n",
            GS_TIMEOUT_MS);
@@ -358,6 +425,7 @@ int main(int argc, char **argv) {
     uint16_t port = GS_DEFAULT_PORT;
     uint8_t players = GS_PROTO_MAX_PLAYERS;
     uint32_t seconds = 0;
+    const char *track_path = nullptr;
 
     for (int i = 1; i < argc; i++) {
         if (SDL_strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -365,6 +433,8 @@ int main(int argc, char **argv) {
         } else if (SDL_strcmp(argv[i], "--players") == 0 && i + 1 < argc) {
             int n = SDL_atoi(argv[++i]);
             players = (uint8_t)SDL_clamp(n, 1, GS_PROTO_MAX_PLAYERS);
+        } else if (SDL_strcmp(argv[i], "--track") == 0 && i + 1 < argc) {
+            track_path = argv[++i];
         } else if (SDL_strcmp(argv[i], "--plain") == 0) {
             gs_srv.plain = true;
         } else if (SDL_strcmp(argv[i], "--timeout") == 0 && i + 1 < argc) {
@@ -407,6 +477,19 @@ int main(int argc, char **argv) {
 
     signal(SIGINT, gs_on_signal);
     signal(SIGTERM, gs_on_signal);
+
+    if (track_path != nullptr) {
+        if (!gs_load_track(track_path)) {
+            printf("could not read a track from %s\n", track_path);
+            NET_DestroyDatagramSocket(gs_srv.sock);
+            NET_Quit();
+            SDL_Quit();
+            return 1;
+        }
+        SDL_Log("serving track %016llx, %zu bytes in %u chunks",
+                (unsigned long long)gs_srv.track_hash, gs_srv.track_len,
+                gs_carrier_chunks(gs_srv.track_len));
+    }
 
     SDL_Log("gearstick server listening on port %u for up to %u players",
             port, players);

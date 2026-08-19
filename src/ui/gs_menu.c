@@ -830,7 +830,12 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
         }
 
         ImGui_Spacing();
-        if (m->lobby_ready) {
+        if (m->track_progress < 1.0f) {
+            // Waiting for the ground rather than for people, which is a
+            // different wait and should not look like the same one.
+            ImGui_Text("Receiving the track... %.0f%%",
+                       (double)(m->track_progress * 100.0f));
+        } else if (m->lobby_ready) {
             ImGui_TextUnformatted("Everybody is here.");
         } else if (heard) {
             uint8_t want = (uint8_t)(m->lobby->capacity - m->lobby->count);

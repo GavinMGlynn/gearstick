@@ -24,6 +24,8 @@
 // For `nullptr` on a toolchain that took -std=c23 without implementing it, as
 // well as the fixed-width types. MSVC is that toolchain today.
 #include "core/gs_common.h"
+#include "core/gs_track.h"
+#include "net/gs_carrier.h"
 #include "net/gs_proto.h"
 
 #define GS_WIRE_MTU     512
@@ -97,6 +99,25 @@ const char *gs_wire_refusal(const gs_wire *w);
 // server connection. Waiting for people is a thing with a picture, not a
 // frozen window.
 const gs_lobby *gs_wire_lobby(const gs_wire *w);
+
+// --- the track the server is running -------------------------------------
+
+// The track this lobby will race on, as the server named it. Zero when it has
+// not said, which is a lobby with no track rather than an error.
+uint64_t gs_wire_track_hash(const gs_wire *w);
+
+// The track itself, once all of it has arrived and it hashes to what was
+// promised. False until then. **Both conditions matter**: the pieces arriving
+// is not the same as the track being right, and two machines racing on tracks
+// they each believe are the same one is the one thing rollback cannot absorb.
+bool gs_wire_track(const gs_wire *w, gs_track *out);
+
+// How much of it is here, for something to show a person.
+float gs_wire_track_progress(const gs_wire *w);
+
+// Ask for it. Safe to call repeatedly: asking again is how a missing piece is
+// recovered, because there is nothing here that acknowledges anything.
+void gs_wire_want_track(gs_wire *w);
 
 // The last thing that went wrong, for putting in front of the player rather
 // than in a log they will never see.

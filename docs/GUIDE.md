@@ -167,8 +167,12 @@ matters when somebody's router will not accept an incoming connection. It shows
 who is there and how far away they are:
 
 ```sh
-gearstick_server --port 47800 --players 4
+gearstick_server --port 47800 --players 4 --track mine.gstrack
 ```
+
+Give it a track and it hands that track to everybody who joins, so nobody has to
+already have it. It arrives in pieces and is checked against its own hash before
+the race starts — a track that arrived damaged is refused rather than raced.
 
 Then everybody else meets there:
 
@@ -243,8 +247,8 @@ Said here rather than discovered:
 
 - **There is one track.** The construction set can build any track and save one;
   there is no library to browse yet.
-- **A server race still needs everybody on the same track**, because the
-  handshake does not send it yet — the same limitation as `--host`/`--join`.
+- **`--host` and `--join` still need everybody on the same track.** Only a
+  server hands the track out; two people meeting each other directly do not.
 - **Online needs everybody on the same track already.** The handshake does not
   send the track.
 - **Only players one and two have keyboard controls** by default.

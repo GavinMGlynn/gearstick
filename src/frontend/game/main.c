@@ -871,9 +871,25 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             a->menu.lobby_error = gs_wire_refusal(a->wire);
             a->menu.lobby_slot = gs_wire_local(a->wire);
             a->menu.lobby_ready = gs_wire_ready(a->wire);
+            a->menu.track_progress =
+                gs_wire_track_hash(a->wire) != 0 ? gs_wire_track_progress(a->wire)
+                                                 : 1.0f;
             if (a->menu.screen == GS_SCREEN_RACE) a->menu.screen = GS_SCREEN_LOBBY;
         }
         if (gs_wire_ready(a->wire)) {
+            // **The server's track, not ours.** Whatever was loaded locally is
+            // set aside: everybody has to be racing the same ground, and the
+            // hash was checked on the way in, so this is the one moment the
+            // game knows for certain that they are.
+            static gs_track served;
+            if (gs_wire_track(a->wire, &served)) {
+                a->t = served;
+                a->music_hash = gs_track_hash(&a->t);
+                gs_music_start(a->music_hash);
+                SDL_Log("net: racing the server's track %016llx",
+                        (unsigned long long)a->music_hash);
+            }
+
             a->players = gs_wire_players(a->wire);
             gs_start_race(a);
             gs_net_begin(&a->net, &a->world, gs_wire_players(a->wire),
