@@ -323,7 +323,8 @@ add_executable(gearstick_server
     src/frontend/server/main.c
     src/net/gs_proto.c
     src/net/gs_carrier.c
-    src/net/gs_store.c)
+    src/net/gs_store.c
+    src/net/gs_verify.c)
 # The carrier rebuilds a track, so the server needs the track format - and with
 # it the simulation, which it will need anyway the day it verifies a lap time.
 target_include_directories(gearstick_server PRIVATE src)
@@ -341,7 +342,8 @@ if(GEARSTICK_TESTS)
     add_executable(gearstick_tests
         tests/test_gearstick.c
         src/net/gs_proto.c
-        src/net/gs_carrier.c)
+        src/net/gs_carrier.c
+        src/net/gs_verify.c)
     target_link_libraries(gearstick_tests PRIVATE gearstick_sim)
 
     # The tests link libm and the simulation does not. That asymmetry is the
@@ -380,7 +382,9 @@ if(GEARSTICK_TESTS)
     # it in-process would test a server nobody runs.
     # Links the shell, because half of what this checks is the client the game
     # actually ships rather than a client written for the test.
-    add_executable(gearstick_server_tests tests/test_server.c)
+    add_executable(gearstick_server_tests
+        tests/test_server.c
+        src/net/gs_verify.c)
     target_link_libraries(gearstick_server_tests PRIVATE gearstick_shell)
     gs_configure(gearstick_server_tests)
     add_dependencies(gearstick_server_tests gearstick_server)

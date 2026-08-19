@@ -7,7 +7,11 @@
 // to get right that are easy to get wrong: a fifth client is refused *with a
 // reason*, and somebody who says hello twice does not occupy two slots.
 #include "net/gs_proto.h"
+#include "core/gs_ai.h"
+#include "core/gs_records.h"
 #include "core/gs_net.h"
+#include "core/gs_replay.h"
+#include "net/gs_verify.h"
 #include "core/gs_track.h"
 #include "net/gs_carrier.h"
 #include "platform/gs_wire.h"
@@ -199,10 +203,13 @@ static bool gs_server_start_for(const char *port, const char *seconds,
     return gs_server_start_full(port, seconds, players, "15000");
 }
 
-static bool gs_server_start_with_store(const char *port, const char *seconds,
-                                       const char *players, const char *store) {
+static bool gs_server_start_verifying(const char *port, const char *seconds,
+                                      const char *players, const char *track,
+                                      const char *store) {
+    gs_track_arg = track;
     gs_store_arg = store;
     bool ok = gs_server_start_full(port, seconds, players, "15000");
+    gs_track_arg = nullptr;
     gs_store_arg = nullptr;
     return ok;
 }
@@ -815,106 +822,200 @@ TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
     gs_server_stop();
 }
 
-TEST(a_record_set_on_one_client_is_seen_by_another) {
-    // **The verification this item exists for.** The second client has never
-    // seen the race, never met the first client, and is told the record by the
-    // server - which is the whole point of there being one.
+// Race for real, and hand back the recording and the truth about it. Whatever
+// a client claims afterwards, this is what actually happened.
+static gs_replay gs_run;
+
+static void gs_race_for_real(gs_track *t, gs_claim *claim, uint16_t laps) {
+    gs_track_init(t, 40, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) gs_track_set_corner(t, x, y, 0);
+    }
+    gs_track_add_gate(t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, laps);
+    gs_world_add_car(&w, t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+
+    gs_replay_begin(&gs_run, &w, t);
+    for (uint32_t i = 0; i < GS_TICK_HZ * 200 && !w.over; i++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        in[0] = gs_ai_drive(&w, t, 0);
+        gs_replay_record(&gs_run, in);
+        gs_world_step(&w, t, in);
+    }
+
+    SDL_zerop(claim);
+    claim->track = gs_track_hash(t);
+    claim->conditions = gs_conditions_hash(&w);
+    claim->laps = laps;
+    claim->lap_ticks = w.car[0].best_lap;
+    claim->race_ticks = w.car[0].finish_tick;
+}
+
+static void gs_pump(gs_wire *w, int times) {
+    for (int k = 0; k < times; k++) {
+        gs_wire_poll(w);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(w, drain, sizeof drain) > 0) { }
+        SDL_Delay(10);
+    }
+}
+
+TEST(a_time_is_kept_only_if_re_racing_it_produces_it) {
+    // **The verification this item exists for, end to end.** A doctored time is
+    // rejected and an honest one from the same client is accepted - by a real
+    // server, over real sockets, with the proof arriving in chunks.
     CHECK(gs_wire_init());
 
-    // A fresh store, so the test is not reading somebody's earlier run.
-    remove("server_records.db");
-    if (!gs_server_start_with_store("47828", "25", "2", "server_records.db")) {
+    static gs_track t;
+    gs_claim honest;
+    gs_race_for_real(&t, &honest, 3);
+    CHECK(honest.race_ticks > 0);
+    CHECK(honest.lap_ticks > 0);
+
+    // The server can only re-race a track it has, so it is the one serving it.
+    static uint8_t track_bytes[GS_CARRIER_MAX_BYTES];
+    size_t track_len = gs_track_serialize(&t, track_bytes, sizeof track_bytes);
+    const char *track_path = "verified.gstrack";
+    SDL_IOStream *io = SDL_IOFromFile(track_path, "wb");
+    CHECK(io != nullptr);
+    if (io != nullptr) { SDL_WriteIO(io, track_bytes, track_len); SDL_CloseIO(io); }
+
+    remove("verified.db");
+    if (!gs_server_start_verifying("47830", "30", "2", track_path,
+                                   "verified.db")) {
         gs_failures++;
         return;
     }
 
-    const uint64_t track = 0x5150515051505150ull;
-    const uint64_t earth = 0x1234ull;
+    static uint8_t proof[sizeof(gs_replay) + 4096];
+    size_t proof_len = gs_replay_serialize(&gs_run, proof, sizeof proof);
+    CHECK(proof_len > 0);
 
-    gs_wire *a = gs_wire_server("127.0.0.1", 47828, "ada");
+    gs_wire *a = gs_wire_server("127.0.0.1", 47830, "ada");
     CHECK(a != nullptr);
-    for (int k = 0; k < 300; k++) {
+    for (int k = 0; k < 400; k++) {
         gs_wire_poll(a);
         if (gs_wire_lobby(a) != nullptr && gs_wire_lobby(a)->count == 1) break;
         SDL_Delay(10);
     }
 
-    // Nothing stands here yet.
-    gs_wire_ask_best(a, track, earth, 3);
-    for (int k = 0; k < 200; k++) {
+    // --- The cheat first, so that a later pass cannot be the earlier one
+    // lingering. A time nobody drove, with the recording of the race that was
+    // actually driven behind it.
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+                        honest.lap_ticks / 2, honest.race_ticks / 2,
+                        proof, proof_len);
+    gs_pump(a, 60);
+
+    gs_wire_ask_best(a, honest.track, honest.conditions, honest.laps);
+    gs_pump(a, 40);
+    CHECK(gs_wire_best_here(a)->known);
+    CHECK(gs_wire_best_here(a)->lap_ticks == 0);      // nothing was kept
+    CHECK(gs_wire_best_here(a)->race_ticks == 0);
+
+    // --- And now the truth, from the same client and the same recording.
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+                        honest.lap_ticks, honest.race_ticks, proof, proof_len);
+    gs_pump(a, 60);
+
+    gs_wire_ask_best(a, honest.track, honest.conditions, honest.laps);
+    bool kept = false;
+    for (int k = 0; k < 60 && !kept; k++) {
+        gs_pump(a, 5);
+        kept = gs_wire_best_here(a)->lap_ticks == honest.lap_ticks;
+    }
+    CHECK(kept);
+    if (kept) {
+        CHECK(gs_wire_best_here(a)->race_ticks == honest.race_ticks);
+        CHECK(SDL_strcmp(gs_wire_best_here(a)->lap_who, "ada") == 0);
+    }
+
+    // --- A claim with no proof at all is not a record either. Silence is not
+    // evidence, and a server that accepted one would be a server where the
+    // proof is decoration.
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+                        1, 1, nullptr, 0);
+    gs_pump(a, 60);
+    gs_wire_ask_best(a, honest.track, honest.conditions, honest.laps);
+    gs_pump(a, 40);
+    CHECK(gs_wire_best_here(a)->lap_ticks == honest.lap_ticks);
+
+    gs_wire_close(a);
+    gs_wire_quit();
+    gs_server_stop();
+    remove("verified.db");
+    remove(track_path);
+}
+
+TEST(a_record_set_on_one_client_is_seen_by_another) {
+    // The same record, read by somebody who has never seen the race. What makes
+    // this worth a test of its own is the *second* client: the server is the
+    // only thing that connects them.
+    CHECK(gs_wire_init());
+
+    static gs_track t;
+    gs_claim honest;
+    gs_race_for_real(&t, &honest, 2);
+
+    static uint8_t track_bytes[GS_CARRIER_MAX_BYTES];
+    size_t track_len = gs_track_serialize(&t, track_bytes, sizeof track_bytes);
+    const char *track_path = "shared.gstrack";
+    SDL_IOStream *io = SDL_IOFromFile(track_path, "wb");
+    if (io != nullptr) { SDL_WriteIO(io, track_bytes, track_len); SDL_CloseIO(io); }
+
+    remove("shared.db");
+    if (!gs_server_start_verifying("47832", "30", "2", track_path, "shared.db")) {
+        gs_failures++;
+        return;
+    }
+
+    static uint8_t proof[sizeof(gs_replay) + 4096];
+    size_t proof_len = gs_replay_serialize(&gs_run, proof, sizeof proof);
+
+    gs_wire *a = gs_wire_server("127.0.0.1", 47832, "ada");
+    CHECK(a != nullptr);
+    for (int k = 0; k < 400; k++) {
         gs_wire_poll(a);
-        uint8_t drain[GS_WIRE_MTU];
-        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
-        if (gs_wire_best_here(a)->known) break;
+        if (gs_wire_lobby(a) != nullptr && gs_wire_lobby(a)->count == 1) break;
         SDL_Delay(10);
     }
-    CHECK(gs_wire_best_here(a)->known);
-    CHECK(gs_wire_best_here(a)->lap_ticks == 0);
 
-    // ada drives one.
-    gs_wire_send_result(a, track, earth, 3, 2, 4200, 13000);
-    SDL_Delay(300);
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+                        honest.lap_ticks, honest.race_ticks, proof, proof_len);
+    gs_pump(a, 60);
 
     // bez arrives afterwards, having seen none of it.
-    gs_wire *b = gs_wire_server("127.0.0.1", 47828, "bez");
+    gs_wire *b = gs_wire_server("127.0.0.1", 47832, "bez");
     CHECK(b != nullptr);
-    for (int k = 0; k < 300; k++) {
+    for (int k = 0; k < 400; k++) {
         gs_wire_poll(b);
         if (gs_wire_lobby(b) != nullptr && gs_wire_lobby(b)->count == 2) break;
         SDL_Delay(10);
     }
 
-    gs_wire_ask_best(b, track, earth, 3);
+    gs_wire_ask_best(b, honest.track, honest.conditions, honest.laps);
     bool told = false;
-    for (int k = 0; k < 300 && !told; k++) {
-        gs_wire_poll(b);
-        uint8_t drain[GS_WIRE_MTU];
-        while (gs_wire_recv(b, drain, sizeof drain) > 0) { }
+    for (int k = 0; k < 60 && !told; k++) {
+        gs_pump(b, 5);
         told = gs_wire_best_here(b)->known && gs_wire_best_here(b)->lap_ticks > 0;
-        SDL_Delay(10);
     }
-
     CHECK(told);
     if (told) {
-        const gs_wire_best *best = gs_wire_best_here(b);
-        CHECK(best->lap_ticks == 4200);
-        CHECK(best->race_ticks == 13000);
-        CHECK(SDL_strcmp(best->lap_who, "ada") == 0);   // and by name
+        CHECK(gs_wire_best_here(b)->lap_ticks == honest.lap_ticks);
+        CHECK(SDL_strcmp(gs_wire_best_here(b)->lap_who, "ada") == 0);
     }
-
-    // bez does better, and the record moves.
-    gs_wire_send_result(b, track, earth, 3, 1, 3900, 12500);
-    SDL_Delay(300);
-
-    gs_wire_ask_best(a, track, earth, 3);
-    bool moved = false;
-    for (int k = 0; k < 300 && !moved; k++) {
-        gs_wire_poll(a);
-        uint8_t drain[GS_WIRE_MTU];
-        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
-        moved = gs_wire_best_here(a)->lap_ticks == 3900;
-        SDL_Delay(10);
-    }
-    CHECK(moved);
-    if (moved) CHECK(SDL_strcmp(gs_wire_best_here(a)->lap_who, "bez") == 0);
-
-    // And a slower run does not take it back.
-    gs_wire_send_result(a, track, earth, 3, 2, 4500, 14000);
-    SDL_Delay(400);
-    gs_wire_ask_best(a, track, earth, 3);
-    for (int k = 0; k < 200; k++) {
-        gs_wire_poll(a);
-        uint8_t drain[GS_WIRE_MTU];
-        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
-        SDL_Delay(10);
-    }
-    CHECK(gs_wire_best_here(a)->lap_ticks == 3900);
 
     gs_wire_close(a);
     gs_wire_close(b);
     gs_wire_quit();
     gs_server_stop();
-    remove("server_records.db");
+    remove("shared.db");
+    remove(track_path);
 }
 
 int main(void) {
@@ -934,6 +1035,7 @@ int main(void) {
     run_a_placed_client_is_not_dropped_for_going_quiet();
     run_a_client_with_a_different_track_is_given_the_right_one();
     run_two_clients_that_cannot_see_each_other_race_through_the_server();
+    run_a_time_is_kept_only_if_re_racing_it_produces_it();
     run_a_record_set_on_one_client_is_seen_by_another();
 
     gs_server_stop();

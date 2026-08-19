@@ -25,6 +25,7 @@
 #include "core/gs_profile.h"
 #include "core/gs_records.h"
 #include "net/gs_carrier.h"
+#include "net/gs_verify.h"
 #include "core/gs_share.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
@@ -3339,6 +3340,147 @@ TEST(a_track_that_arrives_damaged_is_refused_rather_than_raced) {
     CHECK(gs_track_hash(&got) == hash);
 }
 
+// ---------------------------------------------------------------------------
+// Is that time real?
+// ---------------------------------------------------------------------------
+
+static gs_replay gs_proof;
+
+// A real race, recorded: an AI driver round a real track until the flag. What
+// comes back is the recording and the truth about what it did.
+static void gs_honest_race(gs_track *t, gs_claim *claim, uint16_t laps) {
+    gs_track_init(t, 40, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++)
+        for (uint8_t x = 0; x <= t->w; x++) gs_track_set_corner(t, x, y, 0);
+    gs_track_add_gate(t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, laps);
+    gs_world_add_car(&w, t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+
+    gs_replay_begin(&gs_proof, &w, t);
+    for (uint32_t i = 0; i < GS_TICK_HZ * 200 && !w.over; i++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        in[0] = gs_ai_drive(&w, t, 0);
+        gs_replay_record(&gs_proof, in);
+        gs_world_step(&w, t, in);
+    }
+
+    memset(claim, 0, sizeof *claim);
+    claim->track = gs_track_hash(t);
+    claim->conditions = gs_conditions_hash(&w);
+    claim->laps = laps;
+    claim->car = 0;
+    claim->lap_ticks = w.car[0].best_lap;
+    claim->race_ticks = w.car[0].finish_tick;
+}
+
+TEST(an_honest_time_is_verified_and_a_doctored_one_is_not) {
+    static gs_track t;
+    gs_claim claim;
+    gs_honest_race(&t, &claim, 3);
+
+    CHECK(claim.race_ticks > 0);
+    CHECK(claim.lap_ticks > 0);
+
+    // **The whole point.** The server re-races what was pressed and checks it
+    // produces what was claimed - which is possible only because a race is
+    // exactly reproducible from its inputs.
+    CHECK(gs_verify(&gs_proof, &t, &claim, nullptr) == GS_VERDICT_OK);
+
+    // A better time than was driven. This is the cheat, and it is the one
+    // thing that must never get through.
+    gs_claim faster = claim;
+    faster.race_ticks = claim.race_ticks - 1;
+    CHECK(gs_verify(&gs_proof, &t, &faster, nullptr) == GS_VERDICT_RACE_TOO_GOOD);
+
+    faster = claim;
+    faster.race_ticks = claim.race_ticks / 2;
+    CHECK(gs_verify(&gs_proof, &t, &faster, nullptr) == GS_VERDICT_RACE_TOO_GOOD);
+
+    faster = claim;
+    faster.lap_ticks = claim.lap_ticks - 1;
+    CHECK(gs_verify(&gs_proof, &t, &faster, nullptr) == GS_VERDICT_LAP_TOO_GOOD);
+
+    // A *slower* claim is fine. Somebody's own honest mistake costs them the
+    // record they did not take and nothing else, and rejecting it would be
+    // punishing a player for being wrong in their own favour's opposite.
+    gs_claim slower = claim;
+    slower.race_ticks = claim.race_ticks + 500;
+    slower.lap_ticks = claim.lap_ticks + 500;
+    CHECK(gs_verify(&gs_proof, &t, &slower, nullptr) == GS_VERDICT_OK);
+}
+
+TEST(a_time_from_a_different_race_is_not_this_record) {
+    static gs_track t, other;
+    gs_claim claim;
+    gs_honest_race(&t, &claim, 3);
+
+    // Somewhere else. The recording says which track it is and the track says
+    // what it is, so this is a comparison rather than a matter of trust.
+    gs_track_init(&other, 40, 16, GS_SURF_DIRT);
+    for (uint8_t y = 0; y <= other.h; y++)
+        for (uint8_t x = 0; x <= other.w; x++) gs_track_set_corner(&other, x, y, 0);
+    gs_track_add_gate(&other, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&other, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+    CHECK(gs_track_hash(&other) != gs_track_hash(&t));
+    CHECK(gs_verify(&gs_proof, &other, &claim, nullptr) == GS_VERDICT_WRONG_TRACK);
+
+    // A different distance. A two-lap time is not a three-lap record, however
+    // real it is.
+    gs_claim wrong_laps = claim;
+    wrong_laps.laps = 5;
+    CHECK(gs_verify(&gs_proof, &t, &wrong_laps, nullptr) == GS_VERDICT_WRONG_RULES);
+
+    // **Different dials.** A lap driven on the Moon cannot pay for a claim
+    // about Earth, and the conditions are in the recording rather than in the
+    // claim, so saying otherwise does not help.
+    gs_claim wrong_gravity = claim;
+    wrong_gravity.conditions ^= 0xffull;
+    CHECK(gs_verify(&gs_proof, &t, &wrong_gravity, nullptr) == GS_VERDICT_WRONG_RULES);
+
+    // A car that was not in the race.
+    gs_claim ghost_car = claim;
+    ghost_car.car = 3;
+    CHECK(gs_verify(&gs_proof, &t, &ghost_car, nullptr) == GS_VERDICT_NO_SUCH_CAR);
+
+    // And rubbish is not a recording.
+    static uint8_t junk[512];
+    for (size_t i = 0; i < sizeof junk; i++) junk[i] = (uint8_t)(i * 13u);
+    CHECK(gs_verify_bytes(junk, sizeof junk, &t, &claim, nullptr) ==
+          GS_VERDICT_NOT_A_REPLAY);
+}
+
+TEST(a_time_survives_the_wire_and_is_still_verifiable) {
+    // The proof arrives as bytes, so that is how it is checked. A verifier that
+    // only worked on the recording it was handed in memory would be a verifier
+    // no server could use.
+    static gs_track t;
+    gs_claim claim;
+    gs_honest_race(&t, &claim, 2);
+
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&gs_proof, bytes, sizeof bytes);
+    CHECK(n > 0);
+
+    gs_world produced;
+    CHECK(gs_verify_bytes(bytes, n, &t, &claim, &produced) == GS_VERDICT_OK);
+
+    // And the world handed back is the race that actually happened, which is
+    // what a server should believe rather than what it was told.
+    CHECK(produced.car[0].finish_tick == claim.race_ticks);
+    CHECK(produced.car[0].best_lap == claim.lap_ticks);
+    CHECK(produced.over);
+
+    // One byte different in the middle and it is not a recording any more.
+    bytes[n / 2] ^= 0xffu;
+    gs_verdict v = gs_verify_bytes(bytes, n, &t, &claim, nullptr);
+    CHECK(v != GS_VERDICT_OK);
+}
+
 TEST(the_analyser_gives_the_same_answer_twice) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -3684,6 +3826,9 @@ int main(void) {
     run_the_analyser_calls_a_jump_nobody_can_clear_impossible();
     run_the_analyser_says_so_when_a_track_cannot_be_got_round_at_all();
     run_the_heatmap_shows_where_everybody_actually_went();
+    run_an_honest_time_is_verified_and_a_doctored_one_is_not();
+    run_a_time_from_a_different_race_is_not_this_record();
+    run_a_time_survives_the_wire_and_is_still_verifiable();
     run_a_track_arrives_in_pieces_and_is_the_same_track();
     run_a_track_that_arrives_damaged_is_refused_rather_than_raced();
     run_a_record_belongs_to_a_track_and_the_conditions_it_was_set_under();

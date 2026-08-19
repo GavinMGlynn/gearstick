@@ -17,12 +17,21 @@
 #ifndef GS_CARRIER_H
 #define GS_CARRIER_H
 
+#include "core/gs_replay.h"
 #include "core/gs_track.h"
 #include "net/gs_proto.h"
 
-// A track's worth of chunks. Sized from the format rather than guessed at.
-#define GS_CARRIER_MAX_BYTES  (GS_TRACK_TILES * 4 + 4096)
-#define GS_CARRIER_MAX_CHUNKS ((GS_CARRIER_MAX_BYTES + GS_CHUNK_BYTES - 1) / GS_CHUNK_BYTES)
+// **Big enough for the largest thing that travels this way, which is not a
+// track.** A track is about four kilobytes; the replay behind a claimed time is
+// one byte per car per tick and a three-lap race is tens of thousands of ticks.
+// Sizing this from the track format looked reasonable and quietly truncated
+// every proof: the chunks past the end were refused, the transfer never
+// completed, and an honest time was never verified. Sized from the format that
+// is actually biggest, and derived rather than guessed.
+#define GS_CARRIER_MAX_BYTES \
+    (GS_REPLAY_MAX_TICKS * GS_MAX_CARS + 256)
+#define GS_CARRIER_MAX_CHUNKS \
+    ((GS_CARRIER_MAX_BYTES + GS_CHUNK_BYTES - 1) / GS_CHUNK_BYTES)
 
 typedef struct gs_carrier {
     uint64_t hash;              // what is being received

@@ -480,7 +480,7 @@ platform section of `FEATURES.md` for why that line is drawn where it is.
       driver on another machine, and a record set on one is visible from the
       other. *Verification: a record set on one client is shown by a second
       client that has never seen that race.*
-- [ ] **Times verified by re-racing them.** A submitted time arrives with the
+- [x] **Times verified by re-racing them.** A submitted time arrives with the
       inputs that produced it and the server re-simulates them. *Verification: a
       time whose replay does not produce it is rejected, and an honest one from
       the same client is accepted.*

@@ -857,6 +857,38 @@ client tells it. The next item has it re-race the inputs before accepting
 anything, and the message does not change when that happens — only what the
 server does with it.
 
+### Times verified by re-racing them
+
+**The strongest thing this project's determinism buys.** A claimed time arrives
+with the inputs that produced it, the server re-races them through the same
+simulation the player used, and the time is kept only if the replay produces it.
+
+That reduces cheating to "produce an input log that genuinely drives that fast",
+which is not cheating — it is being good at the game. It works only because a
+race is exactly reproducible from its inputs, which is the property everything
+in `src/core/` is arranged around, and it is the best argument for having built
+it that way.
+
+What is checked is not equality but *betterness*. A claim faster than the inputs
+produced is rejected; a slower one is accepted, because somebody being wrong in
+their own disfavour costs them the record they did not take and nothing else.
+The track, the distance and the dials are all checked too, and all three come
+out of the recording rather than out of the claim — a lap driven on the Moon
+cannot pay for a claim about Earth, however the claim is worded.
+
+**The bug here was a good one and it was about size.** The carrier that
+reassembles a track was reused for the proof, and it was sized from the track
+format: about twenty kilobytes. A replay is one byte per car per tick, and a
+three-lap race is tens of thousands of ticks — so every proof was truncated, the
+chunks past the end were refused, the transfer never completed, and an honest
+time was never verified at all. It is now sized from the largest thing that
+travels that way rather than from the first thing that did, and derived from the
+replay format rather than typed in.
+
+The claim and its proof travel separately and the server holds the first until
+it has the second. A claim that arrives with no proof is not a record: silence
+is not evidence, and a test sends one to make sure it stays that way.
+
 ---
 
 ## What does not exist

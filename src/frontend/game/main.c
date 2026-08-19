@@ -28,6 +28,7 @@
 #include "ui/gs_style.h"
 #include "core/gs_ai.h"
 #include "core/gs_ghost.h"
+#include "core/gs_records.h"
 
 #include "dcimgui.h"
 #include "backends/dcimgui_impl_sdl3.h"
@@ -858,6 +859,21 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         a->race_settled = true;
         gs_menu_finish(&a->menu, &a->world, &a->t);
         gs_store_save(a);
+
+        // And to the server, with the inputs that produced it. The server
+        // re-races them before it believes any of it, which is why the
+        // recording goes along rather than the number alone.
+        if (a->online && a->server_host != nullptr) {
+            static uint8_t proof[sizeof(gs_replay) + 4096];
+            size_t n = gs_replay_serialize(&a->recording, proof, sizeof proof);
+            const gs_car *me = &a->world.car[a->net.local];
+
+            gs_wire_send_result(a->wire, gs_track_hash(&a->t),
+                                gs_conditions_hash(&a->world),
+                                a->world.laps_to_win, me->vehicle,
+                                me->best_lap, me->finish_tick, proof, n);
+        }
+
         a->menu.screen = GS_SCREEN_RESULTS;
         steps = 0;
     }

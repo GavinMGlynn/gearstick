@@ -302,6 +302,44 @@ bool gs_proto_read_track_chunk(const uint8_t *buf, size_t len, uint64_t *track_h
 }
 
 // --- times ----------------------------------------------------------------
+//
+// A proof chunk is shaped exactly like a track chunk, and deliberately so: the
+// same reassembly, the same "the key is in every piece", the same refusal to
+// believe a length a datagram does not contain.
+
+size_t gs_proto_proof_chunk(uint8_t *buf, size_t cap, uint64_t track,
+                            uint16_t chunk, uint16_t chunks,
+                            const uint8_t *data, uint16_t len) {
+    if (len > GS_CHUNK_BYTES) return 0;
+    if (cap < GS_HEAD + 8 + 2 + 2 + 2 + (size_t)len) return 0;
+
+    size_t n = gs_head(buf, cap, GS_MSG_PROOF);
+    gs_put64(buf + n, track); n += 8;
+    gs_put16(buf + n, chunk); n += 2;
+    gs_put16(buf + n, chunks); n += 2;
+    gs_put16(buf + n, len); n += 2;
+    memcpy(buf + n, data, len);
+    return n + len;
+}
+
+bool gs_proto_read_proof_chunk(const uint8_t *buf, size_t len, uint64_t *track,
+                               uint16_t *chunk, uint16_t *chunks,
+                               const uint8_t **data, uint16_t *data_len) {
+    if (!gs_expect(buf, len, GS_MSG_PROOF, GS_HEAD + 14)) return false;
+
+    size_t n = GS_HEAD;
+    *track = gs_get64(buf + n); n += 8;
+    *chunk = gs_get16(buf + n); n += 2;
+    *chunks = gs_get16(buf + n); n += 2;
+    *data_len = gs_get16(buf + n); n += 2;
+
+    if (*data_len > GS_CHUNK_BYTES) return false;
+    if (n + *data_len > len) return false;
+    if (*chunks == 0 || *chunk >= *chunks) return false;
+
+    *data = buf + n;
+    return true;
+}
 
 size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
                        uint64_t conditions, uint16_t laps, uint8_t vehicle,

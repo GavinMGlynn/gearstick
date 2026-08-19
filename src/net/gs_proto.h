@@ -42,6 +42,7 @@ typedef enum gs_msg {
     GS_MSG_RELAY,      // "pass this to the others for me"
     GS_MSG_RESULT,     // "this is what I did" - a time, offered
     GS_MSG_WANT_BEST,  // "what is the record here?"
+    GS_MSG_PROOF,      // one chunk of the replay behind a claimed time
 
     // Server to client.
     GS_MSG_WELCOME,    // "you are player N of M, and here is everyone"
@@ -96,6 +97,16 @@ size_t gs_proto_track_chunk(uint8_t *buf, size_t cap, uint64_t track_hash,
 // A result is offered rather than asserted. Today the server believes it; the
 // item after this one has it re-race the inputs before it does, and the message
 // does not change when that happens - only what the server does with it.
+
+// The replay behind a claimed time, in chunks like a track. **The claim and its
+// proof travel separately**: the result says what was done, the proof says what
+// was pressed, and the server decides whether the second produces the first.
+size_t gs_proto_proof_chunk(uint8_t *buf, size_t cap, uint64_t track,
+                            uint16_t chunk, uint16_t chunks,
+                            const uint8_t *data, uint16_t len);
+bool gs_proto_read_proof_chunk(const uint8_t *buf, size_t len, uint64_t *track,
+                               uint16_t *chunk, uint16_t *chunks,
+                               const uint8_t **data, uint16_t *data_len);
 
 size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
                        uint64_t conditions, uint16_t laps, uint8_t vehicle,

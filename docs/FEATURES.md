@@ -198,7 +198,7 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   project that cannot be "finished" — it is hosting, moderation and cost, and
   it should be entered into deliberately rather than drifted into.
 
-- **Times verified by re-racing them.** `WANTED`
+- **Times verified by re-racing them.** `CORE`
   A submitted time comes with the inputs that produced it, and a server can
   re-race those inputs and check the answer. Cheating reduces to "drive that
   fast", which is the only leaderboard worth having. This is possible *because*

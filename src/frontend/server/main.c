@@ -15,6 +15,7 @@
 #include "net/gs_carrier.h"
 #include "net/gs_proto.h"
 #include "net/gs_store.h"
+#include "net/gs_verify.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
@@ -59,6 +60,13 @@ typedef struct gs_client {
 
     uint32_t in, out;          // datagrams
     uint64_t in_bytes, out_bytes;
+
+    // The replay behind whatever time this client last claimed. Per client,
+    // because two people can finish a race at the same moment and each one's
+    // proof is their own.
+    gs_carrier proof;
+    bool       claimed;
+    gs_claim   claim;
 } gs_client;
 
 static struct {
@@ -88,7 +96,7 @@ static struct {
 
     // What is remembered between races, and between runs of the server.
     gs_store *store;
-    uint32_t  results, kept;
+    uint32_t  results, kept, rejected;
 } gs_srv;
 
 // --- the lobby --------------------------------------------------------------
@@ -297,6 +305,10 @@ static void gs_draw(uint64_t now) {
                gs_store_driver_count(gs_srv.store),
                gs_store_record_count(gs_srv.store),
                gs_store_track_count(gs_srv.store), gs_srv.results, gs_srv.kept);
+        if (gs_srv.rejected > 0) {
+            printf("  rejected   %u time(s) that the replay did not produce\n",
+                   gs_srv.rejected);
+        }
     }
 
     if (gs_srv.track_len > 0) {
@@ -410,11 +422,72 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         }
 
         gs_srv.results++;
-        if (gs_store_put_record(gs_srv.store, track, conditions, laps,
-                                gs_srv.client[at].name, vehicle, lap_ticks,
-                                race_ticks)) {
+
+        // **Held, not believed.** The claim waits for the inputs that produced
+        // it; nothing goes in the table until the server has re-raced them.
+        gs_client *cl = &gs_srv.client[at];
+        cl->claim = (gs_claim){ track, conditions, laps, 0, lap_ticks, race_ticks };
+        cl->claimed = true;
+        gs_carrier_expect(&cl->proof, track);
+        break;
+    }
+
+    case GS_MSG_PROOF: {
+        // The inputs behind a claim, in pieces. Reassembled with the same
+        // carrier a track uses - it keys on a hash and refuses a length the
+        // datagram does not contain, which is what a proof needs too.
+        if (at < 0 || gs_srv.store == nullptr) break;
+
+        gs_client *cl = &gs_srv.client[at];
+        if (!cl->claimed) break;
+
+        uint64_t hash = 0;
+        uint16_t chunk = 0, chunks = 0, data_len = 0;
+        const uint8_t *data = nullptr;
+        if (!gs_proto_read_proof_chunk(d->buf, len, &hash, &chunk, &chunks,
+                                       &data, &data_len)) {
+            break;
+        }
+        if (hash != cl->proof.hash) break;
+
+        // The carrier reads track chunks; a proof chunk is the same shape with
+        // a different name, so it is handed over as one.
+        uint8_t as_track[GS_PROTO_MTU];
+        size_t n = gs_proto_track_chunk(as_track, sizeof as_track, hash, chunk,
+                                        chunks, data, data_len);
+        if (n == 0 || !gs_carrier_take(&cl->proof, as_track, n)) break;
+        if (!gs_carrier_done(&cl->proof)) break;
+
+        // Everything is here. Re-race it.
+        static gs_track t;
+        static uint8_t track_bytes[GS_CARRIER_MAX_BYTES];
+        size_t track_len = 0;
+        if (!gs_store_get_track(gs_srv.store, cl->claim.track, track_bytes,
+                                sizeof track_bytes, &track_len) ||
+            !gs_track_deserialize(&t, track_bytes, track_len)) {
+            SDL_Log("%s claimed a time on a track this server does not have",
+                    cl->name);
+            cl->claimed = false;
+            gs_srv.rejected++;
+            break;
+        }
+
+        gs_verdict v = gs_verify_bytes(cl->proof.bytes, cl->proof.len, &t,
+                                       &cl->claim, nullptr);
+        cl->claimed = false;
+
+        if (v != GS_VERDICT_OK) {
+            SDL_Log("%s: time rejected - %s", cl->name, gs_verdict_text(v));
+            gs_srv.rejected++;
+            break;
+        }
+
+        if (gs_store_put_record(gs_srv.store, cl->claim.track,
+                                cl->claim.conditions, cl->claim.laps, cl->name,
+                                0, cl->claim.lap_ticks, cl->claim.race_ticks)) {
             gs_srv.kept++;
         }
+        SDL_Log("%s: time verified by re-racing it", cl->name);
         break;
     }
 
