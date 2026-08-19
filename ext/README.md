@@ -52,6 +52,29 @@ SDL3 backends is a thing to check *before* that phase rather than during it.
 not SDL, not libm. The tests link libm to check the fixed-point trigonometry
 against double precision, which is the only place a maths library appears.
 
+## Building SDL needs system development packages
+
+SDL is vendored as source, so the *system* still has to carry what SDL links
+against. The authoritative list is `docs/README-linux.md` inside the submodule
+at the pinned tag; `.github/workflows/ci.yml` installs it on both Linux
+families and is the copy that is actually tested.
+
+Two of them surprise people, because SDL does not treat them as optional — it
+calls `SDL_missing_dependency()` and fails the configure, naming a `-D` flag
+rather than a package:
+
+- **XTEST** — `libxtst-dev` / `libXtst-devel`
+- **XScrnSaver** — `libxss-dev` / `libXScrnSaver-devel`
+
+On RHEL-family systems `libXScrnSaver-devel` is **in EPEL and nowhere else**, so
+a stock RHEL or Rocky box needs `epel-release` installed before it can build
+this at all. `ninja-build` and `libdecor-devel` come from CRB. Neither is a CI
+quirk; both apply to anybody building from source.
+
+If you would rather not have them, `-DSDL_X11_XTEST=OFF` and
+`-DSDL_X11_XSCRNSAVER=OFF` are the documented escapes. Gearstick does not take
+them: a racing game genuinely wants to stop the screensaver coming on mid-race.
+
 ## Why submodules rather than FetchContent
 
 A clone records the exact commit it builds against, and an offline build works.

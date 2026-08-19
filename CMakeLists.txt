@@ -165,6 +165,22 @@ if(GEARSTICK_TESTS)
     add_test(NAME gearstick COMMAND gearstick_tests)
     set_tests_properties(gearstick PROPERTIES TIMEOUT 120)
 
+    # The renderer's own tests, which need a window system and therefore link
+    # gearstick_shell. Kept a separate executable from the simulation tests on
+    # purpose: those link gearstick_sim and nothing else, and that is the
+    # standing proof the simulation does not know it is being looked at. One
+    # test binary linking both would quietly retire the proof.
+    add_executable(gearstick_render_tests tests/test_render.c)
+    target_link_libraries(gearstick_render_tests PRIVATE gearstick_shell)
+    gs_configure(gearstick_render_tests)
+
+    add_test(NAME gearstick_render COMMAND gearstick_render_tests)
+    # No display, no audio device, no pads - and the software renderer, so the
+    # pixels are the same ones on every platform's CI.
+    set_tests_properties(gearstick_render PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIODRIVER=dummy"
+        TIMEOUT 180)
+
     # The golden replay: an input log in, a state hash out. This is the test
     # that fails when a "harmless" change to the physics quietly rewrites every
     # ghost time and every shared replay in existence.

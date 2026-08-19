@@ -17,19 +17,25 @@ jobs:
     name: Linux x86_64 (GCC 14, Debian family)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: false }
       - name: Check out build submodules
         run: git submodule update --init --depth 1 $CI_SUBMODULES
 
+      # The list is SDL's own, from docs/README-linux.md at the pinned tag.
+      # XTEST and XScrnSaver are not optional extras: SDL calls
+      # SDL_missing_dependency() and fails the configure outright without them,
+      # naming a -D flag rather than a package. Worth knowing before deciding
+      # they look skippable.
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-14 ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
-            libxfixes-dev libxss-dev libxkbcommon-dev \
-            libwayland-dev wayland-protocols \
-            libgl-dev libegl-dev libpulse-dev libasound2-dev \
+            libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libgl-dev libegl-dev libdrm-dev libgbm-dev \
+            libpulse-dev libasound2-dev \
             libdbus-1-dev libudev-dev libusb-1.0-0-dev
 
       - name: Configure
@@ -62,16 +68,29 @@ jobs:
     runs-on: ubuntu-latest
     container: rockylinux/rockylinux:10
     steps:
+      # Three repositories, and none of it is optional:
+      #   AppStream  most of it
+      #   CRB        ninja-build, libdecor-devel
+      #   EPEL       libXScrnSaver-devel, which exists nowhere else on RHEL 10
+      # `--enablerepo=` one-shot rather than `dnf config-manager --set-enabled`,
+      # because Rocky 10 ships dnf5 and config-manager's flags changed there.
+      #
+      # That EPEL line is a real portability fact rather than a CI detail: SDL
+      # fails its configure without XScrnSaver, so building this on a stock
+      # RHEL-family box needs EPEL too. See ext/README.md.
       - name: Install dependencies
         run: |
-          dnf -y install git gcc cmake ninja-build \
+          dnf -y install epel-release
+          dnf -y --enablerepo=crb install git gcc cmake ninja-build \
             libX11-devel libXext-devel libXrandr-devel libXi-devel \
-            libXcursor-devel libXfixes-devel libxkbcommon-devel \
-            wayland-devel wayland-protocols-devel \
-            mesa-libGL-devel mesa-libEGL-devel pulseaudio-libs-devel \
-            alsa-lib-devel dbus-devel systemd-devel libusb1-devel
+            libXcursor-devel libXfixes-devel libXScrnSaver-devel libXtst-devel \
+            libxkbcommon-devel \
+            wayland-devel wayland-protocols-devel libdecor-devel \
+            mesa-libGL-devel mesa-libEGL-devel libdrm-devel mesa-libgbm-devel \
+            pulseaudio-libs-devel alsa-lib-devel dbus-devel systemd-devel \
+            libusb1-devel
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: false }
       - name: Check out build submodules
         run: |
@@ -86,15 +105,27 @@ jobs:
 
   macos:
     name: macOS arm64 (AppleClang)
-    runs-on: macos-14
+    # macos-15, not macos-14: the 14 image is deprecated and ships AppleClang
+    # 15, which is not C23 and is correctly refused by cmake/Platform.cmake.
+    # Both images are Apple Silicon, which is the architecture this targets.
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: false }
       - name: Check out build submodules
         run: git submodule update --init --depth 1 $CI_SUBMODULES
 
       - name: Install ninja
         run: brew install ninja
+
+      # Take the newest Xcode the image carries rather than whichever one it
+      # happens to have selected. The compiler gate needs AppleClang 16+, and
+      # discovering that the default was older costs a whole CI round trip.
+      - name: Use the newest Xcode on the image
+        run: |
+          latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          cc --version
 
       - name: Configure, build, test
         run: |
@@ -115,7 +146,7 @@ jobs:
     name: Windows x64 (MSVC)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: false }
       - name: Check out build submodules
         run: git submodule update --init --depth 1 ext/sdl
