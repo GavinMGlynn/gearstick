@@ -91,7 +91,8 @@ src/frontend/   one main.c per executable: game/ and cli/
 cmake/          platform gate, warning set, layer and float checks
 tools/          the trig table baker
 ext/            pinned submodules - see ext/README.md
-docs/           GUIDE.md, FEATURES.md, COMPLETION_PLAN.md, PROJECT_STATUS.md, ASSETS.md
+docs/           GUIDE.md, RELEASES.md, FEATURES.md, COMPLETION_PLAN.md,
+                PROJECT_STATUS.md, ASSETS.md
 ```
 
 ## Licence

@@ -259,7 +259,12 @@ target_compile_definitions(gearstick_shell PRIVATE
 # drifted from the code is worse than no guide: it sends somebody to press a key
 # that does nothing and lets them conclude the game is broken.
 target_compile_definitions(gearstick_shell PUBLIC
-    GS_SOURCE_DOCS="${CMAKE_CURRENT_SOURCE_DIR}/docs")
+    GS_SOURCE_DOCS="${CMAKE_CURRENT_SOURCE_DIR}/docs"
+    # The package name this platform actually produces, so a test can check the
+    # release notes describe files that exist rather than files somebody
+    # remembered. Getting this wrong is silent: the document simply describes a
+    # download nobody has.
+    GS_PACKAGE_PLATFORM="${GS_PLATFORM}")
 
 gs_configure(gearstick_shell)
 

@@ -121,6 +121,33 @@ jobs:
           ./gearstick --shot packaged.bmp --shot-at 120
           test -s packaged.bmp || { echo "the packaged game drew nothing"; exit 1; }
 
+      # **A machine that has never had a toolchain on it.** The runner has one,
+      # so unpacking on the runner proves less than it looks: a package can
+      # quietly depend on something only a build machine has and nobody finds
+      # out until a player does. A bare Debian container has no compiler, no
+      # CMake and no SDL, which is what a release is actually for.
+      - name: Run it on a machine with no toolchain
+        run: |
+          docker run --rm -v "$PWD/build:/pkg:ro" \
+            -e SDL_VIDEODRIVER=dummy -e SDL_RENDER_DRIVER=software \
+            -e SDL_AUDIODRIVER=dummy \
+            debian:12-slim bash -c '
+              set -e
+              for t in gcc cc cmake ninja make; do
+                if command -v $t >/dev/null; then
+                  echo "::error::$t is present - this is not a clean machine"
+                  exit 1
+                fi
+              done
+              tar xzf /pkg/gearstick-*-linux-*.tar.gz -C /tmp
+              cd /tmp/gearstick-*
+              ldd ./gearstick
+              ./gearstick_cli selftest --verify
+              ./gearstick --shot packaged.bmp --shot-at 120
+              test -s packaged.bmp
+              echo "the release runs where nothing was ever built"
+            '
+
       - uses: actions/upload-artifact@v4
         with:
           name: gearstick-linux-x86_64
@@ -229,3 +256,77 @@ jobs:
         with:
           name: gearstick-windows-x64
           path: build/windows-release/gearstick-*.zip*
+
+  # ---------------------------------------------------------------------------
+  # Publishing
+  #
+  # **Unsigned, and provably built here.** Code signing means paying Microsoft's
+  # and Apple's certificate authorities so a name is attached to the binary; it
+  # says who paid, and nothing about what went in. A build provenance
+  # attestation is a signed statement by GitHub's own infrastructure that this
+  # exact file came out of this workflow from this commit - which is a stronger
+  # claim, is free, and can be checked by anybody with `gh attestation verify`.
+  #
+  # docs/RELEASES.md says all of this to the person downloading it, along with
+  # exactly what SmartScreen and Gatekeeper will say and what to do about it.
+  # "Just click through the warning" is terrible advice and this project does
+  # not give it.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish the release
+    needs: [linux, macos, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # to create the release
+      id-token: write        # to sign the provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: false }
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: One checksum file for the lot
+        run: |
+          cd dist
+          rm -f *.sha256 SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest what was built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.dmg
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          body: |
+            ## Gearstick ${{ github.ref_name }}
+
+            **These builds are not code-signed.** Windows and macOS will say so.
+            [docs/RELEASES.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/RELEASES.md)
+            explains exactly what each will say, what to do about it, and why
+            the money went into provenance instead of a certificate.
+
+            Every file here carries a build provenance attestation. Check it:
+
+            ```sh
+            gh attestation verify <file> --repo ${{ github.repository }}
+            ```
+
+            That confirms the file came out of this repository's CI, from this
+            commit, unaltered. A code-signing certificate does not make that
+            claim.
+
+            New here? [The player's guide](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/GUIDE.md)
+            has the first ten minutes.

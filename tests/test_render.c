@@ -1829,6 +1829,54 @@ TEST(the_guide_tells_people_to_press_the_keys_the_game_listens_for) {
     SDL_free(raw);
 }
 
+TEST(the_release_notes_say_what_is_actually_shipped) {
+    (void)ren;
+
+    // The release document tells people what they are downloading and what
+    // their computer will say about it. The names of the files are the part
+    // most likely to drift - a rename in CPack and this quietly starts
+    // describing files nobody has - so they are checked against the pattern
+    // CMakeLists.txt builds them from.
+    size_t len = 0;
+    void *raw = SDL_LoadFile(GS_SOURCE_DOCS "/RELEASES.md", &len);
+    CHECK(raw != nullptr);
+    if (raw == nullptr) return;
+
+    const char *doc = (const char *)raw;
+
+    // **Against the build, not against the document.** The first version of
+    // this checked that the notes contained the strings the notes contained,
+    // which is a test that can only ever pass - and it duly passed while the
+    // notes named a Windows file the packaging has never produced. This asks
+    // the build what it calls a package on this platform and looks for that.
+    char expected[128];
+    SDL_snprintf(expected, sizeof expected, "gearstick-VERSION-%s.",
+                 GS_PACKAGE_PLATFORM);
+    CHECK(SDL_strstr(doc, expected) != nullptr);
+
+    static const char *const must_say[] = {
+        // The other two platforms, which this machine cannot ask the build
+        // about. CI runs this test on all three, so between them every name is
+        // checked against the build that makes it.
+        "gearstick-VERSION-linux-x86_64.tar.gz",
+        "gearstick-VERSION-macos-arm64.dmg",
+        "gearstick-VERSION-windows-x64.zip",
+        // The two programs inside it.
+        "gearstick_cli",
+        "gearstick_cli selftest --verify",
+        // And the honest part, which is the reason the document exists.
+        "not code-signed",
+        "gh attestation verify",
+        "Run anyway",          // what Windows makes you click
+        "Open Anyway",         // what macOS makes you click
+    };
+    for (size_t i = 0; i < SDL_arraysize(must_say); i++) {
+        CHECK(SDL_strstr(doc, must_say[i]) != nullptr);
+    }
+
+    SDL_free(raw);
+}
+
 TEST(a_time_reads_the_way_people_say_it) {
     (void)ren;
     char text[32];
@@ -2202,6 +2250,7 @@ int main(void) {
     run_a_car_is_drawn_from_its_mesh_and_faces_where_it_is_pointing(ren);
     run_a_car_on_a_slope_leans_with_the_ground(ren);
     run_the_guide_tells_people_to_press_the_keys_the_game_listens_for(ren);
+    run_the_release_notes_say_what_is_actually_shipped(ren);
     run_a_time_reads_the_way_people_say_it(ren);
     run_a_finished_race_becomes_a_table_in_the_order_it_finished(ren);
     run_the_store_remembers_drivers_and_records_between_runs(ren);

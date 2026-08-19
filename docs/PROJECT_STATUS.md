@@ -629,6 +629,49 @@ in it was checked against the code, including the ones that are easy to write
 and wrong: the eight gravity presets, that all six machines win something, and
 that fifty degrees is where a slope becomes a wall.
 
+### Releases: unsigned, and provably built here
+
+Tagging publishes a GitHub release with all three platforms in it, a combined
+`SHA256SUMS`, and a **build provenance attestation** on every file.
+
+The releases are not code-signed, and `docs/RELEASES.md` is a whole document
+about that rather than a footnote - because "just click through the warning" is
+terrible advice that people give constantly. It says exactly what SmartScreen
+and Gatekeeper will say, exactly which click gets past each of them, and what to
+do about macOS's *"is damaged and can't be opened"*, which is the quarantine
+attribute rather than damage.
+
+The reasoning is worth stating plainly: code signing means paying Microsoft's
+and Apple's certificate authorities a few hundred dollars a year so that a name
+is attached to the binary. That says who paid. It says nothing about what went
+in. A provenance attestation is a signed statement by GitHub's own
+infrastructure that this exact file came out of this workflow from this commit,
+it is free, and anybody can check it with one command. It is the stronger claim,
+so that is what is shipped - and the document tells the person downloading how
+to run the check rather than assuming they will not.
+
+**The verification is the interesting part.** "Run on a machine that never had a
+toolchain on it" is not something a CI runner can honestly claim about itself:
+the runner has a compiler, and a package can quietly depend on something only a
+build machine has. So the Linux job now unpacks the release inside a bare
+`debian:12-slim` container that has no compiler, no CMake and no SDL, refuses to
+proceed if it finds one, and runs the packaged game there - the headless driver
+re-racing the golden replay and the game drawing a frame.
+
+Locally, where Docker was not reachable, the same claim was checked the other
+way round: the packaged `gearstick_cli` links nothing but libc, and the packaged
+game links nothing but libc, libm and the GCC runtime. SDL is static. There is
+nothing in the package that a toolchain would have provided.
+
+One more test earns its place here, and it earned it by being wrong first. The
+release notes describe the files people download, and a rename in CPack would
+silently turn that into a description of files nobody has. The first version
+checked that the notes contained the strings the notes contained - a test that
+can only pass - and it duly passed while the notes named
+`gearstick-VERSION-windows-x86_64.zip`, which the packaging has never produced.
+It now asks the build what it calls a package on this platform and looks for
+that, and CI runs it on all three.
+
 ---
 
 ## What does not exist

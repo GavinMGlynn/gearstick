@@ -440,7 +440,7 @@ whatever the UI turns out to be — then the interface on top.
 - [x] **A player's guide**, covering the first ten minutes, every control, the
       editor and how to report a bug as a file somebody else can run.
       *Verification: someone else follows it and races.*
-- [ ] **Signed or clearly-documented-unsigned releases** for all three
+- [x] **Signed or clearly-documented-unsigned releases** for all three
       platforms. *Verification: downloaded and run on a machine that has never
       had a toolchain on it.*
 
