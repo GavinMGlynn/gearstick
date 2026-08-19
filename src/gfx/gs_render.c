@@ -20,6 +20,15 @@ static const gs_rgb gs_surface_colour[GS_SURF_COUNT] = {
     [GS_SURF_PAVEMENT] = { 0.42f, 0.44f, 0.47f },
     [GS_SURF_DIRT]     = { 0.55f, 0.40f, 0.24f },
     [GS_SURF_ICE]      = { 0.68f, 0.82f, 0.92f },
+    // Told apart by hue as well as by lightness, because a shaded slope changes
+    // a tile's brightness by more than these differ by - two surfaces separated
+    // only by how pale they are would be one surface on a hillside.
+    [GS_SURF_SAND]     = { 0.78f, 0.68f, 0.42f },
+    [GS_SURF_GRAVEL]   = { 0.52f, 0.50f, 0.46f },
+    [GS_SURF_ROCK]     = { 0.36f, 0.33f, 0.34f },
+    [GS_SURF_DUST]     = { 0.62f, 0.59f, 0.54f },
+    [GS_SURF_SLUSH]    = { 0.58f, 0.64f, 0.68f },
+    [GS_SURF_GRASS]    = { 0.34f, 0.52f, 0.28f },
 };
 
 // Fixed light, up and to the left. Nothing here casts a real shadow except the

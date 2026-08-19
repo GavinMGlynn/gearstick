@@ -34,10 +34,29 @@
 // in this layer.
 #define GS_TILE_METRES 4
 
+// **A ground for every world on the gravity dial.**
+//
+// The dial names eight bodies and there were three surfaces, all of which could
+// have been a car park. These are the grounds those worlds are actually made of
+// - and each one earns its place in the numbers below rather than in a tint.
+// **A surface that drives like another surface is a colour swatch**, and the
+// rule that refuses a feature for adding fidelity without adding predictability
+// refuses those too.
+//
+// Appended, never renumbered. The value is what a saved track stores, so moving
+// one silently changes the ground under every track anybody has built.
 typedef enum gs_surface {
-    GS_SURF_PAVEMENT = 0,
-    GS_SURF_DIRT,
-    GS_SURF_ICE,
+    GS_SURF_PAVEMENT = 0,   // Earth, made
+    GS_SURF_DIRT,           // Earth, not
+    GS_SURF_ICE,            // Europa, and a hard winter
+
+    GS_SURF_SAND,           // Mars, and every desert
+    GS_SURF_GRAVEL,         // Ceres, and a rally stage
+    GS_SURF_ROCK,           // Venus, Io - basalt, and nothing kind about it
+    GS_SURF_DUST,           // the Moon: regolith, and nothing has ever swept it
+    GS_SURF_SLUSH,          // Titan, and a thaw
+    GS_SURF_GRASS,          // Earth again, and the one everybody underestimates
+
     GS_SURF_COUNT
 } gs_surface;
 

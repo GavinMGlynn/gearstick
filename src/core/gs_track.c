@@ -25,6 +25,50 @@ const gs_surface_def gs_surfaces[GS_SURF_COUNT] = {
     // and less ability to do anything with it.
     [GS_SURF_ICE]      = { "ice",      GS_RATIO( 18, 100), GS_RATIO(1, 100), GS_RATIO(45, 100),
                            GS_RATIO(7, 100), GS_RATIO(70, 100), GS_RATIO(40, 100) },
+
+    // --- and one for every other world on the dial ---------------------------
+    //
+    // Each of these has to be a different thing to drive on, or it is a colour.
+    // Read down the columns rather than across the rows: what makes a surface
+    // itself is which of grip, rolling resistance and drive it is bad at, and no
+    // two of these are bad at the same pair.
+
+    // Sand robs you of *drive* above all: the wheels turn and the car does not
+    // go. Grip is poor but not catastrophic, so it is the one surface where
+    // lifting off is faster than flooring it. Churns into deep ruts.
+    [GS_SURF_SAND]     = { "sand",     GS_RATIO( 52, 100), GS_RATIO(21, 100), GS_RATIO(55, 100),
+                           GS_RATIO(11, 100), GS_RATIO(78, 100), GS_RATIO(125, 100) },
+
+    // Gravel gives you grip only while it is still there. It rolls under the
+    // tyre, so the first car through has more of it than the fifth - the only
+    // surface here that gets *better* on the line for the person behind.
+    [GS_SURF_GRAVEL]   = { "gravel",   GS_RATIO( 74, 100), GS_RATIO(13, 100), GS_RATIO(82, 100),
+                           GS_RATIO(8, 100), GS_RATIO(118, 100), GS_RATIO(80, 100) },
+
+    // Basalt: more grip than pavement and it costs you. Rolling resistance is
+    // high and it does not wear at all, so a fast line on rock is fast on the
+    // last lap too - and every landing on it is taken at full violence.
+    [GS_SURF_ROCK]     = { "rock",     GS_RATIO(128, 100), GS_RATIO(11, 100), GS_ONE,
+                           0, GS_ONE, GS_ONE },
+
+    // Regolith, never weathered, never swept. Almost no rolling resistance and
+    // almost no grip either - the closest thing to ice that is not slippery
+    // because it is smooth. It has never been driven on, so it churns faster
+    // than anything else here.
+    [GS_SURF_DUST]     = { "dust",     GS_RATIO( 34, 100), GS_RATIO(2, 100), GS_RATIO(62, 100),
+                           GS_RATIO(16, 100), GS_RATIO(72, 100), GS_RATIO(160, 100) },
+
+    // Slush drags. Middling grip, the worst rolling resistance of anything here,
+    // and it packs down under use into something quicker and looser - so the
+    // line is worth taking and gets harder to hold each time you take it.
+    [GS_SURF_SLUSH]    = { "slush",    GS_RATIO( 58, 100), GS_RATIO(26, 100), GS_RATIO(70, 100),
+                           GS_RATIO(10, 100), GS_RATIO(76, 100), GS_RATIO(58, 100) },
+
+    // Grass is fine until it is not. Nearly dirt's grip while it is whole, and
+    // it tears into mud faster than dirt ruts - the surface that punishes the
+    // car in front for having found the good line.
+    [GS_SURF_GRASS]    = { "grass",    GS_RATIO( 80, 100), GS_RATIO(15, 100), GS_RATIO(88, 100),
+                           GS_RATIO(14, 100), GS_RATIO(55, 100), GS_RATIO(140, 100) },
 };
 
 void gs_track_init(gs_track *t, uint8_t w, uint8_t h, gs_surface surface) {

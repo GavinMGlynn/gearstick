@@ -175,11 +175,39 @@ there is no authentication behind "whoever", so today that check is a formality.
 
 ## Order of work, and why
 
-1. **Fuzz the parsers.** Cheapest, and it defends the surface most likely to
-   contain something exploitable today.
-2. **Seal the transport.** Everything about identity is meaningless without it.
-3. **Accounts, and a track's ownership.** Now that identity exists, "only the
+**Ordered by how much each one matters**, which is not the same as ordering by
+what depends on what. The first four are open holes today and are cheap; the
+transport work is larger and defends a channel nobody is currently attacking.
+
+1. **Bind a replay to its driver.** A recording carries the track, the dials, the
+   grid and the machines, and not who was holding the controller — so an honest
+   replay is a bearer token and anyone who obtains one can hand it in as theirs.
+   The driver goes inside the signed metadata and the server checks it against
+   the account submitting. Cheap, and a complete break until it is done.
+2. **Bind a submission to a session.** The same valid replay can be submitted
+   again. Records are keyed, so that is idempotent rather than harmful — but by
+   accident of the schema and not by design. A server-chosen nonce in the claim
+   makes it deliberate.
+3. **Commit then reveal for race inputs.** Rollback hands every peer the others'
+   inputs for a tick before it must commit its own, so a modified client can
+   delay and choose. Nothing desyncs, because everybody then simulates the
+   dishonest input faithfully: the state-hash check catches a modified
+   *simulation* and cannot see a dishonestly chosen *decision*. Send a hash of
+   the inputs first, the inputs afterwards. One exchange of fixed delay, and the
+   whole class goes.
+4. **Verify the whole race, not the winner's lap.** Every peer keeps the complete
+   input log and the end-state hash everybody agreed on; re-racing the log has to
+   produce that hash. Nearly free, given determinism.
+5. **Fuzz the parsers.** Cheapest of all, and it defends the surface most likely
+   to contain something exploitable today.
+6. **Seal the transport.** Everything about identity is meaningless without it.
+7. **Accounts, and a track's ownership.** Now that identity exists, "only the
    author may withdraw this" becomes true rather than decorative.
-4. **Bind a replay to its driver.** Closes the bearer-token gap above.
-5. **Commit-then-reveal for race inputs.** Closes the last class that
-   determinism alone does not catch.
+
+**Said out loud rather than left to be discovered: one to four are not complete
+defences until six and seven land.** Binding a replay to a driver stops somebody
+handing in a recording they found; it does not stop somebody claiming to *be*
+that driver, because until there are authenticated accounts the name attached to
+a datagram is whatever the sender typed. Each is worth doing on its own account.
+None of them finishes the job alone, and the ordering is a judgement about impact
+per day of work rather than a claim that the earlier ones are sufficient.

@@ -609,17 +609,54 @@ Everything left on `FEATURES.md`, and every tail found along the way.
 says what is being defended, from whom, and what is deliberately not defended at
 all. A defence nobody stated is a defence nobody can review.
 
-The order is not arbitrary and is argued there. Fuzzing comes first because it is
-cheap and it covers the surface most likely to be exploitable *today*. Sealing
-the transport comes next because every notion of identity below it is meaningless
-without one — a password on a plaintext protocol is not a password. Accounts
-follow, and only then do the things that depend on knowing who somebody is.
+**Ordered by how much each one matters, not by what depends on what.** The first
+four close holes that are open *today* and are cheap; the transport work below
+them is larger and defends a channel nobody is currently attacking. That ordering
+comes with one thing said out loud rather than discovered: **items one to four are
+not complete defences until items five to eight land.** Binding a replay to a
+driver stops somebody handing in a recording they found, and it does not stop
+somebody claiming to be that driver, because until there are accounts the name on
+a datagram is whatever the sender typed. Each is worth doing on its own account
+and none of them finishes the job alone.
 
 **Nothing in this phase is invented here.** The pattern is named and specified,
 the primitives are audited and widely deployed, and the evidence is conformance
 vectors plus a handshake completed against an independent implementation. A
 protocol whose only support is its author's confidence is the thing that fails
 review, and it fails it for good reasons.
+
+- [ ] **A replay says who drove it, and cannot be submitted by anybody else.**
+      A recording carries the track, the dials, the grid and the machines, and
+      not the driver — so an honest replay is a bearer token, and whoever obtains
+      one can submit it as their own with the verifier correctly agreeing the
+      time was driven. **The most serious open hole in `docs/THREATS.md`.**
+      *Verification: a replay recorded by one profile and submitted by another is
+      refused; the same replay submitted twice sets one record, not two.*
+- [ ] **A submission is bound to the session that asked for it.** Records are
+      keyed, so resubmitting the same replay sets one record rather than two —
+      but that is a property of the schema rather than a defence, and a thing
+      that is safe by accident stops being safe when the schema changes. A
+      server-chosen nonce inside the claim makes it deliberate.
+      *Verification: a claim carrying a nonce the server did not issue, or one it
+      issued to somebody else, or one it has already retired, is refused.*
+- [ ] **A race commits to its inputs before it sees anybody else's.** Rollback
+      hands every peer the others' inputs for a tick, so a modified client can
+      wait and choose. Nothing desyncs, because everybody then simulates the
+      dishonest input faithfully — state hashes catch a changed simulation and
+      not a changed decision. Each peer sends a hash of its inputs first and the
+      inputs afterwards.
+      *Verification: a peer that reveals inputs which do not match what it
+      committed to is caught and the race stops; and a four-player rollback race
+      with the commitment in place still agrees tick for tick.*
+- [ ] **The whole race is verified, not just the winning lap.** Every peer keeps
+      the complete input log and the final state hash everybody agreed on. The
+      server re-races the log; a log that does not produce that hash means one of
+      the clients was not running this race. Nearly free, because the simulation
+      is exactly reproducible — which is the argument for having built it that
+      way, collected.
+      *Verification: a race in which one peer's recorded inputs are altered by a
+      single bit afterwards fails the check, and an honest four-player race
+      passes it.*
 
 - [ ] **The parsers are fuzzed.** Every byte the server acts on came from
       somebody who may be hostile: the protocol decoder, the chunked
@@ -679,38 +716,6 @@ review, and it fails it for good reasons.
       with and to nobody else; and every write path aimed at a track that shipped
       with the game is refused, including by the profile that happens to be
       called the same thing as its author.*
-- [ ] **A replay says who drove it, and cannot be submitted by anybody else.**
-      A recording carries the track, the dials, the grid and the machines, and
-      not the driver — so an honest replay is a bearer token, and whoever obtains
-      one can submit it as their own with the verifier correctly agreeing the
-      time was driven. **The most serious open hole in `docs/THREATS.md`.**
-      *Verification: a replay recorded by one profile and submitted by another is
-      refused; the same replay submitted twice sets one record, not two.*
-- [ ] **A race commits to its inputs before it sees anybody else's.** Rollback
-      hands every peer the others' inputs for a tick, so a modified client can
-      wait and choose. Nothing desyncs, because everybody then simulates the
-      dishonest input faithfully — state hashes catch a changed simulation and
-      not a changed decision. Each peer sends a hash of its inputs first and the
-      inputs afterwards.
-      *Verification: a peer that reveals inputs which do not match what it
-      committed to is caught and the race stops; and a four-player rollback race
-      with the commitment in place still agrees tick for tick.*
-- [ ] **A submission is bound to the session that asked for it.** Records are
-      keyed, so resubmitting the same replay sets one record rather than two —
-      but that is a property of the schema rather than a defence, and a thing
-      that is safe by accident stops being safe when the schema changes. A
-      server-chosen nonce inside the claim makes it deliberate.
-      *Verification: a claim carrying a nonce the server did not issue, or one it
-      issued to somebody else, or one it has already retired, is refused.*
-- [ ] **The whole race is verified, not just the winning lap.** Every peer keeps
-      the complete input log and the final state hash everybody agreed on. The
-      server re-races the log; a log that does not produce that hash means one of
-      the clients was not running this race. Nearly free, because the simulation
-      is exactly reproducible — which is the argument for having built it that
-      way, collected.
-      *Verification: a race in which one peer's recorded inputs are altered by a
-      single bit afterwards fails the check, and an honest four-player race
-      passes it.*
 
 ## Phase 15 — Installers
 
