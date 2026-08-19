@@ -125,15 +125,22 @@ sudo dnf install libX11 libXext libwayland-client alsa-lib pulseaudio-libs
 
 | Platform | File | Contents |
 | --- | --- | --- |
-| Linux x86_64 | `gearstick-VERSION-linux-x86_64.tar.gz` | `gearstick`, `gearstick_cli`, `assets/` |
+| Linux x86_64 | `gearstick-VERSION-linux-x86_64.tar.gz` | `gearstick`, `gearstick_server`, `gearstick_cli`, `assets/` |
 | macOS arm64 | `gearstick-VERSION-macos-arm64.dmg` | `Gearstick.app` |
 | macOS arm64 | `gearstick-VERSION-macos-arm64.tar.gz` | the same, as a folder |
-| Windows x64 | `gearstick-VERSION-windows-x64.zip` | `gearstick.exe`, `gearstick_cli.exe`, `assets\` |
+| Windows x64 | `gearstick-VERSION-windows-x64.zip` | `gearstick.exe`, `gearstick_server.exe`, `gearstick_cli.exe`, `assets\` |
 
-`gearstick` is the game. `gearstick_cli` is the same simulation with no window
-attached — it is what re-races a replay to check it, and running
-`gearstick_cli selftest --verify` is the first thing to do if anything seems
-wrong. See [the player's guide](GUIDE.md).
+`gearstick` is the game.
+
+`gearstick_server` is the meeting point for online play. You do not need it to
+play — two people can reach each other directly with `--host` and `--join` — and
+you do need it if you want to run a place people come back to. It has no window,
+draws a live view in the terminal, and is happy on a machine with no screen.
+
+`gearstick_cli` is the same simulation with no window attached. It is what
+re-races a replay to check it, and running `gearstick_cli selftest --verify` is
+the first thing to do if anything seems wrong. See
+[the player's guide](GUIDE.md).
 
 SDL is linked statically, so there is nothing to install alongside it.
 

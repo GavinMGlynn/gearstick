@@ -459,7 +459,7 @@ them in touch with each other — and it does not simulate a race, because a rac
 simulated on a server means every steering input waits a round trip. See the
 platform section of `FEATURES.md` for why that line is drawn where it is.
 
-- [ ] **A server that runs and shows who is there.** A `gearstick_server` that
+- [x] **A server that runs and shows who is there.** A `gearstick_server` that
       listens, takes up to four clients, and displays them live with the stats
       that say whether it is healthy. *Verification: four clients connect and
       appear by name; one leaves and disappears within a second.*

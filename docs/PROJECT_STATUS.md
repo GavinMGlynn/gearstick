@@ -672,6 +672,47 @@ can only pass - and it duly passed while the notes named
 It now asks the build what it calls a package on this platform and looks for
 that, and CI runs it on all three.
 
+### The server, and two tests that proved nothing
+
+`gearstick_server` listens, holds a lobby of up to four, and draws a live view
+of who is there — name, address, round trip, datagrams each way — with the
+totals underneath. It runs headless: SDL is initialised with no subsystems at
+all, because SDL_net needs SDL and not a display, and a server that demanded one
+could not run where servers run.
+
+The protocol is `src/net/gs_proto.c`, which links nothing — no sockets, no SDL,
+no allocation. The same discipline the rollback session keeps and for the same
+reason: a protocol that can be exercised without a network is one whose edge
+cases can be tested at all.
+
+Two decisions worth writing down. A refusal carries a reason, because a client
+turned away has to tell its user why and "connection failed" is not why. And a
+client is matched on address *and* port, because two people behind one router
+share an address and are not the same player.
+
+**Two of the first tests here passed while the thing they checked was broken**,
+which is worth more than the code they were testing.
+
+The first checked that a fifth client is refused — on a server configured to
+hold four. Deleting the capacity check entirely did not fail it, because with
+four allowed and four seats there is nothing to observe. It now starts a server
+told to hold *two* and watches the third bounce, which is the only arrangement
+where the setting being used and the setting being ignored look different.
+
+The second checked that saying hello twice does not take two slots — at the end
+of the four-player test, with every seat taken. There, a server that duplicated
+a rejoin and a server that *refused* one both leave the count at four. It is now
+its own test with room to spare, and it checks the rejoining client gets the
+same slot back rather than merely that the count did not move.
+
+Both were found by breaking the server and watching the tests stay green, which
+is the whole reason that step exists.
+
+The ping column had the same shape of problem and was caught the same way: the
+server displayed a round trip it never measured. Only the end that sends a ping
+can time its own reply, so a server that wants to show one has to ask — it now
+does, every two seconds, and a test fails if the asking stops.
+
 ---
 
 ## What does not exist

@@ -32,8 +32,18 @@ set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-# Dear ImGui's floor. Ours is C23; this applies to the vendored C++ alone.
-set(CMAKE_CXX_STANDARD 17)
+# **This is not our C++ standard, because there is no first-party C++.** Every
+# .cpp compiled here is Dear ImGui's; our side of that boundary is the generated
+# C API, which is C23 like everything else. So this is the standard somebody
+# else's code is compiled with, and the two numbers have no relationship to
+# maintain - C and C++ standards are independent and there is no interop to win.
+#
+# C++20 rather than the 17 it started at because it costs nothing and is
+# supported outright by all four toolchains this project builds on. Checked
+# rather than assumed: ImGui compiles at C++20 with no errors and no new
+# warnings. C++23 is deliberately not taken - AppleClang and MSVC coverage is
+# patchier, and the payoff for a project that writes no C++ is exactly zero.
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)   # so clangd/IDEs see -std=c23
@@ -292,6 +302,33 @@ gs_configure(gearstick_cli)
 set_target_properties(gearstick_cli PROPERTIES C_VISIBILITY_PRESET hidden)
 
 # ---------------------------------------------------------------------------
+# The server - the meeting point for online races
+#
+# **Headless on purpose.** It links SDL because SDL_net needs it, and no part of
+# the renderer or the UI, because a server that needed a display could not run
+# where servers run. It does not link the simulation either, yet: it is a
+# librarian and a referee rather than a player, and the day it re-races a
+# submitted replay to check a time is the day it gains gearstick_sim.
+# ---------------------------------------------------------------------------
+option(GEARSTICK_SERVER "Build gearstick_server" ON)
+option(GEARSTICK_SQLITE_AMALGAMATION
+       "Always fetch SQLite rather than using a system copy" OFF)
+
+if(GEARSTICK_SERVER)
+include(cmake/Sqlite.cmake)
+gs_add_sqlite()
+
+add_executable(gearstick_server
+    src/frontend/server/main.c
+    src/net/gs_proto.c)
+target_include_directories(gearstick_server PRIVATE src)
+target_link_libraries(gearstick_server PRIVATE ${GS_SDL} ${GS_SDL_NET}
+    gearstick_sqlite)
+gs_configure(gearstick_server)
+set_target_properties(gearstick_server PROPERTIES C_VISIBILITY_PRESET hidden)
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 if(GEARSTICK_TESTS)
@@ -329,6 +366,20 @@ if(GEARSTICK_TESTS)
     add_executable(gearstick_wire_tests tests/test_wire.c)
     target_link_libraries(gearstick_wire_tests PRIVATE gearstick_shell)
     gs_configure(gearstick_wire_tests)
+
+    # The lobby, with the server as a real process on the loopback. It is a
+    # separate program in real use and it is a separate program here - starting
+    # it in-process would test a server nobody runs.
+    add_executable(gearstick_server_tests
+        tests/test_server.c
+        src/net/gs_proto.c)
+    target_include_directories(gearstick_server_tests PRIVATE src)
+    target_link_libraries(gearstick_server_tests PRIVATE ${GS_SDL} ${GS_SDL_NET})
+    gs_configure(gearstick_server_tests)
+    add_dependencies(gearstick_server_tests gearstick_server)
+
+    add_test(NAME gearstick_server COMMAND gearstick_server_tests)
+    set_tests_properties(gearstick_server PROPERTIES TIMEOUT 180)
 
     add_test(NAME gearstick_wire COMMAND gearstick_wire_tests)
     set_tests_properties(gearstick_wire PROPERTIES TIMEOUT 120)

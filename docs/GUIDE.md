@@ -159,7 +159,23 @@ gearstick --host 47000 4          # wait for four players in total
 gearstick --join their-address 47000
 ```
 
-Nobody starts until everybody has arrived. The netcode is rollback: your car
+Nobody starts until everybody has arrived.
+
+**Or through a server.** `gearstick_server` is a separate program that acts as
+the meeting point — you all connect to it instead of to each other, which
+matters when somebody's router will not accept an incoming connection. It shows
+who is there and how far away they are:
+
+```sh
+gearstick_server --port 47800 --players 4
+```
+
+The server does not run the race. Your machine does, and so does everybody
+else's — that is why your car responds to your steering immediately instead of
+waiting for the network. The server holds the lobby, and later the track library
+and the records. **Connecting the game to a server is not built yet**; today the
+server runs, accepts clients and shows them, and the game still uses `--host`
+and `--join`. See *What is missing*. The netcode is rollback: your car
 responds to your steering on the frame you press it, and when the game guesses
 wrong about what somebody else did it quietly rewinds and replays. You will see
 another car twitch occasionally. You will not wait for the network to see your
@@ -219,6 +235,8 @@ Said here rather than discovered:
 
 - **There is one track.** The construction set can build any track and save one;
   there is no library to browse yet.
+- **The game does not talk to the server yet.** `gearstick_server` runs and
+  holds a lobby; the game still meets people with `--host` and `--join`.
 - **Online needs everybody on the same track already.** The handshake does not
   send the track.
 - **Only players one and two have keyboard controls** by default.
