@@ -291,6 +291,12 @@ typedef struct gs_scenario {
     bool        twisty;     // steer back and forth rather than run straight
     int32_t     drop;       // shelf height in tiles, 0 for flat ground
     gs_fix      bumps;      // washboard amplitude in tiles, 0 for smooth
+    uint32_t    seconds;    // how long the run lasts
+
+    // Ten seconds is enough where speed decides. Where *survival* decides it is
+    // not: a fast fragile car banks distance before it breaks, and over a short
+    // run that is enough to win. Toughness only shows up when there is time for
+    // the survivors to pull away from the wreckage.
 } gs_scenario;
 
 static void gs_scenario_track(gs_track *t, const gs_scenario *sc) {
@@ -314,9 +320,9 @@ static void gs_scenario_track(gs_track *t, const gs_scenario *sc) {
     }
 }
 
-// How far along the track a vehicle got in ten seconds, in tiles. A wreck
-// scores whatever it managed before it stopped, which is the point of including
-// a drop at all.
+// How far along the track a vehicle got, in tiles. A wreck scores whatever it
+// managed before it stopped, which is the point of the rough scenarios: the
+// clock keeps running and a broken car stops adding to its total.
 static double gs_run_scenario(const gs_scenario *sc, uint8_t vehicle) {
     static gs_track t;
     gs_scenario_track(&t, sc);
@@ -325,7 +331,7 @@ static double gs_run_scenario(const gs_scenario *sc, uint8_t vehicle) {
     gs_world_init(&w, sc->gravity);
     gs_world_add_car(&w, &t, vehicle, GS_INT(2), GS_INT(12), 0);
 
-    for (uint32_t i = 0; i < GS_TICK_HZ * 10; i++) {
+    for (uint32_t i = 0; i < GS_TICK_HZ * sc->seconds; i++) {
         gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
         if (sc->twisty) {
             if ((i / 45u) % 2u == 0u) in[0] |= GS_IN_LEFT;
@@ -339,20 +345,24 @@ static double gs_run_scenario(const gs_scenario *sc, uint8_t vehicle) {
 static int cmd_roster(void) {
     // Chosen so that different things decide them: top speed, grip, survival,
     // and grip again where gravity has taken most of it away.
+    // Chosen so that different things decide them. Top speed on good ground;
+    // grip where there is little of it; grip alone where gravity has taken
+    // nearly all of it; and survival where the ground is trying to break the
+    // car - which needs a long enough run that a wreck stops mattering less
+    // than it costs.
     const gs_scenario scenarios[] = {
-        { "pavement sprint",  GS_SURF_PAVEMENT, GS_ONE,             false,  0, 0 },
-        { "pavement, twisty", GS_SURF_PAVEMENT, GS_ONE,             true,   0, 0 },
-        { "jupiter",          GS_SURF_PAVEMENT, GS_RATIO(253, 100), false,  0, 0 },
-        { "ice",              GS_SURF_ICE,      GS_ONE,             false,  0, 0 },
-        { "dirt, twisty",     GS_SURF_DIRT,     GS_ONE,             true,   0, 0 },
-        { "the moon",         GS_SURF_PAVEMENT, GS_RATIO(17, 100),  true,   0, 0 },
-        { "ceres",            GS_SURF_PAVEMENT, GS_RATIO(3, 100),   true,   0, 0 },
-        { "off a shelf",      GS_SURF_DIRT,     GS_ONE,             false, 14, 0 },
-        { "off a cliff",      GS_SURF_DIRT,     GS_ONE,             false, 30, 0 },
-        { "washboard",        GS_SURF_DIRT,     GS_ONE,             false,  0,
-          GS_RATIO(45, 100) },
+        { "pavement sprint",  GS_SURF_PAVEMENT, GS_ONE,             false,  0, 0, 10 },
+        { "pavement, twisty", GS_SURF_PAVEMENT, GS_ONE,             true,   0, 0, 10 },
+        { "jupiter",          GS_SURF_PAVEMENT, GS_RATIO(253, 100), false,  0, 0, 10 },
+        { "ice",              GS_SURF_ICE,      GS_ONE,             false,  0, 0, 10 },
+        { "dirt, twisty",     GS_SURF_DIRT,     GS_ONE,             true,   0, 0, 10 },
+        { "the moon",         GS_SURF_PAVEMENT, GS_RATIO(17, 100),  true,   0, 0, 10 },
+        { "ceres",            GS_SURF_PAVEMENT, GS_RATIO(3, 100),   true,   0, 0, 10 },
+        { "off a shelf",      GS_SURF_DIRT,     GS_ONE,             false, 14, 0, 10 },
+        { "rough and twisty", GS_SURF_DIRT,     GS_ONE,             true,   0,
+          GS_RATIO(55, 100), 25 },
         { "broken ground",    GS_SURF_DIRT,     GS_ONE,             false,  0,
-          GS_RATIO(90, 100) },
+          GS_INT(1), 30 },
     };
     const size_t count = sizeof scenarios / sizeof scenarios[0];
 
@@ -384,16 +394,23 @@ static int cmd_roster(void) {
     for (uint8_t v = 0; v < GS_VEH_COUNT; v++) printf("%12u", wins[v]);
     printf("\n\n");
 
-    uint8_t distinct = 0;
-    for (uint8_t v = 0; v < GS_VEH_COUNT; v++) if (wins[v] > 0) distinct++;
-
-    if (distinct < 2) {
-        printf("FAIL   one vehicle wins everything: that is a roster of one and "
-               "five decorations\n");
-        return 1;
+    // **Every vehicle has to win something.** "No vehicle wins everything" was
+    // the first bar and it is too low: two winners and four also-rans is still
+    // a roster of two with four decorations. If a machine is best at nothing,
+    // there is no reason to ever pick it, and a choice nobody would make is not
+    // a trade-off.
+    uint8_t idle = 0;
+    for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
+        if (wins[v] == 0) {
+            printf("FAIL   %s is best at nothing - so there is no reason to "
+                   "choose it\n", gs_vehicle(v)->name);
+            idle++;
+        }
     }
-    printf("OK     %u different vehicles win something across %zu conditions\n",
-           distinct, count);
+    if (idle != 0) return 1;
+
+    printf("OK     all %u vehicles win something across %zu conditions\n",
+           (unsigned)GS_VEH_COUNT, count);
     return 0;
 }
 

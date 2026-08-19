@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 4 are complete — 35 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 37 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -239,12 +239,25 @@ whatever the UI turns out to be — then the interface on top.
 
 ## Phase 5 — Surfaces, vehicles and dials
 
-- [ ] **Three surfaces with distinct grip**, on the ground and in the corners.
-      *Verification: the same corner at the same speed is takeable on pavement
-      and not on ice.*
-- [ ] **A vehicle roster with real trade-offs** — engine, tyres, mass.
-      *Verification: no vehicle is fastest on every track in the analyser
-      sweep.*
+- [x] **Three surfaces with distinct grip**, on the ground and in the corners.
+      *Verification: the same corner, same speed, same steering. On pavement the
+      car goes where it points — under two degrees of slip — and gets round.
+      On ice it points into the corner and carries straight on, thirty degrees
+      of slip and less than a third of the turn. Dirt sits between them on both
+      counts.*
+- [x] **A vehicle roster with real trade-offs** — engine, tyres, mass.
+      *Verification: `gearstick_cli roster` races all six over ten conditions
+      chosen to be decided by different things, and fails if any vehicle is best
+      at nothing. Every one of them wins something: the sprint car where there
+      is grip to spare, the motorcycle where there is not, the rover where
+      gravity has taken nearly all of it, the stock car off a shelf, the buggy
+      on rough ground that needs turning, and the baja bug where the ground is
+      breaking everything else.*
+
+      *The bar is "every vehicle wins something", not the plan's original "no
+      vehicle wins everything" — two winners and four also-rans passes the
+      second and is still a roster of two. A machine that is best at nothing is
+      a choice nobody would make.*
 - [ ] **The dials: gravity, air drag, friction scale, damage multiplier**, all
       continuous, all changeable before a race. *Verification: each dial changes
       the outcome of the same input log in the expected direction.*
