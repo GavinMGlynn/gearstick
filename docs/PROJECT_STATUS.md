@@ -534,6 +534,46 @@ when the arrangement was forced to bar zero forever - because the oscillators
 drift, so a one-bar loop renders differently anyway. It now walks the chord of
 each bar directly and requires the progression to actually visit several.
 
+### The front end, and the store behind it
+
+Title, drivers, race setup, results, records. A session now starts from a cold
+launch, chooses who is playing and what they are driving, races, and comes back
+to a table of times - with no command line anywhere in it, which was the whole
+requirement and is a bigger one than it sounds.
+
+The setup screen shows the standing lap record *before* the race rather than
+after, because the number you are driving at is more use than the number you
+missed. It also refuses to start on a track whose route is unsound, and says to
+go and fix it in the construction set rather than starting a race nobody can
+finish.
+
+Behind it, three things that had to exist first:
+
+**A race that can end.** The simulation gained a lap target and a finish tick,
+and the race is over when nobody is left who could still finish - not when the
+first car crosses, because everybody's time is what a results screen is for.
+Laps are timed in the simulation and hashed like everything else: a best lap is
+what a track is actually judged by, so it is state two machines have to agree
+about rather than something a front end watches for and works out afterwards.
+
+**Records.** Keyed by the track's content hash and by a hash of the dials,
+because a lap set at a sixth of gravity is not a lap. One row per driver per
+track per conditions per distance - the distance is part of the key, and without
+it driving a longer race quietly deleted the shorter record. A test caught
+exactly that, which is the second time this week a test has caught a key that
+was one field short.
+
+**Drivers.** A name, a colour, a favourite machine and a history. None of it
+touches the simulation: a colour cannot change where a car ends up, so it is not
+in the hash, and somebody can repaint without invalidating a replay or a record.
+
+All of it is one file in the preferences directory, written when something
+changes and read at startup, so a second run of the game knows who you are and
+what you have done. `--session` runs a whole race by itself and stops on the
+results, which is how the verification is checked rather than asserted: two
+drivers, a real race, a real table, and the records still there when a second
+process starts cold.
+
 ---
 
 ## What does not exist

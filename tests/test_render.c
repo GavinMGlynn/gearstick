@@ -21,6 +21,7 @@
 #include "gfx/gs_meshes.h"
 #include "platform/gs_bind.h"
 #include "ui/gs_editor.h"
+#include "ui/gs_menu.h"
 
 #define GS_W 640
 #define GS_H 480
@@ -1751,6 +1752,150 @@ TEST(a_car_on_a_slope_leans_with_the_ground) {
     gs_frame_free(&shots[1]);
 }
 
+// ---------------------------------------------------------------------------
+// The front end
+// ---------------------------------------------------------------------------
+
+static gs_menu gs_m;
+
+TEST(a_time_reads_the_way_people_say_it) {
+    (void)ren;
+    char text[32];
+
+    gs_time_text(text, sizeof text, 0);
+    CHECK(SDL_strcmp(text, "-") == 0);            // never finished
+
+    gs_time_text(text, sizeof text, GS_TICK_HZ * 5);
+    CHECK(SDL_strcmp(text, "5.00") == 0);
+
+    gs_time_text(text, sizeof text, GS_TICK_HZ * 65 + GS_TICK_HZ / 2);
+    CHECK(SDL_strcmp(text, "1:05.50") == 0);
+
+    // A minute is where the format changes, so it is the interesting one.
+    gs_time_text(text, sizeof text, GS_TICK_HZ * 59);
+    CHECK(SDL_strcmp(text, "59.00") == 0);
+    gs_time_text(text, sizeof text, GS_TICK_HZ * 60);
+    CHECK(SDL_strcmp(text, "1:00.00") == 0);
+}
+
+TEST(a_finished_race_becomes_a_table_in_the_order_it_finished) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 16);
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+
+    gs_menu_init(&gs_m);
+    CHECK(gs_profile_add(&gs_m.profiles, "ada", GS_COLOUR_ORANGE, 0) == 0);
+    CHECK(gs_profile_add(&gs_m.profiles, "bez", GS_COLOUR_PURPLE, 0) == 1);
+    gs_m.setup.players = 3;
+    gs_m.setup.profile[0] = 0;
+    gs_m.setup.profile[1] = 1;
+    gs_m.setup.profile[2] = -1;      // a guest
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 3);
+    for (uint8_t i = 0; i < 3; i++) {
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(4), GS_INT(6) + GS_INT(2) * i, 0);
+    }
+
+    // Car 1 finished first, car 0 second, car 2 never finished at all - which
+    // is the case that matters, because "did not finish" still has a position.
+    w.car[0].finish_tick = 2000; w.car[0].laps = 3; w.car[0].best_lap = 600;
+    w.car[1].finish_tick = 1500; w.car[1].laps = 3; w.car[1].best_lap = 480;
+    w.car[2].finish_tick = 0;    w.car[2].laps = 2; w.car[2].wrecked = true;
+
+    gs_menu_finish(&gs_m, &w, &t);
+
+    CHECK(gs_m.result_count == 3);
+    CHECK(gs_m.result[0].car == 1);
+    CHECK(gs_m.result[0].place == 1);
+    CHECK(gs_m.result[1].car == 0);
+    CHECK(gs_m.result[2].car == 2);
+    CHECK(gs_m.result[2].wrecked);
+
+    // The first person round set both records; the second beat neither.
+    CHECK(gs_m.result[0].beat_lap);
+    CHECK(gs_m.result[0].beat_race);
+    CHECK(!gs_m.result[1].beat_lap);
+    CHECK(!gs_m.result[1].beat_race);
+
+    // Two rows, not three: a guest has not said who they are, and inventing a
+    // row for them would fill the table with "guest".
+    CHECK(gs_m.records.count == 2);
+
+    // And the people who drove have a history now.
+    CHECK(gs_m.profiles.entry[1].races == 1);
+    CHECK(gs_m.profiles.entry[1].wins == 1);
+    CHECK(gs_m.profiles.entry[0].wins == 0);
+    CHECK(gs_m.profiles.entry[0].races == 1);
+}
+
+TEST(the_store_remembers_drivers_and_records_between_runs) {
+    (void)ren;
+
+    gs_menu_init(&gs_m);
+    gs_profile_add(&gs_m.profiles, "ada", GS_COLOUR_ORANGE,
+                   (uint8_t)GS_VEH_BAJA_BUG);
+    gs_profile_raced(&gs_m.profiles, 0, true, true, false, 500);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_records_submit(&gs_m.records, 0xfeedULL, gs_conditions_hash(&w),
+                      (uint8_t)GS_VEH_BAJA_BUG, (uint8_t)GS_MODE_RACE, 3,
+                      4200, 13000, "ada");
+
+    static uint8_t buf[sizeof(gs_profiles) + sizeof(gs_records) + 4096];
+    size_t n = gs_menu_save(&gs_m, buf, sizeof buf);
+    CHECK(n > 0);
+
+    // A different program, starting cold.
+    static gs_menu back;
+    gs_menu_init(&back);
+    CHECK(gs_menu_load(&back, buf, n));
+
+    CHECK(back.profiles.count == 1);
+    CHECK(SDL_strcmp(back.profiles.entry[0].name, "ada") == 0);
+    CHECK(back.profiles.entry[0].colour == GS_COLOUR_ORANGE);
+    CHECK(back.profiles.entry[0].wins == 1);
+    CHECK(back.profiles.entry[0].tiles == 500);
+
+    const gs_record *r = gs_records_best_lap(&back.records, 0xfeedULL,
+                                             gs_conditions_hash(&w));
+    CHECK(r != nullptr);
+    if (r != nullptr) {
+        CHECK(r->lap == 4200);
+        CHECK(SDL_strcmp(r->who, "ada") == 0);
+    }
+
+    // Rubbish is refused rather than half-read, which matters here more than
+    // most places: a half-read store is somebody's history with holes in it.
+    CHECK(!gs_menu_load(&back, buf, 4));
+    buf[0] ^= 0xffu;
+    CHECK(!gs_menu_load(&back, buf, n));
+}
+
+TEST(an_empty_store_round_trips_rather_than_failing) {
+    (void)ren;
+
+    // The first run of the game on a new machine, saved and read back. An empty
+    // store that could not be written would mean nothing was ever remembered.
+    gs_menu_init(&gs_m);
+    static uint8_t buf[256];
+    size_t n = gs_menu_save(&gs_m, buf, sizeof buf);
+    CHECK(n > 0);
+
+    static gs_menu back;
+    gs_menu_init(&back);
+    CHECK(gs_menu_load(&back, buf, n));
+    CHECK(back.profiles.count == 0);
+    CHECK(back.records.count == 0);
+}
+
 TEST(a_track_goes_out_through_the_clipboard_and_comes_back_the_same) {
     (void)ren;
 
@@ -1985,6 +2130,10 @@ int main(void) {
     run_every_vehicle_has_a_mesh_and_no_two_are_the_same_shape(ren);
     run_a_car_is_drawn_from_its_mesh_and_faces_where_it_is_pointing(ren);
     run_a_car_on_a_slope_leans_with_the_ground(ren);
+    run_a_time_reads_the_way_people_say_it(ren);
+    run_a_finished_race_becomes_a_table_in_the_order_it_finished(ren);
+    run_the_store_remembers_drivers_and_records_between_runs(ren);
+    run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);

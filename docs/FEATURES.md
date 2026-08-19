@@ -161,6 +161,70 @@ predict what the car will do is out, however impressive it looks.
 
 ---
 
+## The platform
+
+The game is a thing you install and play. This is the layer around it that
+remembers who you are, keeps what you have built, and lets it travel — decided
+in as a direction, and deliberately kept at arm's length from the racing itself.
+
+- **Drivers, not player slots.** `WANTED`
+  A name, a colour and a favourite machine, remembered between sessions, with a
+  history behind it. "Best lap 0:42.1" is a number; "Ada, 0:42.1, baja bug" is
+  something to beat. Everything else here hangs off this.
+
+- **Records that mean something.** `WANTED`
+  Best lap and best race per track — and a record is a time *on a track under
+  conditions*, so a lap set at a sixth of gravity is not a lap. Change the
+  dials and it is honestly a different table rather than a leaderboard nobody
+  can read.
+
+- **Everything remembered between runs.** `WANTED`
+  Drivers, records, and the tracks you have built. Nothing that took an evening
+  to make should live only in the window it was made in.
+
+- **A track library rather than a save file.** `WANTED`
+  Your tracks are a collection you can browse, not a filename you have to
+  remember. Tracks identified by content means the library needs no naming
+  authority: the same track from two people is the same entry.
+
+- **Share a track with somebody, or publish it to everybody.** `WANTED`
+  Sharing already works with no server at all — a track is a few hundred
+  characters you can paste into a message. Publishing is the other half: put it
+  somewhere people can find it, with who made it and what has been done on it.
+
+- **A central service for the things a single machine cannot do.** `CANDIDATE`
+  Accounts that follow you between machines, a browsable library of what
+  everybody has built, and global leaderboards. This is the one part of the
+  project that cannot be "finished" — it is hosting, moderation and cost, and
+  it should be entered into deliberately rather than drifted into.
+
+- **Times verified by re-racing them.** `WANTED`
+  A submitted time comes with the inputs that produced it, and a server can
+  re-race those inputs and check the answer. Cheating reduces to "drive that
+  fast", which is the only leaderboard worth having. This is possible *because*
+  the simulation is exactly reproducible, and is the strongest argument for
+  having built it that way.
+
+- **A relay for people whose routers will not cooperate.** `WANTED`
+  Two players who can reach each other should race each other directly, because
+  that is the fastest path and the game is about response. A relay exists for
+  the people who cannot, and forwards packets without ever simulating anything.
+
+- **Racing stays between the players.** `CORE`
+  The service is a librarian and a referee, never a player. A race simulated on
+  a server means every steering input waits a round trip, and for a game where
+  you are making continuous small corrections that is the difference between
+  feeling good and feeling broken. The service checks races afterwards; it does
+  not run them.
+
+- **The library never reaches into a race.** `CORE`
+  What is stored decides *which* race to run and records what happened, and
+  nothing in between. Anything a race read from a local database would be a
+  thing two machines could disagree about, and disagreeing is the one failure
+  this design cannot absorb.
+
+---
+
 ## Deliberately not
 
 - **Tyre slip curves, suspension travel, weight transfer.** `OUT`

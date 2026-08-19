@@ -24,6 +24,8 @@
 #include "platform/gs_wire.h"
 #include "core/gs_net.h"
 #include "ui/gs_editor.h"
+#include "ui/gs_menu.h"
+#include "core/gs_ai.h"
 #include "core/gs_ghost.h"
 
 #include "dcimgui.h"
@@ -90,6 +92,15 @@ typedef struct gs_app {
     uint8_t     online_players;   // how many the host is waiting for
     bool        net_started;      // everybody is here and the race has begun
     uint64_t    music_hash;       // the track the current tune was written for
+
+    // The front end. A session starts here, comes back here after every race,
+    // and never needs a command line - which is the whole requirement.
+    gs_menu  menu;
+    bool     skip_menu;           // --shot and the like drop straight into a race
+    bool     race_settled;        // the results have been worked out once
+    int      shot_screen;         // with --screen: which one to show
+    bool     want_screen;
+    bool     session;             // run setup -> race -> results by itself
     uint32_t    waiting;     // ticks spent stalled, for telling the player
     bool        quit;
 } gs_app;
@@ -188,12 +199,28 @@ static void gs_start_race(gs_app *a) {
             gs_world_add_car(&a->world, &a->t, which,
                              GS_INT(8) + GS_INT(2) * v, GS_INT(12), GS_DEG(30));
         }
-    } else {
+    } else if (a->skip_menu) {
         for (uint8_t i = 0; i < players; i++) {
             gs_world_add_car(&a->world, &a->t, grid[i],
                              GS_INT(3), GS_INT(7) + GS_INT(4) * i, 0);
         }
+    } else {
+        // From the setup screen: the dials, the machines and the paint. The
+        // paint goes to the renderer rather than into the world, because a
+        // colour cannot change where a car ends up and must not be able to.
+        const gs_race_setup *set = &a->menu.setup;
+        a->world.gravity = set->gravity;
+        gs_world_set_mode(&a->world, (gs_mode)set->mode);
+        gs_world_set_laps(&a->world, set->mode == (uint8_t)GS_MODE_RACE ? set->laps : 0);
+
+        for (uint8_t i = 0; i < set->players && i < GS_MAX_CARS; i++) {
+            gs_world_add_car(&a->world, &a->t, set->vehicle[i],
+                             GS_INT(3), GS_INT(7) + GS_INT(4) * i, 0);
+            gs_render_set_car_paint(i, set->colour[i]);
+        }
+        players = set->players;
     }
+    a->race_settled = false;
     a->prev = a->world;
 
     // Whatever was just raced becomes the thing to beat. A recording of zero
@@ -225,6 +252,54 @@ static void gs_start_race(gs_app *a) {
         a->view[0].cam.cy = (gs_to_f(first->y) + gs_to_f(last->y)) * 0.5f;
         a->view[0].cam.cz = 0.0f;
     }
+}
+
+// --- the store --------------------------------------------------------------
+//
+// **Remembered between executions**, which is what makes a record a record and
+// a profile a person. One file in the preferences directory, holding the
+// drivers and everything they have done. The frontend owns the disk because
+// src/core/ owns no I/O; the format is core's.
+
+#define GS_STORE_FILENAME "gearstick.store"
+
+static bool gs_store_path(char *out, size_t cap) {
+    const char *dir = gs_pref_dir();
+    if (dir == nullptr) return false;
+    SDL_snprintf(out, cap, "%s%s", dir, GS_STORE_FILENAME);
+    return true;
+}
+
+static void gs_store_load(gs_app *a) {
+    char path[1024];
+    if (!gs_store_path(path, sizeof path)) return;
+
+    size_t n = 0;
+    void *buf = SDL_LoadFile(path, &n);
+    if (buf == nullptr) return;      // nothing saved yet, which is not an error
+
+    if (!gs_menu_load(&a->menu, (const uint8_t *)buf, n)) {
+        SDL_Log("store: %s is not readable - starting fresh", path);
+    } else {
+        SDL_Log("store: %u drivers, %u records", a->menu.profiles.count,
+                a->menu.records.count);
+    }
+    SDL_free(buf);
+}
+
+static void gs_store_save(gs_app *a) {
+    if (!a->menu.store_dirty) return;
+
+    char path[1024];
+    if (!gs_store_path(path, sizeof path)) return;
+
+    static uint8_t buf[sizeof(gs_profiles) + sizeof(gs_records) + 4096];
+    size_t n = gs_menu_save(&a->menu, buf, sizeof buf);
+    if (n == 0 || !SDL_SaveFile(path, buf, n)) {
+        SDL_Log("store: could not write %s: %s", path, SDL_GetError());
+        return;
+    }
+    a->menu.store_dirty = false;
 }
 
 // --- the race, as something to listen to ------------------------------------
@@ -409,6 +484,25 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->ghost_path = argv[++i];
         } else if (SDL_strcmp(argv[i], "--audio-out") == 0 && i + 1 < argc) {
             a->audio_out = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--session") == 0) {
+            // A whole session with nobody at the keyboard: the grid from the
+            // setup screen, a race driven by the AI, and the results table it
+            // produced. This is the plan's verification made runnable - "a full
+            // session start to finish" is a thing that can be watched happen
+            // rather than a thing somebody says they did.
+            a->session = true;
+        } else if (SDL_strcmp(argv[i], "--screen") == 0 && i + 1 < argc) {
+            // For looking at the front end, and for capturing it. Named rather
+            // than numbered, because a screenshot script that says "results" is
+            // a screenshot script somebody can read.
+            const char *name = argv[++i];
+            a->shot_screen = SDL_strcmp(name, "title") == 0     ? GS_SCREEN_TITLE
+                           : SDL_strcmp(name, "drivers") == 0   ? GS_SCREEN_PROFILES
+                           : SDL_strcmp(name, "setup") == 0     ? GS_SCREEN_SETUP
+                           : SDL_strcmp(name, "results") == 0   ? GS_SCREEN_RESULTS
+                           : SDL_strcmp(name, "records") == 0   ? GS_SCREEN_RECORDS
+                                                                : GS_SCREEN_RACE;
+            a->want_screen = true;
         } else if (SDL_strcmp(argv[i], "--showroom") == 0) {
             a->showroom = true;
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') {
@@ -425,6 +519,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --editor        open in the construction set");
             SDL_Log("  --heatmap       open the editor with the analyser already run");
             SDL_Log("  --showroom      line up every vehicle, to look at the art");
+            SDL_Log("  --screen NAME   open on title/drivers/setup/results/records");
+            SDL_Log("  --session       run a whole race by itself and stop on the results");
             SDL_Log("  --audio-out F   with --shot: write the race as a .wav to listen to");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  --players N     one to four, split-screen to match");
@@ -471,6 +567,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         SDL_Log("could not start Dear ImGui");
         return SDL_APP_FAILURE;
     }
+
+    gs_menu_init(&a->menu);
 
     if (!gs_editor_init(&a->editor, 65536)) {
         SDL_Log("could not allocate the edit history");
@@ -539,6 +637,38 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // and nobody hears the same one on all fifty tracks.
     gs_music_start(gs_track_hash(&a->t));
 
+    // A shot, a showroom or an online race is a machine being told exactly what
+    // to do, so it goes straight there. Anything else is a person, and a person
+    // gets the front end.
+    a->skip_menu = (a->shot_path != nullptr && !a->want_screen && !a->session) ||
+                   a->showroom || a->online || a->start_in_editor;
+    if (a->skip_menu) {
+        a->menu.screen = GS_SCREEN_RACE;
+    } else {
+        gs_store_load(a);
+        a->menu.screen = a->want_screen ? (gs_screen)a->shot_screen
+                                        : GS_SCREEN_TITLE;
+
+        if (a->session) {
+            // Two drivers with names, so the results table and the records have
+            // somebody in them rather than a row of guests.
+            gs_profile_add(&a->menu.profiles, "ada", GS_COLOUR_ORANGE,
+                           (uint8_t)GS_VEH_SPRINT_CAR);
+            gs_profile_add(&a->menu.profiles, "bez", GS_COLOUR_PURPLE,
+                           (uint8_t)GS_VEH_DUNE_BUGGY);
+            for (uint8_t i = 0; i < 2; i++) {
+                a->menu.setup.profile[i] = (int8_t)i;
+                a->menu.setup.vehicle[i] = a->menu.profiles.entry[i].vehicle;
+                a->menu.setup.colour[i] = a->menu.profiles.entry[i].colour;
+            }
+            a->menu.setup.players = 2;
+            a->menu.setup.laps = 2;
+            a->menu.screen = GS_SCREEN_RACE;
+            gs_start_race(a);
+            gs_layout(a);
+        }
+    }
+
     gs_clock_init(&a->clock);
     a->last_ns = SDL_GetTicksNS();
     return SDL_APP_CONTINUE;
@@ -557,7 +687,20 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         gs_layout(a);
         break;
     case SDL_EVENT_KEY_DOWN:
-        if (e->key.key == SDLK_ESCAPE) return SDL_APP_SUCCESS;
+        if (e->key.key == SDLK_ESCAPE) {
+            // Back out one step rather than always quitting: quitting from a
+            // race because you wanted the menu is the oldest bad habit in
+            // games, and the title screen is where quitting belongs.
+            if (a->editor.active) {
+                gs_editor_toggle(&a->editor, &a->view[0]);
+            } else if (a->menu.screen == GS_SCREEN_RACE && !a->skip_menu) {
+                a->menu.screen = GS_SCREEN_SETUP;
+            } else if (a->menu.screen != GS_SCREEN_TITLE && !a->skip_menu) {
+                a->menu.screen = GS_SCREEN_TITLE;
+            } else {
+                return SDL_APP_SUCCESS;
+            }
+        }
         if (e->key.key == SDLK_G) {
             for (uint8_t i = 0; i < a->views; i++)
                 a->view[i].show_gravity = !a->view[i].show_gravity;
@@ -601,6 +744,31 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
     // In shot mode the clock is ignored entirely and the ticks are counted out,
     // so the captured frame is the same frame on every machine.
+    // A session drives itself to the flag, then stops on the results. Bounded,
+    // because a track the AI cannot get round would otherwise spin here forever
+    // - and the analyser exists precisely because that is a thing tracks do.
+    if (a->session && a->menu.screen == GS_SCREEN_RACE) {
+        steps = 0;
+        gs_clock_init(&a->clock);
+
+        const uint64_t give_up = (uint64_t)GS_TICK_HZ * 300u;
+        while (!a->world.over && a->world.tick < give_up) {
+            gs_input in[GS_MAX_CARS] = { 0 };
+            for (uint8_t i = 0; i < a->world.car_count; i++) {
+                in[i] = gs_ai_drive(&a->world, &a->t, i);
+            }
+            a->prev = a->world;
+            gs_world_step(&a->world, &a->t, in);
+        }
+
+        a->race_settled = true;
+        gs_menu_finish(&a->menu, &a->world, &a->t);
+        gs_store_save(a);
+        a->menu.screen = GS_SCREEN_RESULTS;
+        SDL_Log("session: %u laps, winner %u, over %s",
+                a->menu.setup.laps, a->world.winner, a->world.over ? "yes" : "no");
+    }
+
     if (a->shot_path != nullptr) {
         steps = 0;
         gs_clock_init(&a->clock);
@@ -638,6 +806,21 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // The race is paused while the track is being built - a car ploughing on
     // through terrain that is changing under it helps nobody.
     if (a->editor.active) steps = 0;
+
+    // And it is paused on every screen that is not the race, which is what
+    // makes the front end a front end rather than an overlay on a race that
+    // carries on behind it.
+    if (a->menu.screen != GS_SCREEN_RACE) steps = 0;
+
+    // A finished race is worked out once. Doing it every frame would resubmit
+    // the same lap to the records table until somebody clicked something.
+    if (a->world.over && !a->race_settled && !a->skip_menu) {
+        a->race_settled = true;
+        gs_menu_finish(&a->menu, &a->world, &a->t);
+        gs_store_save(a);
+        a->menu.screen = GS_SCREEN_RESULTS;
+        steps = 0;
+    }
 
     if (a->online && !a->net_started) {
         // Nobody races until everybody is here. The player count decides the
@@ -776,7 +959,19 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // Racing: the screen decides for itself how many views it wants. Cars that
     // are close share one, because a collision is legible when both cars are in
     // the same picture and that is the whole argument for this camera.
-    if (!a->editor.active && !a->showroom) {
+    // One view, filling the window, behind a menu. A title screen over a split
+    // screen reads as two things going wrong at once, and nobody is driving
+    // either of them.
+    if (a->menu.screen != GS_SCREEN_RACE && !a->editor.active) {
+        int ww = 0, wh = 0;
+        SDL_GetRenderOutputSize(a->ren, &ww, &wh);
+        views = 1;
+        a->view[0].rect = (SDL_Rect){ 0, 0, ww, wh };
+        a->view[0].cam.vw = (float)ww;
+        a->view[0].cam.vh = (float)wh;
+    }
+
+    if (!a->editor.active && !a->showroom && a->menu.screen == GS_SCREEN_RACE) {
         int ww = 0, wh = 0;
         SDL_GetRenderOutputSize(a->ren, &ww, &wh);
         gs_split_update(&a->split, &a->world, ww, wh, (float)delta / 1e9f);
@@ -805,6 +1000,21 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             for (uint8_t i = 0; i < views; i++) {
                 gs_render_ghost_lerp(a->ren, &a->t, gp, gn, alpha, &a->view[i]);
             }
+        }
+    }
+
+    // The front end, over whatever is on the screen. A title over a parked grid
+    // beats a title over nothing: the game is visibly a game before anybody has
+    // pressed anything.
+    if (!a->editor.active && a->menu.screen != GS_SCREEN_RACE) {
+        gs_screen next = gs_menu_frame(&a->menu, &a->t);
+        if (next != a->menu.screen) {
+            if (next == GS_SCREEN_RACE) {
+                gs_start_race(a);
+                gs_layout(a);
+            }
+            a->menu.screen = next;
+            gs_store_save(a);
         }
     }
 
@@ -878,6 +1088,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     gs_app *a = (gs_app *)appstate;
     if (a == nullptr) return;
 
+    gs_store_save(a);
     gs_audio_close();
     if (a->wire != nullptr) {
         gs_wire_close(a->wire);

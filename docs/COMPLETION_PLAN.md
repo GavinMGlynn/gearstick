@@ -434,7 +434,7 @@ whatever the UI turns out to be — then the interface on top.
       noise, impacts, and the silence of being airborne.
       *Verification: listened to, on all three platforms.*
 - [x] **Music.** *Verification: as above.*
-- [ ] **Front end** — title, race setup, vehicle choice, results.
+- [x] **Front end** — title, race setup, vehicle choice, results.
       *Verification: a full session start to finish without touching a command
       line.*
 - [ ] **A player's guide**, covering the first ten minutes, every control, the
