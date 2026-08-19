@@ -21,11 +21,15 @@
 // them changes every recorded replay - which is why this number is allowed to
 // move during tuning and is not allowed to move by accident.
 //
+// And once more for surface wear, which is new state that changes the race:
+// dirt churns and loses grip on the line everyone takes, ice polishes into
+// something faster and looser, pavement is unmoved.
+//
 // The grip circle, in detail: engine force is now
 // capped by the traction available, so tyres matter off the line and not only
 // in corners, and low gravity takes your acceleration along with your weight.
 // Every replay and ghost time recorded before that is invalid, which is what
 // this number failing is for. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0xe9990091ee480b5dULL
+#define GS_SELFTEST_WORLD_HASH 0x7861a7c82058b71dULL
 
 #endif // GS_GOLDEN_H

@@ -77,6 +77,17 @@ typedef struct gs_world {
 
     uint8_t car_count;
     gs_car  car[GS_MAX_CARS];
+
+    // What this race has done to the ground. In the world and not the track,
+    // because it is not what the track *is* - reload the track and it is fresh
+    // again, exactly as it should be. Eight kilobytes, so a snapshot is still a
+    // memcpy and rollback is still cheap.
+    //
+    // Sixteen bits rather than eight, and that is not caution. A tyre marks a
+    // tile by well under one part in 255 per tick, so in a byte every single
+    // tick truncated to zero and the ground never wore at all - a feature that
+    // did nothing, silently, because the arithmetic was too coarse to notice.
+    uint16_t wear[GS_TRACK_TILES];
 } gs_world;
 
 void gs_world_init(gs_world *w, gs_fix gravity_scale);
@@ -94,6 +105,10 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in);
 // answer. This is what the golden replay compares, and what a rollback session
 // exchanges to prove two machines still agree.
 uint64_t gs_world_hash(const gs_world *w);
+
+// How worn the ground is at a point, 0 to GS_ONE. The renderer wants it, and so
+// will the analyser when it starts asking where the line has moved to.
+gs_fix gs_world_wear(const gs_world *w, gs_fix x, gs_fix y);
 
 // Speed over the ground, tiles per second. Convenience for the HUD and the AI;
 // the physics works in components.

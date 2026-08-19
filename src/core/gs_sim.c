@@ -50,6 +50,19 @@ int gs_world_add_car(gs_world *w, const gs_track *t,
     return (int)i;
 }
 
+// The tile a point sits in, clamped into the array. Wear is indexed the same
+// way the track's own tile arrays are, so the two always agree about which tile
+// is which.
+static size_t gs_wear_index(gs_fix x, gs_fix y) {
+    int32_t tx = GS_CLAMP(gs_fix_floor(x), 0, GS_TRACK_MAX - 1);
+    int32_t ty = GS_CLAMP(gs_fix_floor(y), 0, GS_TRACK_MAX - 1);
+    return GS_TILE_INDEX(tx, ty);
+}
+
+gs_fix gs_world_wear(const gs_world *w, gs_fix x, gs_fix y) {
+    return (gs_fix)(((int64_t)w->wear[gs_wear_index(x, y)] * GS_ONE) / UINT16_MAX);
+}
+
 gs_fix gs_car_speed(const gs_car *c) {
     return gs_fix_len2(c->vx, c->vy);
 }
@@ -77,6 +90,15 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
 
     gs_surface surf = gs_track_surface(t, c->x, c->y);
     const gs_surface_def *sd = &gs_surfaces[surf];
+
+    // What previous laps did to this exact tile. Interpolating between the
+    // fresh figures and the worn ones means a half-worn tile is half-changed,
+    // rather than the surface flipping character at some threshold - which
+    // would be a cliff a player could not read.
+    gs_fix worn = gs_world_wear(w, c->x, c->y);
+    gs_fix surf_grip = gs_lerp(sd->grip, gs_fix_mul(sd->grip, sd->wear_grip), worn);
+    gs_fix surf_rolling =
+        gs_lerp(sd->rolling, gs_fix_mul(sd->rolling, sd->wear_rolling), worn);
 
     gs_fix cos_h = gs_cos(c->heading);
     gs_fix sin_h = gs_sin(c->heading);
@@ -133,7 +155,7 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
         // With it, a grippy car gets off the line on ice where a heavy one
         // spins, and the Moon takes away your acceleration along with your
         // weight. Both are things a player can feel and predict.
-        gs_fix traction = gs_fix_mul(gs_fix_mul(sd->grip, v->grip),
+        gs_fix traction = gs_fix_mul(gs_fix_mul(surf_grip, v->grip),
                                      gs_fix_mul(g, w->friction_scale));
         if (accel > traction) accel = traction;
         if (accel < -traction) accel = -traction;
@@ -142,7 +164,7 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
 
         // --- Rolling resistance and air drag. Drag matters only near the top
         // of the range, which is where it should.
-        gs_fix roll = gs_fix_mul(gs_fix_mul(sd->rolling, g), w->friction_scale);
+        gs_fix roll = gs_fix_mul(gs_fix_mul(surf_rolling, g), w->friction_scale);
         vlong = gs_toward_zero(vlong, gs_fix_mul(roll, dt));
 
         gs_fix drag = gs_fix_mul(gs_fix_mul(v->drag, w->drag_scale),
@@ -175,6 +197,19 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
         vlong -= gs_fix_mul(drag, dt);
         c->vx = gs_fix_mul(vlong, cos_h) - gs_fix_mul(vlat, sin_h);
         c->vy = gs_fix_mul(vlong, sin_h) + gs_fix_mul(vlat, cos_h);
+    }
+
+    // --- Mark the ground. A tyre wears a tile in proportion to how hard it is
+    // working it: sliding sideways churns far more than rolling straight, which
+    // is why the racing line goes off before the rest of the track does.
+    if (c->grounded && sd->wear_rate != 0) {
+        gs_fix working = gs_fix_abs(vlong) + gs_fix_mul(gs_fix_abs(vlat), GS_INT(3));
+        gs_fix marked = gs_fix_mul(gs_fix_mul(working, sd->wear_rate), dt);
+
+        size_t at = gs_wear_index(c->x, c->y);
+        int64_t step = ((int64_t)marked * UINT16_MAX) >> GS_FIX_SHIFT;
+        int64_t now_worn = (int64_t)w->wear[at] + step;
+        w->wear[at] = (uint16_t)(now_worn > UINT16_MAX ? UINT16_MAX : now_worn);
     }
 
     // --- Move.
@@ -285,6 +320,15 @@ uint64_t gs_world_hash(const gs_world *w) {
     gs_hash_i32(&h, w->friction_scale);
     gs_hash_i32(&h, w->damage_scale);
     gs_hash_u64(&h, w->car_count);
+
+    // Wear is state that changes the race, so two machines disagreeing about it
+    // is a desync exactly as much as a car in the wrong place would be.
+    for (size_t i = 0; i < GS_TRACK_TILES; i++) {
+        if (w->wear[i] != 0) {
+            gs_hash_u64(&h, (uint64_t)i);
+            gs_hash_u64(&h, w->wear[i]);
+        }
+    }
 
     for (uint8_t i = 0; i < w->car_count; i++) {
         const gs_car *c = &w->car[i];

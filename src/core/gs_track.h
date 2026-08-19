@@ -46,6 +46,17 @@ typedef struct gs_surface_def {
     gs_fix      grip;      // how much sideways force it will take before sliding
     gs_fix      rolling;   // rolling resistance, as a fraction of gravity
     gs_fix      drive;     // how much of the engine reaches the ground
+
+    // How the surface changes under use. Wear lives in the world rather than
+    // the track - it is what happened during *this* race, not what the track
+    // is - and these say what a fully worn tile becomes.
+    //
+    // The point is that lap five is not lap one: the line everyone has been
+    // taking stops being the fast one, and running second becomes a reason to
+    // try somewhere else rather than a position to suffer.
+    gs_fix      wear_rate;     // how quickly a working tyre marks it
+    gs_fix      wear_grip;     // grip multiplier when fully worn
+    gs_fix      wear_rolling;  // rolling-resistance multiplier when fully worn
 } gs_surface_def;
 
 extern const gs_surface_def gs_surfaces[GS_SURF_COUNT];

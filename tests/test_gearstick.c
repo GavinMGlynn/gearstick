@@ -1112,6 +1112,145 @@ TEST(gravity_is_a_dial_and_it_is_continuous_between_the_planets) {
 }
 
 // ---------------------------------------------------------------------------
+// Wear
+// ---------------------------------------------------------------------------
+
+// Drive the same corner, on the same line, `laps` times over, and report how
+// far round the car got on the last one. Everything is identical between runs
+// except what the earlier laps did to the ground.
+static double gs_lap_on_worn_ground(gs_surface surface, int laps) {
+    static gs_track t;
+    gs_track_init(&t, 60, 60, surface);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+
+    double turned = 0.0;
+    for (int lap = 0; lap < laps; lap++) {
+        // Same start, same speed, same steering, every lap. Only the ground
+        // remembers.
+        w.car[0].x = GS_INT(30);
+        w.car[0].y = GS_INT(30);
+        w.car[0].heading = 0;
+        w.car[0].vx = GS_INT(5);
+        w.car[0].vy = 0;
+        w.car[0].vz = 0;
+
+        gs_angle before = gs_atan2(w.car[0].vy, w.car[0].vx);
+        gs_input in[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_LEFT), 0, 0, 0 };
+        for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, in);
+
+        int32_t d = gs_angle_delta(before, gs_atan2(w.car[0].vy, w.car[0].vx));
+        turned = (double)(d < 0 ? -d : d) / 65536.0 * 360.0;
+    }
+    return turned;
+}
+
+TEST(lap_five_on_dirt_is_slower_on_the_used_line_than_lap_one) {
+    double first = gs_lap_on_worn_ground(GS_SURF_DIRT, 1);
+    double fifth = gs_lap_on_worn_ground(GS_SURF_DIRT, 5);
+
+    // The line everyone has been taking has churned into ruts, and the corner
+    // that was there on lap one is not there any more.
+    CHECK(fifth < first);
+    CHECK(first - fifth > 1.0);
+}
+
+TEST(pavement_does_not_care_how_many_laps_you_have_done_on_it) {
+    double first = gs_lap_on_worn_ground(GS_SURF_PAVEMENT, 1);
+    double fifth = gs_lap_on_worn_ground(GS_SURF_PAVEMENT, 5);
+
+    // Which is what makes pavement the surface you can plan around.
+    CHECK(fabs(fifth - first) < 0.001);
+}
+
+TEST(ice_polishes_into_something_faster_and_looser) {
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_ICE);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(30), 0);
+
+    // Wear a strip in, driving straight.
+    gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+    for (int i = 0; i < GS_TICK_HZ * 12; i++) gs_world_step(&w, &t, in);
+
+    // Sampled where the car started rather than where it ended up: it wears
+    // the tiles it *spent time on*, and on ice it accelerates so slowly that
+    // the first few are the deepest. The tile under it at the end is one it has
+    // only just reached.
+    gs_fix worn = gs_world_wear(&w, GS_INT(4), GS_INT(30));
+    CHECK(worn > 0);
+
+    // Polished ice holds a car less well than fresh ice does. Both are awful;
+    // the used line is worse, which is the point.
+    CHECK(gs_surfaces[GS_SURF_ICE].wear_grip < GS_ONE);
+    // And it rolls more freely, so the used line is *faster* in a straight
+    // line - the nastiest combination of the three surfaces.
+    CHECK(gs_surfaces[GS_SURF_ICE].wear_rolling < GS_ONE);
+}
+
+TEST(a_sliding_tyre_churns_the_ground_more_than_a_rolling_one) {
+    // Why the racing line goes off before the rest of the track does: it is not
+    // that more cars have been over it, it is that they were all *working* on
+    // it, and a tyre scrubbing sideways marks the ground far harder than one
+    // rolling straight over it.
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_DIRT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    // Same longitudinal speed, same tile, same time. One is sliding and the
+    // other is not, and that is the only difference between them.
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(40), 0);
+
+    w.car[0].vx = GS_INT(3);
+    w.car[1].vx = GS_INT(3);
+    w.car[1].vy = GS_INT(3);      // sliding sideways as well as travelling
+
+    for (int i = 0; i < 20; i++) gs_world_step(&w, &t, nullptr);
+
+    gs_fix rolled = gs_world_wear(&w, GS_INT(10), GS_INT(10));
+    gs_fix scrubbed = gs_world_wear(&w, GS_INT(10), GS_INT(40));
+
+    CHECK(rolled > 0);
+    CHECK(scrubbed > rolled);
+}
+
+TEST(wear_belongs_to_the_race_and_not_to_the_track) {
+    static gs_track t;
+    gs_track_init(&t, 40, 40, GS_SURF_DIRT);
+    uint64_t fresh = gs_track_hash(&t);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(20), 0);
+
+    gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+    for (int i = 0; i < GS_TICK_HZ * 8; i++) gs_world_step(&w, &t, in);
+
+    CHECK(gs_world_wear(&w, w.car[0].x, w.car[0].y) > 0);
+
+    // The track is untouched: reload it and the ground is fresh again, which is
+    // exactly right - ruts are what happened during a race, not what somebody
+    // built. A track's identity must not drift because it was driven on.
+    CHECK(gs_track_hash(&t) == fresh);
+
+    // But it is world state, so it travels in a snapshot and it is hashed.
+    gs_world snap;
+    memcpy(&snap, &w, sizeof snap);
+    CHECK(gs_world_hash(&snap) == gs_world_hash(&w));
+
+    gs_world clean;
+    gs_world_init(&clean, GS_ONE);
+    gs_world_add_car(&clean, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(20), 0);
+    CHECK(gs_world_hash(&clean) != gs_world_hash(&w));
+}
+
+// ---------------------------------------------------------------------------
 // Determinism - the property everything else is built on
 // ---------------------------------------------------------------------------
 
@@ -1405,6 +1544,11 @@ int main(void) {
     run_the_friction_scale_is_a_dial_and_more_of_it_means_more_grip_until_it_does_not();
     run_the_damage_multiplier_is_a_dial_and_more_of_it_hurts_more();
     run_gravity_is_a_dial_and_it_is_continuous_between_the_planets();
+    run_lap_five_on_dirt_is_slower_on_the_used_line_than_lap_one();
+    run_pavement_does_not_care_how_many_laps_you_have_done_on_it();
+    run_ice_polishes_into_something_faster_and_looser();
+    run_a_sliding_tyre_churns_the_ground_more_than_a_rolling_one();
+    run_wear_belongs_to_the_race_and_not_to_the_track();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

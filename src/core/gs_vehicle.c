@@ -42,7 +42,7 @@ const gs_vehicle_def gs_vehicles[GS_VEH_COUNT] = {
     [GS_VEH_DUNE_BUGGY] = {
         "dune buggy",
         GS_RATIO(56, 10), GS_RATIO(85, 10), GS_RATIO(53, 10),
-        GS_RATIO(128, 100), GS_INT(12500), GS_RATIO(9, 1000), GS_RATIO(105, 100),
+        GS_RATIO(128, 100), GS_INT(12500), GS_RATIO(9, 1000), GS_RATIO(140, 100),
     },
     // Slow, and it does not care what you drive it over or how you land it.
     [GS_VEH_BAJA_BUG] = {

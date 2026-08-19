@@ -360,9 +360,9 @@ static int cmd_roster(void) {
         { "ceres",            GS_SURF_PAVEMENT, GS_RATIO(3, 100),   true,   0, 0, 10 },
         { "off a shelf",      GS_SURF_DIRT,     GS_ONE,             false, 14, 0, 10 },
         { "rough and twisty", GS_SURF_DIRT,     GS_ONE,             true,   0,
-          GS_RATIO(55, 100), 25 },
+          GS_RATIO(90, 100), 25 },
         { "broken ground",    GS_SURF_DIRT,     GS_ONE,             false,  0,
-          GS_INT(1), 30 },
+          GS_RATIO(19, 10), 30 },
     };
     const size_t count = sizeof scenarios / sizeof scenarios[0];
 

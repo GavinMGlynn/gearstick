@@ -10,9 +10,21 @@
 // Three surfaces, far apart. The point is that a corner takeable on pavement is
 // not takeable on ice, and that a player can hold the difference in their head.
 const gs_surface_def gs_surfaces[GS_SURF_COUNT] = {
-    [GS_SURF_PAVEMENT] = { "pavement", GS_RATIO(110, 100), GS_RATIO(3, 100), GS_ONE },
-    [GS_SURF_DIRT]     = { "dirt",     GS_RATIO( 65, 100), GS_RATIO(9, 100), GS_RATIO(80, 100) },
-    [GS_SURF_ICE]      = { "ice",      GS_RATIO( 18, 100), GS_RATIO(1, 100), GS_RATIO(45, 100) },
+    // Pavement does not care. Whatever you do to it, it is the same next lap,
+    // which is what makes it the surface you can plan around.
+    [GS_SURF_PAVEMENT] = { "pavement", GS_RATIO(110, 100), GS_RATIO(3, 100), GS_ONE,
+                           0, GS_ONE, GS_ONE },
+
+    // Dirt churns into ruts: the line everyone takes loses a third of its grip,
+    // and the way round stops being the way round.
+    [GS_SURF_DIRT]     = { "dirt",     GS_RATIO( 65, 100), GS_RATIO(9, 100), GS_RATIO(80, 100),
+                           GS_RATIO(9, 100), GS_RATIO(62, 100), GS_ONE },
+
+    // Ice polishes. It gets *faster* and looser at once, which is the nastiest
+    // of the three: the line you have been using rewards you with more speed
+    // and less ability to do anything with it.
+    [GS_SURF_ICE]      = { "ice",      GS_RATIO( 18, 100), GS_RATIO(1, 100), GS_RATIO(45, 100),
+                           GS_RATIO(7, 100), GS_RATIO(70, 100), GS_RATIO(40, 100) },
 };
 
 void gs_track_init(gs_track *t, uint8_t w, uint8_t h, gs_surface surface) {
