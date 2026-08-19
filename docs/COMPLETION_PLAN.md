@@ -637,8 +637,15 @@ review, and it fails it for good reasons.
       but that is a property of the schema rather than a defence, and a thing
       that is safe by accident stops being safe when the schema changes. A
       server-chosen nonce inside the claim makes it deliberate.
+      **Sessions live in the database** alongside everything else the server
+      knows — a nonce it has issued, who it was issued to, when it expires and
+      whether it has been spent. A server that kept them only in memory would
+      forget every one of them on restart and would have no way to say whether a
+      nonce had already been used.
       *Verification: a claim carrying a nonce the server did not issue, or one it
-      issued to somebody else, or one it has already retired, is refused.*
+      issued to somebody else, or one it has already retired, is refused — and
+      still refused after the server has been restarted, because the session
+      outlived the process that made it.*
 - [ ] **A race commits to its inputs before it sees anybody else's.** Rollback
       hands every peer the others' inputs for a tick, so a modified client can
       wait and choose. Nothing desyncs, because everybody then simulates the
