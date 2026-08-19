@@ -20,6 +20,7 @@
 #include "platform/gs_input.h"
 #include "platform/gs_paths.h"
 #include "audio/gs_audio.h"
+#include "audio/gs_music.h"
 #include "platform/gs_wire.h"
 #include "core/gs_net.h"
 #include "ui/gs_editor.h"
@@ -88,6 +89,7 @@ typedef struct gs_app {
     uint16_t    port;
     uint8_t     online_players;   // how many the host is waiting for
     bool        net_started;      // everybody is here and the race has begun
+    uint64_t    music_hash;       // the track the current tune was written for
     uint32_t    waiting;     // ticks spent stalled, for telling the player
     bool        quit;
 } gs_app;
@@ -427,6 +429,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  --players N     one to four, split-screen to match");
             SDL_Log("  --diverge       with --shot: drive the cars apart, to see the split");
+            SDL_Log("  M turns the music off and on.");
             SDL_Log("  H shows or hides the ghost of your last run,");
             SDL_Log("  F5 saves that run as a ghost file and F9 loads one.");
             SDL_Log("  --ghost FILE    race against a recorded run");
@@ -530,6 +533,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // into it.
     gs_audio_open();
 
+    // **The track's own hash is the seed.** A track already carries an identity;
+    // handing it to the composer means every track has its own tune, and
+    // building a ramp changes the chorus. Nobody writes fifty pieces of music
+    // and nobody hears the same one on all fifty tracks.
+    gs_music_start(gs_track_hash(&a->t));
+
     gs_clock_init(&a->clock);
     a->last_ns = SDL_GetTicksNS();
     return SDL_APP_CONTINUE;
@@ -555,6 +564,10 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         }
         if (e->key.key == SDLK_R) gs_start_race(a);
         if (e->key.key == SDLK_H) a->show_ghost = !a->show_ghost;
+        if (e->key.key == SDLK_M) {
+            if (gs_music_playing()) gs_music_stop();
+            else gs_music_start(gs_track_hash(&a->t));
+        }
         if (e->key.key == SDLK_F5) gs_ghost_save(a);
         if (e->key.key == SDLK_F9) gs_ghost_open(a);
         // Tab is the whole loop: build, drive, build. No load step between
@@ -692,6 +705,15 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         gs_audio_silence();
     } else {
         gs_audio_update(&a->world, &a->t, a->view[0].cam.cx, a->view[0].cam.cy);
+    }
+
+    // Editing a track rewrites its theme, because editing a track changes its
+    // hash and the hash is the tune. Checked once a frame rather than watched
+    // for, which is the same way the editor's ghost notices.
+    uint64_t now_hash = gs_track_hash(&a->t);
+    if (now_hash != a->music_hash) {
+        a->music_hash = now_hash;
+        gs_music_start(now_hash);
     }
 
     float alpha = gs_to_f(gs_clock_alpha(&a->clock));

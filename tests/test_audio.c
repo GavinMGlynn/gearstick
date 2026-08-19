@@ -8,6 +8,7 @@
 // the same function the device callback calls, so what is checked here is what
 // comes out of the speakers rather than a description of it.
 #include "audio/gs_audio.h"
+#include "audio/gs_music.h"
 #include "core/gs_track.h"
 
 #include <SDL3/SDL.h>
@@ -306,6 +307,175 @@ TEST(silence_is_a_fade_and_not_a_cut) {
     CHECK(gs_rms(gs_buf, FRAMES) < 0.002f);
 }
 
+// ---------------------------------------------------------------------------
+// The music
+// ---------------------------------------------------------------------------
+
+static float gs_music_buf[FRAMES * GS_AUDIO_CHANNELS];
+
+// Render `frames` of music alone, into a buffer that starts empty.
+static void gs_music_only(uint64_t seed, float *out, int frames) {
+    gs_music_start(seed);
+    SDL_memset(out, 0, (size_t)frames * GS_AUDIO_CHANNELS * sizeof *out);
+
+    // Past the fade-in, so what is measured is the piece rather than the ramp.
+    static float warm[FRAMES * GS_AUDIO_CHANNELS];
+    for (int i = 0; i < 12; i++) {
+        SDL_memset(warm, 0, sizeof warm);
+        gs_music_mix(warm, FRAMES);
+    }
+    gs_music_mix(out, frames);
+}
+
+TEST(a_track_gets_its_own_tune_and_the_same_one_every_time) {
+    // **The same seed is the same music, sample for sample.** A tune that came
+    // out differently each time would be a tune nobody could describe to
+    // anybody else, and the seed is a track's content hash - so this is also
+    // what makes "that track with the good music" a thing somebody can say.
+    static float once[FRAMES * GS_AUDIO_CHANNELS];
+    gs_music_only(0x0123456789abcdefULL, once, FRAMES);
+    gs_music_only(0x0123456789abcdefULL, gs_music_buf, FRAMES);
+    CHECK(SDL_memcmp(once, gs_music_buf, sizeof once) == 0);
+
+    // And it is not silence being compared with silence.
+    CHECK(gs_rms(once, FRAMES) > 0.01f);
+
+    // A different track is a different tune. Two hashes one bit apart, because
+    // that is what two tracks one corner apart give.
+    gs_music_only(0x0123456789abceefULL, gs_music_buf, FRAMES);
+    CHECK(SDL_memcmp(once, gs_music_buf, sizeof once) != 0);
+
+    // Not merely different samples - a different *piece*. Over a spread of
+    // seeds it has to reach several keys and several tempos, or every track has
+    // the same tune in a slightly different phase.
+    int keys = 0, tempos = 0;
+    uint8_t seen_key[12] = { 0 };
+    uint16_t seen_bpm[24] = { 0 };
+    for (uint64_t i = 0; i < 24; i++) {
+        gs_music_start(0x9e3779b97f4a7c15ULL * (i + 1));
+        gs_music_state st = gs_music_now();
+
+        CHECK(st.root < 12);
+        CHECK(st.bpm >= 100 && st.bpm <= 200);
+        if (!seen_key[st.root]) { seen_key[st.root] = 1; keys++; }
+
+        bool known = false;
+        for (int k = 0; k < tempos; k++) {
+            if (seen_bpm[k] == st.bpm) known = true;
+        }
+        if (!known && tempos < 24) seen_bpm[tempos++] = st.bpm;
+    }
+    CHECK(keys >= 6);
+    CHECK(tempos >= 6);
+}
+
+TEST(the_music_goes_somewhere_rather_than_repeating_one_bar) {
+    gs_music_start(0xfeedfaceULL);
+
+    // Eight bars at 112-168 bpm is somewhere between eleven and seventeen
+    // seconds, so a few seconds in it is a different part of the piece. Compare
+    // the first second against the fifth: a loop of one bar would match.
+    static float early[FRAMES * GS_AUDIO_CHANNELS];
+    for (int i = 0; i < 12; i++) { SDL_memset(early, 0, sizeof early); gs_music_mix(early, FRAMES); }
+
+    SDL_memset(early, 0, sizeof early);
+    gs_music_mix(early, FRAMES);
+
+    for (int i = 0; i < 40; i++) { SDL_memset(gs_music_buf, 0, sizeof gs_music_buf); gs_music_mix(gs_music_buf, FRAMES); }
+
+    CHECK(SDL_memcmp(early, gs_music_buf, sizeof early) != 0);
+
+    // But different samples prove nothing on their own: the oscillators drift,
+    // so a piece looping one bar forever would also render differently. What
+    // has to change is the *composition*, so the chord each bar sits on is
+    // walked directly - and it has to reach more than one of them.
+    CHECK(gs_music_now().bar > 0);
+
+    gs_music_start(0xfeedfaceULL);
+    uint8_t chords[8];
+    int distinct = 0;
+    for (int bar = 0; bar < 8; bar++) {
+        // Far enough into the bar to be unambiguously in it.
+        while (gs_music_now().bar == (uint32_t)bar) {
+            SDL_memset(gs_music_buf, 0, sizeof gs_music_buf);
+            gs_music_mix(gs_music_buf, 256);
+            if (gs_music_now().bar != (uint32_t)bar) break;
+            chords[bar] = gs_music_now().chord;
+        }
+    }
+    for (int i = 0; i < 8; i++) {
+        bool seen = false;
+        for (int k = 0; k < i; k++) {
+            if (chords[k] == chords[i]) seen = true;
+        }
+        if (!seen) distinct++;
+    }
+    // A progression goes somewhere and comes back, so it is more than one
+    // chord and fewer than eight.
+    CHECK(distinct >= 3);
+    CHECK(distinct <= 7);
+}
+
+TEST(the_music_stops_by_fading_and_can_be_started_again) {
+    gs_music_start(0xabcdefULL);
+    for (int i = 0; i < 12; i++) { SDL_memset(gs_music_buf, 0, sizeof gs_music_buf); gs_music_mix(gs_music_buf, FRAMES); }
+    CHECK(gs_rms(gs_music_buf, FRAMES) > 0.01f);
+    CHECK(gs_music_playing());
+
+    gs_music_stop();
+    for (int i = 0; i < 200; i++) {
+        SDL_memset(gs_music_buf, 0, sizeof gs_music_buf);
+        gs_music_mix(gs_music_buf, FRAMES);
+    }
+    CHECK(gs_rms(gs_music_buf, FRAMES) < 0.002f);
+    CHECK(!gs_music_playing());
+
+    // And nothing is mixed in once it has stopped, rather than a quiet
+    // something that never quite goes.
+    SDL_memset(gs_music_buf, 0, sizeof gs_music_buf);
+    gs_music_mix(gs_music_buf, FRAMES);
+    CHECK(gs_rms(gs_music_buf, FRAMES) == 0.0f);
+
+    gs_music_start(0xabcdefULL);
+    for (int i = 0; i < 12; i++) { SDL_memset(gs_music_buf, 0, sizeof gs_music_buf); gs_music_mix(gs_music_buf, FRAMES); }
+    CHECK(gs_rms(gs_music_buf, FRAMES) > 0.01f);
+}
+
+TEST(the_music_and_the_race_together_still_fit_in_a_speaker) {
+    gs_world w;
+    gs_scene(&w, GS_SURF_DIRT);
+    for (uint8_t i = 1; i < GS_MAX_CARS; i++) {
+        gs_world_add_car(&w, &gs_t, (uint8_t)GS_VEH_SPRINT_CAR,
+                         GS_INT(16), GS_INT(8) + GS_INT(i), 0);
+    }
+    for (uint8_t i = 0; i < w.car_count; i++) {
+        w.car[i].vx = GS_INT(8);
+        w.car[i].vy = GS_INT(7);
+    }
+
+    gs_audio_set_volume(1.0f);
+    gs_music_set_volume(1.0f);
+    gs_music_start(0x1234ULL);
+
+    for (int step = 0; step < 120; step++) {
+        for (uint8_t i = 0; i < w.car_count; i++) {
+            if (w.car[i].damage < 200) w.car[i].damage = (uint8_t)(w.car[i].damage + 8);
+        }
+        gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
+        gs_audio_render(gs_buf, FRAMES);
+
+        for (int i = 0; i < FRAMES * GS_AUDIO_CHANNELS; i++) {
+            CHECK(gs_buf[i] >= -1.0f && gs_buf[i] <= 1.0f);
+            CHECK(gs_buf[i] == gs_buf[i]);
+            if (gs_failures > 0) return;
+        }
+    }
+    gs_audio_set_volume(0.8f);
+    gs_music_set_volume(0.55f);
+    gs_music_stop();
+    for (int i = 0; i < 200; i++) gs_audio_render(gs_buf, FRAMES);
+}
+
 int main(void) {
     printf("gearstick audio tests\n");
 
@@ -321,6 +491,10 @@ int main(void) {
     run_a_car_further_away_is_quieter_than_the_one_being_driven();
     run_nothing_the_synthesiser_produces_can_blow_a_speaker();
     run_silence_is_a_fade_and_not_a_cut();
+    run_a_track_gets_its_own_tune_and_the_same_one_every_time();
+    run_the_music_goes_somewhere_rather_than_repeating_one_bar();
+    run_the_music_stops_by_fading_and_can_be_started_again();
+    run_the_music_and_the_race_together_still_fit_in_a_speaker();
 
     gs_audio_close();
     SDL_Quit();

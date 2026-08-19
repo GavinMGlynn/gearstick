@@ -433,7 +433,7 @@ whatever the UI turns out to be — then the interface on top.
 - [x] **Sound.** Engine note that tracks the drivetrain, surface-dependent tyre
       noise, impacts, and the silence of being airborne.
       *Verification: listened to, on all three platforms.*
-- [ ] **Music.** *Verification: as above.*
+- [x] **Music.** *Verification: as above.*
 - [ ] **Front end** — title, race setup, vehicle choice, results.
       *Verification: a full session start to finish without touching a command
       line.*

@@ -1,5 +1,6 @@
 #include "audio/gs_audio.h"
 
+#include "audio/gs_music.h"
 #include "core/gs_vehicle.h"
 
 #include <SDL3/SDL.h>
@@ -92,6 +93,13 @@ static float gs_noise_next(void) {
 
 void gs_audio_render(float *out, int frames) {
     SDL_memset(out, 0, (size_t)frames * GS_AUDIO_CHANNELS * sizeof *out);
+
+    // The music goes in first and the race on top of it, in the same buffer, so
+    // that the soft clip below covers both. Mixing it in afterwards would let
+    // it push the total past full scale on exactly the loud moments the clip
+    // exists for.
+    gs_music_mix(out, frames);
+
     if (gs_a.lock != nullptr) SDL_LockMutex(gs_a.lock);
 
     for (int i = 0; i < frames; i++) {
@@ -168,8 +176,8 @@ void gs_audio_render(float *out, int frames) {
         // scale, which is a race you have to turn the amplifier up for and
         // then get deafened by the next thing you play.
         float g = gs_a.master * gs_a.volume * 1.35f;
-        left *= g;
-        right *= g;
+        left = left * g + out[i * 2 + 0];
+        right = right * g + out[i * 2 + 1];
 
         // Soft clip. Four cars landing together will overshoot, and a soft knee
         // is a squash where hard clipping is a tear.

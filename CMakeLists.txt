@@ -233,6 +233,7 @@ add_library(gearstick_shell STATIC
     src/ui/gs_editor.c
     src/gfx/gs_iso.c
     src/audio/gs_audio.c
+    src/audio/gs_music.c
     src/gfx/gs_meshes.c
     src/gfx/gs_render.c
     src/platform/gs_bind.c

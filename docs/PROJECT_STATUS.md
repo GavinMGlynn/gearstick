@@ -496,6 +496,44 @@ all. It has been listened to on Linux; **Windows and macOS have not been
 listened to yet** - the synthesiser is platform-independent but the device path
 is not, and claiming otherwise would be claiming a check nobody has run.
 
+### Music, seeded by the track itself
+
+Composed rather than recorded, and **the seed is the track's own content hash**.
+A track already carries an identity - the number that says two people who built
+the same thing built the same thing - so that number is handed to the composer
+and every track gets its own tune. Build a ramp and the chorus changes; undo it
+and the old one comes back. Nobody writes fifty pieces of music for fifty
+tracks, and nobody hears the same one on all of them.
+
+The instruments are a 1985 machine's: pulse waves with a moving duty cycle, a
+triangle, and noise for percussion. That is not nostalgia for its own sake -
+three simple oscillators are what a generative score can be genuinely good at,
+because what carries a chiptune is the composition and the arpeggios rather than
+the timbre. The chords are one voice playing three notes very fast, which is how
+they were done when one voice was what there was.
+
+The composer picks a key, a mode, a tempo between 112 and 168, and one of four
+progressions, then writes out eight bars: a bass on the beat with passing notes
+where a bass player would put them, a lead over it that thins into a turnaround
+every fourth bar, and percussion that stays out of the way. All of it decided
+once, when the track loads; what runs per sample is a sequencer reading tables,
+which is the division a tracker made in 1985 and for the same reason.
+
+It is deterministic and tested for it: the same seed is the same music sample
+for sample, and two hashes one bit apart give different pieces - not just
+different samples but different keys and tempos, checked across two dozen seeds.
+
+The music mixes into the same buffer as the race, before the soft clip rather
+than after. Mixing it in afterwards - which is how it was written first - lets
+it push the total past full scale on exactly the loud moments the clip exists
+for.
+
+One test needed rewriting for the usual reason. "The music goes somewhere rather
+than repeating one bar" compared rendered audio a few seconds apart, and passed
+when the arrangement was forced to bar zero forever - because the oscillators
+drift, so a one-bar loop renders differently anyway. It now walks the chord of
+each bar directly and requires the progression to actually visit several.
+
 ---
 
 ## What does not exist
