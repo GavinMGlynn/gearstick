@@ -74,6 +74,7 @@ add_library(gearstick_sim STATIC
     src/core/gs_records.c
     src/core/gs_pack.c
     src/core/gs_share.c
+    src/core/gs_stunts.c
     src/core/gs_clock.c
     src/core/gs_edit.c
     src/core/gs_fixed.c
@@ -468,6 +469,11 @@ if(GEARSTICK_TESTS)
 
     # Every way a route can be broken is refused, and named.
     add_test(NAME gearstick_validate COMMAND gearstick_cli validate)
+
+    # The importer, against a file this repository made. The corpus it is really
+    # for belongs to somebody else and does not ship - see docs/ASSETS.md rule 1
+    # - so a check that needed a download would be a check that does not run.
+    add_test(NAME gearstick_import COMMAND gearstick_cli import)
     set_tests_properties(gearstick_validate PROPERTIES TIMEOUT 60)
 
     # The AI gets round, on every surface and in every machine, with no

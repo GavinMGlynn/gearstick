@@ -1400,6 +1400,42 @@ dereferenced the record it looked up, so when the loader was broken on purpose
 the suite died with a segmentation fault instead of naming the fact that had
 stopped being true. A test that crashes reports nothing.
 
+### A track from somebody else's game
+
+Every track this project has seen was built by whoever wrote the editor. That is
+the worst possible sample — the shapes that get built are the shapes the tools
+make easy — and a generated track does not help, because the generator was
+written by the same person from the same assumptions.
+
+`src/core/gs_stunts.c` reads a Stunts (1990) `.trk`. The format is published and
+small: 1802 bytes, a 30×30 grid, 900 bytes of road pieces, one byte of horizon,
+900 bytes of terrain, and a trailing byte nobody has explained. Stunts has three
+road surfaces — paved, dirt, ice — which are the three this project started with,
+so they cross exactly. Its two elevations become heights, and the slopes between
+them fall out of our bilinear sampling rather than being built as well, which
+would give them twice the climb.
+
+Two things about the layout are easy to get wrong and both are caught by tests:
+the two 900-byte planes are indistinguishable by inspection, and the road plane
+is stored bottom to top while the terrain plane is stored top to bottom. Swapping
+either produces something that still looks like a track.
+
+**Anything this reader cannot name becomes road, and is counted.** Stunts has
+loops, pipes, corkscrews and bridges, and the element table this was written from
+does not list them all. Laying road says the true thing — a car should be able to
+drive where the donor put one — and the count says the other true thing, which is
+that the shape was lost. Leaving them as grass would silently cut a track in half
+and report success.
+
+**What is verified, and what is not.** `gearstick_cli import` runs in CI against
+a file written in the donor's layout by this repository, converts it, validates
+the route and has the analyser drive it. That proves the reader and our writer
+agree with each other. It does **not** prove the reader agrees with a real Stunts
+file — nothing here has ever seen one. Closing that gap needs a person to point
+it at a downloaded track, because the corpus is somebody else's and does not ship:
+`docs/ASSETS.md` rule 1 makes no exception for tracks, and a corpus is no
+different from a sprite sheet.
+
 ---
 
 ## What does not exist

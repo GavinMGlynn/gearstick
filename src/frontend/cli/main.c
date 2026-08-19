@@ -17,6 +17,7 @@
 #include "core/gs_generate.h"
 #include "core/gs_ghost.h"
 #include "core/gs_share.h"
+#include "core/gs_stunts.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -721,6 +722,87 @@ static int cmd_generate(int count) {
     return 0;
 }
 
+// --- a track from somebody else's game ---------------------------------------
+//
+// **The verification for the importer, and it is exercised against a file this
+// repository made.** The corpus is somebody else's and does not ship, so a check
+// that needed a download would be a check that does not run - and one that only
+// ever saw our own tracks would be testing the thing it was written from.
+//
+// Given a file, it converts that. Given none, it makes one, converts it, and
+// checks the result is a track somebody could drive.
+static gs_analysis gs_import_report;
+
+static int cmd_import(const char *path) {
+    static uint8_t bytes[GS_STUNTS_BYTES + 64];
+    static gs_track t;
+    size_t len = 0;
+
+    if (path != nullptr) {
+        FILE *f = fopen(path, "rb");
+        if (f == nullptr) {
+            printf("could not read %s\n", path);
+            return 1;
+        }
+        len = fread(bytes, 1, sizeof bytes, f);
+        fclose(f);
+    } else {
+        // A track of ours, written out in the donor's layout. The reader is
+        // then being asked about a file it did not produce the contents of.
+        static gs_track made;
+        gs_track_init(&made, GS_STUNTS_SIDE, GS_STUNTS_SIDE, GS_SURF_GRASS);
+        for (int x = 3; x < 27; x++) {
+            gs_track_set_surface(&made, (uint8_t)x, 15, GS_SURF_PAVEMENT);
+            gs_track_set_surface(&made, (uint8_t)x, 16, GS_SURF_PAVEMENT);
+            gs_track_set_surface(&made, (uint8_t)x, 8, GS_SURF_DIRT);
+        }
+        for (int y = 2; y <= 6; y++) {
+            for (int x = 18; x <= 26; x++) {
+                gs_track_set_corner(&made, (uint8_t)x, (uint8_t)y, GS_RATIO(150, 100));
+            }
+        }
+        len = gs_stunts_write(&made, bytes, sizeof bytes, (uint8_t)GS_STUNTS_ALPINE);
+        printf("no file given, so one was written here: %zu bytes\n", len);
+    }
+
+    gs_stunts_report report;
+    if (!gs_stunts_read(&t, bytes, len, &report)) {
+        printf("FAIL   %zu bytes is not a Stunts track (they are %d)\n",
+               len, GS_STUNTS_BYTES);
+        return 1;
+    }
+
+    static const char *const skies[] = {
+        "desert", "tropical", "alpine", "city", "country", "chaotic",
+    };
+    printf("%ux%u  horizon %s  %u road tiles  %u shaped  %u piece(s) unknown\n",
+           t.w, t.h,
+           report.horizon < 6 ? skies[report.horizon] : "?",
+           report.road_tiles, report.raised_tiles, report.unknown_pieces);
+
+    // A route, because the donor describes one with its road pieces and this
+    // project describes one with gates. Across the middle, which is where the
+    // generated file puts its road.
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(15) + GS_HALF, 0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(25), GS_INT(15) + GS_HALF, 0, GS_INT(4));
+
+    gs_track_issue issue = gs_track_validate(&t);
+    if (issue.problem != GS_TRACK_OK) {
+        printf("FAIL   the converted track has a bad route: %s\n",
+               gs_track_problem_text(issue.problem));
+        return 1;
+    }
+
+    gs_analyse(&t, gs_analyse_seconds(&t), &gs_import_report);
+    if (!gs_import_report.completable) {
+        printf("FAIL   the converted track cannot be got round\n");
+        return 1;
+    }
+
+    printf("OK     it converts, it validates, and somebody can drive it\n");
+    return 0;
+}
+
 // --- sharing ----------------------------------------------------------------
 
 static int cmd_code(const char *path, bool as_url) {
@@ -865,6 +947,7 @@ static int usage(void) {
            "  ai                   race the AI round a circuit in every condition\n"
            "  analyse FILE         what gravities and machines can get round a track\n"
            "  generate [N]         make N tracks from seeds and analyse every one\n"
+           "  import [FILE]        read a Stunts .trk; with no file, make one first\n"
            "  code FILE            print a track as a code somebody can paste back\n"
            "  url FILE             the same code wrapped as a link\n"
            "  decode CODE [FILE]   read a code, and optionally write the track out\n"
@@ -892,6 +975,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "analyse") == 0 && argc > 2) return cmd_analyse(argv[2]);
     if (strcmp(argv[1], "generate") == 0) {
         return cmd_generate(argc > 2 ? atoi(argv[2]) : 0);
+    }
+    if (strcmp(argv[1], "import") == 0) {
+        return cmd_import(argc > 2 ? argv[2] : nullptr);
     }
     if (strcmp(argv[1], "code") == 0 && argc > 2) return cmd_code(argv[2], false);
     if (strcmp(argv[1], "url") == 0 && argc > 2) return cmd_code(argv[2], true);

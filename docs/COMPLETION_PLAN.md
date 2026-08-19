@@ -617,19 +617,26 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       heard of is still refused, in both directions: tolerant of the past, and
       not of the future, because a table of times read by guesswork is worse than
       one that will not open.*
-- [ ] **Read a foreign track format, and test against a corpus nobody here
-      wrote.** Our own tracks were all built by whoever wrote the editor, which
-      is the worst possible sample — a generator has the same problem, because
-      it was written by the same person. The *Stunts* format is documented and
-      grid-based with elevation and surfaces, which is close enough to ours to
-      import. **Two separate questions, and they get separate answers: reading
-      the format is ours to write and ships; the tracks themselves are somebody
-      else's and do not ship**, whatever their licence turns out to permit —
-      `docs/ASSETS.md` rule 1 says nothing third-party is redistributed by this
-      repository, and a track corpus is no different from a sprite sheet.
-      *Verification: a converted track from the corpus loads, validates and can
-      be driven, and the importer is exercised by CI against a track generated
-      in the format rather than against a downloaded one.*
+- [x] **Read a foreign track format, and test against a corpus nobody here
+      wrote.** `src/core/gs_stunts.c` reads a Stunts (1990) `.trk`: 1802 bytes,
+      a 30×30 grid, one plane of road pieces and one of terrain, written from the
+      published format. Its three road surfaces — paved, dirt, ice — are the
+      three this project started with, so they cross exactly; its two elevations
+      become heights; everything else becomes road and is counted as not
+      understood, because a car should be able to drive where the donor put a
+      road and "it imported" means nothing without knowing how much was
+      approximated. **Reading the format is ours and ships; the tracks are
+      somebody else's and do not**, per `docs/ASSETS.md` rule 1.
+      *Verification: `gearstick_cli import`, in CI, converts a file written in
+      the donor's layout by this repository — never a downloaded one — and the
+      result validates and is driven by the analyser. Reading the two planes the
+      wrong way round, or forgetting that the road plane is stored bottom to top
+      while the terrain plane is stored top to bottom, both fail loudly.*
+      *What this does not prove: that the reader agrees with a **real** Stunts
+      file. A round trip against our own writer shows the two are consistent with
+      each other, not that either matches the game. That needs somebody to point
+      it at a downloaded track, which is a thing a person does and not a thing
+      CI can.*
 - [ ] **Read the original's designer notes and build stock tracks.** The 1985
       manual says what each of its fifty tracks was *for*. That is design
       rationale from the authors, it needs no reverse engineering, and it should

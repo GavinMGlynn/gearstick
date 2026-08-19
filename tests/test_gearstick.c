@@ -29,6 +29,7 @@
 #include "net/gs_carrier.h"
 #include "net/gs_verify.h"
 #include "core/gs_share.h"
+#include "core/gs_stunts.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -3999,6 +4000,188 @@ TEST(a_wrecked_car_stops_moving) {
 
 
 // ---------------------------------------------------------------------------
+// A track from somebody else's game
+// ---------------------------------------------------------------------------
+
+static gs_stunts_report gs_st_report;
+
+// A Stunts file built here, byte by byte, from the published layout. **CI is
+// exercised against this and never against a downloaded track**: the corpus is
+// somebody else's and does not ship, per docs/ASSETS.md rule 1, and a test that
+// needed a download would be a test that does not run.
+static void gs_stunts_file(uint8_t *out, uint8_t horizon) {
+    for (size_t i = 0; i < GS_STUNTS_BYTES; i++) out[i] = 0;
+    out[GS_STUNTS_HORIZON_AT] = horizon;
+
+    uint8_t *road = out + GS_STUNTS_TRACK_AT;
+    uint8_t *ground = out + GS_STUNTS_TERRAIN_AT;
+
+    // A paved straight along one row, a dirt straight along another, an icy one
+    // along a third - the three surfaces the donor and this project share.
+    // The road plane is stored bottom to top, hence the flip.
+    for (int x = 4; x < 26; x++) {
+        road[(size_t)(GS_STUNTS_SIDE - 1 - 10) * GS_STUNTS_SIDE + (size_t)x] = 0x05;
+        road[(size_t)(GS_STUNTS_SIDE - 1 - 14) * GS_STUNTS_SIDE + (size_t)x] = 0x0f;
+        road[(size_t)(GS_STUNTS_SIDE - 1 - 18) * GS_STUNTS_SIDE + (size_t)x] = 0x19;
+    }
+    // A start line, a crossroads, and a piece from a part of the game this
+    // project has no equivalent of - a loop, which becomes road.
+    road[(size_t)(GS_STUNTS_SIDE - 1 - 10) * GS_STUNTS_SIDE + 4] = 0x01;
+    road[(size_t)(GS_STUNTS_SIDE - 1 - 10) * GS_STUNTS_SIDE + 15] = 0x4a;
+    road[(size_t)(GS_STUNTS_SIDE - 1 - 10) * GS_STUNTS_SIDE + 20] = 0x40;
+
+    // A raised plateau with a slope up to it, and a lake.
+    for (int y = 2; y < 8; y++) {
+        for (int x = 2; x < 12; x++) ground[(size_t)y * GS_STUNTS_SIDE + (size_t)x] = 0x06;
+    }
+    for (int x = 2; x < 12; x++) ground[(size_t)8 * GS_STUNTS_SIDE + (size_t)x] = 0x07;
+    for (int y = 22; y < 27; y++) {
+        for (int x = 18; x < 27; x++) ground[(size_t)y * GS_STUNTS_SIDE + (size_t)x] = 0x01;
+    }
+}
+
+TEST(a_track_from_stunts_reads_as_a_track) {
+    static uint8_t file[GS_STUNTS_BYTES];
+    gs_stunts_file(file, GS_STUNTS_ALPINE);
+
+    static gs_track t;
+    CHECK(gs_stunts_read(&t, file, sizeof file, &gs_st_report));
+    CHECK(gs_st_report.ok);
+
+    // The shape of the donor, kept.
+    CHECK(t.w == GS_STUNTS_SIDE);
+    CHECK(t.h == GS_STUNTS_SIDE);
+    CHECK(gs_st_report.horizon == GS_STUNTS_ALPINE);
+
+    // The three surfaces it shares with this project, on the rows they were on.
+    CHECK(gs_track_surface(&t, GS_INT(10) + GS_HALF, GS_INT(10) + GS_HALF) == GS_SURF_PAVEMENT);
+    CHECK(gs_track_surface(&t, GS_INT(10) + GS_HALF, GS_INT(14) + GS_HALF) == GS_SURF_DIRT);
+    CHECK(gs_track_surface(&t, GS_INT(10) + GS_HALF, GS_INT(18) + GS_HALF) == GS_SURF_ICE);
+
+    // And what is not road is not road.
+    CHECK(gs_track_surface(&t, GS_INT(10) + GS_HALF, GS_INT(12) + GS_HALF) == GS_SURF_GRASS);
+
+    // A loop has no equivalent here and is not in the table this reader was
+    // written from. It becomes road rather than a hole - a car should be able to
+    // drive where the donor put one - and it is *counted*, because "it imported"
+    // means nothing without knowing how much was approximated.
+    CHECK(gs_track_surface(&t, GS_INT(20) + GS_HALF, GS_INT(10) + GS_HALF) == GS_SURF_PAVEMENT);
+    CHECK(gs_st_report.unknown_pieces == 1);
+    CHECK(gs_st_report.road_tiles > 60);
+
+    // The ground came across: a plateau, a lake, and flat between them.
+    CHECK(gs_track_height(&t, GS_INT(6), GS_INT(5)) > GS_ONE);
+    CHECK(gs_track_height(&t, GS_INT(22), GS_INT(24)) < 0);
+    CHECK(gs_track_height(&t, GS_INT(28), GS_INT(2)) == 0);
+    CHECK(gs_st_report.raised_tiles > 60);
+}
+
+TEST(an_imported_track_can_be_validated_and_driven) {
+    // **The point of importing at all.** A track nobody here designed, put
+    // through the analyser and the AI - which have only ever been shown terrain
+    // built by the same hands that wrote them.
+    static uint8_t file[GS_STUNTS_BYTES];
+    gs_stunts_file(file, GS_STUNTS_DESERT);
+
+    static gs_track t;
+    CHECK(gs_stunts_read(&t, file, sizeof file, nullptr));
+
+    // A route, because Stunts describes one with its road pieces and this
+    // project describes one with gates - so importing the ground is the part
+    // that transfers and the route is the importer's caller's business.
+    gs_track_add_gate(&t, GS_INT(5), GS_INT(10) + GS_HALF, 0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(10) + GS_HALF, 0, GS_INT(4));
+
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+    gs_analyse(&t, gs_analyse_seconds(&t), &gs_report);
+    CHECK(gs_report.completable);
+}
+
+TEST(bytes_that_are_not_a_stunts_track_are_refused) {
+    static uint8_t file[GS_STUNTS_BYTES + 16];
+    gs_stunts_file(file, 0);
+
+    static gs_track t;
+
+    // The length is the only thing that can be said for certain - every byte
+    // value in range is a legal picture of something - so it is the only thing
+    // refused, and it is refused firmly.
+    CHECK(!gs_stunts_read(&t, file, GS_STUNTS_BYTES - 1, &gs_st_report));
+    CHECK(!gs_st_report.ok);
+    CHECK(!gs_stunts_read(&t, file, GS_STUNTS_BYTES + 1, nullptr));
+    CHECK(!gs_stunts_read(&t, nullptr, GS_STUNTS_BYTES, nullptr));
+    CHECK(gs_stunts_read(&t, file, GS_STUNTS_BYTES, nullptr));
+}
+
+TEST(a_road_piece_this_reader_does_not_know_is_counted_rather_than_hidden) {
+    // Half a track somebody can look at beats a refusal they cannot act on -
+    // but they have to be told how much of it was thrown away, or "it imported"
+    // means nothing.
+    static uint8_t file[GS_STUNTS_BYTES];
+    gs_stunts_file(file, 0);
+
+    // What the file already contains that this reader cannot name - measured
+    // rather than assumed, so adding a piece to the fixture later does not
+    // quietly turn this into a test of a number.
+    static gs_track t;
+    CHECK(gs_stunts_read(&t, file, sizeof file, &gs_st_report));
+    uint16_t before = gs_st_report.unknown_pieces;
+
+    file[(size_t)(GS_STUNTS_SIDE - 1 - 3) * GS_STUNTS_SIDE + 3] = 0xb0;
+    file[(size_t)(GS_STUNTS_SIDE - 1 - 3) * GS_STUNTS_SIDE + 4] = 0xc7;
+
+    CHECK(gs_stunts_read(&t, file, sizeof file, &gs_st_report));
+    CHECK(gs_st_report.ok);
+    CHECK(gs_st_report.unknown_pieces == before + 2);
+
+    // And they are road, not holes.
+    CHECK(gs_track_surface(&t, GS_INT(3) + GS_HALF, GS_INT(3) + GS_HALF) == GS_SURF_PAVEMENT);
+}
+
+TEST(a_track_written_in_the_stunts_layout_reads_back_as_itself) {
+    // The writer exists so CI has an input this repository made. It is only
+    // worth having if the two agree, so this is the round trip: our track, out
+    // through the donor's format, and back.
+    static gs_track made;
+    gs_track_init(&made, GS_STUNTS_SIDE, GS_STUNTS_SIDE, GS_SURF_GRASS);
+
+    for (int x = 3; x < 27; x++) {
+        gs_track_set_surface(&made, (uint8_t)x, 8, GS_SURF_PAVEMENT);
+        gs_track_set_surface(&made, (uint8_t)x, 16, GS_SURF_DIRT);
+        gs_track_set_surface(&made, (uint8_t)x, 22, GS_SURF_ICE);
+    }
+    for (int y = 2; y <= 6; y++) {
+        for (int x = 20; x <= 26; x++) {
+            gs_track_set_corner(&made, (uint8_t)x, (uint8_t)y, GS_RATIO(150, 100));
+        }
+    }
+
+    static uint8_t file[GS_STUNTS_BYTES];
+    CHECK(gs_stunts_write(&made, file, sizeof file, GS_STUNTS_CITY) == GS_STUNTS_BYTES);
+
+    static gs_track back;
+    CHECK(gs_stunts_read(&back, file, sizeof file, &gs_st_report));
+    CHECK(gs_st_report.horizon == GS_STUNTS_CITY);
+
+    // The surfaces survive the crossing exactly, because all three exist in both.
+    for (int x = 3; x < 27; x++) {
+        gs_fix cx = GS_INT(x) + GS_HALF;
+        CHECK(gs_track_surface(&back, cx, GS_INT(8) + GS_HALF) == GS_SURF_PAVEMENT);
+        CHECK(gs_track_surface(&back, cx, GS_INT(16) + GS_HALF) == GS_SURF_DIRT);
+        CHECK(gs_track_surface(&back, cx, GS_INT(22) + GS_HALF) == GS_SURF_ICE);
+        CHECK(gs_track_surface(&back, cx, GS_INT(4) + GS_HALF) == GS_SURF_GRASS);
+    }
+
+    // The elevation survives as elevation rather than exactly: the donor has two
+    // levels and we have a continuous height, so what comes back is high where
+    // it was high and flat where it was flat, and saying more than that would be
+    // claiming a fidelity the format does not have.
+    CHECK(gs_track_height(&back, GS_INT(23), GS_INT(4)) > GS_ONE);
+    CHECK(gs_track_height(&back, GS_INT(5), GS_INT(20)) == 0);
+}
+
+// ---------------------------------------------------------------------------
 // A store written by an older version
 // ---------------------------------------------------------------------------
 
@@ -5161,6 +5344,11 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_a_track_from_stunts_reads_as_a_track();
+    run_an_imported_track_can_be_validated_and_driven();
+    run_bytes_that_are_not_a_stunts_track_are_refused();
+    run_a_road_piece_this_reader_does_not_know_is_counted_rather_than_hidden();
+    run_a_track_written_in_the_stunts_layout_reads_back_as_itself();
     run_records_written_by_the_previous_version_still_load();
     run_profiles_written_by_the_previous_version_still_load();
     run_a_store_from_a_version_that_does_not_exist_is_refused();
