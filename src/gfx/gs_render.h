@@ -23,6 +23,13 @@ typedef struct gs_view {
     uint8_t   car;       // whose view it is
     bool      show_gravity;
 
+    // The landing arc, for the driver of this view. **Off unless asked for**:
+    // the arc being not negotiable is what makes the take-off decision matter,
+    // and a permanent readout would turn a judgement into a number to follow.
+    // It is for learning what a ramp does, and for the editor, where "does
+    // anybody clear this" is the whole job.
+    bool      show_arc;
+
     // The analyser's heatmap, or null for none. Borrowed, not owned: the view
     // paints whatever the editor last worked out and never runs the sweep
     // itself, because a sweep is thirty seconds of simulation and a frame is

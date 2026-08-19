@@ -77,6 +77,7 @@ Other keys, any time:
 | **R** | restart the race |
 | **H** | show or hide the ghost of your last run |
 | **G** | show painted gravity as colour on the ground |
+| **J** | show where a jump is going to put you down |
 | **M** | music on or off |
 | **F5** / **F9** | save the last run as a ghost file / load one |
 
@@ -92,6 +93,13 @@ the *mismatch* between how fast it is coming down and how fast the ground is
 falling away underneath. Land on a downslope going downhill and it barely
 registers. Land the same jump on the flat and it folds a sprint car. This is the
 whole reason to build a downhill landing.
+
+**J** draws the rest of the jump while you are in the air: a dotted line to where
+you will come down, and a ring on the spot. It is off to begin with, and it is
+worth leaving off once you have the measure of a ramp — knowing where you will
+land is not the same skill as judging it, and the judging is the better game. Use
+it to learn a track, or in the construction set to find out whether the jump you
+just built is one anybody can clear.
 
 **A wall is a wall.** Ground steeper than about fifty degrees cannot be driven
 up. You stop.

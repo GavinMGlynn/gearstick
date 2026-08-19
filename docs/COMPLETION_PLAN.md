@@ -576,9 +576,14 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       flattened to match, and a car passing at an offset that clears a live car
       does not clear a wreck. Measured on the drawn frame too: the debris covers
       seventy per cent more ground than the car did.*
-- [ ] **A landing-prediction arc, off by default.** A dotted trajectory to the
-      predicted touchdown while airborne. *Verification: the car lands where the
-      arc said it would, at three gravities.*
+- [x] **A landing-prediction arc, off by default.** A dotted trajectory to the
+      predicted touchdown while airborne, on **J**.
+      *Verification: the car lands **exactly** where the arc said it would — the
+      same fixed-point value, not nearly — at a sixth of a gravity, at Earth's,
+      and at Jupiter's. It can be that exact because the arc is not a formula: it
+      steps a copy of the world forward with the real physics, so an arc that
+      disagreed with the race would mean the two were different programs. Asking
+      does not move anything, and asking twice gives the same answer.*
 - [ ] **Decide what surrounds a track.** Leaving the track currently costs
       nothing at all — the ground continues forever at the edge tile's height.
       *Verification: whatever is decided, driving off the edge has a consequence

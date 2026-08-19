@@ -1249,6 +1249,34 @@ which marks the entire frame as interesting, because the terrain is shaded and a
 pavement pixel is nowhere near the unshaded pavement colour. The reference now
 comes from the picture rather than from the palette.
 
+### The landing arc
+
+**J** while airborne draws where you are going to come down: a dotted line that
+fades along its length, and a ring on the ground at the touchdown. Off by
+default, and the guide says to leave it off once you have the measure of a ramp —
+knowing where you will land is not the same skill as judging it, and the judging
+is the better game. It earns its place in the construction set, where "can
+anybody clear this" is the whole question.
+
+**It is not a parabola.** `gs_world_arc` copies the world, takes the other cars
+out of the copy, and steps it forward with the real `gs_world_step` until the car
+is grounded. An airborne car has drag on it and gravity is sampled per tile, so a
+closed form would be an approximation of this program rather than a description
+of it — and an arc that disagreed with the landing would be worse than no arc,
+because it is believed. Being the same code is why the test can demand the landing
+match *exactly*, to the fixed-point value, at three gravities.
+
+Other cars come out of the copy because a mid-air collision is not predictable.
+What the arc says is where you land if nothing hits you, which is the question
+worth answering.
+
+The first version had a bad contract and the test caught it. Given one point per
+tick and a fixed array, a flight longer than the array simply stopped — and a
+path that stops still ends *somewhere*, which is read as the landing. It now
+halves its own sampling rate in place when it runs out of room, so the last point
+is the touchdown however long the car is up there, and a `landed` flag says
+whether the flight ended or the car has left the world entirely.
+
 ---
 
 ## What does not exist

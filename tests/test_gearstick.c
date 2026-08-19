@@ -3940,6 +3940,185 @@ TEST(a_wrecked_car_stops_moving) {
 
 
 // ---------------------------------------------------------------------------
+// The landing arc
+// ---------------------------------------------------------------------------
+
+// A ramp to fly off: flat, then a rise, then flat again a long way further on.
+static void gs_ramp_track(gs_track *t) {
+    gs_track_init(t, 64, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) {
+            gs_fix z = 0;
+            if (x >= 14 && x < 20) z = (gs_fix)((int64_t)GS_INT(2) * (x - 14) / 6);
+            else if (x >= 20) z = 0;
+            gs_track_set_corner(t, x, y, z);
+        }
+    }
+}
+
+TEST(a_car_lands_where_the_arc_said_it_would) {
+    // **The arc is a promise and it has to be kept**, or it is worse than no arc
+    // because it is believed. It is computed by running the simulation rather
+    // than by solving a parabola - an airborne car has drag on it and gravity is
+    // sampled per tile - so this checks that the promise and the race are the
+    // same code and not two descriptions of it.
+    //
+    // At three gravities, because a formula that quietly assumed Earth would
+    // pass at one and fail at the others, and the whole dial is the game.
+    static const gs_fix dial[3] = {
+        GS_RATIO(17, 100), GS_ONE, GS_RATIO(253, 100),   // Moon, Earth, Jupiter
+    };
+
+    for (int g = 0; g < 3; g++) {
+        static gs_track t;
+        gs_ramp_track(&t);
+
+        gs_world w;
+        gs_world_init(&w, dial[g]);
+        gs_world_add_car(&w, &t, GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+
+        // Flat out at the ramp until the wheels leave the ground.
+        int flown = 0;
+        for (int i = 0; i < GS_TICK_HZ * 40; i++) {
+            gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+            gs_world_step(&w, &t, in);
+            if (!w.car[0].grounded) { flown = 1; break; }
+        }
+        CHECK(flown);
+        if (!flown) continue;
+
+        static gs_arc arc;
+        uint8_t n = gs_world_arc(&w, &t, 0, &arc);
+        CHECK(n > 1);
+        if (n < 2) continue;
+
+        // The car itself, flying the same flight it was just asked about.
+        int landed = 0;
+        for (int i = 0; i < GS_TICK_HZ * 40; i++) {
+            gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+            gs_world_step(&w, &t, in);
+            if (w.car[0].grounded) { landed = 1; break; }
+        }
+        CHECK(landed);
+
+        // **Exactly**, not nearly. Both are the same integer arithmetic on the
+        // same state, so anything other than an exact match means the arc was
+        // predicting a different world from the one the car is in.
+        CHECK(w.car[0].x == arc.x[n - 1]);
+        CHECK(w.car[0].y == arc.y[n - 1]);
+        CHECK(w.car[0].z == arc.z[n - 1]);
+
+        // And it is a flight rather than a full stop: the landing is somewhere
+        // else, and further on.
+        CHECK(arc.x[n - 1] > arc.x[0]);
+        CHECK(arc.landed);
+    }
+}
+
+TEST(a_long_flight_is_drawn_coarsely_rather_than_cut_off) {
+    // **An arc that ran out of room used to stop half way**, and a path that
+    // stops still ends somewhere - which is read as the landing. A jump longer
+    // than the array is now sampled more widely instead, so the last point is
+    // the touchdown however long the car is up there.
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_track_set_corner(&t, x, y, x < 8 ? GS_INT(30) : 0);
+        }
+    }
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), 0, GS_INT(5));
+
+    // A long way up, at a sixth of a gravity: a flight of many seconds, far
+    // beyond what the array holds one point per tick of.
+    gs_world w;
+    gs_world_init(&w, GS_RATIO(17, 100));
+    gs_world_add_car(&w, &t, GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+
+    int flown = 0;
+    for (int i = 0; i < GS_TICK_HZ * 40; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        if (!w.car[0].grounded) { flown = 1; break; }
+    }
+    CHECK(flown);
+    if (!flown) return;
+
+    static gs_arc arc;
+    uint8_t n = gs_world_arc(&w, &t, 0, &arc);
+    CHECK(n > 1);
+    CHECK(n <= GS_ARC_MAX);
+    CHECK(arc.landed);
+
+    int landed = 0;
+    for (int i = 0; i < GS_TICK_HZ * 40; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        if (w.car[0].grounded) { landed = 1; break; }
+    }
+    CHECK(landed);
+
+    // The flight really was longer than the array, so this is the coarse path
+    // and not the easy case wearing its name.
+    CHECK(arc.x[n - 1] == w.car[0].x);
+    CHECK(arc.y[n - 1] == w.car[0].y);
+    CHECK(arc.z[n - 1] == w.car[0].z);
+}
+
+TEST(there_is_no_arc_for_a_car_on_the_ground) {
+    // A car that is not going anywhere has nowhere predicted for it, and a
+    // trajectory drawn from a parked car would be a line to where it is
+    // standing.
+    static gs_track t;
+    gs_ramp_track(&t);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(8), 0);
+
+    static gs_arc arc;
+    CHECK(gs_world_arc(&w, &t, 0, &arc) == 0);
+    CHECK(arc.count == 0);
+
+    // Nor for a car that is not in the race at all.
+    CHECK(gs_world_arc(&w, &t, 3, &arc) == 0);
+}
+
+TEST(asking_where_a_car_will_land_does_not_move_it) {
+    // The arc runs the simulation forward. If it ran the *real* one, looking at
+    // where you were going to land would send you there.
+    static gs_track t;
+    gs_ramp_track(&t);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(11), 0);
+
+    for (int i = 0; i < GS_TICK_HZ * 40 && w.car[0].grounded; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, GS_IN_ACCEL, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(!w.car[0].grounded);
+
+    uint64_t before = gs_world_hash(&w);
+
+    static gs_arc arc;
+    for (int k = 0; k < 5; k++) CHECK(gs_world_arc(&w, &t, 0, &arc) > 0);
+
+    CHECK(gs_world_hash(&w) == before);
+
+    // And the same question twice gets the same answer, which a design tool
+    // that disagreed with itself between frames would not manage.
+    static gs_arc again;
+    CHECK(gs_world_arc(&w, &t, 0, &again) == arc.count);
+    for (uint8_t i = 0; i < arc.count; i++) {
+        CHECK(again.x[i] == arc.x[i]);
+        CHECK(again.y[i] == arc.y[i]);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Wreckage
 // ---------------------------------------------------------------------------
 
@@ -4486,6 +4665,10 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_a_car_lands_where_the_arc_said_it_would();
+    run_a_long_flight_is_drawn_coarsely_rather_than_cut_off();
+    run_there_is_no_arc_for_a_car_on_the_ground();
+    run_asking_where_a_car_will_land_does_not_move_it();
     run_a_wreck_takes_up_more_room_than_the_car_it_used_to_be();
     run_every_ground_is_a_different_thing_to_drive_on();
     run_a_ground_is_named_once_and_the_name_is_the_surface_table();

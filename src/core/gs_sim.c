@@ -722,6 +722,72 @@ uint8_t gs_world_place(const gs_world *w, const gs_track *t, uint8_t car) {
     return (uint8_t)(ahead + 1);
 }
 
+uint8_t gs_world_arc(const gs_world *w, const gs_track *t, uint8_t car,
+                     gs_arc *out) {
+    out->count = 0;
+    out->landed = false;
+    if (car >= w->car_count) return 0;
+    if (!w->car[car].active || w->car[car].grounded || w->car[car].wrecked) return 0;
+
+    // A copy, so nothing here can touch the race. The world holds no pointers,
+    // which is what makes this one assignment rather than a walk.
+    gs_world flight = *w;
+
+    // Alone in it. A mid-air collision is not predictable, and an arc that
+    // flinched at a car which might not be there would be answering a question
+    // nobody asked.
+    for (uint8_t i = 0; i < flight.car_count; i++) {
+        if (i != car) flight.car[i].active = false;
+    }
+
+    // Twenty seconds. Long enough for any jump on any track at any gravity on
+    // the dial, and short enough that a car which has left the world entirely
+    // does not take the frame with it.
+    const int32_t limit = GS_TICK_HZ * 20;
+
+    int32_t every = 1;
+    for (int32_t i = 0; i < limit; i++) {
+        gs_world_step(&flight, t, nullptr);
+
+        const gs_car *c = &flight.car[car];
+        if (c->grounded) {
+            // The touchdown is the point of the whole thing, so it is written
+            // whatever the sampling was doing - and it is written last.
+            if (out->count >= GS_ARC_MAX) out->count = GS_ARC_MAX - 1;
+            out->x[out->count] = c->x;
+            out->y[out->count] = c->y;
+            out->z[out->count] = c->z;
+            out->count++;
+            out->landed = true;
+            break;
+        }
+
+        if ((i % every) != 0) continue;
+
+        // **Out of room is a reason to draw the same flight more coarsely, not
+        // a reason to stop drawing it.** An arc cut off half way still ends
+        // somewhere, and that somewhere is read as the landing. Keeping every
+        // other point already taken and doubling the interval covers a flight of
+        // any length in a fixed array, at whatever resolution it can afford.
+        if (out->count >= GS_ARC_MAX) {
+            for (uint8_t k = 0; k * 2 < out->count; k++) {
+                out->x[k] = out->x[k * 2];
+                out->y[k] = out->y[k * 2];
+                out->z[k] = out->z[k * 2];
+            }
+            out->count = (uint8_t)((out->count + 1) / 2);
+            every *= 2;
+        }
+
+        out->x[out->count] = c->x;
+        out->y[out->count] = c->y;
+        out->z[out->count] = c->z;
+        out->count++;
+    }
+
+    return out->count;
+}
+
 uint64_t gs_world_hash(const gs_world *w) {
     uint64_t h = 0xcbf29ce484222325ULL;
 

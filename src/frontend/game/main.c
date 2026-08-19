@@ -73,6 +73,7 @@ typedef struct gs_app {
     const char *shot_path;
     uint64_t    shot_at;
     bool        overlay;      // start with the painted-gravity overlay on
+    bool        arc;          // start with the landing arc on
     bool        start_in_editor;
     float       zoom;         // 0 means the default
     uint8_t     players;      // 0 means the default of two
@@ -263,6 +264,7 @@ static void gs_start_race(gs_app *a) {
         a->view[i].car = i;
         a->view[i].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
         a->view[i].show_gravity = a->overlay;
+        a->view[i].show_arc = a->arc;
         gs_render_track_camera(&a->view[i], &a->prev, &a->world, 1.0f);
     }
 
@@ -478,6 +480,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->shot_at = (uint64_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--overlay") == 0) {
             a->overlay = true;
+        } else if (SDL_strcmp(argv[i], "--arc") == 0) {
+            a->arc = true;
         } else if (SDL_strcmp(argv[i], "--players") == 0 && i + 1 < argc) {
             int n = SDL_atoi(argv[++i]);
             a->players = (uint8_t)(n < 1 ? 1 : (n > GS_MAX_CARS ? GS_MAX_CARS : n));
@@ -553,6 +557,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --shot FILE     write a frame and exit");
             SDL_Log("  --shot-at TICK  which tick to write it at (default 0)");
             SDL_Log("  --overlay       start with the painted-gravity overlay on");
+            SDL_Log("  --arc           start with the landing arc on");
             SDL_Log("  --editor        open in the construction set");
             SDL_Log("  --heatmap       open the editor with the analyser already run");
             SDL_Log("  --showroom      line up every vehicle, to look at the art");
@@ -572,6 +577,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --server HOST PORT  meet everybody at a server");
             SDL_Log("  --name NAME     who to appear as online");
             SDL_Log("  --relay         send through the server, if peers cannot connect");
+            SDL_Log("  J toggles the landing arc while airborne.");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
@@ -805,6 +811,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         if (e->key.key == SDLK_G) {
             for (uint8_t i = 0; i < a->views; i++)
                 a->view[i].show_gravity = !a->view[i].show_gravity;
+        }
+        // **Off unless asked for.** A permanent readout of where you are going
+        // to land turns a judgement into a number to follow, and the arc not
+        // being negotiable is what makes the take-off decision worth making.
+        if (e->key.key == SDLK_J) {
+            a->arc = !a->arc;
+            for (uint8_t i = 0; i < a->views; i++) a->view[i].show_arc = a->arc;
         }
         if (e->key.key == SDLK_R) gs_start_race(a);
         if (e->key.key == SDLK_H) a->show_ghost = !a->show_ghost;
@@ -1144,6 +1157,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         views = gs_split_views(&a->split, &a->world, ww, wh, merged);
         for (uint8_t i = 0; i < views; i++) {
             merged[i].show_gravity = a->view[i].show_gravity;
+            merged[i].show_arc = a->arc;
             merged[i].heat = nullptr;
             if (a->zoom > 0.0f) merged[i].cam.zoom = a->zoom;
             a->view[i] = merged[i];

@@ -197,6 +197,48 @@ uint64_t gs_world_hash(const gs_world *w);
 // three of them working it out separately is three chances to disagree.
 uint8_t gs_world_place(const gs_world *w, const gs_track *t, uint8_t car);
 
+// **Where an airborne car is going to come down**, as the path it will take.
+//
+// Off by default in the game, because the arc being *not* negotiable is what
+// makes the take-off decision matter and a permanent readout would turn a
+// judgement into a number. It is here for the player who wants to learn what a
+// ramp does, and for the editor, where the question "does anybody clear this"
+// is the whole job.
+//
+// **Computed by running the simulation, not by solving a parabola.** An airborne
+// car has drag on it and gravity is sampled per tile, so a closed form would be
+// an approximation of this program rather than a description of it - and an arc
+// that disagreed with where the car lands is worse than no arc, because it is
+// believed. This steps a copy forward with the real code and writes down where
+// it went, so the two cannot drift.
+//
+// Other cars are taken out of the copy first: a collision in mid-air is not
+// something anybody can predict, and an arc that flinched at a car that might
+// not be there would be answering a different question. What this says is where
+// you land if nothing hits you.
+#define GS_ARC_MAX 96
+
+typedef struct gs_arc {
+    uint8_t count;
+    bool    landed;     // false if the flight was still going when time ran out
+    gs_fix  x[GS_ARC_MAX];
+    gs_fix  y[GS_ARC_MAX];
+    gs_fix  z[GS_ARC_MAX];
+} gs_arc;
+
+// The flight from where the car is now to where it touches down. Returns how
+// many points were written, and zero if the car is not in the air.
+//
+// **The last point is the touchdown**, whenever `landed` is set. The sampling
+// rate is chosen to fit the flight rather than given: a long jump is drawn from
+// fewer, wider-spaced points instead of being cut off half way, because an arc
+// that stopped early would still end *somewhere* and that somewhere would be
+// read as the landing. `landed` is false only when the car is still in the air
+// after twenty seconds, which means it has gone off the edge of the world rather
+// than jumped.
+uint8_t gs_world_arc(const gs_world *w, const gs_track *t, uint8_t car,
+                     gs_arc *out);
+
 // How big a car is when it hits something. A circle rather than the drawn box:
 // two rectangles need a separating-axis test and a contact point, and all of
 // that buys is corners catching corners - which is a source of surprise rather

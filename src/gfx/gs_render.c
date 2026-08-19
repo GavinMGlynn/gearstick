@@ -279,6 +279,49 @@ static void gs_tri(SDL_Renderer *ren, const SDL_FPoint p[3], SDL_FColor c) {
 #define GS_WRECK_SPREAD 1.5f
 #define GS_WRECK_SQUASH 0.55f
 
+// The predicted flight, as a dotted line to the touchdown with a marker on the
+// spot. Dotted rather than solid because it is a guess about the future and has
+// to look like one - a solid line through the world reads as scenery.
+static void gs_draw_arc(SDL_Renderer *ren, const gs_camera *cam,
+                        const gs_track *t, const gs_world *w, uint8_t car) {
+    static gs_arc arc;
+    uint8_t n = gs_world_arc(w, t, car, &arc);
+    if (n < 2) return;
+
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+    // Every other point, so it reads as dots rather than as a rope.
+    for (uint8_t i = 0; i < n; i += 2) {
+        float sx, sy;
+        gs_iso_project(cam, gs_to_f(arc.x[i]), gs_to_f(arc.y[i]),
+                       gs_to_f(arc.z[i]), &sx, &sy);
+
+        // Fading along its length: the near end is where you are and the far end
+        // is a prediction, and it should not claim equal confidence in both.
+        float along = (float)i / (float)(n - 1);
+        SDL_SetRenderDrawColorFloat(ren, 1.0f, 0.85f, 0.35f, 0.65f - along * 0.3f);
+        SDL_FRect dot = { sx - 1.5f, sy - 1.5f, 3.0f, 3.0f };
+        SDL_RenderFillRect(ren, &dot);
+    }
+
+    // Where it comes down, on the ground rather than in the air: a ring at the
+    // touchdown is the thing a player is actually reading, and the height of the
+    // last dot is not where the wheels arrive.
+    if (!arc.landed) return;
+
+    gs_fix gz = gs_track_height(t, arc.x[n - 1], arc.y[n - 1]);
+    float cx = gs_to_f(arc.x[n - 1]), cy = gs_to_f(arc.y[n - 1]);
+
+    SDL_SetRenderDrawColorFloat(ren, 1.0f, 0.85f, 0.35f, 0.75f);
+    SDL_FPoint ring[13];
+    for (int i = 0; i < 13; i++) {
+        float a = (float)i * 6.2831853f / 12.0f;
+        gs_iso_project(cam, cx + SDL_cosf(a) * 0.5f, cy + SDL_sinf(a) * 0.5f,
+                       gs_to_f(gz) + 0.02f, &ring[i].x, &ring[i].y);
+    }
+    SDL_RenderLines(ren, ring, 13);
+}
+
 static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
                         const gs_track *t, const gs_car *c, uint8_t index,
                         float alpha) {
@@ -694,6 +737,14 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
         int cd = gs_fix_floor(c.x) + gs_fix_floor(c.y);
         if (cd >= diagonals || cd < 0) gs_draw_car(ren, &cam, t, &c, i, 1.0f);
+    }
+
+    // The landing arc last of all, over everything, and only for the driver of
+    // this view. Predicted from the settled state rather than the interpolated
+    // one: the arc is a question about the simulation, and half way between two
+    // ticks is not a state the simulation was ever in.
+    if (view->show_arc && view->car < now->car_count) {
+        gs_draw_arc(ren, &cam, t, now, view->car);
     }
 
     SDL_SetRenderClipRect(ren, nullptr);

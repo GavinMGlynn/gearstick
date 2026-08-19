@@ -2454,6 +2454,104 @@ static int gs_hud_pixels_differing(const gs_frame *a, const gs_frame *b) {
     return n;
 }
 
+// How much of the frame is the arc's colour: a warm yellow nothing else in the
+// scene uses.
+static int gs_count_arc(const gs_frame *f) {
+    int n = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        const uint8_t *px = &f->px[i * 4];
+        if (px[0] > 150 && px[1] > 110 && px[2] < 130 && px[0] > px[2] + 60) n++;
+    }
+    return n;
+}
+
+TEST(the_landing_arc_is_off_until_it_is_asked_for) {
+    // **Off by default and not by accident.** The arc being not negotiable is
+    // what makes the take-off decision matter, so a permanent readout of where
+    // you are going to land would turn a judgement into a number to follow.
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_track_set_corner(&t, x, y, x < 10 ? GS_INT(3) : 0);
+        }
+    }
+
+    // Off the shelf and into the air.
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+    for (int i = 0; i < GS_TICK_HZ * 30 && w.car[0].grounded; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(!w.car[0].grounded);
+
+    gs_view view = { 0 };
+    view.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    view.cam.vw = GS_W; view.cam.vh = GS_H;
+    view.cam.cx = gs_to_f(w.car[0].x) + 4.0f;
+    view.cam.cy = gs_to_f(w.car[0].y);
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+
+    int ink[2] = { 0, 0 };
+    for (int on = 0; on < 2; on++) {
+        view.show_arc = on != 0;
+
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+        SDL_RenderClear(ren);
+        gs_render_view(ren, &t, &w, &w, 1.0f, &view);
+
+        SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
+        CHECK(raw != nullptr);
+        if (raw == nullptr) return;
+        gs_frame f = { 0 };
+        f.own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(raw);
+        if (f.own == nullptr) return;
+        f.px = (uint8_t *)f.own->pixels;
+        ink[on] = gs_count_arc(&f);
+        gs_frame_free(&f);
+    }
+
+    // Nothing at all with it off, and a real path with it on.
+    CHECK(ink[0] == 0);
+    CHECK(ink[1] > 20);
+}
+
+TEST(there_is_no_arc_drawn_for_a_car_on_the_ground) {
+    // A parked car gets no line to where it is standing.
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 16);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(8), 0);
+
+    gs_view view = { 0 };
+    view.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    view.cam.vw = GS_W; view.cam.vh = GS_H;
+    view.cam.cx = 20.0f; view.cam.cy = 8.0f;
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    view.show_arc = true;
+
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    gs_render_view(ren, &t, &w, &w, 1.0f, &view);
+
+    SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
+    CHECK(raw != nullptr);
+    if (raw == nullptr) return;
+    gs_frame f = { 0 };
+    f.own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(raw);
+    if (f.own == nullptr) return;
+    f.px = (uint8_t *)f.own->pixels;
+
+    CHECK(gs_count_arc(&f) == 0);
+    gs_frame_free(&f);
+}
+
 TEST(a_wreck_is_drawn_as_wide_as_the_obstacle_it_actually_is) {
     // The physics gives a wreck a bigger radius than the car it used to be,
     // because debris is a spread of parts. **The drawing has to agree**: a wreck
@@ -2731,6 +2829,8 @@ int main(void) {
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
+    run_the_landing_arc_is_off_until_it_is_asked_for(ren);
+    run_there_is_no_arc_drawn_for_a_car_on_the_ground(ren);
     run_a_wreck_is_drawn_as_wide_as_the_obstacle_it_actually_is(ren);
     run_no_two_grounds_are_drawn_the_same_colour(ren);
     run_the_hud_says_what_lap_it_is_and_changes_when_the_lap_does(ren);
