@@ -549,6 +549,33 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       camera came in to twice the distance it was: a car was three and a half
       percent of the screen's width against the original's seven and a half, and
       the comment claiming a split pane showed ten tiles was describing twenty.*
+- [ ] **A ground for every world on the dial.** The gravity dial names eight
+      bodies and there are three surfaces, all of which could be a car park.
+      Dust, sand, gravel, rock and slush alongside pavement, dirt and ice — each
+      one earning its place in grip, rolling resistance, how much engine reaches
+      the ground, and what it turns into once it has been driven on. Nothing that
+      is only a different colour.
+      *Verification: on a track of one surface, the same car with the same inputs
+      finishes at a measurably different time on every one of them, and no two
+      are within a hair of each other — so the set is a menu of behaviours rather
+      than a palette.*
+- [ ] **A track has an owner, and the ones that shipped have none.** Whoever
+      built a track can change it, take it down, keep it private, hand it to a
+      named few, or publish it to everybody. The stock tracks are outside all of
+      it and no request can touch them.
+      *Verification: a client that did not build a track cannot edit, withdraw or
+      delete it; a shared track is visible to exactly the profiles it was shared
+      with and to nobody else; and every write path aimed at a track that shipped
+      with the game is refused, including by the profile that happens to be
+      called the same thing as its author.*
+- [ ] **A profile you can prove is yours.** A password, and a second factor for
+      anybody who wants one. **Neither ever crosses the wire**: the server offers
+      a challenge and the client returns a proof over it, because the protocol has
+      no confidentiality and a password sent in the clear is not a password.
+      *Verification: a recorded exchange, replayed at the server verbatim, is
+      refused; the password does not appear anywhere in the bytes on the wire;
+      and a one-time code that has been used once does not work a second time
+      inside the window it is still valid for.*
 - [ ] **Wreckage that stays.** A destroyed car leaves debris that is real track
       geometry for the rest of the race. *Verification: a car driving the same
       line at the same speed is deflected by the wreck of an earlier one, and is

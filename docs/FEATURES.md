@@ -61,6 +61,18 @@ predict what the car will do is out, however impressive it looks.
 - **Three surfaces — pavement, dirt, ice.** `CORE`
   Distinct enough to change the racing line, simple enough to hold in your head.
 
+- **A ground for every world on the dial.** `WANTED`
+  The gravity dial already names eight bodies, and eight worlds that all look and
+  drive like a car park is a missed opportunity sitting in plain sight. Dust that
+  is loose and almost frictionless under a sixth of a gravity, sand that will not
+  let you accelerate, basalt that grips like nothing else and punishes a landing,
+  slush that drags. **Each one has to change how the car behaves or it is a
+  colour swatch**, so every surface earns its place in the same three numbers the
+  first three use — grip, rolling resistance, how much engine reaches the ground
+  — and in what it turns into once it has been driven on.
+  The gas giants have no ground at all, which is worth being honest about: their
+  terrain is one of their moons'.
+
 - **Vehicle choice as a set of trade-offs.** `CORE`
   Engine, tyres, mass. Boxy 1985 silhouettes: stock car, dune buggy, baja bug,
   sprint car, motorcycle, lunar rover.
@@ -216,6 +228,28 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   you are making continuous small corrections that is the difference between
   feeling good and feeling broken. The service checks races afterwards; it does
   not run them.
+
+- **A track belongs to somebody, and the ones that shipped belong to nobody.**
+  `WANTED`
+  Whoever built a track can change it, take it down, keep it to themselves, hand
+  it to a few named people, or put it up for everybody. The tracks that came with
+  the game are outside all of that: nobody can edit or delete them, because a
+  library whose furniture can be taken away is a library that eventually has
+  nothing in it. Content addressing does half the work already — an "edit" of
+  somebody else's track is a new track with a new identity, so nothing can be
+  altered underneath anyone even by accident.
+
+- **A profile you can prove is yours.** `CANDIDATE`
+  The moment a name owns published work and a place on a leaderboard, it is worth
+  taking, and a name typed at a prompt proves nothing. A password at least, and a
+  second factor from a phone for anybody who wants one.
+  **The hard part is not the second factor.** A one-time code is a small,
+  dependency-free piece of arithmetic; what makes this real work is that the
+  protocol has no confidentiality at all today, so a password would cross the
+  wire in the clear and a code could be replayed by anyone on the path for the
+  half minute it lives. The answer is to never send either: the server offers a
+  challenge and the client returns a proof over it. That is a smaller change than
+  encrypting everything and it is the part worth designing carefully.
 
 - **The library never reaches into a race.** `CORE`
   What is stored decides *which* race to run and records what happened, and
