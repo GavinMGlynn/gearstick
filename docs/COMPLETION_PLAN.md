@@ -476,7 +476,7 @@ platform section of `FEATURES.md` for why that line is drawn where it is.
       can reach each other still race directly; the rest are forwarded by the
       server. *Verification: a race between two clients that cannot see each
       other at all ends in the same state on both.*
-- [ ] **Profiles and records live on the server too.** A driver is the same
+- [x] **Profiles and records live on the server too.** A driver is the same
       driver on another machine, and a record set on one is visible from the
       other. *Verification: a record set on one client is shown by a second
       client that has never seen that race.*

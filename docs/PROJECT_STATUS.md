@@ -818,6 +818,45 @@ socket buffer overflowing because nothing paced the sender. A race sends one
 packet per player per tick at 120 Hz, so the test does too, and the server's
 drain loop sleeps a millisecond rather than five.
 
+### What the server remembers
+
+SQLite, **on the server only**. The client's store is the same versioned flat
+file it has always been, the game links no SQLite, and `gearstick_cli` still
+links nothing but libc. It is obtained as the single-file amalgamation, pinned
+by SHA-256 and fetched once at configure time, so there is no package manager,
+no submodule and no Tcl — and a system copy is used instead when there is one.
+
+Three tables, and the shape of each is decided by what it is:
+
+**Drivers** by name, because a name is what a record carries. One row however
+often somebody appears; a repaint updates it rather than adding another.
+
+**Records** keyed by track, conditions, distance *and* driver — all four. That
+is not normalisation pedantry: a lap set at a sixth of gravity is not a lap, a
+three-lap time is not a five-lap time, and dropping either from the key is the
+difference between a leaderboard and a mess. The better-time-wins rule is in the
+statement rather than done by reading first and writing after, so two results
+arriving together cannot lose one of them.
+
+**Tracks** content-addressed. Two people uploading the thing they both built are
+storing the same thing, which is what a content hash is *for* — the schema's
+primary key is what enforces it, and a test confirms that is load-bearing rather
+than decorative.
+
+Every statement is prepared with bound parameters, never assembled. A driver's
+name arrives over a network from somebody the server has never met, and there is
+exactly one way to be safe about that. The test for it is a driver called
+`'); DROP TABLE driver;--`, who races, sets a record, and is still just somebody
+with an unusual name afterwards.
+
+The operational payoff is real: the server's state is a `.db` file that
+`sqlite3` opens.
+
+**A time is offered rather than proven, for now.** The server believes what a
+client tells it. The next item has it re-race the inputs before accepting
+anything, and the message does not change when that happens — only what the
+server does with it.
+
 ---
 
 ## What does not exist

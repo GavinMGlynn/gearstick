@@ -119,6 +119,29 @@ float gs_wire_track_progress(const gs_wire *w);
 // recovered, because there is nothing here that acknowledges anything.
 void gs_wire_want_track(gs_wire *w);
 
+// --- what the server remembers --------------------------------------------
+
+// Offer a time. Sent once; if it is lost, the record stands as it was, which
+// is a race nobody has to replay and a great deal simpler than acknowledging.
+void gs_wire_send_result(gs_wire *w, uint64_t track, uint64_t conditions,
+                         uint16_t laps, uint8_t vehicle, uint32_t lap_ticks,
+                         uint32_t race_ticks);
+
+// Ask what stands on a track, and read the answer when it comes.
+void gs_wire_ask_best(gs_wire *w, uint64_t track, uint64_t conditions,
+                      uint16_t laps);
+
+typedef struct gs_wire_best {
+    bool     known;
+    uint64_t track;
+    uint32_t lap_ticks;
+    char     lap_who[GS_PROTO_NAME];
+    uint32_t race_ticks;
+    char     race_who[GS_PROTO_NAME];
+} gs_wire_best;
+
+const gs_wire_best *gs_wire_best_here(const gs_wire *w);
+
 // --- getting through a router that will not cooperate ----------------------
 
 // Send everything through the server rather than to the other players.

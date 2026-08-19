@@ -56,6 +56,7 @@ struct gs_wire {
     uint64_t   want_track;
     bool       heard_start;    // the server has said what the race is on
     bool       relay;          // everything goes through the server
+    gs_wire_best best;         // what the server says stands here
     gs_carrier carrier;
     uint32_t   asked_at;
 
@@ -182,6 +183,28 @@ gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name) {
     SDL_strlcpy(w->host_text, host, sizeof w->host_text);
     w->host_port = port;
     return w;
+}
+
+void gs_wire_send_result(gs_wire *w, uint64_t track, uint64_t conditions,
+                         uint16_t laps, uint8_t vehicle, uint32_t lap_ticks,
+                         uint32_t race_ticks) {
+    if (w == nullptr || !w->via_server) return;
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf,
+                 gs_proto_result(buf, sizeof buf, track, conditions, laps,
+                                 vehicle, lap_ticks, race_ticks));
+}
+
+void gs_wire_ask_best(gs_wire *w, uint64_t track, uint64_t conditions,
+                      uint16_t laps) {
+    if (w == nullptr || !w->via_server) return;
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf,
+                 gs_proto_want_best(buf, sizeof buf, track, conditions, laps));
+}
+
+const gs_wire_best *gs_wire_best_here(const gs_wire *w) {
+    return (w != nullptr && w->via_server) ? &w->best : nullptr;
 }
 
 void gs_wire_use_relay(gs_wire *w, bool on) {
@@ -465,6 +488,25 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
                        w->lobby.count >= w->lobby.capacity && gs_wire_settled(w);
         }
         break;
+
+    case GS_MSG_BEST: {
+        uint64_t track = 0, conditions = 0;
+        uint16_t laps = 0;
+        uint32_t lap_ticks = 0, race_ticks = 0;
+        char lap_who[GS_PROTO_NAME] = { 0 }, race_who[GS_PROTO_NAME] = { 0 };
+
+        if (gs_proto_read_best(buf, len, &track, &conditions, &laps, &lap_ticks,
+                               lap_who, sizeof lap_who, &race_ticks, race_who,
+                               sizeof race_who)) {
+            w->best.known = true;
+            w->best.track = track;
+            w->best.lap_ticks = lap_ticks;
+            w->best.race_ticks = race_ticks;
+            SDL_strlcpy(w->best.lap_who, lap_who, sizeof w->best.lap_who);
+            SDL_strlcpy(w->best.race_who, race_who, sizeof w->best.race_who);
+        }
+        break;
+    }
 
     case GS_MSG_FULL:
         // **Kept, and shown.** A client that could only say "connection

@@ -1,0 +1,89 @@
+// gs_store.h - what the server remembers.
+//
+// **SQLite, on the server only.** The client's store is the same versioned flat
+// file it has always been and the simulation still links nothing; this is a
+// server-side concern and stays there. See `cmake/Sqlite.cmake` for how it is
+// obtained - the single-file amalgamation, pinned by SHA-256, compiled like any
+// other source file.
+//
+// Three things live here, and the shape of each is decided by what it is rather
+// than by what is convenient:
+//
+//   drivers   a name, a colour, a machine, and what they have done
+//   records   a time on a track under conditions over a distance - the key is
+//             all four, because a lap set at a sixth of gravity is not a lap
+//             and a three-lap time is not a five-lap time
+//   tracks    content-addressed blobs, because a track already knows its own
+//             name: two people uploading the same track collide correctly
+//             rather than making two rows of it
+#ifndef GS_STORE_H
+#define GS_STORE_H
+
+#include "core/gs_common.h"
+
+#define GS_STORE_NAME 32
+
+typedef struct gs_store gs_store;
+
+// Open, creating the schema if the file is new. `path` may be ":memory:",
+// which is what the tests use. Null if it cannot be opened.
+gs_store *gs_store_open(const char *path);
+void      gs_store_close(gs_store *s);
+
+// The last thing that went wrong, for a log a person will actually read.
+const char *gs_store_error(const gs_store *s);
+
+// What schema version the file is at.
+int gs_store_version(const gs_store *s);
+
+// --- drivers ---------------------------------------------------------------
+
+// Remember somebody, or update what is remembered about them. Returns their id,
+// or 0. A name is the identity here, because a name is what a record carries.
+int64_t gs_store_put_driver(gs_store *s, const char *name, uint8_t colour,
+                            uint8_t vehicle);
+int64_t gs_store_find_driver(gs_store *s, const char *name);
+bool    gs_store_driver(gs_store *s, int64_t id, char *name, size_t cap,
+                        uint8_t *colour, uint8_t *vehicle);
+int     gs_store_driver_count(gs_store *s);
+
+// --- records ---------------------------------------------------------------
+
+// A time, offered. Kept only where it beats what that driver already has, which
+// is the same rule the client's table keeps. Returns true if anything changed.
+bool gs_store_put_record(gs_store *s, uint64_t track, uint64_t conditions,
+                         uint16_t laps, const char *who, uint8_t vehicle,
+                         uint32_t lap_ticks, uint32_t race_ticks);
+
+// The best on a track under conditions. Zero if nobody has been round it.
+// `who` may be null.
+uint32_t gs_store_best_lap(gs_store *s, uint64_t track, uint64_t conditions,
+                           char *who, size_t cap);
+uint32_t gs_store_best_race(gs_store *s, uint64_t track, uint64_t conditions,
+                            uint16_t laps, char *who, size_t cap);
+int gs_store_record_count(gs_store *s);
+
+// --- tracks ----------------------------------------------------------------
+
+// Keep a track. The hash is the key, so storing the same track twice stores it
+// once - and two people who built the same thing are storing the same thing.
+bool gs_store_put_track(gs_store *s, uint64_t hash, const char *name,
+                        const char *author, const uint8_t *bytes, size_t len);
+
+// Fetch one. `out` may be null to ask only whether it is there and how big.
+bool gs_store_get_track(gs_store *s, uint64_t hash, uint8_t *out, size_t cap,
+                        size_t *len);
+bool gs_store_has_track(gs_store *s, uint64_t hash);
+int  gs_store_track_count(gs_store *s);
+
+typedef struct gs_track_row {
+    uint64_t hash;
+    char     name[64];
+    char     author[GS_STORE_NAME];
+    uint32_t bytes;
+} gs_track_row;
+
+// The library, newest first. Returns how many rows were written.
+int gs_store_list_tracks(gs_store *s, gs_track_row *out, int cap);
+
+#endif // GS_STORE_H

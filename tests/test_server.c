@@ -124,8 +124,10 @@ static void gs_client_pump(gs_test_client *c) {
 // deadline so a broken test cannot leave one running.
 static SDL_Process *gs_server = nullptr;
 
-// A track for the server to hand out, when a test wants one.
+// A track for the server to hand out, and a store to remember in, when a test
+// wants them.
 static const char *gs_track_arg = nullptr;
+static const char *gs_store_arg = nullptr;
 
 // Two drivers on different rhythms, so no two players ever change their minds
 // together and a session that mixed them up would be caught.
@@ -156,7 +158,7 @@ static bool gs_server_start_full(const char *port, const char *seconds,
                  "");
 #endif
 
-    const char *args[16];
+    const char *args[20];
     int n = 0;
     args[n++] = exe;
     args[n++] = "--port";     args[n++] = port;
@@ -167,6 +169,8 @@ static bool gs_server_start_full(const char *port, const char *seconds,
     if (gs_track_arg != nullptr) {
         args[n++] = "--track"; args[n++] = gs_track_arg;
     }
+    args[n++] = "--store";
+    args[n++] = gs_store_arg != nullptr ? gs_store_arg : ":memory:";
     args[n] = nullptr;
 
     // Its output goes nowhere. The server redraws a live view four times a
@@ -193,6 +197,14 @@ static bool gs_server_start_full(const char *port, const char *seconds,
 static bool gs_server_start_for(const char *port, const char *seconds,
                                 const char *players) {
     return gs_server_start_full(port, seconds, players, "15000");
+}
+
+static bool gs_server_start_with_store(const char *port, const char *seconds,
+                                       const char *players, const char *store) {
+    gs_store_arg = store;
+    bool ok = gs_server_start_full(port, seconds, players, "15000");
+    gs_store_arg = nullptr;
+    return ok;
 }
 
 static bool gs_server_start_with_track(const char *port, const char *seconds,
@@ -803,6 +815,108 @@ TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
     gs_server_stop();
 }
 
+TEST(a_record_set_on_one_client_is_seen_by_another) {
+    // **The verification this item exists for.** The second client has never
+    // seen the race, never met the first client, and is told the record by the
+    // server - which is the whole point of there being one.
+    CHECK(gs_wire_init());
+
+    // A fresh store, so the test is not reading somebody's earlier run.
+    remove("server_records.db");
+    if (!gs_server_start_with_store("47828", "25", "2", "server_records.db")) {
+        gs_failures++;
+        return;
+    }
+
+    const uint64_t track = 0x5150515051505150ull;
+    const uint64_t earth = 0x1234ull;
+
+    gs_wire *a = gs_wire_server("127.0.0.1", 47828, "ada");
+    CHECK(a != nullptr);
+    for (int k = 0; k < 300; k++) {
+        gs_wire_poll(a);
+        if (gs_wire_lobby(a) != nullptr && gs_wire_lobby(a)->count == 1) break;
+        SDL_Delay(10);
+    }
+
+    // Nothing stands here yet.
+    gs_wire_ask_best(a, track, earth, 3);
+    for (int k = 0; k < 200; k++) {
+        gs_wire_poll(a);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
+        if (gs_wire_best_here(a)->known) break;
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_best_here(a)->known);
+    CHECK(gs_wire_best_here(a)->lap_ticks == 0);
+
+    // ada drives one.
+    gs_wire_send_result(a, track, earth, 3, 2, 4200, 13000);
+    SDL_Delay(300);
+
+    // bez arrives afterwards, having seen none of it.
+    gs_wire *b = gs_wire_server("127.0.0.1", 47828, "bez");
+    CHECK(b != nullptr);
+    for (int k = 0; k < 300; k++) {
+        gs_wire_poll(b);
+        if (gs_wire_lobby(b) != nullptr && gs_wire_lobby(b)->count == 2) break;
+        SDL_Delay(10);
+    }
+
+    gs_wire_ask_best(b, track, earth, 3);
+    bool told = false;
+    for (int k = 0; k < 300 && !told; k++) {
+        gs_wire_poll(b);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(b, drain, sizeof drain) > 0) { }
+        told = gs_wire_best_here(b)->known && gs_wire_best_here(b)->lap_ticks > 0;
+        SDL_Delay(10);
+    }
+
+    CHECK(told);
+    if (told) {
+        const gs_wire_best *best = gs_wire_best_here(b);
+        CHECK(best->lap_ticks == 4200);
+        CHECK(best->race_ticks == 13000);
+        CHECK(SDL_strcmp(best->lap_who, "ada") == 0);   // and by name
+    }
+
+    // bez does better, and the record moves.
+    gs_wire_send_result(b, track, earth, 3, 1, 3900, 12500);
+    SDL_Delay(300);
+
+    gs_wire_ask_best(a, track, earth, 3);
+    bool moved = false;
+    for (int k = 0; k < 300 && !moved; k++) {
+        gs_wire_poll(a);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
+        moved = gs_wire_best_here(a)->lap_ticks == 3900;
+        SDL_Delay(10);
+    }
+    CHECK(moved);
+    if (moved) CHECK(SDL_strcmp(gs_wire_best_here(a)->lap_who, "bez") == 0);
+
+    // And a slower run does not take it back.
+    gs_wire_send_result(a, track, earth, 3, 2, 4500, 14000);
+    SDL_Delay(400);
+    gs_wire_ask_best(a, track, earth, 3);
+    for (int k = 0; k < 200; k++) {
+        gs_wire_poll(a);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_best_here(a)->lap_ticks == 3900);
+
+    gs_wire_close(a);
+    gs_wire_close(b);
+    gs_wire_quit();
+    gs_server_stop();
+    remove("server_records.db");
+}
+
 int main(void) {
     printf("gearstick server tests\n");
 
@@ -820,6 +934,7 @@ int main(void) {
     run_a_placed_client_is_not_dropped_for_going_quiet();
     run_a_client_with_a_different_track_is_given_the_right_one();
     run_two_clients_that_cannot_see_each_other_race_through_the_server();
+    run_a_record_set_on_one_client_is_seen_by_another();
 
     gs_server_stop();
     NET_Quit();

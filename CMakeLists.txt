@@ -322,7 +322,8 @@ gs_add_sqlite()
 add_executable(gearstick_server
     src/frontend/server/main.c
     src/net/gs_proto.c
-    src/net/gs_carrier.c)
+    src/net/gs_carrier.c
+    src/net/gs_store.c)
 # The carrier rebuilds a track, so the server needs the track format - and with
 # it the simulation, which it will need anyway the day it verifies a lap time.
 target_include_directories(gearstick_server PRIVATE src)
@@ -383,6 +384,18 @@ if(GEARSTICK_TESTS)
     target_link_libraries(gearstick_server_tests PRIVATE gearstick_shell)
     gs_configure(gearstick_server_tests)
     add_dependencies(gearstick_server_tests gearstick_server)
+
+    # What the server remembers. Links no SDL: the store is SQLite and the
+    # track format, and neither of those has ever needed a window.
+    add_executable(gearstick_store_tests
+        tests/test_store.c
+        src/net/gs_store.c)
+    target_include_directories(gearstick_store_tests PRIVATE src)
+    target_link_libraries(gearstick_store_tests PRIVATE gearstick_sqlite)
+    gs_configure(gearstick_store_tests)
+
+    add_test(NAME gearstick_store COMMAND gearstick_store_tests)
+    set_tests_properties(gearstick_store PROPERTIES TIMEOUT 120)
 
     add_test(NAME gearstick_server COMMAND gearstick_server_tests)
     set_tests_properties(gearstick_server PROPERTIES TIMEOUT 180)

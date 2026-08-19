@@ -14,6 +14,7 @@
 #include "core/gs_track.h"
 #include "net/gs_carrier.h"
 #include "net/gs_proto.h"
+#include "net/gs_store.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
@@ -84,6 +85,10 @@ static struct {
     size_t   track_len;
     uint64_t track_hash;
     uint32_t chunks_sent;
+
+    // What is remembered between races, and between runs of the server.
+    gs_store *store;
+    uint32_t  results, kept;
 } gs_srv;
 
 // --- the lobby --------------------------------------------------------------
@@ -221,6 +226,9 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
 
     if (fresh) {
         SDL_Log("player %d (%s) joined from %s:%u", at, c->name, c->text, port);
+        if (gs_srv.store != nullptr) {
+            gs_store_put_driver(gs_srv.store, c->name, 0, 0);
+        }
         if (gs_present() > gs_srv.peak) gs_srv.peak = gs_present();
         gs_broadcast_lobby();
     }
@@ -282,6 +290,14 @@ static void gs_draw(uint64_t now) {
            gs_present(), gs_srv.capacity, gs_srv.peak, gs_srv.refused);
     printf("  datagrams  in %u (%s)   out %u (%s)   relayed %u\n",
            gs_srv.total_in, in_b, gs_srv.total_out, out_b, gs_srv.relayed);
+
+    if (gs_srv.store != nullptr) {
+        printf("  remembered %d driver(s), %d record(s), %d track(s)"
+               "   results %u, kept %u\n",
+               gs_store_driver_count(gs_srv.store),
+               gs_store_record_count(gs_srv.store),
+               gs_store_track_count(gs_srv.store), gs_srv.results, gs_srv.kept);
+    }
 
     if (gs_srv.track_len > 0) {
         printf("  track      %016llx, %zu bytes, %u chunks sent\n",
@@ -377,6 +393,52 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         break;
     }
 
+    case GS_MSG_RESULT: {
+        // A time, offered. **Believed, for now** - the item after this one has
+        // the server re-race the inputs before it accepts anything, and this
+        // message does not change when that happens. Only what is done with it
+        // does.
+        uint64_t track = 0, conditions = 0;
+        uint16_t laps = 0;
+        uint8_t vehicle = 0;
+        uint32_t lap_ticks = 0, race_ticks = 0;
+
+        if (at < 0 || gs_srv.store == nullptr) break;
+        if (!gs_proto_read_result(d->buf, len, &track, &conditions, &laps,
+                                  &vehicle, &lap_ticks, &race_ticks)) {
+            break;
+        }
+
+        gs_srv.results++;
+        if (gs_store_put_record(gs_srv.store, track, conditions, laps,
+                                gs_srv.client[at].name, vehicle, lap_ticks,
+                                race_ticks)) {
+            gs_srv.kept++;
+        }
+        break;
+    }
+
+    case GS_MSG_WANT_BEST: {
+        uint64_t track = 0, conditions = 0;
+        uint16_t laps = 0;
+        if (at < 0 || gs_srv.store == nullptr) break;
+        if (!gs_proto_read_want_best(d->buf, len, &track, &conditions, &laps)) {
+            break;
+        }
+
+        char lap_who[GS_PROTO_NAME] = { 0 }, race_who[GS_PROTO_NAME] = { 0 };
+        uint32_t lap = gs_store_best_lap(gs_srv.store, track, conditions,
+                                         lap_who, sizeof lap_who);
+        uint32_t race = gs_store_best_race(gs_srv.store, track, conditions, laps,
+                                           race_who, sizeof race_who);
+
+        uint8_t out[GS_PROTO_MTU];
+        size_t n = gs_proto_best(out, sizeof out, track, conditions, laps, lap,
+                                 lap_who, race, race_who);
+        gs_send(&gs_srv.client[at], out, n);
+        break;
+    }
+
     case GS_MSG_WANT_TRACK: {
         // Asked for again rather than acknowledged, which is the vocabulary
         // everywhere else here: a client that is missing a piece asks for the
@@ -436,6 +498,7 @@ static void gs_usage(void) {
     printf("  --players N    how many to allow, 1 to %d (default %d)\n",
            GS_PROTO_MAX_PLAYERS, GS_PROTO_MAX_PLAYERS);
     printf("  --track FILE   the track this lobby races on\n");
+    printf("  --store FILE   where to remember drivers, records and tracks\n");
     printf("  --plain        no cursor control, for a log file\n");
     printf("  --timeout N    drop a client after N ms of silence (default %u)\n",
            GS_TIMEOUT_MS);
@@ -448,6 +511,7 @@ int main(int argc, char **argv) {
     uint8_t players = GS_PROTO_MAX_PLAYERS;
     uint32_t seconds = 0;
     const char *track_path = nullptr;
+    const char *store_path = "gearstick.db";
 
     for (int i = 1; i < argc; i++) {
         if (SDL_strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -455,6 +519,8 @@ int main(int argc, char **argv) {
         } else if (SDL_strcmp(argv[i], "--players") == 0 && i + 1 < argc) {
             int n = SDL_atoi(argv[++i]);
             players = (uint8_t)SDL_clamp(n, 1, GS_PROTO_MAX_PLAYERS);
+        } else if (SDL_strcmp(argv[i], "--store") == 0 && i + 1 < argc) {
+            store_path = argv[++i];
         } else if (SDL_strcmp(argv[i], "--track") == 0 && i + 1 < argc) {
             track_path = argv[++i];
         } else if (SDL_strcmp(argv[i], "--plain") == 0) {
@@ -513,6 +579,27 @@ int main(int argc, char **argv) {
                 gs_carrier_chunks(gs_srv.track_len));
     }
 
+    // Opened before anybody can knock, so a server that cannot remember
+    // anything says so at the start rather than the first time it tries.
+    gs_srv.store = gs_store_open(store_path);
+    if (gs_srv.store == nullptr) {
+        printf("could not open the store at %s\n", store_path);
+        NET_DestroyDatagramSocket(gs_srv.sock);
+        NET_Quit();
+        SDL_Quit();
+        return 1;
+    }
+    SDL_Log("store %s: %d driver(s), %d record(s), %d track(s)", store_path,
+            gs_store_driver_count(gs_srv.store),
+            gs_store_record_count(gs_srv.store),
+            gs_store_track_count(gs_srv.store));
+
+    // And the track being served is a track the library has.
+    if (gs_srv.track_len > 0) {
+        gs_store_put_track(gs_srv.store, gs_srv.track_hash, "", "",
+                           gs_srv.track, gs_srv.track_len);
+    }
+
     SDL_Log("gearstick server listening on port %u for up to %u players",
             port, players);
 
@@ -563,6 +650,7 @@ int main(int argc, char **argv) {
     }
 
     printf("\nstopping\n");
+    gs_store_close(gs_srv.store);
     for (int i = 0; i < GS_PROTO_MAX_PLAYERS; i++) {
         if (gs_srv.client[i].addr != nullptr) NET_UnrefAddress(gs_srv.client[i].addr);
     }

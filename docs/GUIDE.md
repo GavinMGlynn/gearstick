@@ -170,6 +170,9 @@ who is there and how far away they are:
 gearstick_server --port 47800 --players 4 --track mine.gstrack
 ```
 
+It remembers who has played, what they have driven and the records they have
+set, in `gearstick.db` beside it — `--store` puts that somewhere else.
+
 Give it a track and it hands that track to everybody who joins, so nobody has to
 already have it. It arrives in pieces and is checked against its own hash before
 the race starts — a track that arrived damaged is refused rather than raced.

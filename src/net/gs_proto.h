@@ -40,6 +40,8 @@ typedef enum gs_msg {
     GS_MSG_PING,       // keeps the connection alive and measures the trip
     GS_MSG_WANT_TRACK, // "send me the track for this race"
     GS_MSG_RELAY,      // "pass this to the others for me"
+    GS_MSG_RESULT,     // "this is what I did" - a time, offered
+    GS_MSG_WANT_BEST,  // "what is the record here?"
 
     // Server to client.
     GS_MSG_WELCOME,    // "you are player N of M, and here is everyone"
@@ -49,6 +51,7 @@ typedef enum gs_msg {
     GS_MSG_START,      // "race, on the track with this hash"
     GS_MSG_PONG,
     GS_MSG_FORWARD,    // a relayed datagram from another player
+    GS_MSG_BEST,       // the record on a track, and who holds it
 
     GS_MSG_COUNT
 } gs_msg;
@@ -87,6 +90,33 @@ size_t gs_proto_want_track(uint8_t *buf, size_t cap, uint64_t track_hash);
 size_t gs_proto_track_chunk(uint8_t *buf, size_t cap, uint64_t track_hash,
                             uint16_t chunk, uint16_t chunks,
                             const uint8_t *data, uint16_t len);
+
+// --- times ----------------------------------------------------------------
+//
+// A result is offered rather than asserted. Today the server believes it; the
+// item after this one has it re-race the inputs before it does, and the message
+// does not change when that happens - only what the server does with it.
+
+size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
+                       uint64_t conditions, uint16_t laps, uint8_t vehicle,
+                       uint32_t lap_ticks, uint32_t race_ticks);
+bool gs_proto_read_result(const uint8_t *buf, size_t len, uint64_t *track,
+                          uint64_t *conditions, uint16_t *laps, uint8_t *vehicle,
+                          uint32_t *lap_ticks, uint32_t *race_ticks);
+
+size_t gs_proto_want_best(uint8_t *buf, size_t cap, uint64_t track,
+                          uint64_t conditions, uint16_t laps);
+bool gs_proto_read_want_best(const uint8_t *buf, size_t len, uint64_t *track,
+                             uint64_t *conditions, uint16_t *laps);
+
+size_t gs_proto_best(uint8_t *buf, size_t cap, uint64_t track,
+                     uint64_t conditions, uint16_t laps, uint32_t lap_ticks,
+                     const char *lap_who, uint32_t race_ticks,
+                     const char *race_who);
+bool gs_proto_read_best(const uint8_t *buf, size_t len, uint64_t *track,
+                        uint64_t *conditions, uint16_t *laps,
+                        uint32_t *lap_ticks, char *lap_who, size_t lap_cap,
+                        uint32_t *race_ticks, char *race_who, size_t race_cap);
 
 // A datagram to be passed on. `from` is filled in by the server on the way out.
 size_t gs_proto_relay(uint8_t *buf, size_t cap, const uint8_t *data, size_t len);
