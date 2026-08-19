@@ -93,6 +93,38 @@ static void gs_demo_track(gs_track *t) {
     gs_track_add_gate(t, GS_INT(34), GS_INT(12), 0, GS_INT(5));
 }
 
+static void gs_layout(gs_app *a);
+
+// Drop into the world from wherever the editor is looking. **Nothing is
+// loaded**: the track object the editor has been writing to is the track the
+// car now drives on, so the loop between changing something and feeling it is
+// a keypress rather than a save, a load and a restart. That loop is the single
+// biggest thing thirty years of hardware buys this game.
+static void gs_start_test_drive(gs_app *a) {
+    gs_fix x = GS_INT(3), y = GS_INT(9);
+    gs_angle heading = 0;
+    gs_editor_drive_start(&a->editor, &a->t, &x, &y, &heading);
+
+    gs_world_init(&a->world, GS_ONE);
+    gs_world_add_car(&a->world, &a->t, (uint8_t)GS_VEH_STOCK_CAR, x, y, heading);
+
+    // The second car alongside, offset across the direction of travel so both
+    // start level rather than one behind the other.
+    gs_fix ox = -gs_fix_mul(gs_sin(heading), GS_INT(2));
+    gs_fix oy = gs_fix_mul(gs_cos(heading), GS_INT(2));
+    gs_world_add_car(&a->world, &a->t, (uint8_t)GS_VEH_DUNE_BUGGY,
+                     x + ox, y + oy, heading);
+
+    a->prev = a->world;
+    a->views = a->world.car_count < 2 ? 1 : 2;
+    for (uint8_t i = 0; i < a->views; i++) {
+        a->view[i].car = i;
+        a->view[i].cam.zoom = 1.0f;
+        gs_render_track_camera(&a->view[i], &a->prev, &a->world, 1.0f);
+    }
+    gs_layout(a);
+}
+
 static void gs_start_race(gs_app *a) {
     gs_world_init(&a->world, GS_ONE);
     gs_world_add_car(&a->world, &a->t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(3), GS_INT(9), 0);
@@ -219,7 +251,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         if (e->key.key == SDLK_R) gs_start_race(a);
         // Tab is the whole loop: build, drive, build. No load step between
         // them, which is the single biggest thing the original could not do.
-        if (e->key.key == SDLK_TAB) gs_editor_toggle(&a->editor, &a->view[0]);
+        if (e->key.key == SDLK_TAB) {
+            gs_editor_toggle(&a->editor, &a->view[0]);
+            // Leaving the editor drops a car where you were looking. Coming
+            // back does nothing at all to the track, which is the other half of
+            // the promise: the edits are still there and so is the history.
+            if (!a->editor.active) gs_start_test_drive(a);
+        }
         break;
     default:
         break;

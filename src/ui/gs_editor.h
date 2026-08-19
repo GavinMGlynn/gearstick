@@ -48,6 +48,8 @@ typedef struct gs_editor {
     bool  hover_on;
     bool  stroke;       // inside a click-drag, which is one undo step
 
+    bool  placed;       // the editor camera has been positioned at least once
+
     gs_edit_log *log;
     char status[192];
 } gs_editor;
@@ -62,6 +64,17 @@ void gs_editor_toggle(gs_editor *e, const gs_view *view);
 // Apply the brush and draw the palette. Call once a frame while active, after
 // ImGui's new frame and before its render.
 void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view);
+
+// Where a test drive should begin, and facing which way.
+//
+// The cursor if it is over the track, because "drive from here" is the whole
+// point of a test drive - you are asking about the corner you are looking at,
+// not about the track from the beginning. The start gate otherwise, which is
+// what you want when the pointer is off in the margins.
+//
+// Returns false if there is nowhere sensible at all: no cursor and no route.
+bool gs_editor_drive_start(const gs_editor *e, const gs_track *t,
+                           gs_fix *x, gs_fix *y, gs_angle *heading);
 
 // Apply the current brush once, at a world position. The pointer path calls
 // this; so can a test or a script, which is the point of it being here rather

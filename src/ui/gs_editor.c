@@ -40,14 +40,40 @@ void gs_editor_quit(gs_editor *e) {
 }
 
 void gs_editor_toggle(gs_editor *e, const gs_view *view) {
-    if (!e->active) {
-        // Start looking where the race was looking. Anything else moves the
-        // world out from under the player at the moment they switch.
+    if (!e->active && !e->placed) {
+        // The first time in, start looking where the race was looking - anything
+        // else moves the world out from under the player as they switch.
+        //
+        // Only the first time, though. Coming back from a test drive has to put
+        // you where you were *building*, not where the car happened to stop.
+        // That is what makes it a snap back rather than a journey home.
         e->cam_x = view->cam.cx;
         e->cam_y = view->cam.cy;
         e->zoom = view->cam.zoom > 0.0f ? view->cam.zoom : 1.0f;
+        e->placed = true;
     }
     e->active = !e->active;
+}
+
+bool gs_editor_drive_start(const gs_editor *e, const gs_track *t,
+                           gs_fix *x, gs_fix *y, gs_angle *heading) {
+    if (e->hover_on) {
+        *x = (gs_fix)(e->hover_x * (float)GS_ONE);
+        *y = (gs_fix)(e->hover_y * (float)GS_ONE);
+        // Pointing the way the start line does, so a drive from the middle of
+        // the track still faces the way the track goes.
+        *heading = t->gate_count > 0 ? t->gate[0].heading : (gs_angle)0;
+        return true;
+    }
+
+    if (t->gate_count > 0) {
+        *x = t->gate[0].x;
+        *y = t->gate[0].y;
+        *heading = t->gate[0].heading;
+        return true;
+    }
+
+    return false;
 }
 
 // One application of the brush at a tile. Corners and tiles are indexed

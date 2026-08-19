@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 32 of 61 items, every
+**Phases 0 to 3 are complete, and Phase 4 has started — 33 of 61 items, every
 one of them with its verification actually run.** Phase 4 is the editor and is
 about half the remaining work.
 
@@ -214,8 +214,12 @@ whatever the UI turns out to be — then the interface on top.
       *Completability — "can a car actually get round it" — is not here. It
       needs something that drives, so it belongs with the analyser in Phase 9,
       and claiming it as validation would be claiming a check nothing performs.*
-- [ ] **Instant test-drive from the cursor, and snap back.** *Verification: no
-      load step, and edits made before the drive survive returning from it.*
+- [x] **Instant test-drive from the cursor, and snap back.** *Verification: Tab
+      drops a car where the pointer was, facing the way the start line does, on
+      the very track object being edited — nothing is written, read or copied.
+      Coming back leaves the track hash and the undo history exactly as they
+      were, and returns the camera to the part of the track being built rather
+      than to wherever the car stopped.*
 - [ ] **The live ghost** — a car continuously re-racing the design as it is
       edited. *Verification: raising a ramp visibly changes the ghost's landing
       without any explicit re-run.*

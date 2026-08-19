@@ -730,6 +730,115 @@ TEST(the_gate_brush_places_a_route_where_the_pointer_is) {
     gs_editor_quit(&ed);
 }
 
+TEST(a_test_drive_starts_where_you_were_looking_and_changes_nothing) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 32, 16);
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), GS_QUARTER, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(8), GS_QUARTER, GS_INT(3));
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 4096));
+
+    // Build something, so there is work that has to survive the drive.
+    ed.brush = GS_BRUSH_RAISE;
+    ed.radius = 1;
+    ed.step = 0.5f;
+    gs_edit_begin(ed.log);
+    for (float x = 10.0f; x < 16.0f; x += 1.0f) gs_editor_paint(&ed, &t, x, 8.0f);
+    gs_edit_end(ed.log);
+
+    uint64_t built = gs_track_hash(&t);
+    uint32_t history = gs_edit_undo_depth(ed.log);
+
+    // The pointer is over the middle of the track: a test drive starts *there*,
+    // because the question being asked is about the corner you are looking at,
+    // not about the track from the beginning.
+    ed.hover_on = true;
+    ed.hover_x = 13.0f;
+    ed.hover_y = 8.0f;
+
+    gs_fix sx = 0, sy = 0;
+    gs_angle heading = 0;
+    CHECK(gs_editor_drive_start(&ed, &t, &sx, &sy, &heading));
+    CHECK(sx == GS_INT(13));
+    CHECK(sy == GS_INT(8));
+    CHECK(heading == GS_QUARTER);        // facing the way the start line does
+
+    // Drive on the very track being edited - no copy, no reload.
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, heading);
+    for (int i = 0; i < GS_TICK_HZ * 3; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(gs_car_speed(&w.car[0]) > 0);
+
+    // And back. The track is exactly what it was, and so is the history: the
+    // edits made before the drive survive returning from it.
+    CHECK(gs_track_hash(&t) == built);
+    CHECK(gs_edit_undo_depth(ed.log) == history);
+
+    CHECK(gs_edit_undo(ed.log, &t));
+    CHECK(gs_track_hash(&t) != built);
+    CHECK(gs_edit_redo(ed.log, &t));
+    CHECK(gs_track_hash(&t) == built);
+
+    // With the pointer off the track, a drive starts at the start line instead.
+    ed.hover_on = false;
+    CHECK(gs_editor_drive_start(&ed, &t, &sx, &sy, &heading));
+    CHECK(sx == GS_INT(4) && sy == GS_INT(8));
+
+    // And with no route and no cursor there is nowhere sensible to begin.
+    static gs_track bare;
+    gs_flat_pavement(&bare, 8, 8);
+    CHECK(!gs_editor_drive_start(&ed, &bare, &sx, &sy, &heading));
+
+    gs_editor_quit(&ed);
+}
+
+TEST(coming_back_from_a_drive_returns_you_to_where_you_were_building) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 40);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 1024));
+
+    gs_view view = { 0 };
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    view.cam = gs_camera_on(5.0f, 5.0f, 0.0f);
+
+    // First time in, the editor adopts the view - otherwise the world moves out
+    // from under you at the moment you switch.
+    gs_editor_toggle(&ed, &view);
+    CHECK(ed.active);
+    CHECK(ed.cam_x == 5.0f && ed.cam_y == 5.0f);
+
+    // Pan off somewhere to work.
+    ed.cam_x = 28.0f;
+    ed.cam_y = 31.0f;
+
+    // Out for a drive. The car goes a long way, and the race camera follows it.
+    gs_editor_toggle(&ed, &view);
+    CHECK(!ed.active);
+    view.cam = gs_camera_on(36.0f, 2.0f, 0.0f);
+
+    // Back in - and back to the part of the track being built, not to wherever
+    // the car happened to stop. That is what makes it a snap back rather than
+    // a journey home, and it is the difference between a test drive you take
+    // twenty times an hour and one you avoid.
+    gs_editor_toggle(&ed, &view);
+    CHECK(ed.active);
+    CHECK(ed.cam_x == 28.0f);
+    CHECK(ed.cam_y == 31.0f);
+
+    gs_editor_quit(&ed);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -764,6 +873,8 @@ int main(void) {
     run_painting_ice_changes_what_the_car_does_when_it_gets_there(ren);
     run_painting_gravity_changes_how_far_the_car_flies_over_it(ren);
     run_the_gate_brush_places_a_route_where_the_pointer_is(ren);
+    run_a_test_drive_starts_where_you_were_looking_and_changes_nothing(ren);
+    run_coming_back_from_a_drive_returns_you_to_where_you_were_building(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
