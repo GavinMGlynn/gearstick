@@ -1,0 +1,185 @@
+# Threat model
+
+What this system is defending, from whom, and what it deliberately does not
+try to stop. Written down because a defence nobody stated is a defence nobody
+can review, and because the things ruled *out* are decisions rather than
+oversights.
+
+Scope: the client, the server, and the traffic between them. Not the operating
+system, not the machine a server runs on, not the player's own hardware.
+
+---
+
+## The one assumption everything else follows from
+
+**A player owns the machine their game runs on.** Any check that runs there can
+be removed by whoever is running it, and a client that reports its own results
+is a client reporting whatever it likes. So nothing the client says is believed
+because it said it; it is believed when it can be independently reproduced.
+
+This is affordable here for a reason that is not true of most games: **the
+simulation is exactly reproducible**. Fixed-point integers, a committed
+trigonometry table, no floating point anywhere in `src/core/`, and a fixed 120 Hz
+step mean the same inputs produce the same race on every machine, at every
+optimisation level, on every platform CI builds for. A claimed time therefore
+comes with the inputs that produced it, and the server drives them again.
+
+Cheating reduces to *drive that fast*.
+
+---
+
+## Adversaries
+
+| | Who | What they want |
+|---|---|---|
+| **A1** | A player with a modified client | A time, a place, a win |
+| **A2** | A player racing you | To win this race |
+| **A3** | Somebody on the network path | To read, alter or replay traffic |
+| **A4** | Anybody who can reach the server | To break it, or take somebody's work down |
+
+---
+
+## What is defended, and how
+
+### Fabricated times — A1
+
+**Defence: re-race the submission.** `src/net/gs_verify.c` rebuilds the world
+from the replay's own metadata, drives the recorded inputs, and compares the
+result with the claim. A claim better than the recording produces is rejected;
+a claim *worse* is accepted, because being slower than you proved is not a lie.
+The track is the server's copy, fetched by content hash, so a doctored track
+cannot come along with the claim.
+
+Verdicts are specific — wrong track, wrong rules, no such car, never finished,
+lap too good, race too good — so a rejection says what was wrong with it.
+
+**Known gap: a replay is not bound to a driver.** `gs_replay_meta` carries the
+track, the dials, the grid and the machines, and not who was holding the
+controller. An honest replay is therefore a bearer token: anyone who obtains one
+can submit it as their own and the verifier will correctly agree that the time
+was driven. Closing this means the driver's identity travels inside the replay
+and is signed, and the server checks it against the account that submitted it.
+**This is the most serious open item in this document.**
+
+**Known gap: a submission is not bound to a session.** Records are keyed, so
+resubmitting the same replay is idempotent rather than harmful, but that is an
+accident of the schema rather than a defence. A server-chosen nonce in the claim
+makes it deliberate.
+
+### Cheating inside a race — A2
+
+Races are peer to peer with rollback, so every machine simulates everything and
+there is no referee in the loop. Two different problems live here.
+
+**A modified simulation** is already caught: peers exchange state hashes and a
+divergence stops the race rather than being lived with. A client that changes
+how the physics works stops agreeing with everybody else immediately.
+
+**Dishonestly chosen inputs are not.** In rollback each peer receives the others'
+inputs for a tick, and a modified client can wait to see them before deciding its
+own. Nothing about that desyncs, because everyone then simulates the same
+dishonest input faithfully. The standard answer is **commit then reveal**: send
+`H(inputs ‖ salt)` first and the inputs afterwards, so a choice is locked before
+anybody else's is visible. It costs a fixed delay and it closes the class.
+
+**Whole-race verification** is the backstop and is nearly free here: every peer
+keeps the complete input log and the agreed final state hash, and the server can
+re-race the log afterwards. A log that does not produce the hash everybody
+accepted means somebody's client was not running this race.
+
+### Traffic — A3
+
+Today: nothing. Datagrams are plaintext, unauthenticated, and replayable, and a
+source address is whatever the sender wrote.
+
+Planned: `Noise_IK_25519_ChaChaPoly_BLAKE2s` over libsodium. Both halves of that
+sentence are the point. **The pattern is named and specified** rather than
+invented here, so its properties are somebody else's published analysis and not
+this project's opinion; **the primitives are audited and widely deployed** rather
+than written here. A handshake a game programmer designed is the thing a reviewer
+rejects, and the rejection is correct: the failure modes are subtle, and
+confidence without evidence is how they survive to production.
+
+IK rather than NK because the client already holds the server's static key, which
+buys client authentication in the first message and hides the client's identity
+from a passive observer. One cipher suite and no negotiation, so there is nothing
+to be talked down to.
+
+Sealed one datagram at a time, because the racing tolerates loss and reordering
+and anything that recovers a stream turns a dropped packet into a stall. Replay
+protection is therefore an RFC 6479 sliding bitmap — the construction IPsec and
+WireGuard use — and not a counter, because ordinary reordering must be accepted
+while a genuine replay is refused.
+
+Decided deliberately, and to be stated in the transport specification rather than
+discovered by a reader: nonce construction and the message limit before a rekey;
+ephemeral keys per session for forward secrecy; the pattern's known
+key-compromise-impersonation properties; constant-time comparison for everything
+secret; explicit zeroisation, because a compiler may legally delete a `memset`
+on a dying buffer; and a cookie-style reply or rate limit for the handshake,
+since an unauthenticated first message otherwise costs the server a scalar
+multiplication on demand.
+
+The evidence, which matters as much as the design: the framework's published test
+vectors in CI, and **a handshake completed against an independent implementation
+of the same pattern** — the one artefact that does not rest on our own reading of
+our own code.
+
+Until that exists, **an account password would be worthless**, which is why the
+transport work comes first and the accounts work comes second.
+
+### The server itself — A4
+
+The server parses attacker-controlled bytes on every path it has: the protocol
+decoder, the chunked reassembler, and the track and replay deserialisers behind
+them. These are the parts most likely to contain a memory-safety bug and the
+parts a reviewer should look at first.
+
+Current position:
+
+- Every protocol reader validates lengths against the datagram it was given
+  rather than believing a field, and rejects a chunk index outside the declared
+  count.
+- The reassembler bounds every write against the buffer it owns, and refuses a
+  chunk count larger than the array it tracks them in.
+- All SQL is bound parameters; no statement is built by concatenation.
+- Builds run with `-Wconversion` and `-Wsign-conversion` as errors, and the
+  sanitized presets run ASan and UBSan.
+
+Open: **none of these parsers is fuzzed**, and the reassembler's bound on its
+own `have[]` index is sound only because the parser upstream established it.
+Both are cheap to fix and both are listed in `COMPLETION_PLAN.md`.
+
+Also open: a published track can be taken down only by whoever published it, but
+there is no authentication behind "whoever", so today that check is a formality.
+
+---
+
+## Deliberately not defended
+
+- **A player who is simply very good, or a bot that is.** Re-racing proves a time
+  is *achievable*, not that a person achieved it. Detecting superhuman-but-legal
+  driving is heuristics with a poor success rate and a real false-positive cost,
+  and the honest position is the original's: the leaderboard says somebody drove
+  this, and it is true.
+- **Anything on the player's own machine.** Save files, local records and the
+  local library are the player's to edit. They mean nothing to anybody else until
+  they are submitted, and submission is verified.
+- **Denial of service by volume.** A server can be flooded. That is an operations
+  problem — rate limits, a firewall, an upstream — and not something the protocol
+  can solve for itself.
+- **Traffic analysis.** Sealing the contents does not hide that two addresses are
+  exchanging datagrams at 120 Hz.
+
+---
+
+## Order of work, and why
+
+1. **Fuzz the parsers.** Cheapest, and it defends the surface most likely to
+   contain something exploitable today.
+2. **Seal the transport.** Everything about identity is meaningless without it.
+3. **Accounts, and a track's ownership.** Now that identity exists, "only the
+   author may withdraw this" becomes true rather than decorative.
+4. **Bind a replay to its driver.** Closes the bearer-token gap above.
+5. **Commit-then-reveal for race inputs.** Closes the last class that
+   determinism alone does not catch.

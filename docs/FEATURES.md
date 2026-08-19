@@ -217,6 +217,39 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   the simulation is exactly reproducible, and is the strongest argument for
   having built it that way.
 
+- **A recording knows who drove it.** `WANTED`
+  Re-racing proves a time was driven. It does not prove *you* drove it, and a
+  recording that does not name its driver is a thing anybody who obtains one can
+  hand in as their own. The driver belongs inside the recording, and the server
+  checks it against whoever is submitting.
+
+- **The whole race is checked, not just the winner's lap.** `WANTED`
+  Everybody keeps the full input log and the final state hash they all agreed
+  on. Re-racing the log has to produce that hash, or one of the machines in that
+  race was not running this game. Almost free, for the same reason as everything
+  else here.
+
+- **Nobody sees anybody else's inputs before committing their own.** `WANTED`
+  Rollback hands every machine the others' inputs for a tick, which means a
+  modified one can wait and then decide. Nothing desyncs — everybody simulates
+  the dishonest choice faithfully — so the state-hash check that catches a
+  changed *simulation* cannot see it. The answer is to commit to a choice before
+  anybody else's is visible: send a hash of your inputs, then the inputs.
+
+- **The parsers are fuzzed.** `WANTED`
+  Everything the server acts on arrived from somebody who may be hostile. The
+  protocol decoder, the reassembler and the deserialisers behind them are the
+  most likely place in this program for a memory-safety bug, and well-formed
+  input is the only thing they have ever been given.
+
+- **A written specification for the transport, and a written threat model.**
+  `WANTED`
+  What is defended, from whom, what is deliberately not defended, and enough
+  detail that somebody who has not read the code could write a client. Both are
+  deliverables in their own right: a design nobody wrote down cannot be
+  reviewed, and the parts left out are exactly what a reviewer most needs to see
+  were decided rather than missed.
+
 - **A relay for people whose routers will not cooperate.** `WANTED`
   Two players who can reach each other should race each other directly, because
   that is the fastest path and the game is about response. A relay exists for
@@ -245,6 +278,12 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   be altered on the way. The server's key is its identity, pinned the first time
   you meet it the way an SSH host key is; there are no certificates and nothing
   to expire.
+  **Nothing here is invented.** A hand-rolled handshake is the thing that fails
+  review, and it fails it for good reasons. This is a named pattern from a
+  specified framework, built on somebody else's audited primitives, and it is
+  held to that by running the framework's own published test vectors and by
+  talking to an independent implementation of the same pattern. A protocol whose
+  only evidence is that its author believes in it is not evidence.
   **It has to be sealed one datagram at a time**, because the racing tolerates
   loss and reordering and a design that recovers a stream would turn a dropped
   packet into a stall. That also means replay protection is a sliding window

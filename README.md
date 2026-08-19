@@ -36,7 +36,9 @@ Gearstick continues that argument with the things 1985 could not afford:
   message. The 50-track floppy was a media limitation, not a design choice.
 
 What it deliberately does *not* add — slip curves, progression, a chase camera —
-and why, is in [`docs/FEATURES.md`](docs/FEATURES.md). Where the art, sound and
+and why, is in [`docs/FEATURES.md`](docs/FEATURES.md). What is defended, from
+whom, and what is deliberately not defended, is in
+[`docs/THREATS.md`](docs/THREATS.md). Where the art, sound and
 tracks come from, and how each is pinned, is in
 [`docs/ASSETS.md`](docs/ASSETS.md).
 
@@ -205,7 +207,7 @@ cmake/          platform gate, warning set, layer and float checks, SQLite
 tools/          the trig table baker, the vehicle mesh generator
 ext/            pinned submodules - see ext/README.md
 docs/           GUIDE.md, RELEASES.md, FEATURES.md, COMPLETION_PLAN.md,
-                PROJECT_STATUS.md, ASSETS.md
+                PROJECT_STATUS.md, ASSETS.md, THREATS.md
 ```
 
 The layering is enforced at configure time rather than remembered:

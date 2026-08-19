@@ -559,37 +559,6 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       finishes at a measurably different time on every one of them, and no two
       are within a hair of each other — so the set is a menu of behaviours rather
       than a palette.*
-- [ ] **A track has an owner, and the ones that shipped have none.** Whoever
-      built a track can change it, take it down, keep it private, hand it to a
-      named few, or publish it to everybody. The stock tracks are outside all of
-      it and no request can touch them.
-      *Verification: a client that did not build a track cannot edit, withdraw or
-      delete it; a shared track is visible to exactly the profiles it was shared
-      with and to nobody else; and every write path aimed at a track that shipped
-      with the game is refused, including by the profile that happens to be
-      called the same thing as its author.*
-- [ ] **Nothing on the wire in the clear.** Every datagram sealed with
-      ChaCha20-Poly1305 under a key agreed by X25519, from Monocypher as a
-      submodule under `ext/` — two files, public domain, and no certificates
-      because the server's public key *is* its identity, pinned on first meeting.
-      Sealed per datagram, because the racing tolerates loss and reordering and
-      anything that recovers a stream turns a dropped packet into a stall.
-      *Verification: a captured exchange contains none of the plaintext it
-      carried; a datagram with one bit changed is refused rather than acted on; a
-      captured datagram replayed later is refused; and a relayed four-player race
-      still agrees tick for tick with datagrams arriving out of order and one in
-      twenty dropped.*
-- [ ] **A profile you can prove is yours.** A password, and a second factor for
-      anybody who wants one. **This comes after the tunnel and is small because
-      of it**: inside a sealed channel a password can simply be sent, and a
-      one-time code is the arithmetic it should always have been. Before the
-      tunnel it would have needed a challenge-response construction to avoid
-      sending either in the clear.
-      *Verification: a profile with a password cannot be used without it; a
-      one-time code that has been used once does not work a second time inside
-      the window it is still valid for; and a profile with no password set still
-      works, because a racing game that demands an account before anybody can
-      drive has lost the argument.*
 - [ ] **Wreckage that stays.** A destroyed car leaves debris that is real track
       geometry for the rest of the race. *Verification: a car driving the same
       line at the same speed is deflected by the wreck of an earlier one, and is
@@ -634,7 +603,116 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       finished by whoever writes the code** — it needs a person with speakers on
       each platform. *Verification: a human says it sounds right on all three.*
 
-## Phase 14 — Installers
+## Phase 14 — The network, properly
+
+**Everything in this phase is written down in `docs/THREATS.md` first**, which
+says what is being defended, from whom, and what is deliberately not defended at
+all. A defence nobody stated is a defence nobody can review.
+
+The order is not arbitrary and is argued there. Fuzzing comes first because it is
+cheap and it covers the surface most likely to be exploitable *today*. Sealing
+the transport comes next because every notion of identity below it is meaningless
+without one — a password on a plaintext protocol is not a password. Accounts
+follow, and only then do the things that depend on knowing who somebody is.
+
+**Nothing in this phase is invented here.** The pattern is named and specified,
+the primitives are audited and widely deployed, and the evidence is conformance
+vectors plus a handshake completed against an independent implementation. A
+protocol whose only support is its author's confidence is the thing that fails
+review, and it fails it for good reasons.
+
+- [ ] **The parsers are fuzzed.** Every byte the server acts on came from
+      somebody who may be hostile: the protocol decoder, the chunked
+      reassembler, and the track and replay deserialisers behind them. They are
+      the part of this program most likely to contain a memory-safety bug and
+      they have never been fed anything but well-formed input.
+      *Verification: a libFuzzer target per parser, each seeded from real
+      captures, run in CI and under ASan and UBSan; and the reassembler bounds
+      its own array index rather than inheriting the bound from a check in
+      another file.*
+- [ ] **Nothing on the wire in the clear.** `Noise_IK_25519_ChaChaPoly_BLAKE2s`
+      over libsodium as a submodule under `ext/`. A **named pattern from a
+      specified, analysed framework** on **somebody else's audited primitives** —
+      because a handshake this project invented is the thing that fails a review,
+      and deservedly. IK rather than NK: the client already knows the server's
+      key, so one round trip gets server authentication, client authentication
+      and a client identity a passive observer cannot read. One cipher suite and
+      no negotiation, because a protocol that cannot negotiate cannot be talked
+      down. See `docs/THREATS.md`.
+      *Verification, and it is the verification that makes this reviewable:*
+      *(a)* the framework's published test vectors pass, in CI;
+      *(b)* **the handshake completes against an independent implementation of
+      the same pattern**, which is the one piece of evidence that does not rest
+      on our own opinion of our own code;
+      *(c)* a captured exchange contains none of the plaintext it carried, and a
+      datagram with a single bit changed is refused rather than acted on;
+      *(d)* a captured datagram replayed later is refused, while a datagram that
+      merely arrives out of order inside the window is accepted — the two are
+      different and a naive counter fails the second;
+      *(e)* a relayed four-player race still agrees tick for tick with one
+      datagram in twenty dropped and the rest reordered;
+      *(f)* the handshake and the framing are fuzzed under ASan and UBSan.
+- [ ] **The transport has a written specification.** Message formats, the state
+      machine, the key schedule, the message limit before a rekey, and the
+      properties claimed **and explicitly not claimed**. A design nobody wrote
+      down cannot be reviewed, and the parts left out are what a reviewer most
+      needs to see were decisions.
+      *Verification: somebody who has not read the code can implement a client
+      from the document alone and complete a handshake.*
+- [ ] **A profile you can prove is yours.** A password, and a second factor for
+      anybody who wants one. **This comes after the tunnel and is small because
+      of it**: inside a sealed channel a password can simply be sent, and a
+      one-time code is the arithmetic it should always have been. Before the
+      tunnel it would have needed a challenge-response construction to avoid
+      sending either in the clear.
+      *Verification: a profile with a password cannot be used without it; a
+      one-time code that has been used once does not work a second time inside
+      the window it is still valid for; and a profile with no password set still
+      works, because a racing game that demands an account before anybody can
+      drive has lost the argument.*
+- [ ] **A track has an owner, and the ones that shipped have none.** Whoever
+      built a track can change it, take it down, keep it private, hand it to a
+      named few, or publish it to everybody. The stock tracks are outside all of
+      it and no request can touch them.
+      *Verification: a client that did not build a track cannot edit, withdraw or
+      delete it; a shared track is visible to exactly the profiles it was shared
+      with and to nobody else; and every write path aimed at a track that shipped
+      with the game is refused, including by the profile that happens to be
+      called the same thing as its author.*
+- [ ] **A replay says who drove it, and cannot be submitted by anybody else.**
+      A recording carries the track, the dials, the grid and the machines, and
+      not the driver — so an honest replay is a bearer token, and whoever obtains
+      one can submit it as their own with the verifier correctly agreeing the
+      time was driven. **The most serious open hole in `docs/THREATS.md`.**
+      *Verification: a replay recorded by one profile and submitted by another is
+      refused; the same replay submitted twice sets one record, not two.*
+- [ ] **A race commits to its inputs before it sees anybody else's.** Rollback
+      hands every peer the others' inputs for a tick, so a modified client can
+      wait and choose. Nothing desyncs, because everybody then simulates the
+      dishonest input faithfully — state hashes catch a changed simulation and
+      not a changed decision. Each peer sends a hash of its inputs first and the
+      inputs afterwards.
+      *Verification: a peer that reveals inputs which do not match what it
+      committed to is caught and the race stops; and a four-player rollback race
+      with the commitment in place still agrees tick for tick.*
+- [ ] **A submission is bound to the session that asked for it.** Records are
+      keyed, so resubmitting the same replay sets one record rather than two —
+      but that is a property of the schema rather than a defence, and a thing
+      that is safe by accident stops being safe when the schema changes. A
+      server-chosen nonce inside the claim makes it deliberate.
+      *Verification: a claim carrying a nonce the server did not issue, or one it
+      issued to somebody else, or one it has already retired, is refused.*
+- [ ] **The whole race is verified, not just the winning lap.** Every peer keeps
+      the complete input log and the final state hash everybody agreed on. The
+      server re-races the log; a log that does not produce that hash means one of
+      the clients was not running this race. Nearly free, because the simulation
+      is exactly reproducible — which is the argument for having built it that
+      way, collected.
+      *Verification: a race in which one peer's recorded inputs are altered by a
+      single bit afterwards fails the check, and an honest four-player race
+      passes it.*
+
+## Phase 15 — Installers
 
 The releases are archives you unpack. On Linux that is normal and on macOS the
 disk image is the convention, but on Windows an application people actually
