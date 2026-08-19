@@ -23,6 +23,8 @@
 // Four, because four-player split-screen is on the plan and a state size that
 // changes when it arrives would change every replay ever recorded.
 #define GS_MAX_CARS 4
+static_assert(GS_MAX_CARS == GS_TRACK_GRID,
+              "the starting grid lines up one car per player");
 
 // One byte of input per car per tick: eight directions and a button, as the
 // original had. Small state is what makes rollback and replay sharing cheap,
@@ -189,6 +191,13 @@ uint64_t gs_world_hash(const gs_world *w);
 // 1.3 tiles long because an honest 2.7 m car reads as a speck; if collision used
 // the honest figure, cars would pass through each other while visibly touching.
 #define GS_CAR_RADIUS GS_RATIO(52, 100)
+
+// **The steepest ground a car will drive up, as a gradient.** About fifty
+// degrees: steeper than any road and shallower than anything anyone would call
+// a wall. Ground beyond it stops a car rather than launching it. Out here in the
+// header because the track generator has to build under the same limit, and a
+// limit written down twice is a limit that will disagree with itself.
+#define GS_MAX_CLIMB GS_RATIO(120, 100)
 
 // Drop a hazard at a car's position, if it is allowed to. Returns whether one
 // was left behind.

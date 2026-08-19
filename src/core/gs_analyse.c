@@ -2,6 +2,36 @@
 
 #include "core/gs_analyse.h"
 
+// A pace slow enough that a car failing to keep it has been stopped by the
+// track rather than merely slowed by it. Cars cruise at four or five tiles a
+// second on the flat; two is what is left after the climbs, the lightest gravity
+// on the dial and an AI that is not trying to be quick.
+#define GS_ANALYSIS_PACE GS_INT(2)
+
+// A floor and a ceiling. The floor gives a very short track a fair go at the
+// heavy end of the gravity dial, where everything is slow; the ceiling stops one
+// enormous route from turning a fifty-track sweep into a coffee break.
+#define GS_ANALYSIS_MIN_SECONDS 20u
+#define GS_ANALYSIS_MAX_SECONDS 90u
+
+uint32_t gs_analyse_seconds(const gs_track *t) {
+    if (t->gate_count == 0) return GS_ANALYSIS_MIN_SECONDS;
+
+    // The whole lap, closing back to the first gate, plus the run from the grid
+    // up to the line.
+    gs_fix len = GS_INT(3);
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        const gs_gate *a = &t->gate[i];
+        const gs_gate *b = &t->gate[(i + 1u) % t->gate_count];
+        len += gs_fix_len2(b->x - a->x, b->y - a->y);
+    }
+
+    uint32_t seconds = (uint32_t)(gs_fix_div(len, GS_ANALYSIS_PACE) / GS_ONE);
+    if (seconds < GS_ANALYSIS_MIN_SECONDS) seconds = GS_ANALYSIS_MIN_SECONDS;
+    if (seconds > GS_ANALYSIS_MAX_SECONDS) seconds = GS_ANALYSIS_MAX_SECONDS;
+    return seconds;
+}
+
 void gs_analyse(const gs_track *t, uint32_t seconds, gs_analysis *out) {
     for (size_t i = 0; i < GS_TRACK_TILES; i++) out->visits[i] = 0;
     out->completable = false;
@@ -19,7 +49,11 @@ void gs_analyse(const gs_track *t, uint32_t seconds, gs_analysis *out) {
             gs_world w;
             gs_world_init(&w, gravity);
             if (t->gate_count == 0) continue;
-            gs_world_add_car(&w, t, v, t->gate[0].x, t->gate[0].y, t->gate[0].heading);
+
+            gs_fix sx, sy;
+            gs_angle facing;
+            gs_track_grid(t, 0, &sx, &sy, &facing);
+            gs_world_add_car(&w, t, v, sx, sy, facing);
 
             for (uint32_t i = 0; i < GS_TICK_HZ * seconds; i++) {
                 gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, t, 0), 0, 0, 0 };
@@ -35,6 +69,13 @@ void gs_analyse(const gs_track *t, uint32_t seconds, gs_analysis *out) {
                     if (out->visits[at] < UINT16_MAX) out->visits[at]++;
                     if (out->visits[at] > out->busiest) out->busiest = out->visits[at];
                 }
+
+                // Done at the flag, not at the end of the time allowed. A car
+                // that has finished its lap and is still driving is milling
+                // about, and the tile it happens to mill on collects more
+                // visits than any part of the route - which paints the busiest
+                // corner bright and the line everybody drove invisible.
+                if (w.car[0].laps > 0) break;
             }
 
             if (w.car[0].laps > 0) out->completed[step]++;

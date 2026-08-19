@@ -221,8 +221,9 @@ static void gs_start_race(gs_app *a) {
         }
     } else if (a->skip_menu) {
         for (uint8_t i = 0; i < players; i++) {
-            gs_world_add_car(&a->world, &a->t, grid[i],
-                             GS_INT(3), GS_INT(7) + GS_INT(4) * i, 0);
+            gs_fix sx, sy; gs_angle facing;
+            gs_track_grid(&a->t, i, &sx, &sy, &facing);
+            gs_world_add_car(&a->world, &a->t, grid[i], sx, sy, facing);
         }
     } else {
         // From the setup screen: the dials, the machines and the paint. The
@@ -234,8 +235,9 @@ static void gs_start_race(gs_app *a) {
         gs_world_set_laps(&a->world, set->mode == (uint8_t)GS_MODE_RACE ? set->laps : 0);
 
         for (uint8_t i = 0; i < set->players && i < GS_MAX_CARS; i++) {
-            gs_world_add_car(&a->world, &a->t, set->vehicle[i],
-                             GS_INT(3), GS_INT(7) + GS_INT(4) * i, 0);
+            gs_fix sx, sy; gs_angle facing;
+            gs_track_grid(&a->t, i, &sx, &sy, &facing);
+            gs_world_add_car(&a->world, &a->t, set->vehicle[i], sx, sy, facing);
             gs_render_set_car_paint(i, set->colour[i]);
         }
         players = set->players;
@@ -575,7 +577,19 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         }
     }
 
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+    // **Audio is in here or there is no sound.** SDL_OpenAudioDeviceStream needs
+    // the subsystem up; without it every open fails with "Audio subsystem is not
+    // initialized", gs_audio_open takes its no-device path, and the game races
+    // in silence on every machine there is - which is exactly what it did until
+    // somebody looked at why a wav capture could not be raced.
+    //
+    // Not asked for when capturing a wav: that path renders the mixer straight
+    // to a file from this thread, so a subsystem would only add a callback
+    // thread rendering the same mixer into a speaker at the same time.
+    SDL_InitFlags subsystems = SDL_INIT_VIDEO | SDL_INIT_GAMEPAD;
+    if (a->audio_out == nullptr) subsystems |= SDL_INIT_AUDIO;
+
+    if (!SDL_Init(subsystems)) {
         SDL_Log("SDL_Init: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
@@ -699,7 +713,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // Silence is not an error: a machine with no sound device races exactly the
     // same race, because nothing downstream of the simulation can reach back
     // into it.
-    gs_audio_open();
+    //
+    // **Capturing a wav opens nothing.** The capture renders from this thread,
+    // and a device thread rendering the same mixer alongside it would put half
+    // of every buffer in the speaker and the other half in the file. What comes
+    // out of --wav has to be what would come out of the speaker, or it is not
+    // worth listening to.
+    if (a->audio_out != nullptr) {
+        gs_audio_open_silent();
+    } else {
+        gs_audio_open();
+    }
 
     // **The track's own hash is the seed.** A track already carries an identity;
     // handing it to the composer means every track has its own tune, and

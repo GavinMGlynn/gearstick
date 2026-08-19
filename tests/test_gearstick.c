@@ -19,6 +19,7 @@
 #include "core/gs_analyse.h"
 #include "core/gs_clock.h"
 #include "core/gs_edit.h"
+#include "core/gs_generate.h"
 #include "core/gs_ghost.h"
 #include "core/gs_library.h"
 #include "core/gs_net.h"
@@ -2079,6 +2080,38 @@ TEST(the_analyser_says_so_when_a_track_cannot_be_got_round_at_all) {
     CHECK(!gs_report.completable);
 }
 
+TEST(a_longer_route_is_given_longer_to_get_round) {
+    // A constant here reported big tracks impossible: the same twenty seconds
+    // that is generous on a forty tile sprint runs out halfway along a fifty
+    // two tile out-and-back, and the verdict then describes the clock rather
+    // than the track.
+    static gs_track small, big;
+
+    gs_track_init(&small, 24, 16, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&small, GS_INT(4), GS_INT(8), 0, GS_INT(4));
+    gs_track_add_gate(&small, GS_INT(20), GS_INT(8), 0, GS_INT(4));
+
+    gs_track_init(&big, 64, 48, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&big, GS_INT(4), GS_INT(24), 0, GS_INT(4));
+    gs_track_add_gate(&big, GS_INT(60), GS_INT(24), 0, GS_INT(4));
+
+    CHECK(gs_analyse_seconds(&big) > gs_analyse_seconds(&small));
+
+    // Floor and ceiling: a tiny track still gets a fair go, and no single track
+    // can turn a fifty track sweep into a coffee break.
+    CHECK(gs_analyse_seconds(&small) >= 20);
+    CHECK(gs_analyse_seconds(&big) <= 90);
+
+    // A track with no route at all still answers rather than dividing by it.
+    static gs_track bare;
+    gs_track_init(&bare, 32, 32, GS_SURF_PAVEMENT);
+    CHECK(gs_analyse_seconds(&bare) >= 20);
+
+    // And the number is what it is for: the big track can be got round.
+    gs_analyse(&big, gs_analyse_seconds(&big), &gs_report);
+    CHECK(gs_report.completable);
+}
+
 TEST(the_heatmap_shows_where_everybody_actually_went) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_PAVEMENT);
@@ -3905,6 +3938,151 @@ TEST(a_wrecked_car_stops_moving) {
     CHECK(w.car[0].x == x);
 }
 
+
+// ---------------------------------------------------------------------------
+// The track generator
+// ---------------------------------------------------------------------------
+
+static gs_track gs_gen_a;
+static gs_track gs_gen_b;
+static gs_analysis gs_gen_look;
+static gs_fix slot_x[GS_TRACK_GRID];
+static gs_fix slot_y[GS_TRACK_GRID];
+
+TEST(a_seed_always_generates_the_same_track) {
+    // The seed is the track's name as far as sharing is concerned: two people
+    // with the same number have to be driving the same ground, or a generated
+    // track cannot be recommended, recorded against or raced on together.
+    gs_generate(&gs_gen_a, 12345);
+    gs_generate(&gs_gen_b, 12345);
+    CHECK(gs_track_hash(&gs_gen_a) == gs_track_hash(&gs_gen_b));
+
+    gs_generate(&gs_gen_b, 12346);
+    CHECK(gs_track_hash(&gs_gen_a) != gs_track_hash(&gs_gen_b));
+}
+
+TEST(a_seed_always_generates_the_same_name) {
+    char one[32], two[32];
+    gs_generate_name(one, sizeof one, 999);
+    gs_generate_name(two, sizeof two, 999);
+    CHECK(strcmp(one, two) == 0);
+    CHECK(strlen(one) > 2);
+
+    gs_generate_name(two, sizeof two, 1000);
+    CHECK(strcmp(one, two) != 0);
+}
+
+TEST(every_generated_track_has_terrain_on_it) {
+    // A generator that rolled a zero height would produce a flat field, which
+    // is completable, differently hashed from its neighbours and worthless.
+    for (uint32_t seed = 1; seed <= 24; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+
+        bool raised = false;
+        for (uint8_t y = 0; y <= gs_gen_a.h && !raised; y++) {
+            for (uint8_t x = 0; x <= gs_gen_a.w; x++) {
+                if (gs_track_corner_at(&gs_gen_a, x, y) != 0) { raised = true; break; }
+            }
+        }
+        CHECK(raised);
+    }
+}
+
+TEST(no_generated_slope_is_steeper_than_a_car_can_climb) {
+    // gs_sim.c stops a car on ground steeper than GS_MAX_CLIMB, so a generator
+    // that picks a height and a ramp independently eventually builds a wall.
+    // The ramps are derived from the heights precisely so this holds.
+    for (uint32_t seed = 1; seed <= 24; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+
+        for (uint8_t y = 0; y <= gs_gen_a.h; y++) {
+            for (uint8_t x = 1; x <= gs_gen_a.w; x++) {
+                gs_fix step = gs_track_corner_at(&gs_gen_a, x, y) -
+                              gs_track_corner_at(&gs_gen_a, (uint8_t)(x - 1), y);
+                CHECK(gs_fix_abs(step) < GS_MAX_CLIMB);
+            }
+        }
+    }
+}
+
+TEST(a_generated_track_leaves_clear_ground_to_get_up_to_speed_on) {
+    // A car starts still. Ground that rises within a few tiles of the start
+    // line is arrived at too slowly to climb, and the track is then unfinishable
+    // for a reason that has nothing to do with how it was shaped.
+    for (uint32_t seed = 1; seed <= 24; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+        CHECK(gs_gen_a.gate_count >= 2);
+        if (gs_gen_a.gate_count < 2) continue;
+
+        uint8_t row = (uint8_t)gs_fix_floor(gs_gen_a.gate[0].y);
+        uint8_t from = (uint8_t)gs_fix_floor(gs_gen_a.gate[0].x);
+        gs_fix at_the_line = gs_track_corner_at(&gs_gen_a, from, row);
+
+        for (uint8_t x = from; x < from + 8 && x <= gs_gen_a.w; x++) {
+            CHECK(gs_track_corner_at(&gs_gen_a, x, row) == at_the_line);
+        }
+    }
+}
+
+TEST(every_generated_track_can_be_got_round) {
+    // **The fact the generator exists to keep.** A track nobody can finish goes
+    // into the library exactly like one they can, and somebody picks it. Checked
+    // by racing them rather than by looking at them; `gearstick_cli generate 50`
+    // is the same sweep over a wider net.
+    for (uint32_t seed = 1; seed <= 12; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+        CHECK(gs_track_validate(&gs_gen_a).problem == GS_TRACK_OK);
+        gs_analyse(&gs_gen_a, gs_analyse_seconds(&gs_gen_a), &gs_gen_look);
+        CHECK(gs_gen_look.completable);
+    }
+}
+
+TEST(every_car_lines_up_behind_the_line_it_has_to_cross) {
+    // The analyser used to put its car *on* the start line, which left it with
+    // its own position to aim at and no reason to go anywhere; whether it
+    // recovered depended on how much room it had to wander, so driveable tracks
+    // came back impossible. A grid is behind the line, and driving forward off
+    // it crosses the line - which is what starting a lap means.
+    static gs_track t;
+    static const gs_angle facings[4] = { 0, GS_DEG(90), GS_DEG(215), GS_DEG(300) };
+
+    for (int f = 0; f < 4; f++) {
+        gs_track_init(&t, 48, 32, GS_SURF_PAVEMENT);
+        gs_track_add_gate(&t, GS_INT(24), GS_INT(16), facings[f], GS_INT(5));
+        gs_track_add_gate(&t, GS_INT(40), GS_INT(28), facings[f], GS_INT(5));
+
+        gs_fix fx = gs_cos(facings[f]), fy = gs_sin(facings[f]);
+
+        for (uint8_t slot = 0; slot < GS_TRACK_GRID; slot++) {
+            gs_fix x, y; gs_angle heading;
+            gs_track_grid(&t, slot, &slot_x[slot], &slot_y[slot], &heading);
+            x = slot_x[slot]; y = slot_y[slot];
+
+            // Behind the line, facing the way the route runs through it.
+            CHECK(heading == facings[f]);
+            CHECK(gs_fix_mul(x - t.gate[0].x, fx) +
+                  gs_fix_mul(y - t.gate[0].y, fy) < 0);
+
+            // On the track, not off the edge of it.
+            CHECK(x > 0 && x < GS_INT(t.w));
+            CHECK(y > 0 && y < GS_INT(t.h));
+
+            // **And driving straight ahead crosses the line**, which is the
+            // whole point of being behind it.
+            CHECK(gs_gate_crossed(&t.gate[0], x, y,
+                                  x + gs_fix_mul(fx, GS_INT(6)),
+                                  y + gs_fix_mul(fy, GS_INT(6))));
+        }
+
+        // Abreast rather than in a queue: no two cars share a place.
+        for (uint8_t a = 0; a < GS_TRACK_GRID; a++) {
+            for (uint8_t b = (uint8_t)(a + 1); b < GS_TRACK_GRID; b++) {
+                CHECK(slot_x[a] != slot_x[b] || slot_y[a] != slot_y[b]);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -3979,6 +4157,7 @@ int main(void) {
     run_an_ai_race_is_deterministic_like_every_other_race();
     run_the_analyser_calls_a_jump_nobody_can_clear_impossible();
     run_the_analyser_says_so_when_a_track_cannot_be_got_round_at_all();
+    run_a_longer_route_is_given_longer_to_get_round();
     run_the_heatmap_shows_where_everybody_actually_went();
     run_three_tracks_are_kept_and_all_three_survive_a_restart();
     run_editing_one_track_leaves_the_others_alone();
@@ -4019,6 +4198,13 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_a_seed_always_generates_the_same_track();
+    run_a_seed_always_generates_the_same_name();
+    run_every_generated_track_has_terrain_on_it();
+    run_no_generated_slope_is_steeper_than_a_car_can_climb();
+    run_a_generated_track_leaves_clear_ground_to_get_up_to_speed_on();
+    run_every_generated_track_can_be_got_round();
+    run_every_car_lines_up_behind_the_line_it_has_to_cross();
 
     if (gs_failures == 0) {
         printf("all tests passed\n");

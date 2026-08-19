@@ -45,4 +45,15 @@
 // this number failing is for. See docs/PROJECT_STATUS.md.
 #define GS_SELFTEST_WORLD_HASH 0x38f969eb07c8e74aULL
 
+// The track generator, folded over its first two hundred seeds.
+//
+// **A generated track is identified by its seed**, so two people typing the same
+// number have to get the same ground - across compilers and across platforms,
+// exactly like the physics. This number caught the reason it needs to exist: two
+// RNG draws sitting in one argument list are two draws in an order C does not
+// define, and gcc and clang chose differently. Changing the generator's output
+// deliberately means moving this number and saying so; changing it by accident
+// means somebody's shared seed no longer names the track they meant.
+#define GS_SELFTEST_GENERATOR_HASH 0x82a752b422e39812ULL
+
 #endif // GS_GOLDEN_H

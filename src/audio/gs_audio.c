@@ -212,15 +212,27 @@ static void SDLCALL gs_audio_callback(void *userdata, SDL_AudioStream *stream,
 
 // --- Opening and closing ----------------------------------------------------
 
-bool gs_audio_open(void) {
-    if (gs_a.open) return true;
-
+// The state the mixer starts from, whether or not anything is going to play it.
+static void gs_audio_reset(void) {
     gs_a.noise = 0x13579bdfu;
     gs_a.volume = 0.8f;
     gs_a.master_want = 1.0f;
     gs_a.master = 0.0f;
 
     gs_a.lock = SDL_CreateMutex();
+}
+
+void gs_audio_open_silent(void) {
+    if (gs_a.open) return;
+    gs_audio_reset();
+    gs_a.stream = nullptr;
+    gs_a.open = true;
+}
+
+bool gs_audio_open(void) {
+    if (gs_a.open) return true;
+
+    gs_audio_reset();
 
     SDL_AudioSpec want = { SDL_AUDIO_F32, GS_AUDIO_CHANNELS, GS_AUDIO_RATE };
     gs_a.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,

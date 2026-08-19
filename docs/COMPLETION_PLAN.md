@@ -505,12 +505,15 @@ hard-coded demo track that has been sitting in the frontend since Phase 3.
 - [x] **Publish a track to a server, and take one down again.** *Verification: a
       track published from one client is browsable and playable from another,
       and disappears from it when withdrawn.*
-- [ ] **A generator that fills the library with tracks worth driving.** Seeded,
+- [x] **A generator that fills the library with tracks worth driving.** Seeded,
       so a track is reproducible from a number, and varied enough to be worth
       having — circuits, point-to-points, jumps, mixed surfaces, painted
       gravity. **These are ours**, so they ship, unlike anything imported.
-      *Verification: fifty generated tracks are all completable and all
-      different, checked by the analyser rather than by looking.*
+      *Verification: `gearstick_cli generate 50` races every one of them and
+      reports fifty completable and fifty different — two hundred also pass. A
+      seed gives the same track under gcc and clang alike, which it did not
+      before: two random draws in one argument list are drawn in whichever order
+      the compiler likes, and the two compilers disagreed.*
 - [ ] **A shipped set of stock tracks, chosen from the generator's output.**
       *Verification: a fresh install has a dozen tracks to race, each one
       completable at Earth gravity in every vehicle that should manage it.*
@@ -652,3 +655,18 @@ worth as much as what was decided about it.
       right, but "refuses to load" means somebody's history is quietly gone the
       first time the format changes. It needs an upgrade path before there is a
       format worth upgrading from.
+
+- [x] **The game never asked SDL for sound, so it never made any.** *(Found and
+      closed while building the generator.)* `SDL_Init` was given video and
+      gamepads and not audio, so every attempt to open a device failed with
+      "Audio subsystem is not initialized", the mixer took its no-device path,
+      and the game raced in silence on every machine there has ever been. The
+      synthesiser and the music were fine and thoroughly tested; nothing was
+      ever connected to a speaker. Found by asking why a captured `.wav` could
+      not be made to race against the sound card.
+- [x] **The audio tests passed about five times out of six.** *(Found and closed
+      alongside the above.)* They opened SDL's dummy audio driver, which is
+      still a driver and still runs a callback thread; that thread mixed the
+      music while the test measured it, so "the same seed is the same music"
+      came out true or false depending on when the callback fired. Tests now
+      open no device at all.

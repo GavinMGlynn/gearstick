@@ -111,7 +111,7 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
           SDL_RENDER_DRIVER: software
-          SDL_AUDIODRIVER: dummy
+          SDL_AUDIO_DRIVER: dummy
         run: |
           mkdir -p /tmp/unpacked
           tar xzf build/gearstick-*-linux-*.tar.gz -C /tmp/unpacked
@@ -130,7 +130,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD/build:/pkg:ro" \
             -e SDL_VIDEODRIVER=dummy -e SDL_RENDER_DRIVER=software \
-            -e SDL_AUDIODRIVER=dummy \
+            -e SDL_AUDIO_DRIVER=dummy \
             debian:12-slim bash -c '
               set -e
               for t in gcc cc cmake ninja make; do
@@ -179,7 +179,7 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
           SDL_RENDER_DRIVER: software
-          SDL_AUDIODRIVER: dummy
+          SDL_AUDIO_DRIVER: dummy
         run: |
           mkdir -p /tmp/unpacked
           tar xzf build/macos-release/gearstick-*-macos-*.tar.gz -C /tmp/unpacked
@@ -234,7 +234,7 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
           SDL_RENDER_DRIVER: software
-          SDL_AUDIODRIVER: dummy
+          SDL_AUDIO_DRIVER: dummy
         run: |
           $zip = Get-ChildItem build\windows-release\gearstick-*.zip | Select-Object -First 1
           New-Item -ItemType Directory -Force -Path C:\unpacked | Out-Null

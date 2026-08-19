@@ -33,6 +33,17 @@
 // Open the device. False if there is not one, which is not an error worth
 // stopping for - the game is playable in silence.
 bool gs_audio_open(void);
+
+// **The synthesiser without a device behind it.** Everything renders exactly as
+// it would with one; nothing is playing it, and no callback thread is pulling on
+// the mixer.
+//
+// This is what a test needs. SDL's dummy driver is still a driver: it runs a
+// callback thread on a timer, that thread mixes the music, and a test measuring
+// the music from its own thread then gets a different answer depending on
+// whether the callback fired between two renders - which is a test that passes
+// most of the time, and a green tick that is not evidence.
+void gs_audio_open_silent(void);
 void gs_audio_close(void);
 bool gs_audio_active(void);
 

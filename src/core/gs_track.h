@@ -127,8 +127,19 @@ gs_surface gs_track_surface(const gs_track *t, gs_fix x, gs_fix y);
 gs_fix gs_track_gravity(const gs_track *t, gs_fix x, gs_fix y);
 
 void gs_track_set_corner(gs_track *t, uint8_t x, uint8_t y, gs_fix height);
+
+// What a corner is now. The lattice is public, but reaching into it to read one
+// value means every caller repeats the stride and the units - and the units are
+// the part that is easy to get wrong, because storage is 1/256 tile and
+// everything else is Q16.16.
+gs_fix gs_track_corner_at(const gs_track *t, uint8_t x, uint8_t y);
 void gs_track_set_surface(gs_track *t, uint8_t x, uint8_t y, gs_surface s);
 void gs_track_set_gravity(gs_track *t, uint8_t x, uint8_t y, gs_fix multiplier);
+
+// How many cars the starting grid lines up. The same number as GS_MAX_CARS,
+// stated here because the route belongs to the track and the track does not know
+// about the simulation; gs_sim.h asserts the two agree.
+#define GS_TRACK_GRID 4
 
 // Append a gate to the route. Returns its index, or -1 if the route is full.
 int gs_track_add_gate(gs_track *t, gs_fix x, gs_fix y, gs_angle heading, gs_fix half_width);
@@ -143,6 +154,22 @@ bool gs_track_remove_gate(gs_track *t, uint8_t index);
 // is finite: passing the plane beyond the gate's width misses it, which is what
 // makes a gate a gate rather than an infinite tripwire across the world.
 bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny);
+
+// **Where a car waits for the flag.** Behind the start line, abreast across it,
+// facing the way the route runs through it - so the first thing a car does is
+// cross the line it has to cross, at whatever speed it managed on the way.
+//
+// One definition, used by the race and by the analyser both, because the two
+// disagreeing is the analyser reporting on a race nobody drove. Starting *on*
+// the line instead leaves a car with its own position to aim at and no reason to
+// go anywhere, and whether it recovers depends on how much room it has to
+// wander: driveable tracks then come back impossible.
+//
+// `slot` is the car's place on the grid, 0 to GS_MAX_CARS - 1, spread across the
+// gate's width. Out-of-range slots are clamped, and a track with no route puts
+// everybody in the middle of it.
+void gs_track_grid(const gs_track *t, uint8_t slot,
+                   gs_fix *x, gs_fix *y, gs_angle *heading);
 
 // --- validation -----------------------------------------------------------
 //

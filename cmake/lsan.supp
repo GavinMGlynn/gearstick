@@ -1,0 +1,18 @@
+# Leaks LeakSanitizer finds inside vendored code, and nowhere else.
+#
+# ext/ is not this project's code and is not held to this project's rules - see
+# CLAUDE.md, which says the same thing about the warning set. A suppression here
+# is a statement that the leak is SDL's to fix, not an excuse for one of ours:
+# every entry names the vendored function it starts in, so a leak that merely
+# passes through SDL on its way out of gearstick still reports.
+#
+# Use it with:  LSAN_OPTIONS=suppressions=cmake/lsan.supp
+# The sanitized presets set it for ctest already.
+
+# SDL keeps a per-thread error buffer, allocated the first time a thread calls
+# SDL_SetError and freed when SDL cleans that thread up. Threads created inside
+# an audio backend - PulseAudio's callback thread is the one that shows up here -
+# are not threads SDL created, so it never gets to free theirs. Two allocations,
+# once per process, and gone when the process is.
+leak:SDL_GetErrBuf
+leak:AddPulseAudioDevice

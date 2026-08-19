@@ -47,3 +47,18 @@ function(gs_configure target)
         target_link_options(${target} PRIVATE -fsanitize=address,undefined)
     endif()
 endfunction()
+
+# The suppressions LeakSanitizer needs to be useful, as an environment setting.
+#
+# Without it a sanitized run of anything that opens an audio device reports two
+# allocations inside SDL's PulseAudio backend, and a report that is noisy on a
+# clean tree is a report nobody reads. See cmake/lsan.supp for what is in it and
+# why each entry is somebody else's leak.
+function(gs_sanitizer_env out)
+    if(GEARSTICK_ASAN AND NOT MSVC)
+        set(${out} "LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/cmake/lsan.supp"
+            PARENT_SCOPE)
+    else()
+        set(${out} "" PARENT_SCOPE)
+    endif()
+endfunction()

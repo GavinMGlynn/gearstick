@@ -66,6 +66,7 @@ gs_check_layering()
 add_library(gearstick_sim STATIC
     src/core/gs_ai.c
     src/core/gs_analyse.c
+    src/core/gs_generate.c
     src/core/gs_ghost.c
     src/core/gs_library.c
     src/core/gs_net.c
@@ -425,14 +426,17 @@ if(GEARSTICK_TESTS)
     gs_configure(gearstick_audio_tests)
 
     add_test(NAME gearstick_audio COMMAND gearstick_audio_tests)
-    set_tests_properties(gearstick_audio PROPERTIES
-        ENVIRONMENT "SDL_AUDIODRIVER=dummy" TIMEOUT 120)
+    # No driver named at all: these tests open no device, because a callback
+    # thread pulling on the mixer makes what they measure depend on when it
+    # fired. See gs_audio_open_silent.
+    set_tests_properties(gearstick_audio PROPERTIES TIMEOUT 120)
 
     add_test(NAME gearstick_render COMMAND gearstick_render_tests)
     # No display, no audio device, no pads - and the software renderer, so the
     # pixels are the same ones on every platform's CI.
+    gs_sanitizer_env(_lsan)
     set_tests_properties(gearstick_render PROPERTIES
-        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIODRIVER=dummy"
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIO_DRIVER=dummy;${_lsan}"
         TIMEOUT 180)
 
     # A track through a real file, not just a buffer: the format is what a

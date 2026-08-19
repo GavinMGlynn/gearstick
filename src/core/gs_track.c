@@ -87,6 +87,43 @@ bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix n
     return gs_fix_abs(lateral) <= g->half_width;
 }
 
+// How far back the grid sits from the line. Three tiles: enough that a car has
+// crossed properly rather than been placed astride the plane, and little enough
+// that the run-up to the first corner is the track's business and not this
+// function's.
+#define GS_GRID_BACK GS_INT(3)
+
+void gs_track_grid(const gs_track *t, uint8_t slot,
+                   gs_fix *x, gs_fix *y, gs_angle *heading) {
+    if (t->gate_count == 0) {
+        *x = GS_INT(t->w) / 2;
+        *y = GS_INT(t->h) / 2;
+        *heading = 0;
+        return;
+    }
+
+    const gs_gate *g = &t->gate[0];
+    if (slot >= GS_TRACK_GRID) slot = GS_TRACK_GRID - 1;
+
+    gs_fix fx = gs_cos(g->heading);
+    gs_fix fy = gs_sin(g->heading);
+
+    // Evenly across the gate rather than from one edge, so the grid is centred
+    // on the line whatever the field size.
+    gs_fix across = gs_fix_mul(g->half_width,
+                               (gs_fix)(((int64_t)(2 * slot + 1) - GS_TRACK_GRID) *
+                                        GS_ONE / GS_TRACK_GRID));
+
+    *x = g->x - gs_fix_mul(fx, GS_GRID_BACK) - gs_fix_mul(fy, across);
+    *y = g->y - gs_fix_mul(fy, GS_GRID_BACK) + gs_fix_mul(fx, across);
+    *heading = g->heading;
+
+    // A gate near an edge would put the grid outside the track. Half a tile in
+    // from the boundary keeps every car on the surface its gate belongs to.
+    *x = GS_CLAMP(*x, GS_HALF, GS_INT(t->w) - GS_HALF);
+    *y = GS_CLAMP(*y, GS_HALF, GS_INT(t->h) - GS_HALF);
+}
+
 // The tile a point falls in, clamped to the track. Off-track sampling returns
 // the edge tile rather than refusing, which is what makes the surrounding plain
 // a continuation of the track's edge instead of a void - there is no wall at
@@ -157,6 +194,11 @@ gs_fix gs_track_gravity(const gs_track *t, gs_fix x, gs_fix y) {
     int32_t tx, ty;
     gs_tile_of(t, x, y, &tx, &ty);
     return (gs_fix)((int32_t)t->gravity[GS_TILE_INDEX(tx, ty)] * GS_ONE / GS_GRAVITY_UNIT);
+}
+
+gs_fix gs_track_corner_at(const gs_track *t, uint8_t x, uint8_t y) {
+    if (x > GS_TRACK_MAX || y > GS_TRACK_MAX) return 0;
+    return (gs_fix)((int32_t)t->corner[(size_t)y * GS_CORNER_STRIDE + x] * 256);
 }
 
 void gs_track_set_corner(gs_track *t, uint8_t x, uint8_t y, gs_fix height) {

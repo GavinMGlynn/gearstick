@@ -96,10 +96,6 @@ static gs_fix gs_steer_authority(const gs_vehicle_def *v, gs_fix speed) {
 #define GS_MINE_LIFT    GS_INT(4)
 #define GS_MINE_HURT    GS_INT(9)
 
-// The steepest ground a car will drive up, as a gradient. About fifty degrees:
-// steeper than any road and shallower than anything anyone would call a wall.
-#define GS_MAX_CLIMB GS_RATIO(120, 100)
-
 // One a second. Holding the button should leave a trail, not a carpet.
 #define GS_DROP_COOLDOWN (GS_TICK_HZ)
 

@@ -36,6 +36,19 @@ typedef struct gs_analysis {
     uint16_t busiest;
 } gs_analysis;
 
+// **Long enough to get round this particular track**, in seconds.
+//
+// A constant cannot do this job: the same number that is generous for a small
+// track runs out halfway along a big one, and the analyser then reports a
+// perfectly good track as impossible because it ran out of clock. Derived from
+// the length of the route at a pace slow enough that failing to finish means the
+// track, not the driving.
+//
+// Every caller should use this rather than choosing a number, so that the
+// editor's verdict, the sweep's verdict and the tests' verdict are the same
+// verdict.
+uint32_t gs_analyse_seconds(const gs_track *t);
+
 // Race every vehicle at every gravity for `seconds` each. Deterministic, so the
 // same track always gives the same answer - a design tool that disagreed with
 // itself between runs would be worse than none.

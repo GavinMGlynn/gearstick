@@ -1003,6 +1003,104 @@ The server will now serve any track it holds rather than only the one its lobby
 is racing, which is what makes a published track *playable* rather than merely
 listed. A listing alone would have passed a weaker test.
 
+### The generator
+
+`src/core/gs_generate.{h,c}` turns a number into a track. Four shapes — a
+sprint, a circuit, a run of jumps, and mixed surfaces — chosen from the seed,
+with painted gravity over the middle two thirds of the time and a two-word name
+from the same seed, because "seed 2864434397" is not a thing anybody says out
+loud. `gearstick_cli generate [N]` sweeps N seeds and races every track through
+the analyser: `generate 50` is the item's verification and `generate 200` also
+passes.
+
+**Three properties are built in rather than tuned in**, each of which the sweep
+caught when it was not:
+
+- *No slope steeper than a car can climb.* `gs_lay_ridge` derives its ramp from
+  the height it was given rather than taking both as arguments, so a ridge is
+  driveable by construction. `GS_MAX_CLIMB` moved from `gs_sim.c` into
+  `gs_sim.h` for this: the generator is bound by the simulation's limit, and a
+  limit written down twice is a limit that will disagree with itself. Ridges add
+  to what is underneath rather than max with it, so a ridge on a bowl is a ridge
+  on a bowl instead of a step where the two meet.
+- *Nothing is built in the first fourteen tiles.* A car starts still. With six
+  tiles of run-up a stock car reaches two tiles a second and cannot crest a
+  two-tile ridge, and the track then comes back undriveable for a reason that
+  has nothing to do with its shape. Perturbing `GS_GEN_RUNUP` down to three puts
+  two of fifty tracks beyond anybody.
+- *A generated height is never zero.* A ridge of no height is not a shallower
+  ridge, it is a missing one; two of the first fifty seeds came out as flat
+  fields before `gs_height` was floored at one quarter-tile.
+
+**The generator's output is now a golden number**, `GS_SELFTEST_GENERATOR_HASH`
+in `src/frontend/cli/golden.h`, folded over its first two hundred seeds and
+checked by `gearstick_cli selftest --verify` — which every CI platform already
+runs. It was added because it immediately caught the reason it needs to exist:
+**gcc and clang generated different tracks from the same seed.** Two calls to
+the RNG sitting in one argument list are two calls in an order C does not
+define, gcc took them right to left and clang left to right, and a seed
+therefore named different ground depending on who built the binary. Every draw
+now gets its own statement. A generated track is identified by its seed, so this
+is the same class of break as a physics desync.
+
+### Three things the analyser was getting wrong
+
+The generator found them, because it was the first thing to ask the analyser
+about tracks nobody had already checked by driving.
+
+**Cars started on the start line.** `gs_analyse` placed its car exactly at gate
+zero, which left it with its own position to aim at and no reason to go
+anywhere; it wandered until it happened to cross its own line backwards-first
+and then drove the lap. Whether it recovered depended on how much room it had to
+wander, so perfectly driveable tracks came back impossible. `gs_track_grid` in
+`gs_track.c` now says where a car waits for the flag — behind the line, abreast
+across it, facing the way the route runs — and the analyser and the game's race
+start both use it. The game had been placing cars at a hard-coded `x = 3`, which
+was right for the stock tracks and wrong for everything else.
+
+**The heatmap was drowned by cars that had already finished.** The run went on
+for the whole time allowed, so a car that completed its lap kept driving and the
+corner it happened to mill about in collected more visits than the entire racing
+line — leaving the line under a fifth of full heat and invisible. Runs now stop
+at the flag, which is also what makes the heat mean "the line everybody drove"
+rather than "where everybody ended up".
+
+**The time allowed was a constant, and every caller chose a different one.**
+Twenty seconds is generous on a forty-tile sprint and runs out halfway along a
+fifty-two-tile out-and-back; the verdict then described the clock rather than
+the track. `gs_analyse_seconds` derives it from the length of the route at a
+pace slow enough that failing to keep it means the track. The editor, the sweep
+and the tests all ask for it now, so they cannot disagree about whether a track
+can be got round.
+
+### The game had no sound
+
+Found while asking why a captured `.wav` could not be made to race against the
+sound card. It could not, because there was nothing to race: `SDL_Init` was
+given video and gamepads and **not audio**, so every `SDL_OpenAudioDeviceStream`
+failed with "Audio subsystem is not initialized", `gs_audio_open` took its
+no-device path — which is deliberate and correct, because a machine with no
+sound card should still race — and the game ran in silence on every machine
+there has ever been. The synthesiser, the tyre filters and the seeded music were
+all fine and all tested; none of it was ever connected to a speaker.
+
+The audio tests had been passing about five times in six. They opened SDL's
+dummy driver, which is still a driver and still runs a callback thread; that
+thread mixed the music while the test measured it, so *the same seed is the same
+music* was true or false depending on when the callback fired. A test that only
+sometimes tests its rule is worse than none, because the green tick is not
+evidence. `gs_audio_open_silent` brings the mixer up with nothing behind it, and
+the tests now use it: twenty-four consecutive runs, no failures, against six
+failures in twenty-four with a device thread running.
+
+`--audio-out` uses the same silent path and no longer asks for the audio
+subsystem at all, so what lands in the file is what would have come out of the
+speaker rather than half of each. Captures are byte-identical run to run.
+
+CI was setting `SDL_AUDIODRIVER`, which is SDL2's name for the variable; SDL3
+reads `SDL_AUDIO_DRIVER`. It had never mattered, because the subsystem was never
+up. It does now.
+
 ---
 
 ## What does not exist

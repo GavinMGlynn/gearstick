@@ -479,10 +479,11 @@ TEST(the_music_and_the_race_together_still_fit_in_a_speaker) {
 int main(void) {
     printf("gearstick audio tests\n");
 
-    // No device needed: the tests call the same render the callback calls.
-    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
-    SDL_Init(SDL_INIT_AUDIO);
-    gs_audio_open();
+    // **No device, and not even a dummy one.** These tests call the same render
+    // the callback calls, and a callback thread pulling on the mixer alongside
+    // them makes the answer depend on when it fired.
+    SDL_Init(0);
+    gs_audio_open_silent();
 
     run_a_race_makes_a_noise_and_an_empty_world_does_not();
     run_the_engine_note_follows_the_drivetrain_up_and_down();

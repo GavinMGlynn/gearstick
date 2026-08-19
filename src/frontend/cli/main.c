@@ -9,10 +9,12 @@
 // Run `gearstick_cli` with no arguments for the list.
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core/gs_ai.h"
 #include "core/gs_analyse.h"
+#include "core/gs_generate.h"
 #include "core/gs_ghost.h"
 #include "core/gs_share.h"
 #include "core/gs_replay.h"
@@ -193,6 +195,26 @@ static int cmd_selftest(bool verify) {
                (unsigned long long)world_hash);
         return 1;
     }
+
+    // The generator, folded over its first two hundred seeds. Same reason as
+    // the two above and checked in the same place, so every platform in CI
+    // pins it without a job of its own.
+    static gs_track gen;
+    uint64_t generated = 1469598103934665603ULL;
+    for (int i = 0; i < 200; i++) {
+        gs_generate(&gen, (uint32_t)(1 + i * 7919));
+        generated = (generated ^ gs_track_hash(&gen)) * 1099511628211ULL;
+    }
+    if (generated != GS_SELFTEST_GENERATOR_HASH) {
+        printf("FAIL   the track generator moved. Every seed anybody shared\n"
+               "       now names a different track.\n"
+               "       want 0x%016llx\n       got  0x%016llx\n"
+               "       See src/frontend/cli/golden.h before changing this.\n",
+               (unsigned long long)GS_SELFTEST_GENERATOR_HASH,
+               (unsigned long long)generated);
+        return 1;
+    }
+    printf("seeds  200 generated tracks, all the ones they always were\n");
 
     printf("OK     the golden replay still lands where it did\n");
     return 0;
@@ -624,6 +646,81 @@ static int cmd_pace(void) {
     return 0;
 }
 
+// --- the generator ----------------------------------------------------------
+
+static gs_analysis gs_gen_report;
+
+// Fifty tracks from fifty seeds, every one of them analysed. **This is the
+// verification for the generator**, and it is a sweep rather than a look: a
+// generated track that cannot be got round is worse than no generated track,
+// because it goes in a library and somebody chooses it.
+static int cmd_generate(int count) {
+    static gs_track t;
+
+    if (count <= 0) count = 50;
+
+    printf("%-6s %-18s %-9s %5s %6s  %s\n", "seed", "name", "shape", "size",
+           "gates", "completable");
+
+    int bad = 0, flat = 0;
+    uint64_t seen[256];
+    int seen_count = 0;
+
+    for (int i = 0; i < count; i++) {
+        uint32_t seed = (uint32_t)(1 + i * 7919);
+        gs_generate(&t, seed);
+
+        char name[32];
+        gs_generate_name(name, sizeof name, seed);
+
+        gs_track_issue issue = gs_track_validate(&t);
+        bool ok = issue.problem == GS_TRACK_OK;
+
+        // Not flat: a generator that wrote nothing would produce forty
+        // completable fields.
+        bool raised = false;
+        for (uint8_t y = 0; y <= t.h && !raised; y++) {
+            for (uint8_t x = 0; x <= t.w; x++) {
+                if (gs_track_corner_at(&t, x, y) != 0) { raised = true; break; }
+            }
+        }
+        if (!raised) flat++;
+
+        // And all different, which is the other way a generator fails
+        // silently.
+        uint64_t hash = gs_track_hash(&t);
+        for (int k = 0; k < seen_count; k++) {
+            if (seen[k] == hash) {
+                printf("  seed %u repeats an earlier track\n", seed);
+                bad++;
+            }
+        }
+        if (seen_count < 256) seen[seen_count++] = hash;
+
+        if (ok) {
+            gs_analyse(&t, gs_analyse_seconds(&t), &gs_gen_report);
+            ok = gs_gen_report.completable;
+        }
+        if (!ok) bad++;
+
+        if (count <= 12 || !ok) {
+            printf("%-6u %-18s %-9s %2ux%-2u %6u  %s\n", seed, name,
+                   gs_shape_name(gs_generate_shape_for(seed)), t.w,
+                   t.h, t.gate_count, ok ? "yes" : "NO");
+        }
+    }
+
+    printf("\n%d track%s: %d not completable, %d flat\n", count,
+           count == 1 ? "" : "s", bad, flat);
+
+    if (bad > 0 || flat > 0) {
+        printf("FAIL   a generated track nobody can drive is worse than none\n");
+        return 1;
+    }
+    printf("OK     every generated track is driveable, and all of them differ\n");
+    return 0;
+}
+
 // --- sharing ----------------------------------------------------------------
 
 static int cmd_code(const char *path, bool as_url) {
@@ -712,7 +809,7 @@ static int cmd_analyse(const char *path) {
     printf("route  %s\n", gs_track_problem_text(issue.problem));
     if (issue.problem != GS_TRACK_OK) return 1;
 
-    gs_analyse(&t, 30, &gs_report);
+    gs_analyse(&t, gs_analyse_seconds(&t), &gs_report);
 
     printf("\n%-14s %s\n", "gravity", "vehicles that got round");
     for (int i = 0; i < GS_ANALYSIS_STEPS; i++) {
@@ -767,6 +864,7 @@ static int usage(void) {
            "  validate             show what the route checker accepts and refuses\n"
            "  ai                   race the AI round a circuit in every condition\n"
            "  analyse FILE         what gravities and machines can get round a track\n"
+           "  generate [N]         make N tracks from seeds and analyse every one\n"
            "  code FILE            print a track as a code somebody can paste back\n"
            "  url FILE             the same code wrapped as a link\n"
            "  decode CODE [FILE]   read a code, and optionally write the track out\n"
@@ -792,6 +890,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "ai") == 0) return cmd_ai();
     if (strcmp(argv[1], "pace") == 0) return cmd_pace();
     if (strcmp(argv[1], "analyse") == 0 && argc > 2) return cmd_analyse(argv[2]);
+    if (strcmp(argv[1], "generate") == 0) {
+        return cmd_generate(argc > 2 ? atoi(argv[2]) : 0);
+    }
     if (strcmp(argv[1], "code") == 0 && argc > 2) return cmd_code(argv[2], false);
     if (strcmp(argv[1], "url") == 0 && argc > 2) return cmd_code(argv[2], true);
     if (strcmp(argv[1], "decode") == 0 && argc > 2) {

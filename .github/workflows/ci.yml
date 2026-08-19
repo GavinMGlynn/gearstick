@@ -119,7 +119,7 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
           SDL_RENDER_DRIVER: software
-          SDL_AUDIODRIVER: dummy
+          SDL_AUDIO_DRIVER: dummy
         run: |
           ./build/gearstick --shot smoke.bmp --shot-at 420 --overlay
           test -s smoke.bmp || { echo "no frame was written"; exit 1; }
@@ -212,7 +212,7 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
           SDL_RENDER_DRIVER: software
-          SDL_AUDIODRIVER: dummy
+          SDL_AUDIO_DRIVER: dummy
         run: |
           # On macOS the game is a bundle - see the install rules in
           # CMakeLists.txt - so the executable is inside it rather than beside

@@ -692,7 +692,7 @@ void gs_editor_analyse(gs_editor *e, const gs_track *t) {
         return;
     }
 
-    gs_analyse(t, 30, &e->heat);
+    gs_analyse(t, gs_analyse_seconds(t), &e->heat);
     e->analysed = true;
     e->heat_track = gs_track_hash(t);
     e->heat_on = true;
