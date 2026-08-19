@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 41 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 42 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -302,9 +302,15 @@ whatever the UI turns out to be — then the interface on top.
       screen. Each view contains its own car and none of the others. And four
       views cost less than three times one full-window view — measured, not
       assumed, which is how the missing culling was found.*
-- [ ] **The merging camera** — views combine into one when the cars are close
+- [x] **The merging camera** — views combine into one when the cars are close
       and separate when they are not, without a visible seam at the transition.
-      *Verification: a recording of cars converging and separating.*
+      *Verification: close cars get one view, far cars get one each, and a pair
+      jiggling across the threshold for six hundred frames never changes the
+      count once — two thresholds, not one. The seam is measured rather than
+      judged: what is checked is not how far the camera moves in a frame, since
+      during a transition it moves quickly on purpose, but how much that changes
+      between frames. Under a tenth of a tile throughout. An instant switch, an
+      unsmoothed blend, and a single threshold each turn it red.*
 - [ ] **Every control remappable, and the game fully playable from a pad
       alone.** *Verification: a full race from pad input only, including the
       menus.*

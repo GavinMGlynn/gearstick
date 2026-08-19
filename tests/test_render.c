@@ -1316,6 +1316,140 @@ TEST(each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one) {
     CHECK(four_ns < one_ns * 3);
 }
 
+TEST(the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 60, 60);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(32), GS_INT(30), 0);
+
+    gs_split sp;
+    gs_split_init(&sp);
+    const float dt = 1.0f / 60.0f;
+
+    // Side by side: one view.
+    for (int i = 0; i < 120; i++) gs_split_update(&sp, &w, GS_W, GS_H, dt);
+    gs_view v[GS_MAX_CARS];
+    CHECK(sp.merge == 1.0f);
+    CHECK(gs_split_views(&sp, &w, GS_W, GS_H, v) == 1);
+
+    // Drive them apart: two.
+    w.car[1].x = GS_INT(30) + GS_INT(30);
+    for (int i = 0; i < 120; i++) gs_split_update(&sp, &w, GS_W, GS_H, dt);
+    CHECK(sp.merge == 0.0f);
+    CHECK(gs_split_views(&sp, &w, GS_W, GS_H, v) == 2);
+
+    // Back together: one again.
+    w.car[1].x = GS_INT(32);
+    for (int i = 0; i < 120; i++) gs_split_update(&sp, &w, GS_W, GS_H, dt);
+    CHECK(gs_split_views(&sp, &w, GS_W, GS_H, v) == 1);
+
+    // A single car is always one view, whatever it does.
+    gs_world solo;
+    gs_world_init(&solo, GS_ONE);
+    gs_world_add_car(&solo, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(5), GS_INT(5), 0);
+    gs_split_init(&sp);
+    gs_split_update(&sp, &solo, GS_W, GS_H, dt);
+    CHECK(gs_split_views(&sp, &solo, GS_W, GS_H, v) == 1);
+}
+
+TEST(cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 60, 60);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+
+    gs_split sp;
+    gs_split_init(&sp);
+    const float dt = 1.0f / 60.0f;
+
+    // Jiggle across the *merge* threshold while already merged. With two
+    // thresholds the screen stays whole until the cars are properly apart; with
+    // one it splits and re-joins every other frame, which is unwatchable.
+    //
+    // Straddling that threshold is the point: a wobble that sits entirely
+    // inside the hysteresis band passes whether the band exists or not.
+    int changes = 0;
+    uint8_t was = 1;
+    for (int i = 0; i < 600; i++) {
+        float wobble = (i % 2 == 0) ? 10.6f : 11.4f;
+        w.car[1].x = GS_INT(30) + (gs_fix)(wobble * (float)GS_ONE);
+        gs_split_update(&sp, &w, GS_W, GS_H, dt);
+
+        gs_view v[GS_MAX_CARS];
+        uint8_t n = gs_split_views(&sp, &w, GS_W, GS_H, v);
+        if (n != was) { changes++; was = n; }
+    }
+    CHECK(changes == 0);
+}
+
+TEST(the_view_does_not_jump_when_the_screen_merges_or_splits) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 90, 60);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(30), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(30), 0);
+
+    gs_split sp;
+    gs_split_init(&sp);
+    const float dt = 1.0f / 60.0f;
+
+    // Car one drives steadily away and steadily back, crossing the threshold in
+    // both directions.
+    //
+    // What is measured is not how far the camera moves in a frame - during the
+    // transition it moves quite quickly on purpose, and a test that objected to
+    // that would be objecting to the feature. It is how much that *changes*
+    // between frames. A pan accelerates gently; a hard switch is one enormous
+    // frame with small ones either side, and that is what shows here.
+    double worst_change = 0.0;
+    double prev_delta = 0.0;
+    float prev_cx = 0, prev_cy = 0;
+    int frames = 0;
+
+    for (int i = 0; i < 900; i++) {
+        float away = (i < 450) ? (float)i * 0.08f : (float)(900 - i) * 0.08f;
+        w.car[1].x = GS_INT(20) + (gs_fix)(away * (float)GS_ONE);
+
+        gs_split_update(&sp, &w, GS_W, GS_H, dt);
+        gs_view v[GS_MAX_CARS];
+        gs_split_views(&sp, &w, GS_W, GS_H, v);
+
+        // Pane zero is what a player watches throughout: the whole screen while
+        // merged, the left half while split.
+        if (frames > 0) {
+            double delta = SDL_fabs((double)v[0].cam.cx - (double)prev_cx) +
+                           SDL_fabs((double)v[0].cam.cy - (double)prev_cy);
+            if (frames > 1) {
+                double change = SDL_fabs(delta - prev_delta);
+                if (change > worst_change) worst_change = change;
+            }
+            prev_delta = delta;
+        }
+        prev_cx = v[0].cam.cx;
+        prev_cy = v[0].cam.cy;
+        frames++;
+    }
+
+    // A hard switch teleports the camera the whole distance between the shared
+    // view and one car - several tiles - in a single frame, next to frames that
+    // moved almost nothing. This stays under a tenth of a tile.
+    CHECK(worst_change < 0.1);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -1360,6 +1494,9 @@ int main(void) {
     run_each_half_of_a_split_screen_shows_its_own_car(ren);
     run_four_players_get_four_views_that_tile_the_window_without_overlapping(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);
+    run_the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not(ren);
+    run_cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half(ren);
+    run_the_view_does_not_jump_when_the_screen_merges_or_splits(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

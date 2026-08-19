@@ -205,6 +205,120 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
     gs_quad(ren, nose, (SDL_FColor){ 1.0f, 1.0f, 1.0f, 0.85f * alpha });
 }
 
+// Two thresholds rather than one, in tiles: cars must come this close to merge
+// and go this far to split again. Anything else flickers the screen in half
+// while two cars trade places at the boundary.
+#define GS_MERGE_CLOSE 11.0f
+#define GS_MERGE_APART 16.0f
+
+// How fast the transition runs, in merge units per second. Slow enough to read
+// as a camera move, fast enough not to be waited on.
+#define GS_MERGE_RATE 1.6f
+
+void gs_split_init(gs_split *s) {
+    *s = (gs_split){ 0 };
+    s->merge = 1.0f;      // start together, because a race starts on a grid
+    s->shared.zoom = GS_ISO_DEFAULT_ZOOM;
+}
+
+// The smallest box holding every active car, and its middle.
+static void gs_car_extent(const gs_world *w, float *cx, float *cy, float *spread) {
+    float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
+    int seen = 0;
+
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        if (!w->car[i].active) continue;
+        float x = gs_to_f(w->car[i].x), y = gs_to_f(w->car[i].y);
+        if (x < minx) minx = x;
+        if (x > maxx) maxx = x;
+        if (y < miny) miny = y;
+        if (y > maxy) maxy = y;
+        seen++;
+    }
+    if (seen == 0) {
+        *cx = 0; *cy = 0; *spread = 0;
+        return;
+    }
+    *cx = (minx + maxx) * 0.5f;
+    *cy = (miny + maxy) * 0.5f;
+
+    float dx = maxx - minx, dy = maxy - miny;
+    *spread = dx > dy ? dx : dy;
+}
+
+void gs_split_update(gs_split *s, const gs_world *w, int win_w, int win_h, float dt) {
+    float cx, cy, spread;
+    gs_car_extent(w, &cx, &cy, &spread);
+
+    // Hysteresis: only the crossing of a threshold changes the answer, and the
+    // two thresholds are apart, so a pair of cars swapping places at the
+    // boundary cannot make the screen split and re-join every frame.
+    float wanted = s->merge > 0.5f ? (spread < GS_MERGE_APART ? 1.0f : 0.0f)
+                                   : (spread < GS_MERGE_CLOSE ? 1.0f : 0.0f);
+    if (w->car_count <= 1) wanted = 1.0f;
+
+    float step = GS_MERGE_RATE * dt;
+    if (s->merge < wanted) s->merge = s->merge + step > wanted ? wanted : s->merge + step;
+    else if (s->merge > wanted) s->merge = s->merge - step < wanted ? wanted : s->merge - step;
+
+    // The shared view holds everybody, pulling back as they spread so that the
+    // last frame before a split already shows what the split panes will.
+    float fit = GS_ISO_DEFAULT_ZOOM;
+    if (spread > 0.0f) {
+        float want = (float)win_h / ((spread + 6.0f) * GS_ISO_TILE_H);
+        fit = want < GS_ISO_DEFAULT_ZOOM ? want : GS_ISO_DEFAULT_ZOOM;
+        if (fit < 0.35f) fit = 0.35f;
+    }
+
+    s->shared.cx = cx;
+    s->shared.cy = cy;
+    s->shared.cz = 0.0f;
+    s->shared.zoom = fit;
+    s->shared.vw = (float)win_w;
+    s->shared.vh = (float)win_h;
+}
+
+uint8_t gs_split_views(const gs_split *s, const gs_world *w,
+                       int win_w, int win_h, gs_view *out) {
+    if (s->merge >= 1.0f || w->car_count <= 1) {
+        out[0] = (gs_view){ 0 };
+        out[0].car = 0;
+        out[0].cam = s->shared;
+        out[0].rect = (SDL_Rect){ 0, 0, win_w, win_h };
+        return 1;
+    }
+
+    SDL_Rect rects[GS_MAX_CARS];
+    uint8_t n = gs_render_layout(w->car_count, win_w, win_h, rects);
+
+    // Eased rather than linear. A linear blend has the camera at full speed on
+    // the very first frame of a transition and stopped on the very last, so it
+    // snaps into motion and snaps out of it - which reads as two small jumps
+    // bracketing a smooth move, and is exactly what "no visible seam" is asking
+    // about. Smoothstep is zero-velocity at both ends.
+    float m = s->merge;
+    float eased = m * m * (3.0f - 2.0f * m);
+
+    for (uint8_t i = 0; i < n; i++) {
+        out[i] = (gs_view){ 0 };
+        out[i].car = i;
+        out[i].rect = rects[i];
+
+        // Its own car when fully split, the shared view as the merge closes -
+        // so at the instant the divider appears or goes, every pane is already
+        // showing what the other arrangement showed.
+        float ox = gs_to_f(w->car[i].x), oy = gs_to_f(w->car[i].y);
+        out[i].cam.cx = ox + (s->shared.cx - ox) * eased;
+        out[i].cam.cy = oy + (s->shared.cy - oy) * eased;
+        out[i].cam.cz = 0.0f;
+        out[i].cam.zoom = GS_ISO_DEFAULT_ZOOM +
+                          (s->shared.zoom - GS_ISO_DEFAULT_ZOOM) * eased;
+        out[i].cam.vw = (float)rects[i].w;
+        out[i].cam.vh = (float)rects[i].h;
+    }
+    return n;
+}
+
 uint8_t gs_render_layout(uint8_t views, int w, int h, SDL_Rect *out) {
     // A gap, so two views read as two views rather than as one confusing one.
     const int gap = 2;

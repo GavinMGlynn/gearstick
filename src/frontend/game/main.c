@@ -40,6 +40,7 @@ typedef struct gs_app {
 
     gs_input_state input;
     gs_editor      editor;
+    gs_split       split;
 
     uint64_t last_ns;
     gs_clock clock;
@@ -53,6 +54,7 @@ typedef struct gs_app {
     bool        start_in_editor;
     float       zoom;         // 0 means the default
     uint8_t     players;      // 0 means the default of two
+    bool        diverge;      // in shot mode, steer the cars apart and back
     bool        quit;
 } gs_app;
 
@@ -182,6 +184,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->players = (uint8_t)(n < 1 ? 1 : (n > GS_MAX_CARS ? GS_MAX_CARS : n));
         } else if (SDL_strcmp(argv[i], "--zoom") == 0 && i + 1 < argc) {
             a->zoom = (float)SDL_atof(argv[++i]);
+        } else if (SDL_strcmp(argv[i], "--diverge") == 0) {
+            a->diverge = true;
         } else if (SDL_strcmp(argv[i], "--editor") == 0) {
             a->start_in_editor = true;
         } else if (SDL_strcmp(argv[i], "--help") == 0) {
@@ -192,6 +196,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --editor        open in the construction set");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  --players N     one to four, split-screen to match");
+            SDL_Log("  --diverge       with --shot: drive the cars apart, to see the split");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
@@ -304,8 +309,23 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         while (a->world.tick < a->shot_at) {
             gs_input in[GS_MAX_CARS];
             for (uint8_t i = 0; i < GS_MAX_CARS; i++) in[i] = GS_IN_ACCEL;
+
+            // Hold the second car back and then let it chase, so a capture can
+            // show the screen deciding it needs two views and later that it
+            // does not. Separating along the track beats steering apart: two
+            // cars turning away from each other curve back together.
+            if (a->diverge && a->world.car_count > 1) {
+                in[1] = (a->world.tick < 420) ? (gs_input)0 : GS_IN_ACCEL;
+            }
+
             a->prev = a->world;
             gs_world_step(&a->world, &a->t, in);
+
+            // The split is a function of time as well as distance, so it has to
+            // be advanced alongside the simulation rather than only at the end.
+            int ww = 0, wh = 0;
+            SDL_GetRenderOutputSize(a->ren, &ww, &wh);
+            gs_split_update(&a->split, &a->world, ww, wh, 1.0f / (float)GS_TICK_HZ);
         }
     }
 
@@ -375,10 +395,24 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     SDL_SetRenderDrawColor(a->ren, 18, 20, 26, 255);
     SDL_RenderClear(a->ren);
 
-    for (uint8_t i = 0; i < views; i++) {
-        if (!a->editor.active) {
-            gs_render_track_camera(&a->view[i], &a->prev, &a->world, alpha);
+    // Racing: the screen decides for itself how many views it wants. Cars that
+    // are close share one, because a collision is legible when both cars are in
+    // the same picture and that is the whole argument for this camera.
+    if (!a->editor.active) {
+        int ww = 0, wh = 0;
+        SDL_GetRenderOutputSize(a->ren, &ww, &wh);
+        gs_split_update(&a->split, &a->world, ww, wh, (float)delta / 1e9f);
+
+        gs_view merged[GS_MAX_CARS];
+        views = gs_split_views(&a->split, &a->world, ww, wh, merged);
+        for (uint8_t i = 0; i < views; i++) {
+            merged[i].show_gravity = a->view[i].show_gravity;
+            if (a->zoom > 0.0f) merged[i].cam.zoom = a->zoom;
+            a->view[i] = merged[i];
         }
+    }
+
+    for (uint8_t i = 0; i < views; i++) {
         gs_render_view(a->ren, &a->t, &a->prev, &a->world, alpha, &a->view[i]);
     }
 
@@ -388,13 +422,23 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         gs_editor_draw_cursor(&a->editor, a->ren, &a->t, &a->view[0]);
     }
 
-    // The divider between the two halves of a split screen, so it reads as two
-    // views and not as one confusing one.
+    // Dividers between the panes, so a split screen reads as several views
+    // rather than as one confusing one. Faded by how merged the screen is: the
+    // panes have already converged on the same picture by the time it appears,
+    // so a line arriving at full strength would be the only sudden thing left.
     if (views > 1) {
         int w = 0, h = 0;
         SDL_GetRenderOutputSize(a->ren, &w, &h);
-        SDL_SetRenderDrawColor(a->ren, 8, 9, 12, 255);
-        SDL_RenderFillRect(a->ren, &(SDL_FRect){ (float)(w / 2 - 1), 0.0f, 3.0f, (float)h });
+        uint8_t alpha8 = (uint8_t)(255.0f * (1.0f - a->split.merge));
+
+        SDL_SetRenderDrawBlendMode(a->ren, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(a->ren, 8, 9, 12, alpha8);
+        SDL_RenderFillRect(a->ren,
+                           &(SDL_FRect){ (float)(w / 2 - 2), 0.0f, 4.0f, (float)h });
+        if (views > 2) {
+            SDL_RenderFillRect(a->ren,
+                               &(SDL_FRect){ 0.0f, (float)(h / 2 - 2), (float)w, 4.0f });
+        }
     }
 
     ImGui_Render();
