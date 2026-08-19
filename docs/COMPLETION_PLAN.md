@@ -456,12 +456,20 @@ Found while implementing something else. Added when found, not when remembered.
       nothing at all. It should probably cost something.
 - [ ] **A hard-coded demo track is in the game frontend.** It is a prototype and
       it goes the moment the editor can write a real one.
-- [ ] **Nothing in the game frontend is a race.** No start, no laps, no
-      checkpoints, no finish, no HUD — two cars drive around on a demo track.
-      Lap order is a Phase 4 item because it is derived from the track, but the
-      frontend needs its own item to actually run a race.
-- [ ] **`assets/` is empty and exists only so the install rules have something
-      to copy.** Fine now; a smell if it is still true at Phase 10.
+- [x] **Nothing in the game frontend is a race.** ~~No start, no laps, no
+      checkpoints, no finish, no HUD — two cars drive around on a demo track.~~
+      *Closed by the Phase 10 front end: a lap target and a finish tick in the
+      simulation, a setup screen that chooses the race, and a results table with
+      everybody's time on it. There is still no HUD during the race — see the
+      new tail below.*
+- [x] **`assets/` is empty and exists only so the install rules have something
+      to copy.** ~~Fine now; a smell if it is still true at Phase 10.~~
+      *Closed, and not by filling it: the vehicles are generated into
+      `src/gfx/gs_meshes.c` and the terrain is emitted as shaded geometry, so
+      there is genuinely no art to load. What `assets/` holds now is
+      `ATTRIBUTION.md`, written by the same script that generates the art. The
+      smell was real and the answer turned out to be that the directory has
+      almost nothing to do.*
 - [ ] **Placing a gate is not in the undo history.** The undo model records a
       cell changing from one value to another, and a gate is a list entry rather
       than a cell. Removing a misplaced gate is easy, so this is an
@@ -480,3 +488,21 @@ Found while implementing something else. Added when found, not when remembered.
       you do not have to go far to find someone to hit. That is design rationale
       from the authors, it needs no reverse engineering, and it should inform
       our own stock tracks before they are built.
+
+- [ ] **There is no HUD.** A race now has laps, positions and a finish, and none
+      of it is on screen while you are driving — you find out what happened on
+      the results table afterwards. Everything needed is in the simulation
+      already; this is a rendering job.
+- [ ] **Online races assume everybody already has the same track.** The
+      handshake exchanges player slots and addresses but not the track itself,
+      so two people racing must be on the same build. A track is a few hundred
+      compressed bytes and the hash is already checked everywhere else — it
+      belongs in the handshake.
+- [ ] **Sound has only been listened to on Linux.** The synthesiser is
+      platform-independent and the device path is not. Windows and macOS need a
+      human with speakers.
+- [ ] **The store is one file with no migration path.** Profiles and records are
+      versioned and refuse to load anything they do not recognise, which is
+      right, but "refuses to load" means somebody's history is quietly gone the
+      first time the format changes. It needs an upgrade path before there is a
+      format worth upgrading from.
