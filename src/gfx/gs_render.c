@@ -434,6 +434,34 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         }
     }
 
+    // Hazards, drawn on the ground under everything that moves. Flat, dark and
+    // slightly translucent for oil, so it reads as something on the road rather
+    // than something standing on it; a mine is small and bright, because the
+    // one thing a player must be able to do is see it in time.
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+    for (uint8_t i = 0; i < now->hazard_count; i++) {
+        const gs_hazard *h = &now->hazard[i];
+        if (h->kind == GS_HAZ_NONE || h->spent) continue;
+
+        float hx = gs_to_f(h->x), hy = gs_to_f(h->y);
+        float r = h->kind == GS_HAZ_OIL ? 1.3f : 0.45f;
+
+        static const float ox[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
+        static const float oy[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+        SDL_FPoint p[4];
+        for (int k = 0; k < 4; k++) {
+            float px = hx + ox[k] * r, py = hy + oy[k] * r;
+            gs_fix pz = gs_track_height(t, (gs_fix)(px * (float)GS_ONE),
+                                        (gs_fix)(py * (float)GS_ONE));
+            gs_iso_project(&cam, px, py, gs_to_f(pz) + 0.02f, &p[k].x, &p[k].y);
+        }
+
+        SDL_FColor col = h->kind == GS_HAZ_OIL
+                             ? (SDL_FColor){ 0.05f, 0.04f, 0.10f, 0.72f }
+                             : (SDL_FColor){ 1.0f, 0.45f, 0.1f, 0.95f };
+        gs_quad(ren, p, col);
+    }
+
     // Cars that have driven off the authored track are past the last diagonal,
     // so they are drawn after everything - which is where they are.
     for (uint8_t i = 0; i < now->car_count; i++) {

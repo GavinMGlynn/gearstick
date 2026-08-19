@@ -48,6 +48,28 @@ typedef struct gs_gravity_preset {
 #define GS_GRAVITY_PRESETS 8
 extern const gs_gravity_preset gs_gravity_presets[GS_GRAVITY_PRESETS];
 
+// What you leave behind you.
+//
+// The original's destruction toolkit, and the reason its second mode works:
+// you cannot shoot forwards, so hurting somebody means getting in front of them
+// first and then staying there. That is a race, and the weapon rewards driving.
+#define GS_MAX_HAZARDS 32
+
+typedef enum gs_hazard_kind {
+    GS_HAZ_NONE = 0,
+    GS_HAZ_OIL,     // takes the grip away and gives it back when you leave
+    GS_HAZ_MINE,    // one use, and it hurts
+    GS_HAZ_COUNT
+} gs_hazard_kind;
+
+typedef struct gs_hazard {
+    gs_fix  x, y;
+    uint8_t kind;
+    uint8_t owner;   // the car that dropped it, which it never affects
+    uint8_t spent;   // a mine that has gone off
+    uint8_t pad;
+} gs_hazard;
+
 typedef struct gs_car {
     gs_fix   x, y, z;        // tiles; z is height above the datum, not above ground
     gs_fix   vx, vy, vz;     // tiles per second
@@ -58,6 +80,10 @@ typedef struct gs_car {
     bool     grounded;
     bool     wrecked;
     bool     active;
+
+    // Ticks until this car can drop another. Without it, holding the button
+    // paves the track at a hundred and twenty hazards a second.
+    uint16_t drop_cooldown;
 
     // How long since the wheels last touched. The renderer wants it for the
     // shadow, and the landing-prediction arc will want it later.
@@ -77,6 +103,9 @@ typedef struct gs_world {
 
     uint8_t car_count;
     gs_car  car[GS_MAX_CARS];
+
+    uint8_t    hazard_count;
+    gs_hazard  hazard[GS_MAX_HAZARDS];
 
     // What this race has done to the ground. In the world and not the track,
     // because it is not what the track *is* - reload the track and it is fresh
@@ -115,6 +144,10 @@ uint64_t gs_world_hash(const gs_world *w);
 // 1.3 tiles long because an honest 2.7 m car reads as a speck; if collision used
 // the honest figure, cars would pass through each other while visibly touching.
 #define GS_CAR_RADIUS GS_RATIO(52, 100)
+
+// Drop a hazard at a car's position, if it is allowed to. Returns whether one
+// was left behind.
+bool gs_world_drop(gs_world *w, uint8_t car, gs_hazard_kind kind);
 
 // How worn the ground is at a point, 0 to GS_ONE. The renderer wants it, and so
 // will the analyser when it starts asking where the line has moved to.

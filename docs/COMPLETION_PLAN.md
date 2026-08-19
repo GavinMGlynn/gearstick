@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 45 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 46 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -343,8 +343,14 @@ whatever the UI turns out to be — then the interface on top.
       both on the ground and still costs something, which is how the two sources
       are known to be separate. A wreck is scenery: it does not move, and the
       living bounce off it.*
-- [ ] **Droppable hazards.** *Verification: a hazard dropped by one car affects
-      the other and not the dropper.*
+- [x] **Droppable hazards.** *Verification: somebody else's oil halves the
+      corner a car can take; your own does nothing to you at all, because
+      driving into what you dropped would make the weapon a way of hurting
+      yourself and nobody would use it. Grip comes back the moment you are off
+      it — a slick is driven through, not served like a penalty. A mine goes off
+      once, launches and hurts whoever found it, and is gone for the next car. A
+      held button leaves about five hazards in five seconds rather than six
+      hundred.*
 - [ ] **Destruction mode.** *Verification: a race ends correctly when one car is
       left driving.*
 - [ ] **Wreckage that persists as track geometry.** *Verification: a wreck

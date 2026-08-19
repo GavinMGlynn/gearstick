@@ -76,7 +76,60 @@ static gs_fix gs_steer_authority(const gs_vehicle_def *v, gs_fix speed) {
     return gs_fix_div(v->steer, denom);
 }
 
-static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) {
+// How far a hazard reaches, and what it does when it gets you.
+#define GS_OIL_RADIUS   GS_RATIO(140, 100)
+#define GS_OIL_GRIP     GS_RATIO(12, 100)
+#define GS_MINE_RADIUS  GS_RATIO(90, 100)
+#define GS_MINE_LIFT    GS_INT(4)
+#define GS_MINE_HURT    GS_INT(9)
+
+// One a second. Holding the button should leave a trail, not a carpet.
+#define GS_DROP_COOLDOWN (GS_TICK_HZ)
+
+bool gs_world_drop(gs_world *w, uint8_t car, gs_hazard_kind kind) {
+    if (car >= w->car_count || kind == GS_HAZ_NONE || kind >= GS_HAZ_COUNT) return false;
+
+    gs_car *c = &w->car[car];
+    if (!c->active || c->wrecked || c->drop_cooldown != 0) return false;
+
+    // A ring rather than a refusal when full. Running out of room to record
+    // hazards should quietly forget the oldest one, not stop the newest from
+    // existing - the player would have no idea why their button stopped
+    // working.
+    uint8_t at;
+    if (w->hazard_count < GS_MAX_HAZARDS) {
+        at = w->hazard_count++;
+    } else {
+        at = (uint8_t)(w->tick % GS_MAX_HAZARDS);
+    }
+
+    w->hazard[at] = (gs_hazard){ .x = c->x, .y = c->y, .kind = (uint8_t)kind,
+                                 .owner = car, .spent = 0, .pad = 0 };
+    c->drop_cooldown = GS_DROP_COOLDOWN;
+    return true;
+}
+
+// How much grip is left where this car is standing, as a multiplier. One when
+// there is no oil about.
+static gs_fix gs_oil_here(const gs_world *w, uint8_t car, gs_fix x, gs_fix y) {
+    gs_fix worst = GS_ONE;
+    for (uint8_t i = 0; i < w->hazard_count; i++) {
+        const gs_hazard *h = &w->hazard[i];
+        if (h->kind != GS_HAZ_OIL || h->spent) continue;
+
+        // **Never your own.** You dropped it; driving into it would make the
+        // weapon a way of hurting yourself, and nobody would use it.
+        if (h->owner == car) continue;
+
+        if (gs_fix_len2(x - h->x, y - h->y) < GS_OIL_RADIUS && GS_OIL_GRIP < worst) {
+            worst = GS_OIL_GRIP;
+        }
+    }
+    return worst;
+}
+
+static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
+                        uint8_t index) {
     const gs_vehicle_def *v = gs_vehicle(c->vehicle);
     const gs_fix dt = GS_DT;
 
@@ -88,6 +141,9 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
     // is the gravity brush; caching it for a race would break the feature.
     gs_fix g = gs_fix_mul(w->gravity, gs_track_gravity(t, c->x, c->y));
 
+    if (c->drop_cooldown > 0) c->drop_cooldown--;
+    if ((in & GS_IN_FIRE) != 0) gs_world_drop(w, index, GS_HAZ_OIL);
+
     gs_surface surf = gs_track_surface(t, c->x, c->y);
     const gs_surface_def *sd = &gs_surfaces[surf];
 
@@ -97,6 +153,11 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
     // would be a cliff a player could not read.
     gs_fix worn = gs_world_wear(w, c->x, c->y);
     gs_fix surf_grip = gs_lerp(sd->grip, gs_fix_mul(sd->grip, sd->wear_grip), worn);
+
+    // Oil takes the grip away and gives it back the moment you are off it,
+    // which is what makes it a thing to be driven through rather than a
+    // punishment to be served.
+    surf_grip = gs_fix_mul(surf_grip, gs_oil_here(w, index, c->x, c->y));
     gs_fix surf_rolling =
         gs_lerp(sd->rolling, gs_fix_mul(sd->rolling, sd->wear_rolling), worn);
 
@@ -414,10 +475,40 @@ static void gs_collide(gs_world *w, gs_car *a, gs_car *b) {
     }
 }
 
+// Mines, checked after everybody has moved so that two cars reaching one on the
+// same tick get the same answer whichever order they were stepped in.
+static void gs_mines(gs_world *w) {
+    for (uint8_t i = 0; i < w->hazard_count; i++) {
+        gs_hazard *h = &w->hazard[i];
+        if (h->kind != GS_HAZ_MINE || h->spent) continue;
+
+        for (uint8_t ci = 0; ci < w->car_count; ci++) {
+            gs_car *c = &w->car[ci];
+            if (!c->active || c->wrecked || h->owner == ci) continue;
+            if (!c->grounded) continue;
+            if (gs_fix_len2(c->x - h->x, c->y - h->y) >= GS_MINE_RADIUS) continue;
+
+            c->vz += GS_MINE_LIFT;
+            c->grounded = false;
+
+            gs_fix hurt = gs_fix_div(gs_fix_mul(GS_MINE_HURT, w->damage_scale),
+                                     gs_vehicle(c->vehicle)->toughness);
+            int32_t d = (int32_t)c->damage + (gs_fix_mul(hurt, GS_INT(8)) >> GS_FIX_SHIFT);
+            c->damage = (uint8_t)GS_CLAMP(d, 0, 255);
+            if (c->damage >= 255) c->wrecked = true;
+
+            h->spent = 1;
+            break;
+        }
+    }
+}
+
 void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
     for (uint8_t i = 0; i < w->car_count; i++) {
-        gs_car_step(w, &w->car[i], t, in != nullptr ? in[i] : (gs_input)0);
+        gs_car_step(w, &w->car[i], t, in != nullptr ? in[i] : (gs_input)0, i);
     }
+
+    gs_mines(w);
 
     // After everybody has moved, in a fixed order, so the result does not
     // depend on who was stepped first.
@@ -471,6 +562,19 @@ uint64_t gs_world_hash(const gs_world *w) {
         gs_hash_u64(&h, (uint64_t)c->wrecked);
         gs_hash_u64(&h, (uint64_t)c->active);
         gs_hash_u64(&h, c->air_ticks);
+        gs_hash_u64(&h, c->drop_cooldown);
+    }
+
+    // Hazards are state that changes the race, so they are hashed like
+    // everything else that does.
+    gs_hash_u64(&h, w->hazard_count);
+    for (uint8_t i = 0; i < w->hazard_count; i++) {
+        const gs_hazard *z = &w->hazard[i];
+        gs_hash_i32(&h, z->x);
+        gs_hash_i32(&h, z->y);
+        gs_hash_u64(&h, z->kind);
+        gs_hash_u64(&h, z->owner);
+        gs_hash_u64(&h, z->spent);
     }
     return h;
 }

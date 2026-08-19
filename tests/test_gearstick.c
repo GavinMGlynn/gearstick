@@ -1480,6 +1480,145 @@ TEST(a_car_flying_over_another_does_not_hit_it) {
 }
 
 // ---------------------------------------------------------------------------
+// What you leave behind
+// ---------------------------------------------------------------------------
+
+// Drive a car straight across a patch of ground and report how much of a turn
+// it can still make there. `dropper` is who left the hazard, if any.
+static double gs_turn_over_hazard(gs_hazard_kind kind, int dropper) {
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(50), 0);
+
+    if (kind != GS_HAZ_NONE) {
+        // Dropped exactly where the first car is about to be.
+        w.car[(uint8_t)dropper].x = GS_INT(30);
+        w.car[(uint8_t)dropper].y = GS_INT(30);
+        CHECK(gs_world_drop(&w, (uint8_t)dropper, kind));
+        w.car[1].x = GS_INT(30);
+        w.car[1].y = GS_INT(50);
+    }
+
+    w.car[0].x = GS_INT(30);
+    w.car[0].y = GS_INT(30);
+    w.car[0].vx = GS_INT(4);
+
+    gs_angle before = gs_atan2(w.car[0].vy, w.car[0].vx);
+    gs_input in[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_LEFT), 0, 0, 0 };
+    for (int i = 0; i < GS_TICK_HZ / 3; i++) gs_world_step(&w, &t, in);
+
+    int32_t d = gs_angle_delta(before, gs_atan2(w.car[0].vy, w.car[0].vx));
+    return (double)(d < 0 ? -d : d) / 65536.0 * 360.0;
+}
+
+TEST(a_hazard_dropped_by_one_car_affects_the_other_and_not_the_dropper) {
+    double clean = gs_turn_over_hazard(GS_HAZ_NONE, 0);
+    double theirs = gs_turn_over_hazard(GS_HAZ_OIL, 1);   // car one dropped it
+    double mine = gs_turn_over_hazard(GS_HAZ_OIL, 0);     // car zero dropped it
+
+    CHECK(clean > 5.0);
+
+    // Somebody else's oil takes the grip away.
+    CHECK(theirs < clean / 2.0);
+
+    // Your own does nothing to you. Driving into what you dropped would make
+    // the weapon a way of hurting yourself, and nobody would ever use it.
+    CHECK(mine > clean - 0.5);
+}
+
+TEST(oil_gives_the_grip_back_the_moment_you_are_off_it) {
+    static gs_track t;
+    gs_track_init(&t, 80, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    CHECK(gs_world_drop(&w, 1, GS_HAZ_OIL));
+
+    // Drive the first car through the slick and out the far side.
+    w.car[1].x = GS_INT(60);
+    w.car[0].vx = GS_INT(6);
+    for (int i = 0; i < GS_TICK_HZ * 3; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+
+    // Well past it now, and cornering normally again: a slick is something to
+    // be driven through, not a penalty to be served.
+    CHECK(w.car[0].x > GS_INT(25));
+
+    gs_world clean;
+    gs_world_init(&clean, GS_ONE);
+    gs_world_add_car(&clean, &t, GS_VEH_STOCK_CAR, w.car[0].x, GS_INT(10), 0);
+    clean.car[0].vx = w.car[0].vx;
+
+    gs_input turn[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_LEFT), 0, 0, 0 };
+    for (int i = 0; i < GS_TICK_HZ / 4; i++) {
+        gs_world_step(&w, &t, turn);
+        gs_world_step(&clean, &t, turn);
+    }
+    CHECK(gs_angle_delta(clean.car[0].heading, w.car[0].heading) == 0);
+}
+
+TEST(a_mine_goes_off_once_and_hurts_whoever_found_it) {
+    static gs_track t;
+    gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(16), 0);
+
+    // Car one leaves a mine where it stands, then gets out of the way.
+    CHECK(gs_world_drop(&w, 1, GS_HAZ_MINE));
+    w.car[1].x = GS_INT(50);
+    w.car[1].y = GS_INT(16);
+
+    w.car[0].vx = GS_INT(5);
+    w.car[2].vx = GS_INT(5);
+
+    bool launched = false;
+    for (int i = 0; i < GS_TICK_HZ * 4; i++) {
+        gs_world_step(&w, &t, nullptr);
+        if (!w.car[0].grounded) launched = true;
+    }
+
+    CHECK(launched);
+    CHECK(w.car[0].damage > 0);
+
+    // One use. The third car drives over the same ground afterwards and finds
+    // nothing there, because a mine that keeps going off is a wall.
+    CHECK(w.car[2].damage == 0);
+    CHECK(w.hazard[0].spent);
+}
+
+TEST(holding_the_button_leaves_a_trail_and_not_a_carpet) {
+    static gs_track t;
+    gs_track_init(&t, 80, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
+
+    gs_input in[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_FIRE), 0, 0, 0 };
+    for (int i = 0; i < GS_TICK_HZ * 5; i++) gs_world_step(&w, &t, in);
+
+    // Five seconds of holding it down is about five, not six hundred.
+    CHECK(w.hazard_count >= 4);
+    CHECK(w.hazard_count <= 7);
+
+    // And they are spread along the road rather than heaped in one place.
+    gs_fix span = w.hazard[w.hazard_count - 1].x - w.hazard[0].x;
+    CHECK(span > GS_INT(4));
+}
+
+// ---------------------------------------------------------------------------
 // Determinism - the property everything else is built on
 // ---------------------------------------------------------------------------
 
@@ -1785,6 +1924,10 @@ int main(void) {
     run_a_wreck_is_scenery_that_the_living_bounce_off();
     run_a_hard_enough_hit_puts_a_car_in_the_air();
     run_a_car_flying_over_another_does_not_hit_it();
+    run_a_hazard_dropped_by_one_car_affects_the_other_and_not_the_dropper();
+    run_oil_gives_the_grip_back_the_moment_you_are_off_it();
+    run_a_mine_goes_off_once_and_hurts_whoever_found_it();
+    run_holding_the_button_leaves_a_trail_and_not_a_carpet();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();
