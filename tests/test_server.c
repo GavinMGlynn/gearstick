@@ -147,6 +147,16 @@ static gs_input gs_drive(uint8_t player, uint32_t tick) {
     return in;
 }
 
+// **How long a test server lives before giving up on its own.**
+//
+// A safety net against a server left running by a test that crashed, not a
+// budget the test is racing. Every one of these tests stops its server
+// explicitly, so this number should be past anything a test could plausibly
+// need - and when it was not, a slow machine outlived its server and the test
+// failed for that rather than for the thing it is about. ctest's own timeout is
+// the real bound.
+#define GS_SERVER_LIFETIME "120"
+
 static bool gs_server_start_full(const char *port, const char *seconds,
                                  const char *players, const char *timeout) {
     // Next to this binary, not next to whatever directory somebody happened to
@@ -181,7 +191,13 @@ static bool gs_server_start_full(const char *port, const char *seconds,
     // second, and interleaving that with the test's own output makes a failure
     // impossible to read.
     SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, args);
+
+    // SDL takes the argument vector as a plain pointer, so the const on the
+    // strings has to be cast off to hand it over. MSVC treats the silent version
+    // of that as a warning and the warning is an error, which is the right way
+    // round - the cast should be visible.
+    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
+                           (void *)(uintptr_t)args);
     SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
                           SDL_PROCESS_STDIO_NULL);
     SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER,
@@ -258,7 +274,7 @@ static bool gs_client_join(gs_test_client *c, const char *name, int tries) {
 }
 
 TEST(four_clients_connect_and_the_server_shows_all_of_them) {
-    if (!gs_server_start("47810", "20")) { gs_failures++; return; }
+    if (!gs_server_start("47810", GS_SERVER_LIFETIME)) { gs_failures++; return; }
 
     static gs_test_client c[4];
     static const char *names[4] = { "ada", "bez", "cy", "dot" };
@@ -348,7 +364,7 @@ TEST(saying_hello_twice_is_still_one_player) {
     // taken, a server that duplicated a rejoin and a server that refused one
     // both leave the count at four. With room to spare the two answers differ,
     // which is the whole point of the check.
-    if (!gs_server_start("47814", "15")) { gs_failures++; return; }
+    if (!gs_server_start("47814", GS_SERVER_LIFETIME)) { gs_failures++; return; }
 
     static gs_test_client a, b;
     CHECK(gs_client_open(&a, 47814));
@@ -392,7 +408,7 @@ TEST(a_server_told_to_hold_two_holds_two) {
     // is used is to give it one that is not the maximum. With four allowed and
     // four asked for, an implementation that ignored the setting entirely would
     // behave identically.
-    if (!gs_server_start_for("47816", "15", "2")) { gs_failures++; return; }
+    if (!gs_server_start_for("47816", GS_SERVER_LIFETIME, "2")) { gs_failures++; return; }
 
     static gs_test_client c[3];
     for (int i = 0; i < 3; i++) CHECK(gs_client_open(&c[i], 47816));
@@ -415,7 +431,7 @@ TEST(a_server_told_to_hold_two_holds_two) {
 }
 
 TEST(the_server_ignores_datagrams_that_are_not_ours) {
-    if (!gs_server_start("47812", "12")) { gs_failures++; return; }
+    if (!gs_server_start("47812", GS_SERVER_LIFETIME)) { gs_failures++; return; }
 
     static gs_test_client c;
     CHECK(gs_client_open(&c, 47812));
@@ -451,7 +467,7 @@ TEST(the_server_ignores_datagrams_that_are_not_ours) {
 // to players talks to the thing shipped to servers.
 
 TEST(the_games_own_client_gets_its_slot_from_the_server) {
-    if (!gs_server_start("47818", "20")) { gs_failures++; return; }
+    if (!gs_server_start("47818", GS_SERVER_LIFETIME)) { gs_failures++; return; }
     CHECK(gs_wire_init());
 
     static gs_wire *w[4];
@@ -541,14 +557,22 @@ TEST(a_placed_client_is_not_dropped_for_going_quiet) {
     // never does.
     // A two second patience, so a connection that stops being maintained dies
     // inside the test rather than a quarter of a minute after it.
-    if (!gs_server_start_full("47822", "20", "2", "2000")) { gs_failures++; return; }
+    //
+    // **The loops below run on the clock, not on a count of SDL_Delay calls.**
+    // A ten millisecond delay is at least ten milliseconds and on some machines
+    // rather more; counting iterations made this test's wall time a property of
+    // the host, and on a slow one it outlived the server it was talking to and
+    // failed for that instead of for the thing it is about. The server's own
+    // lifetime is well past everything the test needs for the same reason.
+    if (!gs_server_start_full("47822", GS_SERVER_LIFETIME, "2", "2000")) { gs_failures++; return; }
     CHECK(gs_wire_init());
 
     gs_wire *a = gs_wire_server("127.0.0.1", 47822, "ada");
     gs_wire *b = gs_wire_server("127.0.0.1", 47822, "bez");
     CHECK(a != nullptr && b != nullptr);
 
-    for (int k = 0; k < 400 && !(gs_wire_ready(a) && gs_wire_ready(b)); k++) {
+    uint64_t until = SDL_GetTicks() + 8000;
+    while (SDL_GetTicks() < until && !(gs_wire_ready(a) && gs_wire_ready(b))) {
         gs_wire_poll(a);
         gs_wire_poll(b);
         SDL_Delay(10);
@@ -558,7 +582,8 @@ TEST(a_placed_client_is_not_dropped_for_going_quiet) {
 
     // Six seconds of a race - three times the server's patience here - with
     // nothing but the connection maintaining itself.
-    for (int k = 0; k < 600; k++) {
+    until = SDL_GetTicks() + 6000;
+    while (SDL_GetTicks() < until) {
         uint8_t drain[GS_WIRE_MTU];
         gs_wire_poll(a);
         gs_wire_poll(b);
@@ -582,8 +607,11 @@ TEST(a_placed_client_is_not_dropped_for_going_quiet) {
     gs_wire_close(b);
     b = nullptr;
 
+    // Five times the server's two second patience: long enough that not
+    // noticing means the roster never came, and not merely that it was slow.
     bool noticed = false;
-    for (int k = 0; k < 500 && !noticed; k++) {
+    until = SDL_GetTicks() + 10000;
+    while (SDL_GetTicks() < until && !noticed) {
         // As a racing client does: poll to keep the connection, and receive to
         // take everything that has arrived. The control traffic is handled on
         // the way past.
@@ -605,7 +633,7 @@ TEST(a_placed_client_is_not_dropped_for_going_quiet) {
 TEST(a_client_waiting_for_others_is_not_ready_yet) {
     // A lobby of four with one person in it is not a race. A client that called
     // itself ready would start racing against three people who are not there.
-    if (!gs_server_start("47820", "12")) { gs_failures++; return; }
+    if (!gs_server_start("47820", GS_SERVER_LIFETIME)) { gs_failures++; return; }
     CHECK(gs_wire_init());
 
     gs_wire *lonely = gs_wire_server("127.0.0.1", 47820, "ada");
@@ -668,7 +696,7 @@ TEST(a_client_with_a_different_track_is_given_the_right_one) {
         SDL_CloseIO(io);
     }
 
-    if (!gs_server_start_with_track("47824", "25", "1", path)) {
+    if (!gs_server_start_with_track("47824", GS_SERVER_LIFETIME, "1", path)) {
         gs_failures++;
         return;
     }
@@ -721,7 +749,7 @@ TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
     // back out of it. If the relay did not work there would be no race at all.
     CHECK(gs_wire_init());
 
-    if (!gs_server_start_for("47826", "30", "2")) { gs_failures++; return; }
+    if (!gs_server_start_for("47826", GS_SERVER_LIFETIME, "2")) { gs_failures++; return; }
 
     gs_wire *a = gs_wire_server("127.0.0.1", 47826, "ada");
     gs_wire *b = gs_wire_server("127.0.0.1", 47826, "bez");
@@ -894,7 +922,7 @@ TEST(a_time_is_kept_only_if_re_racing_it_produces_it) {
     if (io != nullptr) { SDL_WriteIO(io, track_bytes, track_len); SDL_CloseIO(io); }
 
     remove("verified.db");
-    if (!gs_server_start_verifying("47830", "30", "2", track_path,
+    if (!gs_server_start_verifying("47830", GS_SERVER_LIFETIME, "2", track_path,
                                    "verified.db")) {
         gs_failures++;
         return;
@@ -977,7 +1005,7 @@ TEST(a_record_set_on_one_client_is_seen_by_another) {
     if (io != nullptr) { SDL_WriteIO(io, track_bytes, track_len); SDL_CloseIO(io); }
 
     remove("shared.db");
-    if (!gs_server_start_verifying("47832", "30", "2", track_path, "shared.db")) {
+    if (!gs_server_start_verifying("47832", GS_SERVER_LIFETIME, "2", track_path, "shared.db")) {
         gs_failures++;
         return;
     }
@@ -1033,7 +1061,7 @@ TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
     CHECK(gs_wire_init());
 
     remove("published.db");
-    if (!gs_server_start_with_store("47834", "30", "2", "published.db")) {
+    if (!gs_server_start_with_store("47834", GS_SERVER_LIFETIME, "2", "published.db")) {
         gs_failures++;
         return;
     }

@@ -670,3 +670,12 @@ worth as much as what was decided about it.
       music while the test measured it, so "the same seed is the same music"
       came out true or false depending on when the callback fired. Tests now
       open no device at all.
+- [x] **Two server tests raced their own server, and one MSVC warning was an
+      error.** *(Found in CI while landing the generator.)* The tests bounded
+      their waiting by a count of ten-millisecond delays, which is a count of
+      *at least* ten milliseconds each — on a slower machine the test outlived
+      the server it was talking to and failed for that rather than for the thing
+      it was about. Waiting now runs on the clock, and a test server's
+      self-terminate is a safety net well past anything a test needs. Separately,
+      handing SDL an argument vector dropped a `const` that MSVC treats as an
+      error; the cast is now written down.
