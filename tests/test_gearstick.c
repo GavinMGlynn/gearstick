@@ -2522,24 +2522,30 @@ static void gs_net_scene(gs_track *t, gs_world *w) {
         for (uint8_t x = 0; x <= t->w; x++)
             gs_track_set_corner(t, x, y, x > 20 && x < 26 ? GS_INT(1) : 0);
 
+    static const uint8_t grid[GS_MAX_CARS] = {
+        (uint8_t)GS_VEH_STOCK_CAR, (uint8_t)GS_VEH_DUNE_BUGGY,
+        (uint8_t)GS_VEH_SPRINT_CAR, (uint8_t)GS_VEH_BAJA_BUG,
+    };
     gs_world_init(w, GS_ONE);
-    gs_world_add_car(w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(9), 0);
-    gs_world_add_car(w, t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(4), GS_INT(11), 0);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_world_add_car(w, t, grid[i], GS_INT(4), GS_INT(5) + GS_INT(3) * i, 0);
+    }
 }
 
 // What each player does. Deliberately not constant: a player who never changes
 // their input is a player whose every prediction is right, which would test
 // nothing.
 static gs_input gs_net_drive(uint8_t player, uint32_t tick) {
+    // Four different drivers on four different rhythms, so no two players ever
+    // change their minds together and a session that confused one for another
+    // would be caught rather than accidentally agreeing.
+    uint32_t turn = 23u + player * 14u;
+    uint32_t brake = 53u + player * 19u;
+
     gs_input in = GS_IN_ACCEL;
-    if (player == 0) {
-        if ((tick / 37u) % 3u == 0u) in |= GS_IN_LEFT;
-        else if ((tick / 37u) % 3u == 1u) in |= GS_IN_RIGHT;
-        if ((tick / 91u) % 4u == 0u) in |= GS_IN_BRAKE;
-    } else {
-        if ((tick / 23u) % 2u == 0u) in |= GS_IN_RIGHT;
-        if ((tick / 53u) % 5u == 0u) in = GS_IN_BRAKE;
-    }
+    if ((tick / turn) % 3u == 0u) in |= GS_IN_LEFT;
+    else if ((tick / turn) % 3u == 1u) in |= GS_IN_RIGHT;
+    if ((tick / brake) % 4u == 0u) in |= GS_IN_BRAKE;
     return in;
 }
 
@@ -2642,6 +2648,85 @@ TEST(two_machines_race_to_the_same_finish_over_a_bad_connection) {
 
     // And the cars went somewhere, so this is a race rather than a grid.
     CHECK(a.confirmed.car[0].x > GS_INT(20));
+}
+
+TEST(four_machines_race_to_the_same_finish_over_a_bad_connection) {
+    // Four players is what this game is for, and four players is a different
+    // problem from two: every machine is guessing about *three* other people at
+    // once, and a rollback is triggered by whichever of them changed their mind
+    // first. Twelve links rather than two, all of them bad.
+    static gs_net net[4];
+    static gs_link link[4][4];
+    static gs_track t;
+    static gs_world w;
+
+    gs_net_scene(&t, &w);
+    for (int i = 0; i < 4; i++) gs_net_begin(&net[i], &w, 4, (uint8_t)i);
+
+    for (int a = 0; a < 4; a++) {
+        for (int b = 0; b < 4; b++) {
+            link[a][b] = (gs_link){ 0 };
+            link[a][b].seed = 0x2000u + (uint32_t)a * 37u + (uint32_t)b * 11u;
+            link[a][b].latency = 18u + (uint32_t)(a + b) * 3u;   // all different
+            link[a][b].jitter = 6;
+            link[a][b].loss_pct = 10;
+        }
+    }
+
+    const uint32_t ticks = GS_TICK_HZ * 8;
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        for (int a = 0; a < 4; a++) {
+            for (int b = 0; b < 4; b++) {
+                if (a != b) gs_link_deliver(&link[a][b], tick, &net[b], &t);
+            }
+        }
+
+        for (int i = 0; i < 4; i++) {
+            gs_net_local_input(&net[i], gs_net_drive((uint8_t)i, tick));
+
+            uint8_t buf[GS_LINK_MTU];
+            size_t n = gs_net_packet(&net[i], buf, sizeof buf);
+
+            // A mesh: the same packet to each of the other three, which is what
+            // the socket layer does with one gs_wire_send.
+            for (int b = 0; b < 4; b++) {
+                if (b != i) gs_link_send(&link[i][b], tick, buf, n);
+            }
+            gs_net_step(&net[i], &t);
+        }
+    }
+
+    for (uint32_t tick = ticks; tick < ticks + 80u; tick++) {
+        for (int a = 0; a < 4; a++) {
+            for (int b = 0; b < 4; b++) {
+                if (a != b) gs_link_deliver(&link[a][b], tick, &net[b], &t);
+            }
+        }
+    }
+
+    // All four confirmed the whole race, and all four agree about it.
+    for (int i = 0; i < 4; i++) {
+        CHECK(net[i].confirmed_tick == ticks);
+        CHECK(!net[i].desynced);
+        CHECK(gs_world_hash(&net[i].confirmed) == gs_world_hash(&net[0].confirmed));
+        CHECK(net[i].stalls == 0);
+    }
+
+    // And it is the race one machine with no network would have run.
+    gs_world solo;
+    gs_net_scene(&t, &solo);
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        gs_input in[GS_MAX_CARS];
+        for (uint8_t i = 0; i < 4; i++) in[i] = gs_net_drive(i, tick);
+        gs_world_step(&solo, &t, in);
+    }
+    CHECK(gs_world_hash(&solo) == gs_world_hash(&net[0].confirmed));
+
+    // The links really were bad, and rollback really did work for its living -
+    // more than in the two-player case, because there are three people to be
+    // wrong about rather than one.
+    CHECK(link[0][1].dropped > 0);
+    CHECK(net[0].rollbacks > 0);
 }
 
 TEST(rollback_costs_nothing_when_the_guess_is_right) {
@@ -3111,6 +3196,7 @@ int main(void) {
     run_a_damaged_code_never_becomes_a_different_track();
     run_a_code_is_the_same_code_on_every_machine();
     run_two_machines_race_to_the_same_finish_over_a_bad_connection();
+    run_four_machines_race_to_the_same_finish_over_a_bad_connection();
     run_rollback_costs_nothing_when_the_guess_is_right();
     run_a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing();
     run_a_desync_is_noticed_rather_than_lived_with();

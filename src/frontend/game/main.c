@@ -86,6 +86,8 @@ typedef struct gs_app {
     bool        online;
     const char *join_host;
     uint16_t    port;
+    uint8_t     online_players;   // how many the host is waiting for
+    bool        net_started;      // everybody is here and the race has begun
     uint32_t    waiting;     // ticks spent stalled, for telling the player
     bool        quit;
 } gs_app;
@@ -388,6 +390,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         } else if (SDL_strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
             a->online = true;
             a->port = (uint16_t)SDL_atoi(argv[++i]);
+            // How many people are coming, host included. Two by default,
+            // because two is the common case and nobody should have to type a
+            // number to race one friend.
+            if (i + 1 < argc && argv[i + 1][0] >= '2' && argv[i + 1][0] <= '4' &&
+                argv[i + 1][1] == '\0') {
+                a->online_players = (uint8_t)SDL_atoi(argv[++i]);
+            }
         } else if (SDL_strcmp(argv[i], "--join") == 0 && i + 2 < argc) {
             a->online = true;
             a->join_host = argv[++i];
@@ -422,7 +431,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  F5 saves that run as a ghost file and F9 loads one.");
             SDL_Log("  --ghost FILE    race against a recorded run");
             SDL_Log("  --ghost-out F   with --shot: write the captured run as a ghost");
-            SDL_Log("  --host PORT     wait for one other player to join");
+            SDL_Log("  --host PORT [N]   wait for N players in total (2-4, default 2)");
             SDL_Log("  --join HOST PORT  join somebody who is waiting");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
@@ -473,22 +482,19 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("net: could not start networking: %s", SDL_GetError());
             return SDL_APP_FAILURE;
         }
-        a->wire = a->join_host != nullptr ? gs_wire_join(a->join_host, a->port)
-                                          : gs_wire_host(a->port);
+        uint8_t want = a->online_players > 0 ? a->online_players : 2;
+        a->wire = a->join_host != nullptr
+                      ? gs_wire_join(a->join_host, a->port)
+                      : gs_wire_host(a->port, want);
+
         const char *err = gs_wire_error(a->wire);
         if (a->wire == nullptr || err != nullptr) {
             SDL_Log("net: %s", err != nullptr ? err : "could not open a socket");
             return SDL_APP_FAILURE;
         }
 
-        // The host drives car zero and whoever joins drives car one. Both
-        // machines start from the same world - the same track, the same grid -
-        // which is the one thing rollback cannot establish for itself.
-        gs_net_begin(&a->net, &a->world, 2, a->join_host != nullptr ? 1 : 0);
-
-        SDL_Log("net: %s on port %u, driving car %u",
-                a->join_host != nullptr ? "joined" : "hosting", a->port,
-                a->net.local);
+        SDL_Log("net: %s on port %u", a->join_host != nullptr ? "joining" : "hosting",
+                a->port);
     }
 
     // A ghost named on the command line is somebody else's run, so it survives
@@ -620,7 +626,24 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // through terrain that is changing under it helps nobody.
     if (a->editor.active) steps = 0;
 
-    if (a->online) {
+    if (a->online && !a->net_started) {
+        // Nobody races until everybody is here. The player count decides the
+        // grid, and the grid has to be identical on every machine before a
+        // single tick is simulated - rollback can recover from a wrong guess
+        // about an input and from nothing at all about a wrong starting state.
+        gs_wire_poll(a->wire);
+        if (gs_wire_ready(a->wire)) {
+            a->players = gs_wire_players(a->wire);
+            gs_start_race(a);
+            gs_net_begin(&a->net, &a->world, gs_wire_players(a->wire),
+                         gs_wire_local(a->wire));
+            a->net_started = true;
+            SDL_Log("net: %u players, driving car %u", a->net.players, a->net.local);
+        }
+        steps = 0;
+    }
+
+    if (a->online && a->net_started) {
         for (uint32_t i = 0; i < steps; i++) {
             // Everything that has arrived, before anything is simulated: a
             // correction is worth more the earlier it lands, because it is

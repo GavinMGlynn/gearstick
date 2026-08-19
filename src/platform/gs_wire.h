@@ -1,4 +1,4 @@
-// gs_wire.h - the socket under the netcode, and nothing more than a socket.
+// gs_wire.h - the sockets under the netcode, and nothing more than sockets.
 //
 // **Datagrams, unordered, unacknowledged, allowed to vanish.** Every comfort a
 // stream socket offers - delivery, ordering, retransmission - is a round trip,
@@ -7,9 +7,16 @@
 // input in every packet, so a lost datagram is already replaced by the time
 // anybody could have asked for it.
 //
+// **A mesh, not a star.** Up to four players all send directly to each other
+// rather than through the host, because a relay is an extra hop of latency
+// between two clients and latency is the whole thing this is arranged to
+// minimise. The host is used only to *find* everybody: joiners say hello to it,
+// it assigns the player slots, and it hands each of them the list of where the
+// others are. After that it is nobody's server.
+//
 // This file is the only thing in the project that knows what a socket is. The
 // rollback session in src/core/gs_net.c produces and consumes byte arrays, and
-// that separation is what lets a twelve-second race under 200 ms of latency and
+// that separation is what lets a four-player race under 200 ms of latency and
 // twelve percent packet loss run inside a unit test with no network at all.
 #ifndef GS_WIRE_H
 #define GS_WIRE_H
@@ -18,7 +25,8 @@
 // well as the fixed-width types. MSVC is that toolchain today.
 #include "core/gs_common.h"
 
-#define GS_WIRE_MTU 512
+#define GS_WIRE_MTU     512
+#define GS_WIRE_PLAYERS 4
 
 typedef struct gs_wire gs_wire;
 
@@ -26,29 +34,44 @@ typedef struct gs_wire gs_wire;
 bool gs_wire_init(void);
 void gs_wire_quit(void);
 
-// Listen on a port, waiting to be joined. The peer's address is learned from
-// the first datagram that arrives, so there is nothing to configure at this end
-// beyond the port.
-gs_wire *gs_wire_host(uint16_t port);
+// Wait for `players` people in total, this machine being one of them and player
+// zero. Nothing else is configured at this end: joiners are learned from the
+// datagrams they send.
+gs_wire *gs_wire_host(uint16_t port, uint8_t players);
 
-// Join somebody who is listening. `host` is a name or an address.
+// Join somebody who is waiting. `host` is a name or an address. Which player
+// this machine turns out to be is decided by the host and arrives with the
+// roster.
 gs_wire *gs_wire_join(const char *host, uint16_t port);
 
 void gs_wire_close(gs_wire *w);
 
-// True once both ends know where the other one is - which for the host means
-// the first datagram has arrived.
-bool gs_wire_connected(const gs_wire *w);
+// Work the handshake. Call it every frame until `gs_wire_ready`; it is cheap
+// and it does nothing once everybody is present.
+void gs_wire_poll(gs_wire *w);
 
-// Send one. False only if there is nowhere to send it yet; a datagram that is
-// sent and then lost is a success as far as this is concerned, which is the
-// whole point of choosing datagrams.
+// True once every player is present and this machine knows how to reach all of
+// them. Until then there is nobody to race.
+bool gs_wire_ready(const gs_wire *w);
+
+// Which player this machine is, and how many there are. Both are only
+// meaningful once ready.
+uint8_t gs_wire_local(const gs_wire *w);
+uint8_t gs_wire_players(const gs_wire *w);
+
+// How many are present so far, for a "waiting for 2 more" line rather than a
+// frozen window.
+uint8_t gs_wire_present(const gs_wire *w);
+
+// Send to *everybody else*. The rollback packet is the same for every peer, so
+// there is one call rather than one per peer. False only if there is nobody to
+// send to yet.
 bool gs_wire_send(gs_wire *w, const uint8_t *buf, size_t len);
 
-// Take the next one that has arrived, or 0 if none has. Never blocks.
+// Take the next datagram from any peer, or 0 if none has arrived. Never blocks.
+// The handshake's own traffic is dealt with inside and never handed back.
 size_t gs_wire_recv(gs_wire *w, uint8_t *buf, size_t cap);
 
-// What it has been doing, for a corner of the screen when a race feels wrong.
 void gs_wire_stats(const gs_wire *w, uint32_t *sent, uint32_t *received);
 
 // The last thing that went wrong, for putting in front of the player rather

@@ -419,9 +419,11 @@ whatever the UI turns out to be — then the interface on top.
       *Verification: a ghost replays identically on another machine.*
 - [x] **Track sharing as a code or URL.** *Verification: a track round-trips
       through the code and hashes equal.*
-- [x] **Rollback netcode for two players online.** *Verification: a race under
-      simulated latency and packet loss ends in the same state on both
-      machines.*
+- [x] **Rollback netcode for up to four players online.** *Verification: a race
+      under simulated latency and packet loss ends in the same state on every
+      machine.* (Scoped up from two during Phase 10: four is what the couch it
+      replaces held, and the session was N-player from the start - only the
+      socket was written for two.)
 
 ## Phase 10 — Presentation and release
 

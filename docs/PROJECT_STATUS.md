@@ -359,11 +359,40 @@ nothing at all is known - and the bad-connection race from 737 to 61.
 
 The socket is SDL_net, a new submodule under `ext/`, and it is used for
 datagrams and nothing else: every comfort a stream offers is a round trip, and
-rollback exists so that nobody waits one. `--host PORT` and `--join HOST PORT`
-race two machines. A separate test runs a real race over two real loopback
-sockets, because the one thing a simulated link cannot check is whether the
-socket works - whether a host finds a peer it was never told about, and whether
-the two ends still agree once real datagrams carry the race.
+rollback exists so that nobody waits one. A separate test runs a real race over
+real loopback sockets, because the one thing a simulated link cannot check is
+whether the socket works - whether a host finds a peer it was never told about,
+and whether the ends still agree once real datagrams carry the race.
+
+**Four players, not two.** The session was N-player from the start - the input
+history, the known-input bitmask and the confirmed-tick logic never cared how
+many there were - so what four needed was peer discovery and a mesh rather than
+a netcode rewrite. `--host PORT [N]` waits for N in total and `--join HOST PORT`
+joins; nobody races until everybody has arrived, because the grid depends on the
+count and rollback can recover from a wrong guess about an input and from
+nothing at all about a wrong starting state.
+
+It is a **mesh, not a star**: every machine sends directly to the other three,
+because relaying through the host would put the host's latency between two
+clients who can see each other, and latency is the entire thing this design
+exists to minimise. The host is used only to *find* everybody - joiners knock
+until answered, it assigns the slots, and it hands each of them a personalised
+roster saying which player they are and where the others live. After that it is
+nobody's server.
+
+One detail worth writing down: the roster's entry for the host is sent **empty**
+on purpose. A host does not know what its own address looks like from outside -
+behind a router it is not the one it is bound to - and every joiner already
+knows it, because they typed it. So they fill that entry in themselves. The
+honest limitation is the other side of the same coin: a joiner's address as the
+host sees it is the one other joiners are given, which is correct on a LAN and
+is not NAT traversal.
+
+Four machines racing over twelve simulated links, all with different latencies
+and ten percent loss, confirm every tick, agree on the hash, and agree with the
+race one machine would have run. Four real processes on the loopback meet, take
+distinct slots and start. A fifth is given silence rather than a reply telling
+it there is a game here.
 
 Desync is detected rather than lived with: every packet carries the sender's
 confirmed tick and the hash of its state there, and the receiver checks it

@@ -49,7 +49,7 @@ typedef struct gs_voice {
     // Tyres
     float tyre_gain;
     float tyre_bright;    // 0 gritty (dirt), 1 sharp (ice)
-    float tyre_lp;        // one-pole filter state
+    float tyre_lp, tyre_lp2;   // two cascaded poles - see the render loop
 
     // Impact, decaying
     float hit;
@@ -118,13 +118,15 @@ void gs_audio_render(float *out, int frames) {
             // combustion engine rather than a flute.
             float p = o->engine_phase;
             float engine = 0.0f;
-            engine += SDL_sinf(p * 6.2831853f) * 0.55f;
-            engine += SDL_sinf(p * 12.566371f) * 0.30f;
-            engine += SDL_sinf(p * 18.849556f) * 0.16f;
-            engine += SDL_sinf(p * 25.132741f) * 0.09f;
+            engine += SDL_sinf(p * 6.2831853f) * 0.62f;
+            engine += SDL_sinf(p * 12.566371f) * 0.34f;
+            engine += SDL_sinf(p * 18.849556f) * 0.20f;
+            engine += SDL_sinf(p * 25.132741f) * 0.12f;
+            engine += SDL_sinf(p * 31.415927f) * 0.07f;
 
-            // A little noise in the engine too, so it is not a pure tone.
-            engine += gs_noise_next() * 0.06f;
+            // A trace of noise so it is not a pure tone - and only a trace.
+            // The first mix had four times this and the whole race hissed.
+            engine += gs_noise_next() * 0.015f;
             engine *= o->engine_gain;
 
             // --- Tyres. Noise through a one-pole low pass whose cutoff is the
@@ -138,9 +140,10 @@ void gs_audio_render(float *out, int frames) {
             // surface was reaching the synthesiser perfectly and arriving
             // backwards.
             float n = gs_noise_next();
-            float k = 0.04f + o->tyre_bright * 0.55f;
-            o->tyre_lp += (n - o->tyre_lp) * k;
-            float tyre = o->tyre_lp * o->tyre_gain * SDL_sqrtf((2.0f - k) / k);
+            float k = 0.03f + o->tyre_bright * 0.32f;
+            o->tyre_lp  += (n - o->tyre_lp) * k;
+            o->tyre_lp2 += (o->tyre_lp - o->tyre_lp2) * k;
+            float tyre = o->tyre_lp2 * o->tyre_gain * ((2.0f - k) / k) * 0.55f;
 
             // --- Impact. A struck, fast-decaying burst.
             float hit = 0.0f;
@@ -313,8 +316,12 @@ void gs_audio_update(const gs_world *w, const gs_track *t, float lx, float ly) {
             float ch = gs_to_f(gs_cos(c->heading)), sh = gs_to_f(gs_sin(c->heading));
             float lateral = SDL_fabsf(-vx * sh + vy * ch);
 
-            float roll = SDL_clamp(speed / 8.0f, 0.0f, 1.0f) * 0.30f;
-            float slide = SDL_clamp(lateral / 3.0f, 0.0f, 1.0f) * 0.80f;
+            // **Rolling is nearly silent; sliding is not.** Tyre noise that
+            // is always there is just hiss over the top of the engine, and the
+            // information a player wants from it is *am I sliding* - so almost
+            // all of the level is on the slip and almost none on the speed.
+            float roll = SDL_clamp(speed / 8.0f, 0.0f, 1.0f) * 0.07f;
+            float slide = SDL_clamp(lateral / 3.0f, 0.0f, 1.0f) * 0.42f;
             level *= roll + slide;
         }
         o->tyre_gain += (level - o->tyre_gain) * 0.2f;
