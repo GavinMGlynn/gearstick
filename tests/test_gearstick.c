@@ -1712,6 +1712,83 @@ TEST(a_destruction_race_fought_out_between_two_cars_finishes_by_itself) {
     CHECK(w.winner == 1);
 }
 
+// Drive a lap of the same line with the same inputs, and report where it ended
+// up and how far off the straight it was pushed. `blocked` puts a wreck on the
+// line first.
+typedef struct gs_line { gs_fix x, y; double drift; } gs_line;
+
+static gs_line gs_drive_the_line(bool blocked) {
+    static gs_track t;
+    gs_track_init(&t, 80, 24, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(12), 0);
+
+    if (blocked) {
+        // Somebody died here last lap, on the line everyone takes.
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(12), 0);
+        w.car[1].wrecked = true;
+        w.car[1].damage = 255;
+    }
+
+    double drift = 0.0;
+    for (int i = 0; i < GS_TICK_HZ * 6; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+
+        double off = (double)(w.car[0].y - GS_INT(12)) / (double)GS_ONE;
+        if (off < 0) off = -off;
+        if (off > drift) drift = off;
+    }
+    return (gs_line){ w.car[0].x, w.car[0].y, drift };
+}
+
+TEST(a_wreck_changes_the_racing_line_for_the_rest_of_the_race) {
+    gs_line clear_run = gs_drive_the_line(false);
+    gs_line blocked = gs_drive_the_line(true);
+
+    // With nothing in the way the car runs dead straight down the line.
+    CHECK(clear_run.drift < 0.01);
+    CHECK(clear_run.x > GS_INT(30));
+
+    // With a wreck on it, the same inputs no longer take the same path: the
+    // course has been reshaped by something that happened during the race, and
+    // winning the fight has changed the track.
+    CHECK(blocked.x != clear_run.x);
+    CHECK(blocked.x < clear_run.x);      // it cost time as well as position
+}
+
+TEST(a_wreck_is_still_there_much_later_and_has_not_moved) {
+    static gs_track t;
+    gs_track_init(&t, 80, 24, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(12), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(12), 0);
+    w.car[1].wrecked = true;
+    w.car[1].damage = 255;
+
+    gs_fix where_x = w.car[1].x, where_y = w.car[1].y;
+
+    // A long race, with the live car repeatedly driving into it.
+    for (int i = 0; i < GS_TICK_HZ * 40; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+
+    // Still exactly where it died. Debris that drifted would stop being track
+    // geometry and start being another car.
+    CHECK(w.car[1].x == where_x);
+    CHECK(w.car[1].y == where_y);
+    CHECK(w.car[1].wrecked);
+
+    // And it is still an obstacle rather than having quietly become passable.
+    gs_fix gap = gs_fix_len2(w.car[0].x - where_x, w.car[0].y - where_y);
+    CHECK(gap >= GS_CAR_RADIUS * 2 - GS_ONE / 4);
+}
+
 // ---------------------------------------------------------------------------
 // Determinism - the property everything else is built on
 // ---------------------------------------------------------------------------
@@ -2026,6 +2103,8 @@ int main(void) {
     run_everybody_going_at_once_is_a_draw_rather_than_a_win();
     run_a_race_does_not_end_just_because_somebody_was_wrecked();
     run_a_destruction_race_fought_out_between_two_cars_finishes_by_itself();
+    run_a_wreck_changes_the_racing_line_for_the_rest_of_the_race();
+    run_a_wreck_is_still_there_much_later_and_has_not_moved();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();
