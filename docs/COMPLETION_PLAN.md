@@ -505,6 +505,15 @@ hard-coded demo track that has been sitting in the frontend since Phase 3.
 - [ ] **Publish a track to a server, and take one down again.** *Verification: a
       track published from one client is browsable and playable from another,
       and disappears from it when withdrawn.*
+- [ ] **A generator that fills the library with tracks worth driving.** Seeded,
+      so a track is reproducible from a number, and varied enough to be worth
+      having — circuits, point-to-points, jumps, mixed surfaces, painted
+      gravity. **These are ours**, so they ship, unlike anything imported.
+      *Verification: fifty generated tracks are all completable and all
+      different, checked by the analyser rather than by looking.*
+- [ ] **A shipped set of stock tracks, chosen from the generator's output.**
+      *Verification: a fresh install has a dozen tracks to race, each one
+      completable at Earth gravity in every vehicle that should manage it.*
 
 ## Phase 13 — The rest of the feature list, and the tails
 
@@ -533,12 +542,19 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       load anything they do not recognise, which is correct and means somebody's
       history vanishes the first time the format moves. *Verification: a store
       written by the previous version loads, with its records intact.*
-- [ ] **A corpus of real tracks to test the analyser against.** Our own tracks
-      were all built by whoever wrote the editor, which is the worst possible
-      sample. The *Stunts* corpus is the target and **its licence has to be
-      checked before anything is imported**; reference only, nothing ships.
-      *Verification: the analyser runs over a corpus nobody here authored and
-      its verdicts are spot-checked by driving them.*
+- [ ] **Read a foreign track format, and test against a corpus nobody here
+      wrote.** Our own tracks were all built by whoever wrote the editor, which
+      is the worst possible sample — a generator has the same problem, because
+      it was written by the same person. The *Stunts* format is documented and
+      grid-based with elevation and surfaces, which is close enough to ours to
+      import. **Two separate questions, and they get separate answers: reading
+      the format is ours to write and ships; the tracks themselves are somebody
+      else's and do not ship**, whatever their licence turns out to permit —
+      `docs/ASSETS.md` rule 1 says nothing third-party is redistributed by this
+      repository, and a track corpus is no different from a sprite sheet.
+      *Verification: a converted track from the corpus loads, validates and can
+      be driven, and the importer is exercised by CI against a track generated
+      in the format rather than against a downloaded one.*
 - [ ] **Read the original's designer notes and build stock tracks.** The 1985
       manual says what each of its fifty tracks was *for*. That is design
       rationale from the authors, it needs no reverse engineering, and it should

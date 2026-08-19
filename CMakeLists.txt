@@ -243,7 +243,8 @@ add_library(gearstick_shell STATIC
     src/platform/gs_bind.c
     src/platform/gs_paths.c
     src/platform/gs_input.c
-    src/platform/gs_wire.c)
+    src/platform/gs_wire.c
+    src/net/gs_proto.c)
 
 target_include_directories(gearstick_shell PUBLIC src)
 target_link_libraries(gearstick_shell PUBLIC gearstick_sim gearstick_ui ${GS_SDL}
