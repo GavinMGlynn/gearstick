@@ -90,12 +90,24 @@ static bool gs_meet(gs_wire **w, int count, uint16_t port) {
 
 // Run a race across `count` sessions over real sockets, and hand back whether
 // they all agreed.
+// A secret per peer, fixed so a failing race can be re-run and get the same
+// salts. A real client draws one at random; a test that did the same would be a
+// test that fails differently every time.
+static const uint8_t *gs_test_secret(uint8_t who) {
+    static uint8_t s[GS_MAX_CARS][GS_NET_SECRET_BYTES];
+    for (unsigned i = 0; i < GS_NET_SECRET_BYTES; i++) {
+        s[who][i] = (uint8_t)((0x5au + who * 31u + i * 7u) & 0xffu);
+    }
+    return s[who];
+}
+
 static bool gs_race(gs_wire **w, gs_net *n, int count, uint32_t ticks) {
     gs_world start;
     gs_scene(&start);
 
     for (int i = 0; i < count; i++) {
-        gs_net_begin(&n[i], &start, (uint8_t)count, gs_wire_local(w[i]));
+        gs_net_begin(&n[i], &start, (uint8_t)count, gs_wire_local(w[i]),
+                     gs_test_secret(gs_wire_local(w[i])));
     }
 
     for (uint32_t tick = 0; tick < ticks; tick++) {
@@ -115,13 +127,26 @@ static bool gs_race(gs_wire **w, gs_net *n, int count, uint32_t ticks) {
         }
     }
 
-    // Drain whatever is still in flight, so everybody can confirm the finish.
+    // **The race is over, so what is still promised gets shown.** The reveals
+    // trail the commitments by a fixed distance while a race is running, which
+    // is what makes a commitment worth anything; the last dozen ticks are
+    // therefore still owed when the loop ends.
+    for (int i = 0; i < count; i++) gs_net_finish(&n[i]);
+
+    // Keep talking while that goes out, then drain whatever is still in flight,
+    // so everybody can confirm the finish.
     for (int i = 0; i < 200; i++) {
         uint8_t buf[GS_WIRE_MTU];
         size_t got;
         for (int k = 0; k < count; k++) {
             while ((got = gs_wire_recv(w[k], buf, sizeof buf)) > 0) {
                 gs_net_receive(&n[k], &gs_t, buf, got);
+            }
+        }
+        if (i < 100) {
+            for (int k = 0; k < count; k++) {
+                size_t len = gs_net_packet(&n[k], buf, sizeof buf);
+                gs_wire_send(w[k], buf, len);
             }
         }
         SDL_Delay(1);

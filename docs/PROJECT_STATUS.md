@@ -1542,6 +1542,81 @@ everything else, so anybody on the path can read one — what stops them spendin
 it is the name it was issued to, and a name is worth something only once the
 transport and the accounts land.
 
+### A race commits to its inputs before it sees anybody else's
+
+The state-hash check between peers catches a modified *simulation* and is
+completely blind to a modified *decision*. Rollback hands every peer the others'
+inputs for a tick, so a client that waits, looks, and then chooses desyncs
+nothing at all — everybody simulates the dishonest input faithfully, and every
+machine agrees about a race that was rigged.
+
+So an input is promised before it is shown. Each datagram carries a commitment
+for the most recent twelve ticks and the input and salt themselves for the
+thirty-two ticks before those. A reveal that does not match its promise stops
+the race — not stalls it: a stall ends when a datagram arrives, and there is no
+datagram that makes this all right.
+
+**The rule the whole thing rests on is that a promise only counts when it
+arrives in a datagram that does not also prove it.** Let the two travel together
+and the promise costs nothing to make: a peer could wait, choose, and build both
+at once, indistinguishable from an honest one. That is the entire reason the
+reveals run a fixed distance behind the commitments. A peer that ignores the gap
+is not accused of anything, because it has not lied — it simply never says
+anything checkable, and nothing it sends is accepted.
+
+**The cost is twelve ticks, and it is paid by the remote car only.** The local
+car still responds to its own pad on the frame the key goes down; what arrives a
+tenth of a second later is the *correction* for somebody else's car, which is
+what rollback exists to absorb. Sending commitments for more than twelve ticks
+would be waste, because a thirteenth copy arrives in a datagram that also
+reveals the tick and is inadmissible by the rule above.
+
+#### BLAKE2s, and why there is a hash in the simulation
+
+`gs_world_hash` is FNV-1a. That is right for noticing two machines have stopped
+agreeing and useless for a promise, which has to be one the promiser cannot
+wriggle out of. So `src/core/gs_blake2s.c` is RFC 7693, integer-only, no
+allocation — core links nothing and cannot reach libsodium, and will not be able
+to when libsodium arrives for the transport.
+
+It is checked against the RFC's published vector for `"abc"` and against
+Python's `hashlib` for the lengths the RFC does not cover. Those lengths are
+chosen rather than arbitrary: 63, 64, 65 and 128 bytes bracket the block
+boundary, which is where a buffered hash goes wrong if it compresses a full
+block eagerly instead of waiting to learn whether anything follows it. It is
+also fed a message one byte at a time and has to agree with itself.
+
+#### Two faults this turned up
+
+**A rollback datagram outgrew the link and nothing said so.** The packet went
+from 54 bytes to 411. `gs_net_packet` refuses to write into a buffer too small
+for it and returns zero; the simulated link in the tests silently dropped
+anything over its own 96-byte limit. Between them, every race stalled with no
+input ever crossing — which reads exactly like a network fault and was a
+constant nobody had revisited. The size is now a constant in `gs_net.h`,
+`gs_wire.h` carries a `static_assert` that a wire datagram is at least that big,
+the test link uses the real figure, and it counts oversize packets separately
+from the loss it inflicts on purpose so the two can never again be confused.
+
+**A stalled peer rewrote a promise it had already made, and was thrown out of an
+honest race for it.** When the window fills, `gs_net_step` stops advancing but
+the frame loop keeps running, and a caller polling the pad every frame handed
+over a different input for the tick it was stuck on. That input had already gone
+out inside a commitment. The far end saw one tick promised two different ways —
+which is precisely what a peer choosing late looks like — and correctly stopped
+the race. `gs_net_local_input` now keeps the first word said on a tick and
+ignores the rest. The test for the admissibility rule is what found it.
+
+#### What is pinned
+
+Four tests, each watched failing with its own rule removed and nothing else:
+the published and independent digest vectors; a peer whose reveal does not match
+its promise being caught and the race stopping; a peer promising two different
+things for one tick being caught; and a peer that shows its inputs in the same
+breath as it promises them getting nowhere at all. The four-player race over a
+bad link still agrees tick for tick with the race one machine would have run
+alone, which is the claim that says the commitment costs correctness nothing.
+
 ---
 
 ## What does not exist

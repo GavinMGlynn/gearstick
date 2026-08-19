@@ -104,17 +104,46 @@ there is no referee in the loop. Two different problems live here.
 divergence stops the race rather than being lived with. A client that changes
 how the physics works stops agreeing with everybody else immediately.
 
-**Dishonestly chosen inputs are not.** In rollback each peer receives the others'
-inputs for a tick, and a modified client can wait to see them before deciding its
-own. Nothing about that desyncs, because everyone then simulates the same
-dishonest input faithfully. The standard answer is **commit then reveal**: send
-`H(inputs ‖ salt)` first and the inputs afterwards, so a choice is locked before
-anybody else's is visible. It costs a fixed delay and it closes the class.
+**Closed: dishonestly chosen inputs.** In rollback each peer receives the
+others' inputs for a tick, and a modified client could wait to see them before
+deciding its own. Nothing about that desyncs — everyone then simulates the same
+dishonest input faithfully — so the state-hash check, which catches a modified
+*simulation*, is completely blind to it.
 
-**Whole-race verification** is the backstop and is nearly free here: every peer
-keeps the complete input log and the agreed final state hash, and the server can
-re-race the log afterwards. A log that does not produce the hash everybody
-accepted means somebody's client was not running this race.
+So an input is promised before it is shown. Each datagram carries a commitment
+for the most recent ticks — `BLAKE2s(salt ‖ tick ‖ input)`, truncated to eight
+bytes — and the input and salt themselves for ticks twelve further back. A peer
+that waited to see somebody else's input would have to reveal something other
+than what it promised, and that is caught; the race stops rather than carrying
+on, because there is no honest reading of the rest of it.
+
+**The rule that makes it work is that a promise only counts when it arrives in a
+datagram that does not also prove it.** Otherwise the two travel together, the
+promise costs nothing to make, and a peer choosing late is indistinguishable
+from an honest one. That is what the twelve-tick gap between the commitments and
+the reveals is for. A peer that ignores the gap is not accused of anything — it
+has not lied — it simply never says anything checkable, and nothing it sends is
+ever accepted.
+
+Three further things, stated rather than left to be found:
+
+- The salt for a tick is derived from a per-race secret that never leaves the
+  machine, so revealing one tick's salt says nothing about the next one's. That
+  secret comes from `SDL_rand_bits`, which is **not** a cryptographic generator:
+  as with the session nonce, this is the shape the defence takes and not yet a
+  defence against somebody who can predict it.
+- Eight bytes of commitment is not enough to resist a determined search for a
+  *collision*, and is far more than enough to resist finding a second input and
+  salt matching a given one — which is the property this actually rests on, and
+  it has to be done inside the tenth of a second before the reveal is due.
+- BLAKE2s is RFC 7693 and is implemented here in `src/core/`, because core links
+  nothing and cannot reach libsodium. It is checked against the RFC's published
+  vector and against Python's `hashlib`, an implementation written by other
+  people.
+
+**A peer that stalls rather than lying is still not stopped.** Refusing to send
+at all stalls the race, which is visible; choosing *when* to send within the
+window is not something a commitment addresses.
 
 ### Traffic — A3
 
@@ -214,13 +243,10 @@ transport work is larger and defends a channel nobody is currently attacking.
    nonce rides in the claim and is spent once, so a resubmission is refused by
    design rather than being harmless by accident of the schema. Sessions are in
    the database, so a nonce stays spent across a restart.
-3. **Commit then reveal for race inputs.** Rollback hands every peer the others'
-   inputs for a tick before it must commit its own, so a modified client can
-   delay and choose. Nothing desyncs, because everybody then simulates the
-   dishonest input faithfully: the state-hash check catches a modified
-   *simulation* and cannot see a dishonestly chosen *decision*. Send a hash of
-   the inputs first, the inputs afterwards. One exchange of fixed delay, and the
-   whole class goes.
+3. ~~**Commit then reveal for race inputs.**~~ **Done.** A commitment for each
+   tick rides twelve ticks ahead of the input it promises, and a reveal that
+   does not match it stops the race. The cost is the twelve ticks: the local car
+   is unaffected, and a remote car's corrections land that much later.
 4. **Verify the whole race, not the winner's lap.** Every peer keeps the complete
    input log and the end-state hash everybody agreed on; re-racing the log has to
    produce that hash. Nearly free, given determinism.

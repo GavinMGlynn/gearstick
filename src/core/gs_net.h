@@ -22,9 +22,14 @@
 #ifndef GS_NET_H
 #define GS_NET_H
 
+#include "core/gs_blake2s.h"
 #include "core/gs_sim.h"
 
-#define GS_NET_MAGIC  0x544E5347u   // "GSNT"
+// "GSN2". The second version of this format: the first carried inputs alone,
+// and a peer speaking it cannot be told apart from one that has simply chosen
+// not to commit to anything, so it is refused by its magic rather than by
+// stalling mysteriously.
+#define GS_NET_MAGIC  0x324E5347u   // "GSN2"
 
 // How far ahead of confirmed truth a machine will run before it stops and
 // waits. Two seconds at 120 Hz, which is far past any latency a race is
@@ -38,6 +43,55 @@
 // asking for again. Retransmission requests are a round trip, which is the one
 // thing rollback exists to avoid.
 #define GS_NET_REDUNDANCY 32u
+
+// --- commit, then reveal ----------------------------------------------------
+//
+// **Rollback hands every peer the others' inputs for a tick, so a modified
+// client can wait and choose.** Nothing about that desyncs: everybody then
+// simulates the dishonest input faithfully, and the state-hash check catches a
+// changed *simulation* while being completely blind to a changed *decision*.
+//
+// So an input is promised before it is shown. Each datagram carries, for the
+// most recent ticks, a commitment - a truncated BLAKE2s of the input, the tick
+// it belongs to and a per-tick salt - and, for ticks further back, the input
+// and salt themselves. A peer that waited to see somebody else's input before
+// choosing its own would have to produce a reveal that does not match what it
+// already promised, and that is caught.
+//
+// **A commitment only counts if it arrived in a datagram that did not also
+// reveal that tick.** Otherwise the promise and the proof travel together and
+// the promise is worth nothing - a cheat could choose late and build both at
+// once. That rule is what forces the two apart, and it is why the reveal runs
+// a fixed distance behind.
+#define GS_NET_REVEAL_DELAY 12u
+
+// How many ticks of commitment ride in each datagram. Exactly the reveal delay,
+// and not one more: a commitment for a tick this datagram also reveals is
+// inadmissible by the rule above, so sending it would be bytes spent on
+// something the far end is obliged to ignore. Twelve copies is twelve chances
+// for a commitment to survive the network before its reveal comes due.
+#define GS_NET_COMMITS GS_NET_REVEAL_DELAY
+
+// The salt, and the promise. Eight bytes of each: finding a second input and
+// salt that hash to a given sixty-four-bit commitment is far out of reach, and
+// out of reach by an enormous margin inside the tenth of a second a cheat would
+// have to do it in. The salt is derived from a per-race secret rather than
+// stored, so revealing one tick's salt says nothing about the next one's.
+#define GS_NET_SECRET_BYTES 32
+
+// --- how big a datagram gets --------------------------------------------
+//
+// Worth stating rather than discovering. `gs_net_packet` refuses to write into
+// a buffer too small for it and returns zero, and a caller that treats zero as
+// "nothing to send" gets a race where no input ever crosses and every machine
+// stalls waiting for the others - which looks exactly like a network fault and
+// is not one. So whatever carries these has to be big enough, and that is
+// asserted where the carrying happens rather than left to whoever changes a
+// constant next.
+#define GS_NET_HEAD (4u + 1u + 1u + 4u + 1u + 4u)
+#define GS_NET_TAIL (4u + 8u)
+#define GS_NET_MTU  (GS_NET_HEAD + GS_NET_COMMITS * 8u + \
+                     GS_NET_REDUNDANCY * 9u + GS_NET_TAIL)
 
 typedef struct gs_net {
     // The state at `confirmed_tick`, where every player's input is known for
@@ -73,8 +127,33 @@ typedef struct gs_net {
     // different races to each other.
     uint64_t hash[GS_NET_WINDOW];
 
+    // What each player promised for each tick, and whether an admissible
+    // promise has been heard at all. A reveal for a tick with no promise behind
+    // it is not accepted - it is held, and the later copies of the promise are
+    // still arriving.
+    uint64_t commit[GS_NET_WINDOW][GS_MAX_CARS];
+    uint8_t  committed[GS_NET_WINDOW];
+
+    // This machine's own secret for the race, which every salt it publishes is
+    // derived from. It never goes on the wire.
+    uint8_t  secret[GS_NET_SECRET_BYTES];
+
+    // Set once the race is over locally, after which the remaining reveals go
+    // out with no delay. Without it the last twelve ticks of every race are
+    // promised and never shown, and the other machine can never confirm the
+    // finish. The promises for those ticks went out on time in earlier
+    // datagrams, so nothing is weakened by showing them at once.
+    bool     flushing;
+
     bool     desynced;
     uint32_t desync_tick;
+
+    // A peer whose reveal did not match its promise, or who promised two
+    // different things for one tick. Unlike a desync this is not a bug: it is
+    // somebody's client having been modified, and the race stops.
+    bool     cheated;
+    uint32_t cheat_tick;
+    uint8_t  cheat_by;
 
     // What it cost, which is the thing worth watching when a connection is bad.
     uint32_t rollbacks;
@@ -84,16 +163,30 @@ typedef struct gs_net {
 } gs_net;
 
 // Start a session from a world both machines already agree on. `local` is which
-// car this machine drives.
-void gs_net_begin(gs_net *n, const gs_world *w, uint8_t players, uint8_t local);
+// car this machine drives. `secret` is this machine's own, thirty-two bytes that
+// never leave it; every salt it publishes is derived from it, so an opponent who
+// has seen a hundred revealed salts still cannot work out the next one. Where it
+// comes from is the caller's business, because core has no source of randomness
+// and should not pretend to.
+void gs_net_begin(gs_net *n, const gs_world *w, uint8_t players, uint8_t local,
+                  const uint8_t *secret);
 
 // What this machine's player is doing on the tick about to be simulated.
 void gs_net_local_input(gs_net *n, gs_input in);
 
 // Advance one tick, guessing for anybody whose input has not arrived. False
 // when the window is full - which means the other machine has gone quiet, and
-// the race waits rather than running somewhere it can never rewind from.
+// the race waits rather than running somewhere it can never rewind from - and
+// false for good once somebody has been caught breaking a promise.
 bool gs_net_step(gs_net *n, const gs_track *t);
+
+// Somebody's reveal did not match what they committed to, and which tick it was.
+// A race that sees this true does not carry on: there is no honest reading of it.
+bool gs_net_cheated(const gs_net *n);
+
+// The race has finished locally, so the reveals still owed can go out at once
+// rather than trailing twelve ticks behind for ever.
+void gs_net_finish(gs_net *n);
 
 // The datagram to send. Carries the local player's recent inputs and this
 // machine's claim about the confirmed state, so the other end can check it.

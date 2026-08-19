@@ -24,11 +24,20 @@
 // For `nullptr` on a toolchain that took -std=c23 without implementing it, as
 // well as the fixed-width types. MSVC is that toolchain today.
 #include "core/gs_common.h"
+#include "core/gs_net.h"
 #include "core/gs_track.h"
 #include "net/gs_carrier.h"
 #include "net/gs_proto.h"
 
 #define GS_WIRE_MTU     512
+
+// **The carrier has to be able to carry it.** A rollback datagram that does not
+// fit is not an error anybody sees: `gs_net_packet` writes nothing, the wire
+// sends nothing, and every machine sits waiting for inputs that were never
+// produced. That reads as a network fault and is a constant somebody changed,
+// so it is checked here rather than remembered.
+static_assert(GS_WIRE_MTU >= GS_NET_MTU,
+              "a rollback datagram no longer fits in one wire datagram");
 #define GS_WIRE_PLAYERS 4
 
 typedef struct gs_wire gs_wire;

@@ -22,6 +22,7 @@
 #include "core/gs_generate.h"
 #include "core/gs_ghost.h"
 #include "core/gs_library.h"
+#include "core/gs_blake2s.h"
 #include "core/gs_net.h"
 #include "core/gs_pack.h"
 #include "core/gs_profile.h"
@@ -2517,7 +2518,12 @@ TEST(a_code_is_the_same_code_on_every_machine) {
 // datagrams, each with the tick it becomes deliverable on. Deterministic, so a
 // failure is a failure somebody else can reproduce rather than a bad afternoon.
 #define GS_LINK_MAX 512
-#define GS_LINK_MTU 96
+// Exactly what the protocol produces, deliberately. A test link with a smaller
+// one silently swallows every packet that outgrows it, and the race then fails
+// as a stall - which reads as a network fault and is in fact a constant
+// somebody changed. `gs_wire.h` separately asserts the real wire is at least
+// this big.
+#define GS_LINK_MTU GS_NET_MTU
 
 typedef struct gs_link {
     struct {
@@ -2532,6 +2538,11 @@ typedef struct gs_link {
     uint32_t jitter;      // ticks, added at random
     uint32_t loss_pct;
     uint32_t sent, dropped, delivered;
+
+    // Packets too big for the link. Not loss - loss is deliberate here and has
+    // its own counter. This one means the datagram outgrew what carries it, and
+    // a race that lets it pass unremarked reports the result as a stall.
+    uint32_t oversize;
 } gs_link;
 
 static uint32_t gs_link_rand(gs_link *l) {
@@ -2541,7 +2552,7 @@ static uint32_t gs_link_rand(gs_link *l) {
 
 static void gs_link_send(gs_link *l, uint32_t now, const uint8_t *b, size_t n) {
     l->sent++;
-    if (n > GS_LINK_MTU) return;
+    if (n > GS_LINK_MTU) { l->oversize++; return; }
     if (l->loss_pct > 0 && gs_link_rand(l) % 100u < l->loss_pct) {
         l->dropped++;
         return;
@@ -2561,6 +2572,17 @@ static void gs_link_send(gs_link *l, uint32_t now, const uint8_t *b, size_t n) {
 // Everything that has come due, in slot order - which is not arrival order, so
 // this delivers out of order as well as late. Both are things a real link does
 // and both are things rollback has to survive.
+// A secret per peer, fixed so a failing race can be re-run and get the same
+// salts. A real client draws one at random; a test that did the same would be a
+// test that fails differently every time.
+static const uint8_t *gs_test_secret(uint8_t who) {
+    static uint8_t s[GS_MAX_CARS][GS_NET_SECRET_BYTES];
+    for (unsigned i = 0; i < GS_NET_SECRET_BYTES; i++) {
+        s[who][i] = (uint8_t)((0x5au + who * 31u + i * 7u) & 0xffu);
+    }
+    return s[who];
+}
+
 static void gs_link_deliver(gs_link *l, uint32_t now, gs_net *to, const gs_track *t) {
     for (int i = 0; i < GS_LINK_MAX; i++) {
         if (!l->slot[i].live || l->slot[i].due > now) continue;
@@ -2612,8 +2634,8 @@ static void gs_net_race(uint32_t ticks, uint32_t latency, uint32_t jitter,
     gs_world w;
     gs_net_scene(t, &w);
 
-    gs_net_begin(a, &w, 2, 0);
-    gs_net_begin(b, &w, 2, 1);
+    gs_net_begin(a, &w, 2, 0, gs_test_secret(0));
+    gs_net_begin(b, &w, 2, 1, gs_test_secret(1));
 
     *ab = (gs_link){ 0 };
     *ba = (gs_link){ 0 };
@@ -2639,10 +2661,32 @@ static void gs_net_race(uint32_t ticks, uint32_t latency, uint32_t jitter,
         gs_net_step(b, t);
     }
 
-    // Let the tail of the link drain, so both machines have every input and can
-    // confirm the whole race. Without this the last few ticks are still guesses
-    // on both sides and comparing them would be comparing predictions.
-    for (uint32_t tick = ticks; tick < ticks + latency + jitter + 8u; tick++) {
+    // **The race is over on both machines, so what is still owed goes out.**
+    // While a race is on, the reveals run a fixed distance behind the
+    // commitments - that gap is the whole mechanism - which leaves the last
+    // dozen ticks promised and never shown. A real client flushes them when it
+    // reaches the results screen; a test that did not would be measuring a race
+    // whose ending nobody ever proved.
+    gs_net_finish(a);
+    gs_net_finish(b);
+
+    uint32_t settle = ticks + latency + jitter + 8u;
+    for (uint32_t tick = ticks; tick < settle; tick++) {
+        gs_link_deliver(ab, tick, b, t);
+        gs_link_deliver(ba, tick, a, t);
+
+        uint8_t buf[GS_LINK_MTU];
+        size_t n = gs_net_packet(a, buf, sizeof buf);
+        gs_link_send(ab, tick, buf, n);
+        n = gs_net_packet(b, buf, sizeof buf);
+        gs_link_send(ba, tick, buf, n);
+    }
+
+    // And then let the tail of the link drain, so both machines have every
+    // input and can confirm the whole race. Without this the last few ticks are
+    // still guesses on both sides and comparing them would be comparing
+    // predictions.
+    for (uint32_t tick = settle; tick < settle + latency + jitter + 8u; tick++) {
         gs_link_deliver(ab, tick, b, t);
         gs_link_deliver(ba, tick, a, t);
     }
@@ -2683,7 +2727,11 @@ TEST(two_machines_race_to_the_same_finish_over_a_bad_connection) {
     }
     CHECK(gs_world_hash(&solo) == gs_world_hash(&a.confirmed));
 
-    // The link really was bad and the rollback really did work for its living.
+    // The link really was bad and the rollback really did work for its living -
+    // and nothing was lost to being too big, which is a different fault wearing
+    // a stall's clothes.
+    CHECK(ab.oversize == 0);
+    CHECK(ba.oversize == 0);
     CHECK(ab.dropped > 0);
     CHECK(a.rollbacks > 0);
     CHECK(b.rollbacks > 0);
@@ -2715,7 +2763,9 @@ TEST(four_machines_race_to_the_same_finish_over_a_bad_connection) {
     static gs_world w;
 
     gs_net_scene(&t, &w);
-    for (int i = 0; i < 4; i++) gs_net_begin(&net[i], &w, 4, (uint8_t)i);
+    for (int i = 0; i < 4; i++) {
+        gs_net_begin(&net[i], &w, 4, (uint8_t)i, gs_test_secret((uint8_t)i));
+    }
 
     for (int a = 0; a < 4; a++) {
         for (int b = 0; b < 4; b++) {
@@ -2750,7 +2800,26 @@ TEST(four_machines_race_to_the_same_finish_over_a_bad_connection) {
         }
     }
 
+    // All four have finished, so the reveals still owed go out - see the note
+    // in gs_net_race. Then the links drain.
+    for (int i = 0; i < 4; i++) gs_net_finish(&net[i]);
+
     for (uint32_t tick = ticks; tick < ticks + 80u; tick++) {
+        for (int a = 0; a < 4; a++) {
+            for (int b = 0; b < 4; b++) {
+                if (a != b) gs_link_deliver(&link[a][b], tick, &net[b], &t);
+            }
+        }
+        for (int i = 0; i < 4; i++) {
+            uint8_t buf[GS_LINK_MTU];
+            size_t n = gs_net_packet(&net[i], buf, sizeof buf);
+            for (int b = 0; b < 4; b++) {
+                if (b != i) gs_link_send(&link[i][b], tick, buf, n);
+            }
+        }
+    }
+
+    for (uint32_t tick = ticks + 80u; tick < ticks + 160u; tick++) {
         for (int a = 0; a < 4; a++) {
             for (int b = 0; b < 4; b++) {
                 if (a != b) gs_link_deliver(&link[a][b], tick, &net[b], &t);
@@ -2780,6 +2849,7 @@ TEST(four_machines_race_to_the_same_finish_over_a_bad_connection) {
     // more than in the two-player case, because there are three people to be
     // wrong about rather than one.
     CHECK(link[0][1].dropped > 0);
+    CHECK(link[0][1].oversize == 0);
     CHECK(net[0].rollbacks > 0);
 }
 
@@ -2794,8 +2864,8 @@ TEST(rollback_costs_nothing_when_the_guess_is_right) {
     // every real race is paying for it.
     gs_world w;
     gs_net_scene(&t, &w);
-    gs_net_begin(&a, &w, 2, 0);
-    gs_net_begin(&b, &w, 2, 1);
+    gs_net_begin(&a, &w, 2, 0, gs_test_secret(0));
+    gs_net_begin(&b, &w, 2, 1, gs_test_secret(1));
     ab = (gs_link){ 0 };
     ba = (gs_link){ 0 };
     ab.latency = ba.latency = 16;
@@ -2831,12 +2901,251 @@ TEST(rollback_costs_nothing_when_the_guess_is_right) {
     CHECK(a.confirmed_tick > 600u - 64u);
 }
 
+// --- BLAKE2s, checked against people who are not us --------------------------
+
+static bool gs_digest_is(const uint8_t *got, uint8_t len, const char *hex) {
+    for (uint8_t i = 0; i < len; i++) {
+        char pair[3] = { hex[i * 2], hex[i * 2 + 1], 0 };
+        unsigned want = 0;
+        for (int k = 0; k < 2; k++) {
+            char c = pair[k];
+            unsigned d = (c >= '0' && c <= '9') ? (unsigned)(c - '0')
+                                                : (unsigned)(c - 'a' + 10);
+            want = want * 16u + d;
+        }
+        if (got[i] != (uint8_t)want) return false;
+    }
+    return true;
+}
+
+TEST(blake2s_produces_the_digests_the_rfc_and_an_independent_library_say) {
+    // **The first line is the published one.** RFC 7693 appendix B gives the
+    // digest of "abc", and an implementation of a standard that has only ever
+    // been checked against itself is an implementation of something else.
+    //
+    // The rest come from Python's `hashlib`, which is a different implementation
+    // written by different people. They are here for the lengths the RFC does
+    // not cover, and those lengths are chosen rather than arbitrary: sixty-four
+    // bytes is exactly one block, and it is the case that a buffered hash gets
+    // wrong when it compresses a full block eagerly instead of waiting to find
+    // out whether anything follows it.
+    static const struct { const char *msg; size_t len; const char *want; } v[] = {
+        { "",    0,  "69217a3079908094e11121d042354a7c1f55b6482ca1a51e1b250dfd1ed0eef9" },
+        { "abc", 3,  "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982" },
+    };
+    for (size_t i = 0; i < sizeof v / sizeof v[0]; i++) {
+        uint8_t out[GS_BLAKE2S_BYTES];
+        gs_blake2s_hash(out, GS_BLAKE2S_BYTES, v[i].msg, v[i].len);
+        CHECK(gs_digest_is(out, GS_BLAKE2S_BYTES, v[i].want));
+    }
+
+    static uint8_t a[256];
+    for (size_t i = 0; i < sizeof a; i++) a[i] = 'a';
+
+    struct { size_t len; const char *want; } runs[] = {
+        {  63, "9a4267618070af968ff2a0fdaecc62b5c15ab91cb4a56424ba9fcad20aab417c" },
+        {  64, "651d2f5f20952eacaea2fba2f2af2bcd633e511ea2d2e4c9ae2ac0d9ffb7b252" },
+        {  65, "045f8ae18932119bd051ac7ba5c73db59892055fad5c32f82d79a6543d92a497" },
+        { 128, "3ac477e27353f9019b81694afe60c8049403784f91a58288428ea318bfa82809" },
+    };
+    for (size_t i = 0; i < sizeof runs / sizeof runs[0]; i++) {
+        uint8_t out[GS_BLAKE2S_BYTES];
+        gs_blake2s_hash(out, GS_BLAKE2S_BYTES, a, runs[i].len);
+        CHECK(gs_digest_is(out, GS_BLAKE2S_BYTES, runs[i].want));
+    }
+
+    // Every byte value, so a table indexed wrongly shows up.
+    static uint8_t all[256];
+    for (size_t i = 0; i < sizeof all; i++) all[i] = (uint8_t)i;
+    uint8_t out[GS_BLAKE2S_BYTES];
+    gs_blake2s_hash(out, GS_BLAKE2S_BYTES, all, sizeof all);
+    CHECK(gs_digest_is(out, GS_BLAKE2S_BYTES,
+                       "5fdeb59f681d975f52c8e69c5502e02a12a3afcc5836ba58f42784c439228781"));
+
+    // A shorter digest is a different hash, not a truncation of the long one -
+    // the length goes into the parameter block before a byte is taken in.
+    uint8_t half[16];
+    gs_blake2s_hash(half, 16, "abc", 3);
+    CHECK(gs_digest_is(half, 16, "aa4938119b1dc7b87cbad0ffd200d0ae"));
+    gs_blake2s_hash(out, GS_BLAKE2S_BYTES, "abc", 3);
+    CHECK(memcmp(half, out, 16) != 0);
+
+    // Fed in pieces, it is the same hash. Anything that buffers has an off-by-one
+    // waiting in it, and this is where it would show.
+    gs_blake2s s;
+    gs_blake2s_init(&s, GS_BLAKE2S_BYTES);
+    for (size_t i = 0; i < 128; i++) gs_blake2s_update(&s, a + i, 1);
+    uint8_t piecemeal[GS_BLAKE2S_BYTES];
+    gs_blake2s_final(&s, piecemeal);
+    gs_blake2s_hash(out, GS_BLAKE2S_BYTES, a, 128);
+    CHECK(memcmp(piecemeal, out, GS_BLAKE2S_BYTES) == 0);
+}
+
+// --- commit, then reveal -----------------------------------------------------
+
+// Where the interesting bytes are in a rollback datagram. The format is in
+// gs_net.c; this repeats only as much of it as a test needs to tamper.
+#define GS_PKT_COMMITS(p)  ((size_t)(p)[5])
+#define GS_PKT_REVEALS(p)  ((size_t)(p)[10])
+#define GS_PKT_REVEAL_AT(p, i) \
+    (GS_NET_HEAD + GS_PKT_COMMITS(p) * 8u + (size_t)(i) * 9u)
+#define GS_PKT_COMMIT_AT(p, i) (GS_NET_HEAD + (size_t)(i) * 8u)
+
+// Run two peers honestly over a perfect link for a while, so there is a real
+// race in progress to tell a lie inside.
+// `quiet` ticks at the end during which b runs on and a hears none of it. That
+// tail is what leaves a with ticks it has not confirmed - and only an
+// unconfirmed tick can still be lied about, because a confirmed one has already
+// been folded into a state that cannot be rewound to.
+static void gs_commit_warmup(gs_net *a, gs_net *b, gs_track *t, uint32_t ticks,
+                             uint32_t quiet) {
+    gs_world w;
+    gs_net_scene(t, &w);
+    gs_net_begin(a, &w, 2, 0, gs_test_secret(0));
+    gs_net_begin(b, &w, 2, 1, gs_test_secret(1));
+
+    for (uint32_t tick = 0; tick < ticks + quiet; tick++) {
+        gs_net_local_input(a, gs_net_drive(0, tick));
+        gs_net_local_input(b, gs_net_drive(1, tick));
+
+        uint8_t pa[GS_NET_MTU], pb[GS_NET_MTU];
+        size_t na = gs_net_packet(a, pa, sizeof pa);
+        size_t nb = gs_net_packet(b, pb, sizeof pb);
+        gs_net_receive(b, t, pa, na);
+        if (tick < ticks) gs_net_receive(a, t, pb, nb);
+        gs_net_step(a, t);
+        gs_net_step(b, t);
+    }
+}
+
+TEST(a_peer_that_reveals_an_input_it_did_not_commit_to_is_caught) {
+    // **The hole this closes.** Rollback hands every peer the others' inputs
+    // for a tick, so a modified client can wait, look, and then decide. Nothing
+    // desyncs when it does - everybody simulates the dishonest input faithfully
+    // - so the state-hash check sees nothing wrong. The promise is what sees it.
+    static gs_net a, b;
+    static gs_track t;
+    gs_commit_warmup(&a, &b, &t, 90, 8);
+
+    CHECK(!a.cheated);
+    CHECK(a.confirmed_tick > 0);       // an honest race really was under way
+
+    // b's next datagram, with one revealed input changed to something else.
+    // Everything else about it is honest, including the promise it no longer
+    // matches.
+    uint8_t pkt[GS_NET_MTU];
+    size_t n = gs_net_packet(&b, pkt, sizeof pkt);
+    CHECK(n > 0);
+    CHECK(GS_PKT_REVEALS(pkt) > 0);
+
+    // **The newest revealed tick that a is actually in a position to check** -
+    // one it has not already confirmed, and one it holds a promise for. Picking
+    // an index by arithmetic instead would be a test that stops testing its rule
+    // the day a constant moves, and passes quietly while it does.
+    uint32_t reveal_base = (uint32_t)pkt[11] | ((uint32_t)pkt[12] << 8) |
+                           ((uint32_t)pkt[13] << 16) | ((uint32_t)pkt[14] << 24);
+    size_t lie = SIZE_MAX;
+    for (size_t i = GS_PKT_REVEALS(pkt); i-- > 0; ) {
+        uint32_t tick = reveal_base + (uint32_t)i;
+        if (tick < a.confirmed_tick) break;
+        if (a.committed[tick % GS_NET_WINDOW] & (uint8_t)(1u << 1)) { lie = i; break; }
+    }
+    CHECK(lie != SIZE_MAX);
+    if (lie == SIZE_MAX) return;
+
+    size_t at = GS_PKT_REVEAL_AT(pkt, lie);
+    pkt[at] = (uint8_t)(pkt[at] ^ GS_IN_BRAKE);
+
+    gs_net_receive(&a, &t, pkt, n);
+
+    CHECK(a.cheated);
+    CHECK(a.cheat_by == 1);
+
+    // And the race stops. Not stalls - stops: a stall ends when a datagram
+    // arrives, and there is no datagram that makes this all right.
+    uint32_t was = a.local_tick;
+    gs_net_local_input(&a, GS_IN_ACCEL);
+    CHECK(!gs_net_step(&a, &t));
+    CHECK(a.local_tick == was);
+}
+
+TEST(a_peer_that_promises_two_different_things_for_one_tick_is_caught) {
+    // The other way to wriggle out of a promise: make several, and see which
+    // one it turns out to be convenient to have made. An honest peer repeats
+    // the same eight bytes in every datagram that carries them.
+    static gs_net a, b;
+    static gs_track t;
+    gs_commit_warmup(&a, &b, &t, 90, 8);
+
+    uint8_t pkt[GS_NET_MTU];
+    size_t n = gs_net_packet(&b, pkt, sizeof pkt);
+    CHECK(n > 0);
+    CHECK(GS_PKT_COMMITS(pkt) > 0);
+
+    // The honest one first, so the promise is on the record...
+    gs_net_receive(&a, &t, pkt, n);
+    CHECK(!a.cheated);
+
+    // ...and then the same tick promised differently.
+    size_t at = GS_PKT_COMMIT_AT(pkt, 0);
+    pkt[at] = (uint8_t)(pkt[at] ^ 0xffu);
+    gs_net_receive(&a, &t, pkt, n);
+
+    CHECK(a.cheated);
+    CHECK(a.cheat_by == 1);
+}
+
+TEST(a_promise_shown_in_the_same_breath_as_its_proof_buys_nothing) {
+    // **The rule the whole thing rests on.** If a peer may promise and prove in
+    // one datagram, the promise costs nothing to make: it can wait to see
+    // everybody else's input, choose, and then build both at once. So a promise
+    // only counts when it arrives in a datagram that does not also prove it,
+    // which is what forces the two apart in time.
+    //
+    // A peer that ignores the gap is not caught lying - it has not lied. It
+    // simply never says anything that can be checked, and nothing it sends is
+    // ever accepted.
+    static gs_net a, b;
+    static gs_track t;
+    gs_world w;
+    gs_net_scene(&t, &w);
+    gs_net_begin(&a, &w, 2, 0, gs_test_secret(0));
+    gs_net_begin(&b, &w, 2, 1, gs_test_secret(1));
+
+    // b reveals everything the moment it commits to it, from the first tick.
+    gs_net_finish(&b);
+
+    for (uint32_t tick = 0; tick < 300; tick++) {
+        gs_net_local_input(&a, gs_net_drive(0, tick));
+        gs_net_local_input(&b, gs_net_drive(1, tick));
+
+        uint8_t pa[GS_NET_MTU], pb[GS_NET_MTU];
+        size_t na = gs_net_packet(&a, pa, sizeof pa);
+        size_t nb = gs_net_packet(&b, pb, sizeof pb);
+        gs_net_receive(&b, &t, pa, na);
+        gs_net_receive(&a, &t, pb, nb);
+        gs_net_step(&a, &t);
+        gs_net_step(&b, &t);
+    }
+
+    // Nothing b said was ever usable, so a confirmed nothing and stalled at the
+    // window - the same as if b had never spoken at all, which is the honest
+    // outcome for a peer whose word cannot be checked.
+    CHECK(!a.cheated);
+    CHECK(a.confirmed_tick == 0);
+    CHECK(a.stalls > 0);
+
+    // And a, which does keep the gap, was believed by b throughout.
+    CHECK(b.confirmed_tick > 0);
+    CHECK(!b.cheated);
+}
+
 TEST(a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing) {
     static gs_net a;
     static gs_track t;
     gs_world w;
     gs_net_scene(&t, &w);
-    gs_net_begin(&a, &w, 2, 0);
+    gs_net_begin(&a, &w, 2, 0, gs_test_secret(0));
 
     // The other machine never says anything at all. Running on regardless would
     // mean building a race on nothing but guesses and having no way back when
@@ -2859,7 +3168,7 @@ TEST(a_desync_is_noticed_rather_than_lived_with) {
     gs_world w;
     gs_net_scene(&t, &w);
 
-    gs_net_begin(&a, &w, 2, 0);
+    gs_net_begin(&a, &w, 2, 0, gs_test_secret(0));
 
     // The other machine starts from a world that is one nudge different. Every
     // input will agree and every state will not, which is exactly the shape of
@@ -2867,7 +3176,7 @@ TEST(a_desync_is_noticed_rather_than_lived_with) {
     // different races.
     gs_world nudged = w;
     nudged.car[1].x += GS_RATIO(1, 64);
-    gs_net_begin(&b, &nudged, 2, 1);
+    gs_net_begin(&b, &nudged, 2, 1, gs_test_secret(1));
 
     ab = (gs_link){ 0 };
     ba = (gs_link){ 0 };
@@ -5442,6 +5751,10 @@ int main(void) {
     run_two_machines_race_to_the_same_finish_over_a_bad_connection();
     run_four_machines_race_to_the_same_finish_over_a_bad_connection();
     run_rollback_costs_nothing_when_the_guess_is_right();
+    run_blake2s_produces_the_digests_the_rfc_and_an_independent_library_say();
+    run_a_peer_that_reveals_an_input_it_did_not_commit_to_is_caught();
+    run_a_peer_that_promises_two_different_things_for_one_tick_is_caught();
+    run_a_promise_shown_in_the_same_breath_as_its_proof_buys_nothing();
     run_a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing();
     run_a_desync_is_noticed_rather_than_lived_with();
     run_the_same_inputs_produce_the_same_world_every_time();

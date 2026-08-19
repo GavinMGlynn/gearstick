@@ -909,6 +909,17 @@ TEST(a_client_with_a_different_track_is_given_the_right_one) {
     gs_server_stop();
 }
 
+// A secret per peer, fixed so a failing race can be re-run and get the same
+// salts. A real client draws one at random; a test that did the same would be a
+// test that fails differently every time.
+static const uint8_t *gs_test_secret(uint8_t who) {
+    static uint8_t s[GS_MAX_CARS][GS_NET_SECRET_BYTES];
+    for (unsigned i = 0; i < GS_NET_SECRET_BYTES; i++) {
+        s[who][i] = (uint8_t)((0x5au + who * 31u + i * 7u) & 0xffu);
+    }
+    return s[who];
+}
+
 TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
     // **The verification this item exists for.** The two wires below are given
     // no way to reach each other: the roster's addresses are never used,
@@ -950,8 +961,8 @@ TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
     gs_world_add_car(&start, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(9), 0);
     gs_world_add_car(&start, &t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(4), GS_INT(11), 0);
 
-    gs_net_begin(&n[0], &start, 2, gs_wire_local(a));
-    gs_net_begin(&n[1], &start, 2, gs_wire_local(b));
+    gs_net_begin(&n[0], &start, 2, gs_wire_local(a), gs_test_secret(gs_wire_local(a)));
+    gs_net_begin(&n[1], &start, 2, gs_wire_local(b), gs_test_secret(gs_wire_local(b)));
 
     gs_wire *wires[2] = { a, b };
 
@@ -981,7 +992,11 @@ TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
         SDL_Delay(2);
     }
 
-    // Drain, so both can confirm the finish.
+    // The race is over, so the reveals still owed go out - they trail the
+    // commitments by a fixed distance while it is running, which is what makes
+    // a commitment worth anything. Then drain, so both can confirm the finish.
+    for (int i = 0; i < 2; i++) gs_net_finish(&n[i]);
+
     for (int i = 0; i < 300; i++) {
         uint8_t buf[GS_WIRE_MTU];
         size_t got;
@@ -989,6 +1004,12 @@ TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
             gs_wire_poll(wires[k]);
             while ((got = gs_wire_recv(wires[k], buf, sizeof buf)) > 0) {
                 gs_net_receive(&n[k], &t, buf, got);
+            }
+        }
+        if (i < 150) {
+            for (int k = 0; k < 2; k++) {
+                size_t len = gs_net_packet(&n[k], buf, sizeof buf);
+                gs_wire_send(wires[k], buf, len);
             }
         }
         SDL_Delay(2);

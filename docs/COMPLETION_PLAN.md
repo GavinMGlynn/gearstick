@@ -713,15 +713,24 @@ review, and it fails it for good reasons.
       is not from a cryptographic generator and it crosses the wire in clear, so
       it is the shape of the defence rather than the whole of it until the
       transport and the accounts below land.*
-- [ ] **A race commits to its inputs before it sees anybody else's.** Rollback
+- [x] **A race commits to its inputs before it sees anybody else's.** Rollback
       hands every peer the others' inputs for a tick, so a modified client can
       wait and choose. Nothing desyncs, because everybody then simulates the
       dishonest input faithfully — state hashes catch a changed simulation and
       not a changed decision. Each peer sends a hash of its inputs first and the
       inputs afterwards.
       *Verification: a peer that reveals inputs which do not match what it
-      committed to is caught and the race stops; and a four-player rollback race
-      with the commitment in place still agrees tick for tick.*
+      committed to is caught and the race stops; a peer that promises two
+      different things for one tick is caught too; a peer that shows its inputs
+      in the same breath as it promises them gets nowhere, which is the rule the
+      whole thing rests on; and a four-player rollback race with the commitment
+      in place still agrees tick for tick with the race one machine would have
+      run alone. Each of the four turns red on its own when its rule is removed.
+      The hash behind the promise is BLAKE2s, checked against the RFC's
+      published vector and against an independent implementation.*
+      *The cost, stated rather than buried: the reveal runs twelve ticks behind,
+      so a remote car's corrections land a tenth of a second later. The local
+      car is unaffected.*
 - [ ] **The whole race is verified, not just the winning lap.** Every peer keeps
       the complete input log and the final state hash everybody agreed on. The
       server re-races the log; a log that does not produce that hash means one of

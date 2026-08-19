@@ -954,6 +954,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // the same lap to the records table until somebody clicked something.
     if (a->world.over && !a->race_settled && !a->skip_menu) {
         a->race_settled = true;
+
+        // The last dozen ticks were promised and not yet shown. Without this
+        // they never are, and the other machine can never confirm the finish -
+        // a race that is correct everywhere except the end.
+        if (a->online && a->net_started) gs_net_finish(&a->net);
         gs_menu_finish(&a->menu, &a->world, &a->t);
         gs_store_save(a);
 
@@ -1011,8 +1016,20 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
             a->players = gs_wire_players(a->wire);
             gs_start_race(a);
+
+            // This machine's own secret for the race. Every salt it publishes
+            // is derived from it and it never goes on the wire. The same
+            // caveat as the server's session nonce applies and is written down
+            // in docs/THREATS.md rather than left to be assumed: SDL's
+            // generator is not a cryptographic one, so this is the shape the
+            // defence takes and not yet a defence against somebody who can
+            // predict it.
+            uint8_t secret[GS_NET_SECRET_BYTES];
+            for (size_t i = 0; i < sizeof secret; i++) {
+                secret[i] = (uint8_t)(SDL_rand_bits() & 0xffu);
+            }
             gs_net_begin(&a->net, &a->world, gs_wire_players(a->wire),
-                         gs_wire_local(a->wire));
+                         gs_wire_local(a->wire), secret);
             a->net_started = true;
             a->menu.screen = GS_SCREEN_RACE;
             SDL_Log("net: %u players, driving car %u", a->net.players, a->net.local);
@@ -1046,6 +1063,20 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
             a->prev = *gs_net_world(&a->net);
             if (!gs_net_step(&a->net, &a->t)) {
+                // **Two different reasons to stop, and only one of them is
+                // worth waiting out.** A stall is the other machine being
+                // quiet, and it ends when a datagram arrives. A broken promise
+                // does not end: somebody's client has been modified, and there
+                // is no honest reading of the rest of the race.
+                if (gs_net_cheated(&a->net)) {
+                    SDL_Log("net: car %u revealed an input it had not committed "
+                            "to at tick %u - the race is abandoned",
+                            a->net.cheat_by, a->net.cheat_tick);
+                    a->net_started = false;
+                    a->menu.screen = GS_SCREEN_RESULTS;
+                    steps = 0;
+                    break;
+                }
                 a->waiting++;
                 break;    // the other machine has gone quiet; wait for it
             }

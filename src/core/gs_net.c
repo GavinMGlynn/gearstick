@@ -12,12 +12,15 @@ static uint32_t gs_claim(gs_net *n, uint32_t tick) {
     if (n->stamp[slot] != tick) {
         n->stamp[slot] = tick;
         n->known[slot] = 0;
+        n->committed[slot] = 0;
         memset(n->in[slot], 0, sizeof n->in[slot]);
+        memset(n->commit[slot], 0, sizeof n->commit[slot]);
     }
     return slot;
 }
 
-void gs_net_begin(gs_net *n, const gs_world *w, uint8_t players, uint8_t local) {
+void gs_net_begin(gs_net *n, const gs_world *w, uint8_t players, uint8_t local,
+                  const uint8_t *secret) {
     memset(n, 0, sizeof *n);
     for (uint32_t i = 0; i < GS_NET_WINDOW; i++) n->stamp[i] = UINT32_MAX;
     n->confirmed = *w;
@@ -25,6 +28,7 @@ void gs_net_begin(gs_net *n, const gs_world *w, uint8_t players, uint8_t local) 
     n->players   = players;
     n->local     = local;
     n->hash[0]   = gs_world_hash(w);
+    if (secret != nullptr) memcpy(n->secret, secret, sizeof n->secret);
 }
 
 // What a player is assumed to be doing on a tick nobody has told us about:
@@ -68,11 +72,32 @@ static void gs_inputs_for(const gs_net *n, uint32_t tick, gs_input *out) {
 
 void gs_net_local_input(gs_net *n, gs_input in) {
     uint32_t slot = gs_claim(n, n->local_tick);
+    uint8_t bit = (uint8_t)(1u << n->local);
+
+    // **The first word on a tick is the last one.** Once an input has gone out
+    // inside a commitment it cannot be taken back, because a promise that
+    // changes is exactly what a peer choosing late would look like and the far
+    // end is right to refuse it.
+    //
+    // This is not hypothetical. A race that stalls sits on one tick while the
+    // frame loop keeps running, and a caller polling the pad every frame hands
+    // over a different input for that same tick each time - rewriting a promise
+    // already made, and getting itself thrown out of an honest race for it.
+    if (n->known[slot] & bit) return;
+
     n->in[slot][n->local] = in;
-    n->known[slot] |= (uint8_t)(1u << n->local);
+    n->known[slot] |= bit;
 }
 
+bool gs_net_cheated(const gs_net *n) { return n->cheated; }
+
+void gs_net_finish(gs_net *n) { n->flushing = true; }
+
 bool gs_net_step(gs_net *n, const gs_track *t) {
+    // Somebody has been caught breaking a promise. There is no honest reading
+    // of what follows, so the race does not carry on and find out.
+    if (n->cheated) return false;
+
     // The window is the whole of the machine's ability to be wrong. Running
     // past it would mean the tick that needs rewinding to has been overwritten,
     // so instead the race waits - visibly, and for a reason that can be shown
@@ -99,15 +124,27 @@ const gs_world *gs_net_world(const gs_net *n) {
 //
 //   u32  magic
 //   u8   which player is speaking
-//   u8   how many ticks of input follow
+//   u8   how many ticks of commitment follow
 //   u32  the tick the first of them is for
-//   u8   one per tick
+//   u8   how many ticks of reveal follow
+//   u32  the tick the first of them is for
+//   u64  one commitment per tick, the promise
+//   u8 + u64  one input and salt per tick, the proof
 //   u32  the tick this machine has confirmed
 //   u64  the hash of its state there
 //
-// The inputs are sent again and again rather than acknowledged, which is what
-// makes loss cost nothing: by the time a datagram is missed, the next thirty-one
-// carry the same information.
+// Everything is sent again and again rather than acknowledged, which is what
+// makes loss cost nothing: by the time a datagram is missed, the next
+// thirty-one carry the same information. Retransmission requests are a round
+// trip, which is the one thing rollback exists to avoid.
+//
+// **The two ranges never overlap.** The reveals run `GS_NET_REVEAL_DELAY` ticks
+// behind the commitments, which is what lets the far end insist that a promise
+// arrived before its proof did - see the note on `GS_NET_REVEAL_DELAY`. The one
+// exception is a race that has finished locally, where the reveals still owed
+// go out at once; by then their promises have been in flight for a dozen ticks
+// already, and the copies riding along in the flush are ignored as
+// inadmissible, exactly like any other late copy.
 
 static void gs_put32(uint8_t *p, uint32_t v) {
     for (int i = 0; i < 4; i++) p[i] = (uint8_t)((v >> (8 * i)) & 0xffu);
@@ -129,6 +166,28 @@ static uint64_t gs_get64(const uint8_t *p) {
     return v;
 }
 
+// The salt for one of this machine's own ticks, derived rather than stored.
+// Preimage resistance is doing the work: an opponent who has been handed every
+// salt so far still cannot say what the next one is, because saying so would
+// mean inverting BLAKE2s to recover the secret.
+static uint64_t gs_salt_for(const gs_net *n, uint32_t tick) {
+    uint8_t msg[GS_NET_SECRET_BYTES + 4];
+    memcpy(msg, n->secret, GS_NET_SECRET_BYTES);
+    gs_put32(msg + GS_NET_SECRET_BYTES, tick);
+    return gs_blake2s_u64(msg, sizeof msg);
+}
+
+// The promise itself. **The tick is inside it**, so a commitment cannot be
+// lifted from one tick and presented for another - without that, a peer could
+// promise once and reuse the promise for every tick it liked.
+static uint64_t gs_commit_of(uint64_t salt, uint32_t tick, gs_input in) {
+    uint8_t msg[8 + 4 + 1];
+    gs_put64(msg, salt);
+    gs_put32(msg + 8, tick);
+    msg[12] = (uint8_t)in;
+    return gs_blake2s_u64(msg, sizeof msg);
+}
+
 size_t gs_net_packet(const gs_net *n, uint8_t *buf, size_t cap) {
     // Up to and including the tick whose input has just been recorded but not
     // yet simulated. Stopping one short of it means the last input of a race is
@@ -140,18 +199,41 @@ size_t gs_net_packet(const gs_net *n, uint8_t *buf, size_t cap) {
         end++;
     }
 
-    uint32_t count = end < GS_NET_REDUNDANCY ? end : GS_NET_REDUNDANCY;
-    uint32_t base = end - count;
+    uint32_t commits = end < GS_NET_COMMITS ? end : GS_NET_COMMITS;
+    uint32_t commit_base = end - commits;
 
-    size_t need = 4 + 1 + 1 + 4 + count + 4 + 8;
+    // Reveals stop a fixed distance short of the commitments, which is the
+    // whole mechanism. Once the race is over locally there is nothing left to
+    // choose dishonestly, so what is still owed goes out together.
+    uint32_t reveal_end = n->flushing ? end
+                        : (end > GS_NET_REVEAL_DELAY ? end - GS_NET_REVEAL_DELAY : 0);
+    uint32_t reveals = reveal_end < GS_NET_REDUNDANCY ? reveal_end : GS_NET_REDUNDANCY;
+    uint32_t reveal_base = reveal_end - reveals;
+
+    size_t need = GS_NET_HEAD + commits * 8u + reveals * 9u + GS_NET_TAIL;
     if (cap < need) return 0;
 
     uint8_t *p = buf;
     gs_put32(p, GS_NET_MAGIC);  p += 4;
     *p++ = n->local;
-    *p++ = (uint8_t)count;
-    gs_put32(p, base);          p += 4;
-    for (uint32_t i = 0; i < count; i++) *p++ = n->in[GS_SLOT(base + i)][n->local];
+    *p++ = (uint8_t)commits;
+    gs_put32(p, commit_base);   p += 4;
+    *p++ = (uint8_t)reveals;
+    gs_put32(p, reveal_base);   p += 4;
+
+    for (uint32_t i = 0; i < commits; i++) {
+        uint32_t tick = commit_base + i;
+        gs_input in = n->in[GS_SLOT(tick)][n->local];
+        gs_put64(p, gs_commit_of(gs_salt_for(n, tick), tick, in));
+        p += 8;
+    }
+    for (uint32_t i = 0; i < reveals; i++) {
+        uint32_t tick = reveal_base + i;
+        *p++ = n->in[GS_SLOT(tick)][n->local];
+        gs_put64(p, gs_salt_for(n, tick));
+        p += 8;
+    }
+
     gs_put32(p, n->confirmed_tick);                     p += 4;
     gs_put64(p, n->hash[GS_SLOT(n->confirmed_tick)]);   p += 8;
     return need;
@@ -175,23 +257,75 @@ static void gs_advance_confirmed(gs_net *n, const gs_track *t) {
 }
 
 bool gs_net_receive(gs_net *n, const gs_track *t, const uint8_t *buf, size_t len) {
-    if (len < 4 + 1 + 1 + 4 + 4 + 8) return false;
+    if (len < GS_NET_HEAD + GS_NET_TAIL) return false;
 
     const uint8_t *p = buf;
     if (gs_get32(p) != GS_NET_MAGIC) return false;
     p += 4;
 
-    uint8_t from  = *p++;
-    uint8_t count = *p++;
-    uint32_t base = gs_get32(p); p += 4;
+    uint8_t  from        = *p++;
+    uint8_t  commits     = *p++;
+    uint32_t commit_base = gs_get32(p); p += 4;
+    uint8_t  reveals     = *p++;
+    uint32_t reveal_base = gs_get32(p); p += 4;
 
     if (from >= n->players || from == n->local) return false;
-    if (len < (size_t)(4 + 1 + 1 + 4 + count + 4 + 8)) return false;
+    if (len < (size_t)GS_NET_HEAD + (size_t)commits * 8u +
+              (size_t)reveals * 9u + (size_t)GS_NET_TAIL) {
+        return false;
+    }
 
+    // A peer already caught is not listened to further.
+    if (n->cheated) return false;
+
+    const uint8_t *commit_at = p;
+    const uint8_t *reveal_at = p + (size_t)commits * 8u;
+
+    // --- the promises.
+    //
+    // **A promise is only admissible from a datagram that does not also prove
+    // it.** If the two travel together the promise costs nothing to make, and a
+    // peer that waited to see everybody else's input could build both at once
+    // and be indistinguishable from an honest one. Late copies of a promise
+    // ride along with reveals all the time and are simply ignored - by then the
+    // admissible copy has already been kept.
+    for (uint32_t i = 0; i < commits; i++) {
+        uint32_t tick = commit_base + i;
+        uint64_t said = gs_get64(commit_at + (size_t)i * 8u);
+
+        if (reveals > 0 && tick >= reveal_base && tick < reveal_base + reveals) {
+            continue;
+        }
+        if (tick < n->confirmed_tick) continue;
+        if (tick - n->confirmed_tick >= GS_NET_WINDOW) continue;
+
+        uint32_t slot = gs_claim(n, tick);
+        uint8_t bit = (uint8_t)(1u << from);
+
+        if (n->committed[slot] & bit) {
+            // **Two different promises for one tick.** An honest peer repeats
+            // the same eight bytes a dozen times; a peer whose story changes
+            // between copies is choosing after the fact and hoping one of them
+            // lands.
+            if (n->commit[slot][from] != said) {
+                n->cheated = true;
+                n->cheat_tick = tick;
+                n->cheat_by = from;
+                return true;
+            }
+        } else {
+            n->commit[slot][from] = said;
+            n->committed[slot] |= bit;
+        }
+    }
+
+    // --- the proofs.
     bool wrong = false;
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t tick = base + i;
-        gs_input said = (gs_input)p[i];
+    for (uint32_t i = 0; i < reveals; i++) {
+        uint32_t tick = reveal_base + i;
+        const uint8_t *at = reveal_at + (size_t)i * 9u;
+        gs_input said = (gs_input)at[0];
+        uint64_t salt = gs_get64(at + 1);
 
         // Older than anything that can still be rewound to: it has already been
         // folded into the confirmed state, and cannot be changed now.
@@ -199,16 +333,34 @@ bool gs_net_receive(gs_net *n, const gs_track *t, const uint8_t *buf, size_t len
         if (tick - n->confirmed_tick >= GS_NET_WINDOW) continue;
 
         uint32_t slot = gs_claim(n, tick);
+        uint8_t bit = (uint8_t)(1u << from);
+
+        // No admissible promise for this tick yet, so there is nothing to check
+        // it against and it is not accepted. The promise is still being
+        // repeated in the datagrams either side of this one; it is a wait, not
+        // a refusal.
+        if (!(n->committed[slot] & bit)) continue;
+
+        if (gs_commit_of(salt, tick, said) != n->commit[slot][from]) {
+            n->cheated = true;
+            n->cheat_tick = tick;
+            n->cheat_by = from;
+            return true;
+        }
+
+        // Already accepted, and the same as before: an ordinary repeat.
+        if ((n->known[slot] & bit) && n->in[slot][from] == said) continue;
+
         n->in[slot][from] = said;
-        n->known[slot] |= (uint8_t)(1u << from);
+        n->known[slot] |= bit;
 
         // A guess that turned out to be wrong, on a tick already simulated.
         if (tick < n->local_tick && n->used[slot][from] != said) wrong = true;
     }
-    p += count;
 
-    uint32_t their_tick = gs_get32(p); p += 4;
-    uint64_t their_hash = gs_get64(p);
+    const uint8_t *tail = reveal_at + (size_t)reveals * 9u;
+    uint32_t their_tick = gs_get32(tail);
+    uint64_t their_hash = gs_get64(tail + 4);
 
     gs_advance_confirmed(n, t);
 
