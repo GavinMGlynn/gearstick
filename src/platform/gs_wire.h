@@ -14,9 +14,9 @@
 #ifndef GS_WIRE_H
 #define GS_WIRE_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+// For `nullptr` on a toolchain that took -std=c23 without implementing it, as
+// well as the fixed-width types. MSVC is that toolchain today.
+#include "core/gs_common.h"
 
 #define GS_WIRE_MTU 512
 
