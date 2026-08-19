@@ -16,7 +16,18 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 4 are complete — 39 of 61 items, every one of them with its
+**Done means every phase item is ticked.** Not "the current one is finished", not
+"progress is orderly" — those are how the work is done, not whether it is. The
+plan is finished when this returns nothing:
+
+```sh
+sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
+```
+
+The tails below the phases are found-work rather than planned work, and are
+counted separately.
+
+**Phases 0 to 4 are complete — 40 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -279,8 +290,12 @@ whatever the UI turns out to be — then the interface on top.
 
 ## Phase 6 — Two players, then four
 
-- [ ] **Split-screen for two**, on one machine. *Verification: two pads drive two
-      cars in one race.*
+- [x] **Split-screen for two**, on one machine. *Verification: pad N drives car
+      N, a pad nobody plugged in drives nothing, and the keyboard is added to a
+      pad rather than substituted for it — so one keyboard still drives two cars
+      when there are no pads at all. Two cars given opposite inputs turn
+      opposite ways and end a long way apart, and each half of the screen
+      contains its own car and not the other one.*
 - [ ] **Four-player split-screen.** *Verification: four pads, four views, stable
       frame rate.*
 - [ ] **The merging camera** — views combine into one when the cars are close

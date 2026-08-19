@@ -69,6 +69,21 @@ static bool gs_is_car0(const uint8_t *p) {
     return p[0] > 100 && p[0] > 2 * p[1] && p[0] > 2 * p[2];
 }
 
+// Car one is drawn blue. Ice is pale blue too, so the test is on the *ratio* to
+// red rather than on brightness: ice has plenty of red in it and the car has
+// almost none.
+static bool gs_is_car1(const uint8_t *p) {
+    return p[2] > 150 && p[2] > 2 * p[0];
+}
+
+static int gs_count_car1(const gs_frame *f) {
+    int n = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        if (gs_is_car1(&f->px[i * 4])) n++;
+    }
+    return n;
+}
+
 static gs_frame gs_render_frame(SDL_Renderer *ren, const gs_track *t,
                                 const gs_world *prev, const gs_world *now,
                                 float alpha, const gs_camera *cam) {
@@ -1047,6 +1062,137 @@ TEST(moving_a_dial_restarts_the_ghost_under_the_new_one) {
 }
 
 // ---------------------------------------------------------------------------
+// Two on one machine
+// ---------------------------------------------------------------------------
+
+TEST(two_cars_take_their_input_from_different_places_and_go_different_ways) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 40);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(20), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(24), 0);
+    CHECK(w.car_count == 2);
+
+    // One accelerates and turns left, the other accelerates and turns right.
+    // Nothing here is shared but the track.
+    for (int i = 0; i < GS_TICK_HZ * 3; i++) {
+        gs_input in[GS_MAX_CARS] = {
+            (gs_input)(GS_IN_ACCEL | GS_IN_LEFT),
+            (gs_input)(GS_IN_ACCEL | GS_IN_RIGHT),
+            0, 0
+        };
+        gs_world_step(&w, &t, in);
+    }
+
+    CHECK(gs_car_speed(&w.car[0]) > 0);
+    CHECK(gs_car_speed(&w.car[1]) > 0);
+
+    // Turned opposite ways, and a long way apart because of it.
+    int32_t left = gs_angle_delta(0, w.car[0].heading);
+    int32_t right = gs_angle_delta(0, w.car[1].heading);
+    CHECK(left < 0);
+    CHECK(right > 0);
+    CHECK(gs_fix_len2(w.car[0].x - w.car[1].x, w.car[0].y - w.car[1].y) > GS_INT(8));
+
+    // And a car with no input does nothing, so the byte really is per car.
+    gs_world idle;
+    gs_world_init(&idle, GS_ONE);
+    gs_world_add_car(&idle, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(20), 0);
+    gs_world_add_car(&idle, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(24), 0);
+    for (int i = 0; i < GS_TICK_HZ; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&idle, &t, in);
+    }
+    CHECK(gs_car_speed(&idle.car[0]) > 0);
+    CHECK(gs_car_speed(&idle.car[1]) == 0);
+}
+
+TEST(the_second_pad_drives_the_second_car) {
+    (void)ren;
+
+    // Two pads, each pressing something different.
+    gs_input pads[GS_MAX_CARS] = { GS_IN_ACCEL, GS_IN_BRAKE, 0, 0 };
+    gs_input none[2] = { 0, 0 };
+    gs_input out[GS_MAX_CARS];
+
+    gs_input_combine(pads, 2, none, 2, out, 2);
+    CHECK(out[0] == GS_IN_ACCEL);
+    CHECK(out[1] == GS_IN_BRAKE);
+
+    // A pad nobody has plugged in drives nothing, and cars past the count are
+    // left alone rather than fed somebody else's buttons.
+    gs_input_combine(pads, 1, none, 2, out, 2);
+    CHECK(out[0] == GS_IN_ACCEL);
+    CHECK(out[1] == 0);
+
+    gs_input_combine(pads, 2, none, 2, out, 1);
+    CHECK(out[0] == GS_IN_ACCEL);
+    CHECK(out[1] == 0);
+
+    // The keyboard is added rather than substituted: a pad and the arrow keys
+    // can drive the same car, and neither switches the other off.
+    gs_input keys[2] = { GS_IN_LEFT, GS_IN_RIGHT };
+    gs_input_combine(pads, 2, keys, 2, out, 2);
+    CHECK(out[0] == (gs_input)(GS_IN_ACCEL | GS_IN_LEFT));
+    CHECK(out[1] == (gs_input)(GS_IN_BRAKE | GS_IN_RIGHT));
+
+    // And with no pads at all, one keyboard still drives two cars - which is
+    // how most of this gets tested and a good deal of it will be played.
+    gs_input_combine(pads, 0, keys, 2, out, 2);
+    CHECK(out[0] == GS_IN_LEFT);
+    CHECK(out[1] == GS_IN_RIGHT);
+}
+
+TEST(each_half_of_a_split_screen_shows_its_own_car) {
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 40);
+    // Something to tell the two halves apart by, since flat grey looks the same
+    // wherever you point it.
+    for (uint8_t x = 0; x < 20; x++)
+        for (uint8_t y = 0; y < 40; y++)
+            gs_track_set_surface(&t, x, y, GS_SURF_DIRT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(8), GS_INT(20), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(32), GS_INT(20), 0);
+
+    // Two views, each following its own car, side by side across one window.
+    gs_frame half[2];
+    for (int i = 0; i < 2; i++) {
+        gs_view v = { 0 };
+        v.car = (uint8_t)i;
+        v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+        v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+        gs_render_track_camera(&v, &w, &w, 1.0f);
+
+        // The camera went to *its* car, not to car zero.
+        CHECK(SDL_fabs((double)v.cam.cx - (double)gs_to_f(w.car[i].x)) < 0.01);
+
+        half[i] = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+        CHECK(half[i].px != nullptr);
+    }
+
+    // The two halves are looking at different places, so they do not match.
+    CHECK(gs_frame_diff(&half[0], &half[1]) > 1.0);
+
+    // Each half has *its own* car in it, and not the other one: they are
+    // twenty-four tiles apart, so neither is in the other's view at all.
+    CHECK(gs_count_car0(&half[0]) > 100);
+    CHECK(gs_count_car1(&half[0]) == 0);
+
+    CHECK(gs_count_car1(&half[1]) > 100);
+    CHECK(gs_count_car0(&half[1]) == 0);
+
+    gs_frame_free(&half[0]);
+    gs_frame_free(&half[1]);
+}
+
+// ---------------------------------------------------------------------------
 
 int main(void) {
     printf("gearstick renderer tests\n");
@@ -1085,6 +1231,9 @@ int main(void) {
     run_raising_a_ramp_changes_where_the_ghost_lands_without_being_told_to(ren);
     run_a_track_can_be_built_from_a_pad_with_no_mouse_at_all(ren);
     run_moving_a_dial_restarts_the_ghost_under_the_new_one(ren);
+    run_two_cars_take_their_input_from_different_places_and_go_different_ways(ren);
+    run_the_second_pad_drives_the_second_car(ren);
+    run_each_half_of_a_split_screen_shows_its_own_car(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

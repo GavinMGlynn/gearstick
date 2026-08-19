@@ -67,35 +67,51 @@ static gs_input gs_from_pad(SDL_Gamepad *g) {
     return in;
 }
 
-void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars) {
-    const bool *key = SDL_GetKeyboardState(nullptr);
-
+void gs_input_combine(const gs_input *from_pads, int pads,
+                      const gs_input *from_keys, int keys,
+                      gs_input *out, uint8_t cars) {
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) out[i] = 0;
 
+    // Pad N drives car N. Nothing cleverer: a player who picks up the second
+    // pad expects to be driving the second car, and any scheme that decides
+    // otherwise has to be explained to them.
     for (uint8_t i = 0; i < cars && i < GS_MAX_CARS; i++) {
-        if ((int)i < s->pads) out[i] = gs_from_pad(s->pad[i]);
+        if ((int)i < pads) out[i] = from_pads[i];
     }
 
-    if (key == nullptr) return;
+    // The keyboard is *added* rather than substituted, so a pad and the arrow
+    // keys can drive the same car and neither disables the other.
+    for (uint8_t i = 0; i < cars && (int)i < keys && i < GS_MAX_CARS; i++) {
+        out[i] |= from_keys[i];
+    }
+}
 
-    if (cars > 0) {
-        gs_input in = 0;
-        if (key[SDL_SCANCODE_UP])    in |= GS_IN_ACCEL;
-        if (key[SDL_SCANCODE_DOWN])  in |= GS_IN_BRAKE;
-        if (key[SDL_SCANCODE_LEFT])  in |= GS_IN_LEFT;
-        if (key[SDL_SCANCODE_RIGHT]) in |= GS_IN_RIGHT;
-        if (key[SDL_SCANCODE_RSHIFT]) in |= GS_IN_FIRE;
-        out[0] |= in;
+void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars) {
+    gs_input pads[GS_MAX_CARS] = { 0 };
+    for (int i = 0; i < s->pads && i < GS_MAX_CARS; i++) {
+        pads[i] = gs_from_pad(s->pad[i]);
     }
-    if (cars > 1) {
-        gs_input in = 0;
-        if (key[SDL_SCANCODE_W]) in |= GS_IN_ACCEL;
-        if (key[SDL_SCANCODE_S]) in |= GS_IN_BRAKE;
-        if (key[SDL_SCANCODE_A]) in |= GS_IN_LEFT;
-        if (key[SDL_SCANCODE_D]) in |= GS_IN_RIGHT;
-        if (key[SDL_SCANCODE_LSHIFT]) in |= GS_IN_FIRE;
-        out[1] |= in;
+
+    // Two sets of keys, so one person at one keyboard can drive two cars -
+    // which is how most of this game gets tested, and how a lot of it will be
+    // played.
+    gs_input keys[2] = { 0, 0 };
+    const bool *key = SDL_GetKeyboardState(nullptr);
+    if (key != nullptr) {
+        if (key[SDL_SCANCODE_UP])     keys[0] |= GS_IN_ACCEL;
+        if (key[SDL_SCANCODE_DOWN])   keys[0] |= GS_IN_BRAKE;
+        if (key[SDL_SCANCODE_LEFT])   keys[0] |= GS_IN_LEFT;
+        if (key[SDL_SCANCODE_RIGHT])  keys[0] |= GS_IN_RIGHT;
+        if (key[SDL_SCANCODE_RSHIFT]) keys[0] |= GS_IN_FIRE;
+
+        if (key[SDL_SCANCODE_W])      keys[1] |= GS_IN_ACCEL;
+        if (key[SDL_SCANCODE_S])      keys[1] |= GS_IN_BRAKE;
+        if (key[SDL_SCANCODE_A])      keys[1] |= GS_IN_LEFT;
+        if (key[SDL_SCANCODE_D])      keys[1] |= GS_IN_RIGHT;
+        if (key[SDL_SCANCODE_LSHIFT]) keys[1] |= GS_IN_FIRE;
     }
+
+    gs_input_combine(pads, s->pads, keys, 2, out, cars);
 }
 
 // A stick reading, deadzoned and normalised. The deadzone is generous because

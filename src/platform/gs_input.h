@@ -35,6 +35,16 @@ typedef struct gs_pad_edit {
 
 void gs_input_editor_pad(gs_input_state *s, gs_pad_edit *out);
 
+// Who drives what. **Pad N drives car N**, and the keyboard drives cars zero
+// and one as well, so one person can try two cars without owning two pads.
+//
+// Split out from the SDL reading so the rule can be tested without hardware:
+// "the second pad drives the second car" is the whole of two-player on one
+// machine, and it should not be a claim that rests on reading the code.
+void gs_input_combine(const gs_input *from_pads, int pads,
+                      const gs_input *from_keys, int keys,
+                      gs_input *out, uint8_t cars);
+
 void gs_input_init(gs_input_state *s);
 void gs_input_quit(gs_input_state *s);
 
