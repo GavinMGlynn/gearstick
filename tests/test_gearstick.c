@@ -22,6 +22,8 @@
 #include "core/gs_ghost.h"
 #include "core/gs_net.h"
 #include "core/gs_pack.h"
+#include "core/gs_profile.h"
+#include "core/gs_records.h"
 #include "core/gs_share.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
@@ -2841,6 +2843,370 @@ TEST(a_desync_is_noticed_rather_than_lived_with) {
     CHECK(gs_world_hash(&a.confirmed) != gs_world_hash(&b.confirmed));
 }
 
+// ---------------------------------------------------------------------------
+// Finishing a race
+// ---------------------------------------------------------------------------
+
+TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
+    static gs_track t;
+    gs_track_init(&t, 40, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+
+    // Two gates, so a lap is out and back.
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 2);
+
+    // A quick car and a slow one, so the order is decided by the racing rather
+    // than by which index went first.
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(7), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_LUNAR_ROVER, GS_INT(4), GS_INT(9), 0);
+
+    CHECK(!w.over);
+    CHECK(w.winner == GS_NO_WINNER);
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * 120 && !w.over; i++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        for (uint8_t c = 0; c < w.car_count; c++) in[c] = gs_ai_drive(&w, &t, c);
+        gs_world_step(&w, &t, in);
+    }
+
+    CHECK(w.over);
+    CHECK(w.winner == 0);                      // the sprint car
+
+    // Everybody has a time, and the winner's is the smallest of them.
+    for (uint8_t i = 0; i < w.car_count; i++) {
+        CHECK(w.car[i].finish_tick > 0);
+        CHECK(w.car[i].laps >= 2);
+    }
+    CHECK(w.car[0].finish_tick < w.car[1].finish_tick);
+
+    // **The clock does not stop on the winner.** A race that ended the moment
+    // the first car crossed would have no time for anybody else, and the times
+    // are the thing people argue about afterwards.
+    CHECK(w.car[1].finish_tick > 0);
+
+    // And a finished car is timed once. Its time does not creep as it drives on
+    // through the silence afterwards.
+    uint32_t settled = w.car[0].finish_tick;
+    for (uint32_t i = 0; i < GS_TICK_HZ * 5; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, GS_IN_ACCEL, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].finish_tick == settled);
+    CHECK(w.winner == 0);
+}
+
+TEST(a_race_with_no_lap_target_never_ends) {
+    static gs_track t;
+    gs_track_init(&t, 40, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    // No target set at all, which is what a test drive from the editor is.
+
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * 90; i++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        in[0] = gs_ai_drive(&w, &t, 0);
+        gs_world_step(&w, &t, in);
+    }
+
+    // Laps counted, nobody finished, nothing over. Driving around is not a
+    // race until somebody says how long it is.
+    CHECK(w.car[0].laps > 1);
+    CHECK(w.car[0].finish_tick == 0);
+    CHECK(!w.over);
+    CHECK(w.winner == GS_NO_WINNER);
+}
+
+TEST(a_replay_carries_what_race_it_was) {
+    static gs_track t;
+    gs_track_init(&t, 40, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 3);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+
+    static gs_replay rec;
+    gs_replay_begin(&rec, &w, &t);
+    for (uint32_t i = 0; i < GS_TICK_HZ * 60; i++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        in[0] = gs_ai_drive(&w, &t, 0);
+        gs_replay_record(&rec, in);
+        gs_world_step(&w, &t, in);
+    }
+
+    // Through the bytes, because that is the only form a shared race arrives
+    // in. A recording that did not carry the lap target would re-race the same
+    // driving under different rules and finish somewhere else.
+    static uint8_t buf[sizeof(gs_replay) + 4096];
+    size_t n = gs_replay_serialize(&rec, buf, sizeof buf);
+    CHECK(n > 0);
+
+    static gs_replay back;
+    CHECK(gs_replay_deserialize(&back, buf, n));
+    CHECK(back.meta.laps_to_win == 3);
+    CHECK(back.meta.mode == (uint8_t)GS_MODE_RACE);
+
+    gs_world played;
+    CHECK(gs_replay_playback(&back, &t, &played));
+    CHECK(gs_world_hash(&played) == gs_world_hash(&w));
+    CHECK(played.car[0].finish_tick == w.car[0].finish_tick);
+}
+
+// ---------------------------------------------------------------------------
+// Records and the people who set them
+// ---------------------------------------------------------------------------
+
+static gs_records gs_rec;
+
+// A world under the standard dials, for hashing conditions from.
+static void gs_conditions(gs_world *w, gs_fix gravity) {
+    gs_world_init(w, GS_ONE);
+    w->gravity = gravity;
+}
+
+TEST(a_record_belongs_to_a_track_and_the_conditions_it_was_set_under) {
+    gs_records_clear(&gs_rec);
+
+    gs_world earth, moon;
+    gs_conditions(&earth, GS_ONE);
+    gs_conditions(&moon, GS_RATIO(17, 100));
+
+    uint64_t e = gs_conditions_hash(&earth);
+    uint64_t m = gs_conditions_hash(&moon);
+    CHECK(e != m);
+
+    const uint64_t track = 0xabcdef0123456789ULL;
+
+    // Nothing has been done here yet.
+    CHECK(gs_records_best_lap(&gs_rec, track, e) == nullptr);
+
+    gs_record_beat first = gs_records_submit(&gs_rec, track, e,
+                                             (uint8_t)GS_VEH_STOCK_CAR,
+                                             (uint8_t)GS_MODE_RACE, 3,
+                                             5040, 15900, "gavin");
+    CHECK(first.lap);      // the first time round is a record by definition
+    CHECK(first.race);
+
+    const gs_record *best = gs_records_best_lap(&gs_rec, track, e);
+    CHECK(best != nullptr);
+    if (best != nullptr) {
+        CHECK(best->lap == 5040);
+        CHECK(strcmp(best->who, "gavin") == 0);
+    }
+
+    // **A lap at a sixth of gravity is not a lap.** The same track under
+    // different dials is a different table, or every record would eventually be
+    // set on the moon.
+    CHECK(gs_records_best_lap(&gs_rec, track, m) == nullptr);
+
+    // And a different track, one bit apart, is a different table too - which is
+    // the whole reason the key is the content hash.
+    CHECK(gs_records_best_lap(&gs_rec, track ^ 1u, e) == nullptr);
+}
+
+TEST(beating_a_record_is_reported_and_not_beating_one_is_not) {
+    gs_records_clear(&gs_rec);
+    gs_world w;
+    gs_conditions(&w, GS_ONE);
+    uint64_t c = gs_conditions_hash(&w);
+    const uint64_t track = 0x1111ULL;
+
+    gs_records_submit(&gs_rec, track, c, 0, (uint8_t)GS_MODE_RACE, 3, 5000, 16000, "ann");
+
+    // Slower. Nothing is beaten, and the table still says what it said.
+    gs_record_beat slower = gs_records_submit(&gs_rec, track, c, 0,
+                                              (uint8_t)GS_MODE_RACE, 3,
+                                              5200, 16400, "bob");
+    CHECK(!slower.lap);
+    CHECK(!slower.race);
+    CHECK(gs_records_best_lap(&gs_rec, track, c)->lap == 5000);
+
+    // Quicker on the lap but not over the race, which happens constantly: one
+    // brilliant lap and three ordinary ones.
+    gs_record_beat mixed = gs_records_submit(&gs_rec, track, c, 0,
+                                             (uint8_t)GS_MODE_RACE, 3,
+                                             4800, 16900, "bob");
+    CHECK(mixed.lap);
+    CHECK(!mixed.race);
+    CHECK(gs_records_best_lap(&gs_rec, track, c)->lap == 4800);
+    CHECK(gs_records_best_race(&gs_rec, track, c, 3)->race == 16000);
+
+    // One row per person, not one per race: bob has been round twice and
+    // appears once, holding his best rather than his latest.
+    CHECK(gs_rec.count == 2);
+    int bob = -1;
+    for (uint16_t i = 0; i < gs_rec.count; i++) {
+        if (strcmp(gs_rec.entry[i].who, "bob") == 0) bob = (int)i;
+    }
+    CHECK(bob >= 0);
+    if (bob >= 0) CHECK(gs_rec.entry[bob].lap == 4800);
+
+    // A race time only means anything against a race of the same length, so a
+    // five-lap time does not take a three-lap record.
+    gs_record_beat longer = gs_records_submit(&gs_rec, track, c, 0,
+                                              (uint8_t)GS_MODE_RACE, 5,
+                                              4900, 26000, "ann");
+    CHECK(!longer.lap);
+    CHECK(longer.race);         // the first five-lap race, so a record for that
+    CHECK(gs_records_best_race(&gs_rec, track, c, 3)->race == 16000);
+}
+
+TEST(records_survive_being_written_and_read_back) {
+    gs_records_clear(&gs_rec);
+    gs_world w;
+    gs_conditions(&w, GS_ONE);
+    uint64_t c = gs_conditions_hash(&w);
+
+    for (int i = 0; i < 40; i++) {
+        char who[GS_NAME_MAX];
+        snprintf(who, sizeof who, "driver%d", i);
+        gs_records_submit(&gs_rec, 0x2000ULL + (uint64_t)(unsigned)(i % 7), c,
+                          (uint8_t)(i % GS_VEH_COUNT), (uint8_t)GS_MODE_RACE, 3,
+                          (uint32_t)(4000 + i * 13), (uint32_t)(14000 + i * 40), who);
+    }
+    uint16_t before = gs_rec.count;
+    CHECK(before == 40);
+
+    static uint8_t buf[sizeof(gs_records) + 4096];
+    size_t n = gs_records_serialize(&gs_rec, buf, sizeof buf);
+    CHECK(n > 0);
+
+    static gs_records back;
+    CHECK(gs_records_deserialize(&back, buf, n));
+    CHECK(back.count == before);
+    CHECK(memcmp(gs_rec.entry, back.entry, (size_t)before * sizeof(gs_record)) == 0);
+
+    // Rubbish is refused rather than half-read.
+    CHECK(!gs_records_deserialize(&back, buf, 4));
+    buf[0] ^= 0xffu;
+    CHECK(!gs_records_deserialize(&back, buf, n));
+}
+
+TEST(a_profile_is_a_person_rather_than_a_settings_entry) {
+    static gs_profiles p;
+    gs_profiles_clear(&p);
+
+    CHECK(gs_profile_add(&p, "gavin", GS_COLOUR_ORANGE, (uint8_t)GS_VEH_BAJA_BUG) == 0);
+    CHECK(gs_profile_add(&p, "ann", GS_COLOUR_PURPLE, (uint8_t)GS_VEH_MOTORCYCLE) == 1);
+
+    // Two people called the same thing would be two people sharing a record.
+    CHECK(gs_profile_add(&p, "gavin", GS_COLOUR_WHITE, 0) == -1);
+    CHECK(gs_profile_add(&p, "", GS_COLOUR_WHITE, 0) == -1);
+    CHECK(p.count == 2);
+
+    CHECK(gs_profile_find(&p, "ann") == 1);
+    CHECK(gs_profile_find(&p, "nobody") == -1);
+    CHECK(p.entry[0].colour == GS_COLOUR_ORANGE);
+    CHECK(p.entry[0].vehicle == (uint8_t)GS_VEH_BAJA_BUG);
+
+    // A history, which is what makes it a person.
+    gs_profile_raced(&p, 0, true, true, false, 420);
+    gs_profile_raced(&p, 0, false, true, true, 380);
+    CHECK(p.entry[0].races == 2);
+    CHECK(p.entry[0].wins == 1);
+    CHECK(p.entry[0].podiums == 2);
+    CHECK(p.entry[0].wrecks == 1);
+    CHECK(p.entry[0].tiles == 800);
+
+    static uint8_t buf[sizeof(gs_profiles) + 1024];
+    size_t n = gs_profiles_serialize(&p, buf, sizeof buf);
+    CHECK(n > 0);
+
+    static gs_profiles back;
+    CHECK(gs_profiles_deserialize(&back, buf, n));
+    CHECK(back.count == 2);
+    CHECK(strcmp(back.entry[0].name, "gavin") == 0);
+    CHECK(back.entry[0].wins == 1);
+    CHECK(back.entry[0].tiles == 800);
+    CHECK(back.entry[1].colour == GS_COLOUR_PURPLE);
+
+    // Removing somebody keeps the rest in order - and says nothing about their
+    // records, which belong to the track rather than to the roster.
+    CHECK(gs_profile_remove(&p, 0));
+    CHECK(p.count == 1);
+    CHECK(strcmp(p.entry[0].name, "ann") == 0);
+    CHECK(!gs_profile_remove(&p, 7));
+}
+
+TEST(the_race_that_sets_a_record_is_the_race_that_reports_it) {
+    // End to end: a real race, its times taken from the simulation, submitted,
+    // and a second slower race that does not beat it. This is the join between
+    // the two halves - the simulation times laps and the table keeps them - and
+    // it is the join that a test of either half alone would miss.
+    static gs_track t;
+    gs_track_init(&t, 40, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+
+    gs_records_clear(&gs_rec);
+    uint32_t times[2];
+
+    for (int run = 0; run < 2; run++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, GS_MODE_RACE);
+        gs_world_set_laps(&w, 3);
+
+        // The quick car first, then the slow one.
+        gs_world_add_car(&w, &t,
+                         run == 0 ? (uint8_t)GS_VEH_SPRINT_CAR
+                                  : (uint8_t)GS_VEH_LUNAR_ROVER,
+                         GS_INT(4), GS_INT(8), 0);
+
+        for (uint32_t i = 0; i < GS_TICK_HZ * 200 && !w.over; i++) {
+            gs_input in[GS_MAX_CARS] = { 0 };
+            in[0] = gs_ai_drive(&w, &t, 0);
+            gs_world_step(&w, &t, in);
+        }
+        CHECK(w.over);
+        CHECK(w.car[0].best_lap > 0);
+        times[run] = w.car[0].best_lap;
+
+        gs_record_beat beat = gs_records_submit(
+            &gs_rec, gs_track_hash(&t), gs_conditions_hash(&w),
+            w.car[0].vehicle, w.mode, w.laps_to_win,
+            w.car[0].best_lap, w.car[0].finish_tick,
+            run == 0 ? "quick" : "slow");
+
+        if (run == 0) {
+            CHECK(beat.lap);
+            CHECK(beat.race);
+        } else {
+            // The rover is slower than the sprint car everywhere on pavement,
+            // which the roster sweep says too.
+            CHECK(!beat.lap);
+            CHECK(!beat.race);
+        }
+    }
+
+    CHECK(times[1] > times[0]);
+    const gs_record *best = gs_records_best_lap(&gs_rec, gs_track_hash(&t),
+                                                0xffffffffffffffffULL);
+    CHECK(best == nullptr);        // wrong conditions, no record
+}
+
 TEST(the_analyser_gives_the_same_answer_twice) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -3186,6 +3552,14 @@ int main(void) {
     run_the_analyser_calls_a_jump_nobody_can_clear_impossible();
     run_the_analyser_says_so_when_a_track_cannot_be_got_round_at_all();
     run_the_heatmap_shows_where_everybody_actually_went();
+    run_a_record_belongs_to_a_track_and_the_conditions_it_was_set_under();
+    run_beating_a_record_is_reported_and_not_beating_one_is_not();
+    run_records_survive_being_written_and_read_back();
+    run_a_profile_is_a_person_rather_than_a_settings_entry();
+    run_the_race_that_sets_a_record_is_the_race_that_reports_it();
+    run_a_race_ends_when_everybody_has_finished_and_the_first_one_wins();
+    run_a_race_with_no_lap_target_never_ends();
+    run_a_replay_carries_what_race_it_was();
     run_the_analyser_gives_the_same_answer_twice();
     run_a_ghost_is_the_race_that_made_it_not_a_picture_of_it();
     run_a_ghost_from_another_track_is_refused_rather_than_raced();

@@ -10,6 +10,8 @@ void gs_replay_begin(gs_replay *r, const gs_world *w, const gs_track *t) {
     r->meta.drag_scale     = w->drag_scale;
     r->meta.friction_scale = w->friction_scale;
     r->meta.damage_scale   = w->damage_scale;
+    r->meta.mode           = w->mode;
+    r->meta.laps_to_win    = w->laps_to_win;
     r->meta.car_count      = w->car_count;
     for (uint8_t i = 0; i < w->car_count; i++) {
         r->meta.vehicle[i]       = w->car[i].vehicle;
@@ -46,6 +48,8 @@ bool gs_replay_restore(const gs_replay *r, gs_world *w, const gs_track *t) {
     w->drag_scale     = r->meta.drag_scale;
     w->friction_scale = r->meta.friction_scale;
     w->damage_scale   = r->meta.damage_scale;
+    w->mode           = r->meta.mode;
+    w->laps_to_win    = r->meta.laps_to_win;
 
     for (uint8_t i = 0; i < r->meta.car_count; i++) {
         gs_world_add_car(w, t, r->meta.vehicle[i], r->meta.start_x[i],
@@ -97,7 +101,7 @@ static uint64_t gs_get_u64(const uint8_t *p) {
 
 // magic, version, track hash, four dials, car count, vehicles, tick count.
 #define GS_REPLAY_HEADER_BYTES \
-    (4 + 4 + 8 + 16 + 4 + GS_MAX_CARS + GS_MAX_CARS * (4 + 4 + 2) + 4)
+    (4 + 4 + 8 + 16 + 1 + 2 + 4 + GS_MAX_CARS + GS_MAX_CARS * (4 + 4 + 2) + 4)
 
 size_t gs_replay_size(const gs_replay *r) {
     return GS_REPLAY_HEADER_BYTES + (size_t)r->meta.tick_count * GS_MAX_CARS;
@@ -115,6 +119,8 @@ size_t gs_replay_serialize(const gs_replay *r, uint8_t *buf, size_t cap) {
     gs_put_u32(p, (uint32_t)r->meta.drag_scale);     p += 4;
     gs_put_u32(p, (uint32_t)r->meta.friction_scale); p += 4;
     gs_put_u32(p, (uint32_t)r->meta.damage_scale);   p += 4;
+    *p++ = r->meta.mode;
+    gs_put_u16(p, r->meta.laps_to_win);              p += 2;
     gs_put_u32(p, (uint32_t)r->meta.car_count);  p += 4;
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) *p++ = r->meta.vehicle[i];
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
@@ -145,6 +151,8 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     r->meta.drag_scale     = (gs_fix)gs_get_u32(p);            p += 4;
     r->meta.friction_scale = (gs_fix)gs_get_u32(p);            p += 4;
     r->meta.damage_scale   = (gs_fix)gs_get_u32(p);            p += 4;
+    r->meta.mode           = *p++;
+    r->meta.laps_to_win    = gs_get_u16(p);                    p += 2;
     r->meta.car_count      = (uint8_t)gs_get_u32(p);           p += 4;
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) r->meta.vehicle[i] = *p++;
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) {

@@ -34,6 +34,10 @@ void gs_world_init(gs_world *w, gs_fix gravity_scale) {
     w->damage_scale   = GS_ONE;
 }
 
+void gs_world_set_laps(gs_world *w, uint16_t laps) {
+    w->laps_to_win = laps;
+}
+
 void gs_world_set_mode(gs_world *w, gs_mode mode) {
     w->mode = (uint8_t)mode;
     w->over = false;
@@ -565,7 +569,48 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
             c->next_gate = (uint8_t)((c->next_gate + 1) % t->gate_count);
             // Back at the start line is a lap, which is the only place a lap can
             // be counted without deciding arbitrarily where one begins.
-            if (c->next_gate == 0) c->laps++;
+            if (c->next_gate != 0) continue;
+
+            c->laps++;
+
+            // The first crossing is the start of lap one rather than the end of
+            // a lap nobody drove: a car begins behind the line, so its first
+            // "lap" is the run up to it and timing that would give everybody a
+            // fictional best.
+            uint32_t now = (uint32_t)w->tick;
+            if (c->laps > 1) {
+                uint32_t lap = now - c->lap_start;
+                if (c->best_lap == 0 || lap < c->best_lap) c->best_lap = lap;
+            }
+            c->lap_start = now;
+        }
+    }
+
+    // Finishing. A car that has done its laps is timed once and never again;
+    // the first of them is the winner, settled the moment it happens, because
+    // "first past the flag" cannot be revisited by anything that comes after.
+    if (w->mode == (uint8_t)GS_MODE_RACE && w->laps_to_win > 0) {
+        for (uint8_t i = 0; i < w->car_count; i++) {
+            gs_car *c = &w->car[i];
+            if (c->finish_tick != 0 || c->laps < w->laps_to_win) continue;
+
+            c->finish_tick = (uint32_t)w->tick;
+            if (w->winner == GS_NO_WINNER) w->winner = i;
+        }
+
+        // The race is over when there is nobody left who could still finish.
+        // Not when the first car crosses: everybody's time is what a results
+        // screen is for, and stopping the clock on the winner throws away every
+        // other one.
+        if (!w->over) {
+            bool anybody_going = false;
+            for (uint8_t i = 0; i < w->car_count; i++) {
+                const gs_car *c = &w->car[i];
+                if (c->active && !c->wrecked && c->finish_tick == 0) {
+                    anybody_going = true;
+                }
+            }
+            if (!anybody_going) w->over = true;
         }
     }
 
@@ -628,6 +673,7 @@ uint64_t gs_world_hash(const gs_world *w) {
     gs_hash_u64(&h, w->mode);
     gs_hash_u64(&h, (uint64_t)w->over);
     gs_hash_u64(&h, w->winner);
+    gs_hash_u64(&h, w->laps_to_win);
 
     // Wear is state that changes the race, so two machines disagreeing about it
     // is a desync exactly as much as a car in the wrong place would be.
@@ -652,6 +698,9 @@ uint64_t gs_world_hash(const gs_world *w) {
         gs_hash_u64(&h, c->drop_cooldown);
         gs_hash_u64(&h, c->next_gate);
         gs_hash_u64(&h, c->laps);
+        gs_hash_u64(&h, c->finish_tick);
+        gs_hash_u64(&h, c->lap_start);
+        gs_hash_u64(&h, c->best_lap);
     }
 
     // Hazards are state that changes the race, so they are hashed like

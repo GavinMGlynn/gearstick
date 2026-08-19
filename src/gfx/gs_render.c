@@ -3,6 +3,7 @@
 #include "gfx/gs_render.h"
 
 #include "gfx/gs_meshes.h"
+#include "core/gs_profile.h"
 
 typedef struct gs_rgb { float r, g, b; } gs_rgb;
 
@@ -150,12 +151,45 @@ static void gs_draw_tile(SDL_Renderer *ren, const gs_camera *cam,
 // The car is a box: a footprint rotated to its heading, lifted by its ride
 // height. Crude, and it reads correctly - which at this stage is the whole
 // requirement. Pre-rendered sprites replace it in Phase 10.
-static const SDL_FColor gs_car_colour[GS_MAX_CARS] = {
-    { 0.90f, 0.25f, 0.20f, 1.0f },
-    { 0.25f, 0.55f, 0.95f, 1.0f },
-    { 0.95f, 0.80f, 0.20f, 1.0f },
-    { 0.35f, 0.80f, 0.40f, 1.0f },
+// The paint. Eight colours rather than four, so four players can all be
+// different and still argue about who gets red - and indexed by *choice* rather
+// than by car number, because which car you are is the simulation's business
+// and what colour it is is yours.
+//
+// Nothing here is in src/core/: a colour cannot change where a car ends up, so
+// it is not part of the state two machines have to agree about, and a player
+// can repaint without invalidating a single replay or record.
+static const SDL_FColor gs_paint_palette[GS_COLOUR_COUNT] = {
+    [GS_COLOUR_RED]    = { 0.86f, 0.16f, 0.14f, 1.0f },
+    [GS_COLOUR_BLUE]   = { 0.16f, 0.44f, 0.88f, 1.0f },
+    [GS_COLOUR_GREEN]  = { 0.20f, 0.72f, 0.28f, 1.0f },
+    [GS_COLOUR_YELLOW] = { 0.94f, 0.80f, 0.12f, 1.0f },
+    [GS_COLOUR_ORANGE] = { 0.94f, 0.47f, 0.10f, 1.0f },
+    [GS_COLOUR_PURPLE] = { 0.60f, 0.28f, 0.80f, 1.0f },
+    [GS_COLOUR_WHITE]  = { 0.90f, 0.90f, 0.92f, 1.0f },
+    [GS_COLOUR_BLACK]  = { 0.16f, 0.16f, 0.18f, 1.0f },
 };
+
+// Which car wears which colour. Defaulted so that a race started without any
+// profiles still has four cars nobody confuses.
+static uint8_t gs_car_paint[GS_MAX_CARS] = {
+    GS_COLOUR_RED, GS_COLOUR_BLUE, GS_COLOUR_YELLOW, GS_COLOUR_GREEN,
+};
+
+void gs_render_set_car_paint(uint8_t car, uint8_t colour) {
+    if (car >= GS_MAX_CARS || colour >= GS_COLOUR_COUNT) return;
+    gs_car_paint[car] = colour;
+}
+
+uint8_t gs_render_car_paint(uint8_t car) {
+    return car < GS_MAX_CARS ? gs_car_paint[car] : 0;
+}
+
+SDL_FColor gs_render_paint_colour(uint8_t colour) {
+    return colour < GS_COLOUR_COUNT ? gs_paint_palette[colour]
+                                    : gs_paint_palette[GS_COLOUR_RED];
+}
+
 
 static void gs_car_footprint(const gs_car *c, float half_len, float half_wid,
                              float out_x[4], float out_y[4]) {
@@ -175,7 +209,7 @@ static void gs_car_footprint(const gs_car *c, float half_len, float half_wid,
 // What each role looks like. Only the body takes the player's colour; the rest
 // is shared, which is the whole reason a triangle carries a role rather than a
 // colour - four players, six vehicles, one set of geometry.
-static SDL_FColor gs_paint_colour(uint8_t paint, SDL_FColor body) {
+static SDL_FColor gs_role_colour(uint8_t paint, SDL_FColor body) {
     switch (paint) {
     case GS_PAINT_TRIM:  return (SDL_FColor){ 0.22f, 0.23f, 0.27f, body.a };
     case GS_PAINT_GLASS: return (SDL_FColor){ 0.42f, 0.55f, 0.66f, body.a };
@@ -289,7 +323,7 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
 
     float ox = gs_to_f(c->x), oy = gs_to_f(c->y), oz = gs_to_f(c->z);
 
-    SDL_FColor body = gs_car_colour[index & 3];
+    SDL_FColor body = gs_paint_palette[gs_car_paint[index & (GS_MAX_CARS - 1)]];
     if (c->wrecked) { body.r *= 0.35f; body.g *= 0.35f; body.b *= 0.35f; }
     body.a = alpha;
 
@@ -336,7 +370,7 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
             shade = SDL_clamp(0.62f + d * 0.38f, 0.45f, 1.15f);
         }
 
-        SDL_FColor col = gs_paint_colour(tri->paint, body);
+        SDL_FColor col = gs_role_colour(tri->paint, body);
         col.r = SDL_clamp(col.r * shade, 0.0f, 1.0f);
         col.g = SDL_clamp(col.g * shade, 0.0f, 1.0f);
         col.b = SDL_clamp(col.b * shade, 0.0f, 1.0f);

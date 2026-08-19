@@ -21,6 +21,13 @@
 // them changes every recorded replay - which is why this number is allowed to
 // move during tuning and is not allowed to move by accident.
 //
+// And again when laps gained a clock: a best lap is what a track is judged by,
+// so it is simulation state rather than something a front end watches for.
+//
+// And when a race gained a finish line: a lap target on the world and a finish
+// tick on each car, both hashed, because a results screen that shows times
+// needs the times to be part of the state two machines have to agree about.
+//
 // And when ground too steep to climb became a wall rather than a catapult -
 // found by the analyser calling an impassable track completable.
 //
@@ -36,6 +43,6 @@
 // in corners, and low gravity takes your acceleration along with your weight.
 // Every replay and ghost time recorded before that is invalid, which is what
 // this number failing is for. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0xf2da4016b8762ccaULL
+#define GS_SELFTEST_WORLD_HASH 0x38f969eb07c8e74aULL
 
 #endif // GS_GOLDEN_H

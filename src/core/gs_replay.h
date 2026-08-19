@@ -15,7 +15,7 @@
 #include "core/gs_sim.h"
 
 #define GS_REPLAY_MAGIC     0x50525347u   // "GSRP"
-#define GS_REPLAY_VERSION   2u
+#define GS_REPLAY_VERSION   3u
 #define GS_REPLAY_MAX_TICKS (GS_TICK_HZ * 60 * 10)   // ten minutes
 
 typedef struct gs_replay_meta {
@@ -24,6 +24,12 @@ typedef struct gs_replay_meta {
     gs_fix   drag_scale;
     gs_fix   friction_scale;
     gs_fix   damage_scale;
+
+    // What race this was. A recording that did not carry these would re-race
+    // the same driving under different rules and finish somewhere else.
+    uint8_t  mode;
+    uint16_t laps_to_win;
+
     uint8_t  car_count;
     uint8_t  vehicle[GS_MAX_CARS];
 

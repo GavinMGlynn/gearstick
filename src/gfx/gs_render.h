@@ -89,6 +89,15 @@ typedef struct gs_render_stats {
     uint32_t tris;    // car triangles that survived culling and were drawn
 } gs_render_stats;
 
+// What colour each car is painted, which is a player's choice rather than the
+// simulation's business - see gs_profile.h. Set it before a race and the cars
+// wear it; nothing about the race changes.
+void    gs_render_set_car_paint(uint8_t car, uint8_t colour);
+uint8_t gs_render_car_paint(uint8_t car);
+
+// The colour itself, for a swatch next to somebody's name on a menu.
+SDL_FColor gs_render_paint_colour(uint8_t colour);
+
 void gs_render_reset_stats(void);
 gs_render_stats gs_render_stats_now(void);
 

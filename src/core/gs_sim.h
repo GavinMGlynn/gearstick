@@ -87,6 +87,18 @@ typedef struct gs_car {
     uint8_t  next_gate;
     uint16_t laps;
 
+    // The tick this car completed the last lap it had to, or zero for still
+    // going. Times rather than positions, because a results screen that only
+    // said who won would throw away the thing everybody actually argues about.
+    uint32_t finish_tick;
+
+    // The current lap's clock, and the quickest one so far. A best lap is what
+    // a track is actually judged by - a race time is a race, but a lap time is
+    // the track - so it is simulation state, hashed like everything else, and
+    // not something the front end works out afterwards from things it watched.
+    uint32_t lap_start;
+    uint32_t best_lap;
+
     // Ticks until this car can drop another. Without it, holding the button
     // paves the track at a hundred and twenty hazards a second.
     uint16_t drop_cooldown;
@@ -123,9 +135,14 @@ typedef struct gs_world {
     uint8_t    hazard_count;
     gs_hazard  hazard[GS_MAX_HAZARDS];
 
-    uint8_t mode;      // gs_mode
-    bool    over;      // the result is settled and will not change
-    uint8_t winner;    // car index, or GS_NO_WINNER for nobody
+    uint8_t  mode;      // gs_mode
+    bool     over;      // the result is settled and will not change
+    uint8_t  winner;    // car index, or GS_NO_WINNER for nobody
+
+    // How many laps a race is. Zero means there is no finish line at all -
+    // which is what a test drive is, and what every race was before there was
+    // a front end to choose a number in.
+    uint16_t laps_to_win;
 
     // What this race has done to the ground. In the world and not the track,
     // because it is not what the track *is* - reload the track and it is fresh
@@ -144,6 +161,10 @@ void gs_world_init(gs_world *w, gs_fix gravity_scale);
 // Which game is being played. Set it before the race starts; changing it
 // half way through would be changing what everyone was doing.
 void gs_world_set_mode(gs_world *w, gs_mode mode);
+
+// How many laps to win. Set it before the race starts, for the same reason as
+// the mode. Zero is a race with no end, which is what a test drive wants.
+void gs_world_set_laps(gs_world *w, uint16_t laps);
 
 // Put a car on the ground at (x, y), facing `heading`, and return its index.
 // Returns -1 if the world is full.
