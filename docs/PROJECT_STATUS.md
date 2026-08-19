@@ -417,6 +417,56 @@ ground, and passed with the lean disabled - because the *ground* differed. It
 now renders the same ramp twice, grounded and airborne, and compares only the
 car's own pixels.
 
+### Sound, and a test that measured the noise instead of the note
+
+Synthesised, not sampled - for the same reason the art is generated, and for a
+better one: a sample is a recording of one engine at one speed, and what a race
+needs is a note that follows a drivetrain continuously from idle to the limiter
+and back down through a change. That is a synthesiser's job.
+
+There is a real gearbox behind it. Five ratios and a final drive, with
+hysteresis on both changes so a car sitting at a shift point does not hunt.
+Without a gearbox the pitch is a straight function of road speed and the car
+sounds like a vacuum cleaner accelerating; with one, the note climbs, drops, and
+climbs again, and a player can hear how fast they are going without looking.
+Tyres are noise through a one-pole filter coloured by the surface - dirt
+rumbles, ice hisses - scaled by how sideways the car is. Impacts are noticed
+rather than reported: damage only ever goes up, so a jump in it is a collision
+or a landing that hurt, and the size of the jump is how hard. And a car in the
+air loses its tyre noise entirely while the engine goes light, because nothing
+is loading it. That last one is the sound everybody remembers.
+
+Two bugs, both found by measurement rather than by listening.
+
+The tyre filter changed the *level* as well as the tone. A one-pole low pass fed
+white noise puts out sqrt(k / (2 - k)) of what went in, so the darkest setting
+is also the quietest - and dirt at full tyre gain came out quieter than ice at
+half of it. The surface was reaching the synthesiser perfectly and arriving
+backwards. Compensating for the filter's own gain fixed it.
+
+The other was in the test. "The engine note follows the drivetrain" was checked
+by counting zero crossings, which counts the broadband tyre noise sitting on top
+of the note rather than the note - so it failed while the engine was working
+perfectly. Replacing it with a normalised autocorrelation took two more goes:
+the unnormalised kind reported the sixth multiple of the true period at speed,
+and even an unbiased peak-pick lands on a subharmonic about half the time. It
+now reads 28.4, 49.0, 98.0 and 149.5 Hz across four speeds, stable run to run
+and matching the gearbox model exactly - and the test asserts the thing that
+matters: seven tiles a second is 3.5x the speed of two, and the note is only
+1.5x higher, because the car changed up twice on the way.
+
+The first mix peaked at a tenth of full scale, which is a race you turn the
+amplifier up for and then get deafened by the next thing you play. It now peaks
+around 0.43 with a soft knee above that, and a test walks every sample of four
+cars landing on each other at full volume to confirm nothing ever leaves the
+range a speaker cone lives in.
+
+`--audio-out FILE.wav` writes a race out to listen to, one tick of audio per
+tick of race, which is how the plan's "listened to" verification gets done at
+all. It has been listened to on Linux; **Windows and macOS have not been
+listened to yet** - the synthesiser is platform-independent but the device path
+is not, and claiming otherwise would be claiming a check nobody has run.
+
 ---
 
 ## What does not exist

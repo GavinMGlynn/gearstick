@@ -428,7 +428,7 @@ whatever the UI turns out to be — then the interface on top.
 - [x] **The art pipeline** — vehicles and surfaces generated rather than
       hand-drawn, with attribution generated in the same run.
       *Verification: re-running the pipeline reproduces the committed output.*
-- [ ] **Sound.** Engine note that tracks the drivetrain, surface-dependent tyre
+- [x] **Sound.** Engine note that tracks the drivetrain, surface-dependent tyre
       noise, impacts, and the silence of being airborne.
       *Verification: listened to, on all three platforms.*
 - [ ] **Music.** *Verification: as above.*

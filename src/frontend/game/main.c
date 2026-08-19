@@ -19,6 +19,7 @@
 #include "gfx/gs_render.h"
 #include "platform/gs_input.h"
 #include "platform/gs_paths.h"
+#include "audio/gs_audio.h"
 #include "platform/gs_wire.h"
 #include "core/gs_net.h"
 #include "ui/gs_editor.h"
@@ -72,6 +73,7 @@ typedef struct gs_app {
     bool        diverge;      // in shot mode, steer the cars apart and back
     bool        analyse_at_start;
     bool        showroom;    // every vehicle lined up, for looking at the art
+    const char *audio_out;   // with --shot: write what the race sounded like
     uint8_t     showroom_from;
     const char *ghost_path;
     const char *ghost_out;   // with --shot: write the run that was captured
@@ -221,6 +223,76 @@ static void gs_start_race(gs_app *a) {
     }
 }
 
+// --- the race, as something to listen to ------------------------------------
+//
+// The verification for sound in docs/COMPLETION_PLAN.md is "listened to, on all
+// three platforms", which is the right test and is not one a machine can run.
+// What a machine *can* do is hand somebody the thing to listen to, identical on
+// every platform because it is the same synthesiser fed the same race.
+
+#define GS_WAV_SECONDS 40
+#define GS_WAV_FRAMES  (GS_AUDIO_RATE * GS_WAV_SECONDS)
+
+static float gs_wav[GS_WAV_FRAMES * GS_AUDIO_CHANNELS];
+static size_t gs_wav_used;
+
+static void gs_shot_audio_tick(gs_app *a) {
+    gs_audio_update(&a->world, &a->t, gs_to_f(a->world.car[0].x),
+                    gs_to_f(a->world.car[0].y));
+
+    int frames = GS_AUDIO_RATE / GS_TICK_HZ;
+    size_t room = (size_t)GS_WAV_FRAMES - gs_wav_used;
+    if ((size_t)frames > room) frames = (int)room;
+    if (frames <= 0) return;
+
+    gs_audio_render(&gs_wav[gs_wav_used * GS_AUDIO_CHANNELS], frames);
+    gs_wav_used += (size_t)frames;
+}
+
+static void gs_put_le32(uint8_t *p, uint32_t v) {
+    for (int i = 0; i < 4; i++) p[i] = (uint8_t)((v >> (8 * i)) & 0xffu);
+}
+
+static void gs_put_le16(uint8_t *p, uint16_t v) {
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+}
+
+static bool gs_write_wav(const char *path) {
+    // Sixteen-bit PCM, because every player on every platform opens that and
+    // this file exists to be double-clicked.
+    uint32_t samples = (uint32_t)(gs_wav_used * GS_AUDIO_CHANNELS);
+    uint32_t data_bytes = samples * 2u;
+
+    uint8_t header[44];
+    SDL_memcpy(header, "RIFF", 4);
+    gs_put_le32(header + 4, 36u + data_bytes);
+    SDL_memcpy(header + 8, "WAVEfmt ", 8);
+    gs_put_le32(header + 16, 16u);                       // PCM chunk size
+    gs_put_le16(header + 20, 1u);                        // PCM
+    gs_put_le16(header + 22, GS_AUDIO_CHANNELS);
+    gs_put_le32(header + 24, GS_AUDIO_RATE);
+    gs_put_le32(header + 28, GS_AUDIO_RATE * GS_AUDIO_CHANNELS * 2u);
+    gs_put_le16(header + 32, GS_AUDIO_CHANNELS * 2u);
+    gs_put_le16(header + 34, 16u);
+    SDL_memcpy(header + 36, "data", 4);
+    gs_put_le32(header + 40, data_bytes);
+
+    SDL_IOStream *io = SDL_IOFromFile(path, "wb");
+    if (io == nullptr) return false;
+
+    bool ok = SDL_WriteIO(io, header, sizeof header) == sizeof header;
+    for (uint32_t i = 0; ok && i < samples; i++) {
+        float v = SDL_clamp(gs_wav[i], -1.0f, 1.0f);
+        int16_t q = (int16_t)(v * 32767.0f);
+        uint8_t le[2];
+        gs_put_le16(le, (uint16_t)q);
+        ok = SDL_WriteIO(io, le, 2) == 2;
+    }
+    SDL_CloseIO(io);
+    return ok;
+}
+
 // --- ghosts on disk --------------------------------------------------------
 //
 // A ghost you race yourself never needs a file - restarting hands the last run
@@ -324,6 +396,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->ghost_out = argv[++i];
         } else if (SDL_strcmp(argv[i], "--ghost") == 0 && i + 1 < argc) {
             a->ghost_path = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--audio-out") == 0 && i + 1 < argc) {
+            a->audio_out = argv[++i];
         } else if (SDL_strcmp(argv[i], "--showroom") == 0) {
             a->showroom = true;
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') {
@@ -340,6 +414,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --editor        open in the construction set");
             SDL_Log("  --heatmap       open the editor with the analyser already run");
             SDL_Log("  --showroom      line up every vehicle, to look at the art");
+            SDL_Log("  --audio-out F   with --shot: write the race as a .wav to listen to");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  --players N     one to four, split-screen to match");
             SDL_Log("  --diverge       with --shot: drive the cars apart, to see the split");
@@ -444,6 +519,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     SDL_Log("gearstick: track hash 0x%016llx",
             (unsigned long long)gs_track_hash(&a->t));
 
+    // Silence is not an error: a machine with no sound device races exactly the
+    // same race, because nothing downstream of the simulation can reach back
+    // into it.
+    gs_audio_open();
+
     gs_clock_init(&a->clock);
     a->last_ns = SDL_GetTicksNS();
     return SDL_APP_CONTINUE;
@@ -522,6 +602,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             gs_world_step(&a->world, &a->t, in);
             if (a->show_ghost) gs_ghost_step(&a->ghost, &a->t);
 
+            // One tick of audio for one tick of race, so the recording is what
+            // the race sounded like rather than what the synthesiser does when
+            // asked nicely. This is how "listened to" gets done at all: a race
+            // nobody can hear cannot be verified by hearing it.
+            if (a->audio_out != nullptr) gs_shot_audio_tick(a);
+
             // The split is a function of time as well as distance, so it has to
             // be advanced alongside the simulation rather than only at the end.
             int ww = 0, wh = 0;
@@ -574,6 +660,15 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         // playback, so it has to be stepped by the same clock as everything
         // else or it drifts against the thing it is being compared to.
         if (a->show_ghost) gs_ghost_step(&a->ghost, &a->t);
+    }
+
+    // What the race sounds like, from where the camera is. Once a frame rather
+    // than once a tick: the audio thread interpolates between updates by
+    // chasing, and running this at 120 Hz would be work nobody could hear.
+    if (a->editor.active) {
+        gs_audio_silence();
+    } else {
+        gs_audio_update(&a->world, &a->t, a->view[0].cam.cx, a->view[0].cam.cy);
     }
 
     float alpha = gs_to_f(gs_clock_alpha(&a->clock));
@@ -707,6 +802,15 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                 (unsigned long long)a->world.tick);
         SDL_DestroySurface(s);
 
+        if (a->audio_out != nullptr) {
+            if (!gs_write_wav(a->audio_out)) {
+                SDL_Log("could not write %s: %s", a->audio_out, SDL_GetError());
+                return SDL_APP_FAILURE;
+            }
+            SDL_Log("wrote %s, %.1f seconds", a->audio_out,
+                    (double)gs_wav_used / (double)GS_AUDIO_RATE);
+        }
+
         if (a->ghost_out != nullptr) {
             static uint8_t buf[sizeof(gs_replay) + 4096];
             size_t n = gs_replay_serialize(&a->recording, buf, sizeof buf);
@@ -729,6 +833,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     gs_app *a = (gs_app *)appstate;
     if (a == nullptr) return;
 
+    gs_audio_close();
     if (a->wire != nullptr) {
         gs_wire_close(a->wire);
         gs_wire_quit();

@@ -232,6 +232,7 @@ set_target_properties(gearstick_ui PROPERTIES C_VISIBILITY_PRESET hidden)
 add_library(gearstick_shell STATIC
     src/ui/gs_editor.c
     src/gfx/gs_iso.c
+    src/audio/gs_audio.c
     src/gfx/gs_meshes.c
     src/gfx/gs_render.c
     src/platform/gs_bind.c
@@ -313,6 +314,20 @@ if(GEARSTICK_TESTS)
 
     add_test(NAME gearstick_wire COMMAND gearstick_wire_tests)
     set_tests_properties(gearstick_wire PROPERTIES TIMEOUT 120)
+
+    # The synthesiser, measured rather than listened to. A listening test is
+    # the right verification and is not one CI can run; this checks the things a
+    # listener would notice and a forgotten listening test would not - that the
+    # note follows the gearbox, that the surface reaches the tyres, that a jump
+    # takes the tyre noise with it, and that nothing ever leaves the [-1, 1] a
+    # speaker cone lives in.
+    add_executable(gearstick_audio_tests tests/test_audio.c)
+    target_link_libraries(gearstick_audio_tests PRIVATE gearstick_shell)
+    gs_configure(gearstick_audio_tests)
+
+    add_test(NAME gearstick_audio COMMAND gearstick_audio_tests)
+    set_tests_properties(gearstick_audio PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy" TIMEOUT 120)
 
     add_test(NAME gearstick_render COMMAND gearstick_render_tests)
     # No display, no audio device, no pads - and the software renderer, so the
