@@ -495,7 +495,7 @@ hard-coded demo track that has been sitting in the frontend since Phase 3.
       content hash, with names and authors beside them. *Verification: three
       tracks are saved, all three are still there after a restart, and editing
       one leaves the other two alone.*
-- [ ] **Choose a track in the front end.** Browse what you have, pick one, race
+- [x] **Choose a track in the front end.** Browse what you have, pick one, race
       it. *Verification: a full session picks a track that is not the first one
       and races it, without a command line.*
 - [ ] **The hard-coded demo track goes.** The frontend stops carrying a track in

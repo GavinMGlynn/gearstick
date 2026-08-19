@@ -33,6 +33,7 @@ typedef enum gs_screen {
     GS_SCREEN_RESULTS,
     GS_SCREEN_RECORDS,
     GS_SCREEN_LOBBY,
+    GS_SCREEN_TRACKS,
     GS_SCREEN_COUNT
 } gs_screen;
 
@@ -99,6 +100,13 @@ typedef struct gs_menu {
     bool            lobby_ready;
     float           track_progress;   // 1.0 when there is nothing to wait for
     char            server_text[80];
+
+    // The library screen's scratch: what was picked, and what it is being
+    // renamed to.
+    int  picked;
+    int  take;                      // handed to the frontend, then cleared
+    char track_name[GS_LIBRARY_NAME];
+    int  name_for;                  // which entry track_name is showing
 } gs_menu;
 
 void gs_menu_init(gs_menu *m);
@@ -107,6 +115,10 @@ void gs_menu_init(gs_menu *m);
 // same one unless something was clicked. `t` is the track a race would be on,
 // for showing its records and its name.
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
+
+// Which track the library screen wants raced next, or -1. Cleared by reading
+// it, so a choice is acted on once rather than every frame.
+int gs_menu_take_choice(gs_menu *m);
 
 // Work out the finishing order and submit anything worth submitting. Called
 // once, when a race ends.

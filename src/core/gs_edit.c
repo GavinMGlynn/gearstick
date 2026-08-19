@@ -14,6 +14,14 @@ void gs_edit_log_init(gs_edit_log *l, uint32_t capacity) {
     l->open = false;
 }
 
+void gs_edit_reset(gs_edit_log *l) {
+    if (l == nullptr) return;
+    l->count = 0;
+    l->cursor = 0;
+    l->group = 0;
+    l->open = false;
+}
+
 void gs_edit_begin(gs_edit_log *l) {
     if (l->open) return;
     l->open = true;

@@ -918,6 +918,31 @@ The store is version 2 and refuses a version 1 file rather than half-reading it.
 That is correct and it is also the first real reason to build the migration path
 the tails have been asking for.
 
+### Choosing a track
+
+A **Tracks** screen: everything you have built, with its author, which one is
+loaded, and a name you can change. Load one and it becomes the track a race
+happens on; keep the one you are editing; forget one you are done with.
+
+Two details worth recording, both of which were wrong first and both of which
+were caught by looking at a screenshot rather than by a test.
+
+The rename box was empty over a track that had a name, because it was filled in
+when a row was *clicked* and the selection could also be set without a click. It
+now watches the selection instead of relying on every place that changes it
+remembering to refresh — a field that must be updated at every such place is a
+field that is eventually stale at one of them.
+
+And the buttons were off the bottom of the panel, because the height was
+computed for a shorter screen than the one that got built.
+
+**Loading a track throws away the undo history**, and that is correctness rather
+than tidiness. The edit log records a cell changing from one value to another,
+and those values belong to the track that was being edited; undoing after a load
+would apply one track's edits to another. `gs_edit_reset` exists for that and a
+test walks it: undo after a load does nothing at all, rather than reaching into
+the new track.
+
 ---
 
 ## What does not exist

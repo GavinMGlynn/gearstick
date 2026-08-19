@@ -49,6 +49,15 @@ void   gs_edit_log_init(gs_edit_log *l, uint32_t capacity);
 
 // Everything between begin and end undoes as one action. Nesting is not a
 // thing: a second begin without an end is the caller's bug and is ignored.
+// Throw the history away.
+//
+// **Not a tidy-up: a correctness requirement.** The log records a cell changing
+// from one value to another, and those values belong to the track that was
+// being edited. Loading a different track and then undoing would apply somebody
+// else's edits to it - "put this corner back to what it was" is meaningless
+// when it was never that.
+void gs_edit_reset(gs_edit_log *l);
+
 void gs_edit_begin(gs_edit_log *l);
 void gs_edit_end(gs_edit_log *l);
 

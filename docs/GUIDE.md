@@ -45,6 +45,12 @@ took a record. **Records** shows what stands on this track.
 
 **6. Now build something.** Press **Tab**. This is the point of the game.
 
+**7. Keep it.** Back at the title, **Tracks** is everything you have built.
+**Keep this one** puts whatever is loaded into the library, and **Load** brings
+one back. A track is known by what it is rather than by its name, so renaming
+one does not make it a different track and saving the same track twice keeps
+one copy.
+
 ---
 
 ## Driving
@@ -258,8 +264,8 @@ reproduce in ten seconds.
 
 Said here rather than discovered:
 
-- **There is one track.** The construction set can build any track and save one;
-  there is no library to browse yet.
+- **The library holds thirty-two tracks** and there is no way to import one
+  from a file yet — only what you build, and what a server hands you.
 - **`--host` and `--join` still need everybody on the same track.** Only a
   server hands the track out; two people meeting each other directly do not.
 - **Online needs everybody on the same track already.** The handshake does not

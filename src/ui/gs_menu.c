@@ -44,6 +44,9 @@ void gs_menu_init(gs_menu *m) {
 
     m->screen = GS_SCREEN_TITLE;
     m->chosen = -1;
+    m->picked = -1;
+    m->take = -1;
+    m->name_for = -1;
     m->editing = -1;
     m->picking_for = -1;
     m->new_colour = GS_COLOUR_RED;
@@ -158,6 +161,22 @@ static void gs_field(const char *label) {
                         ImGui_GetStyle()->ItemSpacing.x);
 }
 
+// The rename box follows what is picked, so it never shows a name belonging to
+// something else.
+// **Kept in step by watching, not by remembering to call it.** A field that has
+// to be refreshed at every place a selection can change is a field that is
+// eventually stale somewhere - and an empty rename box over a track that has a
+// name looks like the track lost its name.
+static void gs_set_name(gs_menu *m, int index) {
+    const gs_library_entry *e = gs_library_at(&m->library, index);
+    SDL_strlcpy(m->track_name, e != nullptr ? e->name : "", sizeof m->track_name);
+    m->name_for = index;
+}
+
+static void gs_follow_selection(gs_menu *m) {
+    if (m->name_for != m->picked) gs_set_name(m, m->picked);
+}
+
 // One button, centred, the width of the panel.
 static bool gs_wide_button(const char *label, float height) {
     return ImGui_ButtonEx(label, (ImVec2){ -1.0f, height });
@@ -244,6 +263,7 @@ static gs_screen gs_title(gs_menu *m) {
         if (gs_go_button("RACE", -1.0f, 44.0f)) next = GS_SCREEN_SETUP;
         ImGui_Spacing();
         if (gs_wide_button("Drivers", 34.0f)) next = GS_SCREEN_PROFILES;
+        if (gs_wide_button("Tracks", 34.0f)) next = GS_SCREEN_TRACKS;
         if (gs_wide_button("Records", 34.0f)) next = GS_SCREEN_RECORDS;
 
         ImGui_Dummy((ImVec2){ 0.0f, 14.0f });
@@ -257,8 +277,9 @@ static gs_screen gs_title(gs_menu *m) {
         if (m->profiles.count == 0) {
             ImGui_TextUnformatted("No drivers yet - start with Drivers.");
         } else {
-            ImGui_Text("%u driver%s known", m->profiles.count,
-                       m->profiles.count == 1 ? "" : "s");
+            ImGui_Text("%u driver%s, %u track%s", m->profiles.count,
+                       m->profiles.count == 1 ? "" : "s", m->library.count,
+                       m->library.count == 1 ? "" : "s");
         }
         ImGui_PopStyleColor();
 
@@ -587,6 +608,10 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         ImGui_EndDisabled();
 
         ImGui_SameLine();
+        if (ImGui_ButtonEx("Tracks", (ImVec2){ 110.0f, 42.0f })) {
+            next = GS_SCREEN_TRACKS;
+        }
+        ImGui_SameLine();
         if (ImGui_ButtonEx("Back", (ImVec2){ 100.0f, 42.0f })) next = GS_SCREEN_TITLE;
 
         if (!ok) {
@@ -871,6 +896,140 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
     return next;
 }
 
+int gs_menu_take_choice(gs_menu *m) {
+    int take = m->take;
+    m->take = -1;
+    return take;
+}
+
+static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
+    gs_screen next = GS_SCREEN_TRACKS;
+
+    int rows = m->library.count > 0 ? m->library.count : 1;
+    gs_centre_window("tracks", 720.0f, 340.0f + gs_row_height() * (float)(rows + 1));
+
+    if (ImGui_Begin("Tracks", nullptr,
+                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                    ImGuiWindowFlags_NoCollapse)) {
+        ImGui_TextUnformatted("Everything you have built. A track is known by "
+                              "what it is, so the same");
+        ImGui_TextUnformatted("track from two people is one entry.");
+
+        gs_heading("THE LIBRARY");
+
+        if (m->library.count == 0) {
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+            ImGui_TextUnformatted("Nothing here yet. Build something in the "
+                                  "construction set and keep it.");
+            ImGui_PopStyleColor();
+        } else if (ImGui_BeginTable("library", 4,
+                                    ImGuiTableFlags_RowBg |
+                                    ImGuiTableFlags_SizingFixedFit)) {
+            ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthFixed, 30.0f, 0);
+            ImGui_TableSetupColumnEx("track", ImGuiTableColumnFlags_WidthFixed, 240.0f, 0);
+            ImGui_TableSetupColumnEx("by", ImGuiTableColumnFlags_WidthFixed, 130.0f, 0);
+            ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+            ImGui_TableHeadersRow();
+
+            uint64_t here = gs_track_hash(t);
+
+            for (uint16_t i = 0; i < m->library.count; i++) {
+                const gs_library_entry *e = gs_library_at(&m->library, (int)i);
+                ImGui_TableNextRow();
+                ImGui_PushIDInt(6000 + i);
+
+                ImGui_TableSetColumnIndex(0);
+                ImGui_Text("%u", i + 1);
+
+                ImGui_TableSetColumnIndex(1);
+                if (ImGui_SelectableEx(e->name, m->picked == (int)i,
+                                       ImGuiSelectableFlags_SpanAllColumns,
+                                       (ImVec2){ 0.0f, 0.0f })) {
+                    m->picked = (int)i;
+                }
+
+                ImGui_TableSetColumnIndex(2);
+                ImGui_TextUnformatted(e->author[0] != '\0' ? e->author : "-");
+
+                ImGui_TableSetColumnIndex(3);
+                if (e->hash == here) {
+                    float r, g, b;
+                    gs_style_accent(&r, &g, &b);
+                    ImGui_PushStyleColorImVec4(ImGuiCol_Text, (ImVec4){ r, g, b, 1.0f });
+                    ImGui_TextUnformatted("loaded");
+                    ImGui_PopStyleColor();
+                }
+                ImGui_PopID();
+            }
+            ImGui_EndTable();
+        }
+
+        gs_heading("THIS ONE");
+
+        gs_follow_selection(m);
+        const gs_library_entry *picked = gs_library_at(&m->library, m->picked);
+        if (picked == nullptr) {
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+            ImGui_TextUnformatted("Nothing chosen.");
+            ImGui_PopStyleColor();
+        } else {
+            ImGui_Text("%u x %u, %u gates, %016llx", picked->track.w,
+                       picked->track.h, picked->track.gate_count,
+                       (unsigned long long)picked->hash);
+
+            gs_field("name");
+            ImGui_SetNextItemWidth(260.0f);
+            if (ImGui_InputText("##name", m->track_name, sizeof m->track_name, 0)) {
+                // Renaming is not editing: the track is the same track, so the
+                // hash does not move and nothing else in the library cares.
+                gs_library_put(&m->library, &picked->track, m->track_name,
+                               picked->author);
+                m->store_dirty = true;
+            }
+        }
+
+        ImGui_Dummy((ImVec2){ 0.0f, 8.0f });
+        ImGui_Separator();
+        ImGui_Spacing();
+
+        ImGui_BeginDisabled(picked == nullptr);
+        if (gs_go_button("Load", 130.0f, 38.0f)) {
+            m->take = m->picked;
+            next = GS_SCREEN_SETUP;
+        }
+        ImGui_SameLine();
+        if (ImGui_ButtonEx("Forget", (ImVec2){ 110.0f, 38.0f })) {
+            if (picked != nullptr) {
+                gs_library_remove(&m->library, picked->hash);
+                m->picked = -1;
+                m->store_dirty = true;
+            }
+        }
+        ImGui_EndDisabled();
+
+        ImGui_SameLine();
+        if (ImGui_ButtonEx("Keep this one", (ImVec2){ 150.0f, 38.0f })) {
+            // Whatever is loaded, into the library. The commonest thing
+            // somebody wants after building something.
+            int at = gs_library_put(&m->library, t, "untitled", "");
+            if (at >= 0) {
+                m->picked = at;
+                m->store_dirty = true;
+            } else {
+                SDL_snprintf(m->status, sizeof m->status, "the library is full");
+            }
+        }
+        ImGui_SameLine();
+        if (ImGui_ButtonEx("Back", (ImVec2){ 100.0f, 38.0f })) next = GS_SCREEN_TITLE;
+
+        if (m->status[0] != '\0') ImGui_TextUnformatted(m->status);
+    }
+    ImGui_End();
+    return next;
+}
+
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {
     switch (m->screen) {
     case GS_SCREEN_TITLE:    return gs_title(m);
@@ -879,6 +1038,7 @@ gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {
     case GS_SCREEN_RESULTS:  return gs_results_screen(m);
     case GS_SCREEN_RECORDS:  return gs_records_screen(m, t);
     case GS_SCREEN_LOBBY:    return gs_lobby_screen(m);
+    case GS_SCREEN_TRACKS:   return gs_tracks_screen(m, t);
     default:                 return m->screen;
     }
 }

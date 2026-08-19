@@ -63,6 +63,12 @@ conditions is shown before you start rather than after.
 
 ![The race setup screen](docs/images/setup.png)
 
+**The library.** Everything you have built, kept by content — so the same track
+from two people is one entry, and renaming one does not make it a different
+track.
+
+![The track library](docs/images/tracks.png)
+
 **Results**, with everybody's time, best lap, and who took a record.
 
 ![The results screen](docs/images/results.png)

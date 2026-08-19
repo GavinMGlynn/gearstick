@@ -1998,6 +1998,93 @@ TEST(the_store_remembers_drivers_and_records_between_runs) {
     CHECK(!gs_menu_load(&back, buf, n));
 }
 
+TEST(choosing_a_track_from_the_library_changes_what_is_raced) {
+    (void)ren;
+
+    // The library screen hands a choice to the frontend once, and the frontend
+    // loads it. Driven here without ImGui, because what is being checked is the
+    // handover rather than the drawing - a screenshot shows the drawing.
+    gs_menu_init(&gs_m);
+
+    static gs_track t[3];
+    for (int i = 0; i < 3; i++) {
+        gs_flat_pavement(&t[i], (uint8_t)(30 + i * 2), 16);
+        gs_track_set_corner(&t[i], (uint8_t)(5 + i), 8, GS_INT(2));
+        gs_track_add_gate(&t[i], GS_INT(4), GS_INT(8), 0, GS_INT(5));
+        char name[GS_LIBRARY_NAME];
+        SDL_snprintf(name, sizeof name, "track %d", i);
+        gs_library_put(&gs_m.library, &t[i], name, "ada");
+    }
+
+    // Nothing chosen yet.
+    CHECK(gs_menu_take_choice(&gs_m) == -1);
+
+    // **Not the first one**, because loading the first track and loading
+    // nothing look identical when the first track is what is already there.
+    gs_m.picked = 2;
+    gs_m.take = gs_m.picked;
+
+    int take = gs_menu_take_choice(&gs_m);
+    CHECK(take == 2);
+
+    const gs_track *picked = gs_library_track(&gs_m.library, take);
+    CHECK(picked != nullptr);
+    if (picked != nullptr) {
+        CHECK(gs_track_hash(picked) == gs_track_hash(&t[2]));
+        CHECK(gs_track_hash(picked) != gs_track_hash(&t[0]));
+    }
+
+    // Taken once. A choice acted on every frame would reload the track
+    // continuously and undo any editing the moment it happened.
+    CHECK(gs_menu_take_choice(&gs_m) == -1);
+
+    // And an out-of-range choice is nothing rather than something.
+    CHECK(gs_library_track(&gs_m.library, 99) == nullptr);
+    CHECK(gs_library_track(&gs_m.library, -1) == nullptr);
+}
+
+TEST(loading_a_track_throws_away_the_undo_history) {
+    (void)ren;
+
+    // **Correctness, not tidiness.** The log records a cell changing from one
+    // value to another, and those values belong to the track that was being
+    // edited. Undoing after a load would apply one track's edits to another.
+    static gs_track a, b;
+    gs_flat_pavement(&a, 24, 12);
+    gs_flat_pavement(&b, 24, 12);
+    gs_track_set_corner(&b, 3, 3, GS_INT(4));
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 4096));
+
+    gs_edit_begin(ed.log);
+    gs_edit_corner(ed.log, &a, 10, 6, GS_INT(2));
+    gs_edit_end(ed.log);
+    CHECK(gs_edit_can_undo(ed.log));
+
+    // A different track is loaded.
+    uint64_t before = gs_track_hash(&b);
+    gs_edit_reset(ed.log);
+
+    CHECK(!gs_edit_can_undo(ed.log));
+    CHECK(!gs_edit_can_redo(ed.log));
+    CHECK(gs_edit_undo_depth(ed.log) == 0);
+
+    // Undo now does nothing at all, rather than reaching into the new track.
+    CHECK(!gs_edit_undo(ed.log, &b));
+    CHECK(gs_track_hash(&b) == before);
+
+    // And the log still works afterwards.
+    gs_edit_begin(ed.log);
+    gs_edit_corner(ed.log, &b, 8, 4, GS_INT(1));
+    gs_edit_end(ed.log);
+    CHECK(gs_edit_can_undo(ed.log));
+    CHECK(gs_edit_undo(ed.log, &b));
+    CHECK(gs_track_hash(&b) == before);
+
+    gs_editor_quit(&ed);
+}
+
 TEST(the_store_carries_the_library_too) {
     (void)ren;
 
@@ -2299,6 +2386,8 @@ int main(void) {
     run_a_time_reads_the_way_people_say_it(ren);
     run_a_finished_race_becomes_a_table_in_the_order_it_finished(ren);
     run_the_store_remembers_drivers_and_records_between_runs(ren);
+    run_choosing_a_track_from_the_library_changes_what_is_raced(ren);
+    run_loading_a_track_throws_away_the_undo_history(ren);
     run_the_store_carries_the_library_too(ren);
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);

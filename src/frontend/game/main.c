@@ -106,6 +106,7 @@ typedef struct gs_app {
     int      shot_screen;         // with --screen: which one to show
     bool     want_screen;
     bool     session;             // run setup -> race -> results by itself
+    bool     demo_library;        // a few tracks, for looking at the screen
     uint32_t    waiting;     // ticks spent stalled, for telling the player
     bool        quit;
 } gs_app;
@@ -499,6 +500,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->use_relay = true;
         } else if (SDL_strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
             a->online_name = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--demo-library") == 0) {
+            a->demo_library = true;
         } else if (SDL_strcmp(argv[i], "--session") == 0) {
             // A whole session with nobody at the keyboard: the grid from the
             // setup screen, a race driven by the AI, and the results table it
@@ -516,6 +519,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                            : SDL_strcmp(name, "setup") == 0     ? GS_SCREEN_SETUP
                            : SDL_strcmp(name, "results") == 0   ? GS_SCREEN_RESULTS
                            : SDL_strcmp(name, "records") == 0   ? GS_SCREEN_RECORDS
+                           : SDL_strcmp(name, "tracks") == 0    ? GS_SCREEN_TRACKS
+                           : SDL_strcmp(name, "lobby") == 0     ? GS_SCREEN_LOBBY
                                                                 : GS_SCREEN_RACE;
             a->want_screen = true;
         } else if (SDL_strcmp(argv[i], "--showroom") == 0) {
@@ -534,7 +539,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --editor        open in the construction set");
             SDL_Log("  --heatmap       open the editor with the analyser already run");
             SDL_Log("  --showroom      line up every vehicle, to look at the art");
-            SDL_Log("  --screen NAME   open on title/drivers/setup/results/records");
+            SDL_Log("  --screen NAME   title/drivers/setup/tracks/results/records/lobby");
             SDL_Log("  --session       run a whole race by itself and stop on the results");
             SDL_Log("  --audio-out F   with --shot: write the race as a .wav to listen to");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
@@ -679,6 +684,25 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         gs_store_load(a);
         a->menu.screen = a->want_screen ? (gs_screen)a->shot_screen
                                         : GS_SCREEN_TITLE;
+
+        if (a->demo_library) {
+            // A few tracks to look at, for a screenshot of the library. Built
+            // rather than loaded, so the capture does not depend on whatever
+            // happens to be in somebody's store.
+            static const char *names[] = { "first light", "the long drop",
+                                           "ice house", "jupiter run" };
+            for (int k = 0; k < 4; k++) {
+                static gs_track made;
+                gs_demo_track(&made);
+                for (uint8_t y = 0; y <= made.h; y++) {
+                    gs_track_set_corner(&made, (uint8_t)(4 + k * 3), y,
+                                        GS_INT(1 + k));
+                }
+                gs_library_put(&a->menu.library, &made, names[k],
+                               k % 2 == 0 ? "ada" : "bez");
+            }
+            a->menu.picked = 1;
+        }
 
         if (a->session) {
             // Two drivers with names, so the results table and the records have
@@ -1102,6 +1126,22 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // pressed anything.
     if (!a->editor.active && a->menu.screen != GS_SCREEN_RACE) {
         gs_screen next = gs_menu_frame(&a->menu, &a->t);
+
+        // A track chosen from the library becomes the track. Taken rather than
+        // read, so a choice is acted on once instead of every frame.
+        int take = gs_menu_take_choice(&a->menu);
+        const gs_track *picked = gs_library_track(&a->menu.library, take);
+        if (picked != nullptr) {
+            a->t = *picked;
+            a->menu.chosen = take;
+            a->music_hash = gs_track_hash(&a->t);
+            gs_music_start(a->music_hash);
+            // The undo history belongs to the track that was being edited.
+            // Keeping it across a load would let undo apply one track's edits
+            // to another.
+            gs_edit_reset(a->editor.log);
+        }
+
         if (next != a->menu.screen) {
             if (next == GS_SCREEN_RACE) {
                 gs_start_race(a);
