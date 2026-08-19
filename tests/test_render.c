@@ -1758,6 +1758,77 @@ TEST(a_car_on_a_slope_leans_with_the_ground) {
 
 static gs_menu gs_m;
 
+// ---------------------------------------------------------------------------
+// The player's guide
+// ---------------------------------------------------------------------------
+
+TEST(the_guide_tells_people_to_press_the_keys_the_game_listens_for) {
+    (void)ren;
+
+    // **A guide that has drifted is worse than no guide.** It sends somebody to
+    // press a key that does nothing and lets them conclude the game is broken,
+    // and nothing in a build catches it - so this reads the guide as shipped
+    // and checks its control table against the bindings the game actually
+    // starts with.
+    size_t len = 0;
+    void *raw = SDL_LoadFile(GS_SOURCE_DOCS "/GUIDE.md", &len);
+    CHECK(raw != nullptr);
+    if (raw == nullptr) return;
+
+    const char *doc = (const char *)raw;
+
+    gs_bindings b;
+    gs_bind_defaults(&b);
+
+    // Each row of the table: the two keys the guide names, and the action.
+    static const struct {
+        const char *row;
+        gs_action   action;
+        SDL_Scancode one, two;
+    } rows[] = {
+        { "| accelerate | Up | W |",              GS_ACT_ACCEL,
+          SDL_SCANCODE_UP, SDL_SCANCODE_W },
+        { "| brake / reverse | Down | S |",       GS_ACT_BRAKE,
+          SDL_SCANCODE_DOWN, SDL_SCANCODE_S },
+        { "| steer left | Left | A |",            GS_ACT_LEFT,
+          SDL_SCANCODE_LEFT, SDL_SCANCODE_A },
+        { "| steer right | Right | D |",          GS_ACT_RIGHT,
+          SDL_SCANCODE_RIGHT, SDL_SCANCODE_D },
+        { "| drop a hazard | Right Shift | Left Shift |", GS_ACT_FIRE,
+          SDL_SCANCODE_RSHIFT, SDL_SCANCODE_LSHIFT },
+    };
+
+    for (size_t i = 0; i < SDL_arraysize(rows); i++) {
+        // The guide says this row...
+        CHECK(SDL_strstr(doc, rows[i].row) != nullptr);
+        // ...and the game agrees.
+        CHECK(b.key[0][rows[i].action] == rows[i].one);
+        CHECK(b.key[1][rows[i].action] == rows[i].two);
+    }
+
+    // The guide says players three and four have no keyboard controls. If that
+    // ever stops being true, the sentence saying so has to go.
+    CHECK(SDL_strstr(doc, "Players three and four need a gamepad") != nullptr);
+    for (int a = 0; a < GS_ACT_COUNT; a++) {
+        CHECK(b.key[2][a] == GS_KEY_NONE);
+        CHECK(b.key[3][a] == GS_KEY_NONE);
+    }
+
+    // And the commands it tells people to type have to be commands. These are
+    // spelled exactly as the guide spells them, so a rename breaks the test
+    // rather than the reader.
+    static const char *const commands[] = {
+        "gearstick_cli selftest --verify",
+        "gearstick --host 47000 4",
+        "gearstick --join their-address 47000",
+    };
+    for (size_t i = 0; i < SDL_arraysize(commands); i++) {
+        CHECK(SDL_strstr(doc, commands[i]) != nullptr);
+    }
+
+    SDL_free(raw);
+}
+
 TEST(a_time_reads_the_way_people_say_it) {
     (void)ren;
     char text[32];
@@ -2130,6 +2201,7 @@ int main(void) {
     run_every_vehicle_has_a_mesh_and_no_two_are_the_same_shape(ren);
     run_a_car_is_drawn_from_its_mesh_and_faces_where_it_is_pointing(ren);
     run_a_car_on_a_slope_leans_with_the_ground(ren);
+    run_the_guide_tells_people_to_press_the_keys_the_game_listens_for(ren);
     run_a_time_reads_the_way_people_say_it(ren);
     run_a_finished_race_becomes_a_table_in_the_order_it_finished(ren);
     run_the_store_remembers_drivers_and_records_between_runs(ren);

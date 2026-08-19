@@ -437,7 +437,7 @@ whatever the UI turns out to be — then the interface on top.
 - [x] **Front end** — title, race setup, vehicle choice, results.
       *Verification: a full session start to finish without touching a command
       line.*
-- [ ] **A player's guide**, covering the first ten minutes, every control, the
+- [x] **A player's guide**, covering the first ten minutes, every control, the
       editor and how to report a bug as a file somebody else can run.
       *Verification: someone else follows it and races.*
 - [ ] **Signed or clearly-documented-unsigned releases** for all three

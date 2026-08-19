@@ -254,6 +254,13 @@ target_link_libraries(gearstick_shell PUBLIC gearstick_sim gearstick_ui ${GS_SDL
 target_compile_definitions(gearstick_shell PRIVATE
     GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 
+# Where the player's guide is, so a test can read it and check that what it
+# tells people to press is what the game actually listens for. A guide that has
+# drifted from the code is worse than no guide: it sends somebody to press a key
+# that does nothing and lets them conclude the game is broken.
+target_compile_definitions(gearstick_shell PUBLIC
+    GS_SOURCE_DOCS="${CMAKE_CURRENT_SOURCE_DIR}/docs")
+
 gs_configure(gearstick_shell)
 
 # ---------------------------------------------------------------------------

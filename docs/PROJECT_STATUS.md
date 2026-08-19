@@ -599,6 +599,36 @@ results, which is how the verification is checked rather than asserted: two
 drivers, a real race, a real table, and the records still there when a second
 process starts cold.
 
+### The player's guide, and a test that keeps it honest
+
+`docs/GUIDE.md`: the first ten minutes as a path somebody can walk, every
+control, the construction set, racing other people, and - the part that earns
+its place - how to report a bug as a file somebody else can run.
+
+That last section is short because the game was built so it could be. A track is
+a few hundred characters on the clipboard, so "here is the track" is a paste. A
+race is its inputs, so `F5` produces a file that re-races identically on
+anybody's machine. And `gearstick_cli selftest --verify` re-races a fixed
+nine-hundred-tick race, so "the simulation on your machine disagrees with
+everybody else's" is a thing a reporter can find out before they write anything.
+
+**A guide that has drifted from the code is worse than no guide** - it sends
+somebody to press a key that does nothing and lets them conclude the game is
+broken - and nothing in a build catches that. So a test reads the guide as
+shipped and checks its control table against the bindings the game actually
+starts with, in both directions: changing a default binding fails the test, and
+so does renaming a command the guide tells people to type. Both were confirmed
+by breaking them.
+
+The plan's verification is "someone else follows it and races", and a person has
+not. What has been done is to follow it mechanically from a genuinely cold start
+- no store file, nothing remembered - through the title, a full race, a results
+table, records that survive into a second process, a track through the clipboard
+and back byte-identical, a ghost written and read, and the selftest. Every claim
+in it was checked against the code, including the ones that are easy to write
+and wrong: the eight gravity presets, that all six machines win something, and
+that fifty degrees is where a slope becomes a wall.
+
 ---
 
 ## What does not exist
