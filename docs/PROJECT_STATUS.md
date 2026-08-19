@@ -370,6 +370,53 @@ confirmed tick and the hash of its state there, and the receiver checks it
 against its own. A desync that is noticed is a bug report. One that is not is
 two people describing different races to each other.
 
+### The art pipeline, and getting the proportions wrong twice
+
+Cars were boxes. They are now meshes, and every one of them is generated from a
+parameter table in `tools/make_meshes.py` rather than modelled by hand or
+downloaded from anywhere. Six vehicles, 488 vertices, 732 triangles, and no
+third-party art in the game at all - which means there is no licence condition
+to satisfy, which is a better answer to the licence question than any amount of
+careful attribution.
+
+It is not a compromise at this fidelity. What reads at this size is the
+silhouette, and six vehicles that must be distinguishable at a glance and
+consistent with each other is exactly the job a parameter table does better than
+a person with a mouse. Changing every car's ride height is a number here, not an
+afternoon. `--showroom` parks the whole line-up so a change can be looked at
+rather than described.
+
+Colours are not baked. Each triangle carries a *role* - body, trim, glass, tyre,
+metal, light - and the renderer decides what a role looks like, which is what
+lets four players share one mesh and a wreck darken without a second set of
+geometry. Faces are culled in screen space and the survivors sorted back to
+front, because a car is a union of boxes and boxes are not convex together.
+
+The cars also lean now. The simulation has no pitch or roll and does not need
+any, but the terrain has a slope, so the renderer builds a basis from the
+heading tilted by the ground underneath and plants the car on it. A car on a
+ramp points up the ramp.
+
+The proportions were wrong twice, and both times it was the only thing anybody
+would have noticed. First pass: wheels three quarters of the car's height, so
+every vehicle read as a monster truck. Second pass: still half again too big.
+The fix was to stop guessing and write the real ratio down - a saloon is
+4.5 m long on 0.65 m wheels, which is 1 : 0.145 - and scale that to the 1.3
+tiles a car is drawn at. That comment is now in the tool, because it is the
+thing most likely to be got wrong again.
+
+Attribution is written in the same run as the art, into `assets/ATTRIBUTION.md`.
+A licence statement that can drift from the art it describes is worse than none,
+and the only way to be sure it never drifts is for one command to produce both.
+CI runs the generator twice and diffs, so the committed art cannot drift from
+what the tool writes and the tool cannot be accidentally non-reproducible.
+
+A test caught itself being useless here, which is worth recording: the check
+that a car leans on a slope compared a frame on a ramp against a frame on flat
+ground, and passed with the lean disabled - because the *ground* differed. It
+now renders the same ramp twice, grounded and airborne, and compares only the
+car's own pixels.
+
 ---
 
 ## What does not exist

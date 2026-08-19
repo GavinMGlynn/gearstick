@@ -18,6 +18,7 @@
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
 #include "gfx/gs_render.h"
+#include "gfx/gs_meshes.h"
 #include "platform/gs_bind.h"
 #include "ui/gs_editor.h"
 
@@ -1572,6 +1573,184 @@ static void gs_routed_pavement(gs_track *t) {
     gs_track_add_gate(t, GS_INT(34), GS_INT(8), 0, GS_INT(5));
 }
 
+// ---------------------------------------------------------------------------
+// The generated vehicle meshes
+// ---------------------------------------------------------------------------
+
+TEST(every_vehicle_has_a_mesh_and_no_two_are_the_same_shape) {
+    (void)ren;
+
+    // A mesh per vehicle, and each one closed enough to be worth drawing.
+    for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
+        const gs_mesh *m = gs_mesh_for(v);
+        CHECK(m != nullptr);
+        if (m == nullptr) continue;
+
+        CHECK(m->vertex_count > 8);
+        CHECK(m->tri_count >= 12);
+        CHECK(SDL_strcmp(m->name, gs_vehicle(v)->name) == 0);
+
+        // Every index in range - a mesh that reaches past its own vertices
+        // reads whatever is next in the binary and draws it.
+        for (uint16_t i = 0; i < m->tri_count; i++) {
+            CHECK(m->tri[i].a < m->vertex_count);
+            CHECK(m->tri[i].b < m->vertex_count);
+            CHECK(m->tri[i].c < m->vertex_count);
+            CHECK(m->tri[i].paint < GS_PAINT_COUNT);
+        }
+
+        // Inside the size the collision and the shadow assume. A car whose
+        // geometry is bigger than its footprint is a car that gets hit by
+        // things that visibly missed it.
+        for (uint16_t i = 0; i < m->vertex_count; i++) {
+            CHECK(SDL_fabsf(m->vertex[i].x) <= 0.75f);
+            CHECK(SDL_fabsf(m->vertex[i].y) <= 0.45f);
+            CHECK(m->vertex[i].z >= -0.01f);
+            CHECK(m->vertex[i].z <= 1.0f);
+        }
+
+        // Wheels on the ground, not hovering: something has to touch z = 0.
+        bool touches = false;
+        for (uint16_t i = 0; i < m->vertex_count; i++) {
+            if (m->vertex[i].z < 0.02f) touches = true;
+        }
+        CHECK(touches);
+    }
+
+    // And they are six different shapes, not one shape six times. Compared by
+    // their extent, which is what the silhouette is made of.
+    for (uint8_t a = 0; a < GS_VEH_COUNT; a++) {
+        for (uint8_t b = (uint8_t)(a + 1); b < GS_VEH_COUNT; b++) {
+            const gs_mesh *ma = gs_mesh_for(a), *mb = gs_mesh_for(b);
+            bool same = ma->vertex_count == mb->vertex_count &&
+                        ma->tri_count == mb->tri_count;
+            if (same) {
+                same = SDL_memcmp(ma->vertex, mb->vertex,
+                                  ma->vertex_count * sizeof *ma->vertex) == 0;
+            }
+            CHECK(!same);
+        }
+    }
+}
+
+TEST(a_car_is_drawn_from_its_mesh_and_faces_where_it_is_pointing) {
+    static gs_track t;
+    gs_flat_pavement(&t, 24, 16);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(12), GS_INT(8), 0);
+
+    gs_camera cam = { 0 };
+    cam.zoom = 4.0f;
+    cam.vw = GS_W; cam.vh = GS_H;
+    cam.cx = 12.0f; cam.cy = 8.0f;
+
+    gs_render_reset_stats();
+    gs_frame f = gs_render_frame(ren, &t, &w, &w, 1.0f, &cam);
+    CHECK(f.px != nullptr);
+
+    gs_render_stats st = gs_render_stats_now();
+    CHECK(st.cars == 1);
+
+    // Culled, not merely submitted: a closed mesh has more than half its
+    // triangles facing away at any angle, so drawing all of them would mean the
+    // culling is not working.
+    const gs_mesh *m = gs_mesh_for((uint8_t)GS_VEH_STOCK_CAR);
+    CHECK(st.tris > 0);
+    CHECK(st.tris < m->tri_count);
+
+    if (f.px != nullptr) {
+        // The car is on the screen and it is red.
+        int red = gs_count_car0(&f);
+        CHECK(red > 200);
+
+        // Turned ninety degrees, it covers a visibly different area - which is
+        // the whole reason to draw geometry rather than one sprite.
+        double cx0 = 0, cy0 = 0;
+        CHECK(gs_car0_centroid(&f, &cx0, &cy0));
+
+        gs_world turned = w;
+        turned.car[0].heading = GS_DEG(90);
+        gs_frame g = gs_render_frame(ren, &t, &turned, &turned, 1.0f, &cam);
+        CHECK(g.px != nullptr);
+        if (g.px != nullptr) {
+            int red2 = gs_count_car0(&g);
+            CHECK(red2 > 200);
+            CHECK(gs_frame_diff(&f, &g) > 0.5);
+        }
+        gs_frame_free(&g);
+
+        // And a different vehicle is a different picture. The meshes differ -
+        // that is checked above - but this is what says the renderer actually
+        // reaches for the one belonging to the car it is drawing, rather than
+        // drawing every car as a stock car in six colours.
+        gs_world bike = w;
+        bike.car[0].vehicle = (uint8_t)GS_VEH_MOTORCYCLE;
+        gs_frame h = gs_render_frame(ren, &t, &bike, &bike, 1.0f, &cam);
+        CHECK(h.px != nullptr);
+        if (h.px != nullptr) {
+            int bike_px = gs_count_car0(&h);
+            CHECK(bike_px > 50);
+            // A motorcycle is a great deal less car than a stock car is.
+            CHECK(bike_px < red * 3 / 4);
+        }
+        gs_frame_free(&h);
+    }
+    gs_frame_free(&f);
+}
+
+TEST(a_car_on_a_slope_leans_with_the_ground) {
+    static gs_track ramp;
+    gs_flat_pavement(&ramp, 24, 16);
+    for (uint8_t y = 0; y <= ramp.h; y++)
+        for (uint8_t x = 0; x <= ramp.w; x++)
+            gs_track_set_corner(&ramp, x, y, (gs_fix)((int64_t)GS_INT(1) * x / 3));
+
+    gs_camera cam = { 0 };
+    cam.zoom = 4.0f;
+    cam.vw = GS_W; cam.vh = GS_H;
+    cam.cx = 12.0f; cam.cy = 8.0f;
+    cam.cz = gs_to_f(gs_track_height(&ramp, GS_INT(12), GS_INT(8)));
+
+    // **The same terrain in both frames.** Comparing a car on a ramp against a
+    // car on flat ground compares the *ground*, and passes whatever the car
+    // does - which is exactly how the first version of this test passed while
+    // the lean was disabled. The only thing that differs here is whether the
+    // car is standing on the slope or flying over it.
+    gs_frame shots[2];
+    for (int variant = 0; variant < 2; variant++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, &ramp, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(12), GS_INT(8), 0);
+        w.car[0].z = gs_track_height(&ramp, GS_INT(12), GS_INT(8));
+        w.car[0].grounded = variant == 0;
+
+        shots[variant] = gs_render_frame(ren, &ramp, &w, &w, 1.0f, &cam);
+        CHECK(shots[variant].px != nullptr);
+    }
+
+    if (shots[0].px != nullptr && shots[1].px != nullptr) {
+        CHECK(gs_count_car0(&shots[0]) > 200);
+        CHECK(gs_count_car0(&shots[1]) > 200);
+
+        // Only the car's own pixels are compared, so the identical ground
+        // cannot carry the test.
+        int only_grounded = 0, only_airborne = 0;
+        for (int i = 0; i < GS_W * GS_H; i++) {
+            bool a = gs_is_car0(&shots[0].px[i * 4]);
+            bool b = gs_is_car0(&shots[1].px[i * 4]);
+            if (a && !b) only_grounded++;
+            if (b && !a) only_airborne++;
+        }
+        CHECK(only_grounded > 40);
+        CHECK(only_airborne > 40);
+    }
+    gs_frame_free(&shots[0]);
+    gs_frame_free(&shots[1]);
+}
+
 TEST(a_track_goes_out_through_the_clipboard_and_comes_back_the_same) {
     (void)ren;
 
@@ -1803,6 +1982,9 @@ int main(void) {
     run_the_view_does_not_jump_when_the_screen_merges_or_splits(ren);
     run_every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone(ren);
     run_changed_controls_survive_being_written_and_read_back(ren);
+    run_every_vehicle_has_a_mesh_and_no_two_are_the_same_shape(ren);
+    run_a_car_is_drawn_from_its_mesh_and_faces_where_it_is_pointing(ren);
+    run_a_car_on_a_slope_leans_with_the_ground(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);

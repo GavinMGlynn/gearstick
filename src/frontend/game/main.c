@@ -71,6 +71,8 @@ typedef struct gs_app {
     uint8_t     players;      // 0 means the default of two
     bool        diverge;      // in shot mode, steer the cars apart and back
     bool        analyse_at_start;
+    bool        showroom;    // every vehicle lined up, for looking at the art
+    uint8_t     showroom_from;
     const char *ghost_path;
     const char *ghost_out;   // with --shot: write the run that was captured
 
@@ -150,7 +152,7 @@ static void gs_start_test_drive(gs_app *a) {
                      x + ox, y + oy, heading);
 
     a->prev = a->world;
-    a->views = a->world.car_count;
+    a->views = a->showroom ? 1 : a->world.car_count;
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i].car = i;
         a->view[i].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
@@ -167,9 +169,24 @@ static void gs_start_race(gs_app *a) {
     uint8_t players = a->players > 0 ? a->players : 2;
 
     gs_world_init(&a->world, GS_ONE);
-    for (uint8_t i = 0; i < players; i++) {
-        gs_world_add_car(&a->world, &a->t, grid[i],
-                         GS_INT(3), GS_INT(7) + GS_INT(4) * i, 0);
+
+    if (a->showroom) {
+        // Every vehicle at once, parked, so a change to tools/make_meshes.py can
+        // be looked at rather than described. Six of them and four player
+        // colours, so two share - the paint is not what is being inspected.
+        // Close together on purpose: the split screen merges when cars are
+        // near each other, so parking them a tile apart gives one picture of
+        // the whole line-up rather than four pictures of parts of it.
+        for (uint8_t v = 0; v < GS_VEH_COUNT && v < GS_MAX_CARS; v++) {
+            uint8_t which = (uint8_t)((v + a->showroom_from) % GS_VEH_COUNT);
+            gs_world_add_car(&a->world, &a->t, which,
+                             GS_INT(8) + GS_INT(2) * v, GS_INT(12), GS_DEG(30));
+        }
+    } else {
+        for (uint8_t i = 0; i < players; i++) {
+            gs_world_add_car(&a->world, &a->t, grid[i],
+                             GS_INT(3), GS_INT(7) + GS_INT(4) * i, 0);
+        }
     }
     a->prev = a->world;
 
@@ -184,13 +201,23 @@ static void gs_start_race(gs_app *a) {
     }
     gs_replay_begin(&a->recording, &a->world, &a->t);
 
-    a->views = a->world.car_count;
+    a->views = a->showroom ? 1 : a->world.car_count;
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i] = (gs_view){ 0 };
         a->view[i].car = i;
         a->view[i].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
         a->view[i].show_gravity = a->overlay;
         gs_render_track_camera(&a->view[i], &a->prev, &a->world, 1.0f);
+    }
+
+    if (a->showroom && a->world.car_count > 0) {
+        // Centred on the line-up rather than following anybody, because nobody
+        // is driving.
+        const gs_car *first = &a->world.car[0];
+        const gs_car *last = &a->world.car[a->world.car_count - 1];
+        a->view[0].cam.cx = (gs_to_f(first->x) + gs_to_f(last->x)) * 0.5f;
+        a->view[0].cam.cy = (gs_to_f(first->y) + gs_to_f(last->y)) * 0.5f;
+        a->view[0].cam.cz = 0.0f;
     }
 }
 
@@ -297,6 +324,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->ghost_out = argv[++i];
         } else if (SDL_strcmp(argv[i], "--ghost") == 0 && i + 1 < argc) {
             a->ghost_path = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--showroom") == 0) {
+            a->showroom = true;
+            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') {
+                a->showroom_from = (uint8_t)SDL_atoi(argv[++i]);
+            }
         } else if (SDL_strcmp(argv[i], "--heatmap") == 0) {
             a->start_in_editor = true;
             a->analyse_at_start = true;
@@ -307,6 +339,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --overlay       start with the painted-gravity overlay on");
             SDL_Log("  --editor        open in the construction set");
             SDL_Log("  --heatmap       open the editor with the analyser already run");
+            SDL_Log("  --showroom      line up every vehicle, to look at the art");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  --players N     one to four, split-screen to match");
             SDL_Log("  --diverge       with --shot: drive the cars apart, to see the split");
@@ -603,7 +636,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // Racing: the screen decides for itself how many views it wants. Cars that
     // are close share one, because a collision is legible when both cars are in
     // the same picture and that is the whole argument for this camera.
-    if (!a->editor.active) {
+    if (!a->editor.active && !a->showroom) {
         int ww = 0, wh = 0;
         SDL_GetRenderOutputSize(a->ren, &ww, &wh);
         gs_split_update(&a->split, &a->world, ww, wh, (float)delta / 1e9f);

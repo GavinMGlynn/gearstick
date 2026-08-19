@@ -2,6 +2,8 @@
 
 #include "gfx/gs_render.h"
 
+#include "gfx/gs_meshes.h"
+
 typedef struct gs_rgb { float r, g, b; } gs_rgb;
 
 // Counting what was drawn, so the cost of a split screen can be asserted rather
@@ -170,6 +172,54 @@ static void gs_car_footprint(const gs_car *c, float half_len, float half_wid,
     }
 }
 
+// What each role looks like. Only the body takes the player's colour; the rest
+// is shared, which is the whole reason a triangle carries a role rather than a
+// colour - four players, six vehicles, one set of geometry.
+static SDL_FColor gs_paint_colour(uint8_t paint, SDL_FColor body) {
+    switch (paint) {
+    case GS_PAINT_TRIM:  return (SDL_FColor){ 0.22f, 0.23f, 0.27f, body.a };
+    case GS_PAINT_GLASS: return (SDL_FColor){ 0.42f, 0.55f, 0.66f, body.a };
+    case GS_PAINT_TYRE:  return (SDL_FColor){ 0.12f, 0.12f, 0.14f, body.a };
+    case GS_PAINT_METAL: return (SDL_FColor){ 0.62f, 0.64f, 0.68f, body.a };
+    case GS_PAINT_LIGHT: return (SDL_FColor){ 0.98f, 0.95f, 0.72f, body.a };
+    default:             return body;
+    }
+}
+
+// Depth along the view axis, for sorting a car's own triangles. Points that
+// land on the same pixel differ by (1, 1, GS_ISO_TILE_H / GS_ISO_TILE_Z), so
+// that direction is the axis and this is the distance along it.
+static inline float gs_mesh_depth(float x, float y, float z) {
+    return x + y + z * (GS_ISO_TILE_H / GS_ISO_TILE_Z);
+}
+
+#define GS_MESH_MAX_TRIS 256
+
+typedef struct gs_sorted_tri {
+    float     depth;
+    SDL_FPoint p[3];
+    SDL_FColor colour;
+} gs_sorted_tri;
+
+static int gs_tri_compare(const void *a, const void *b) {
+    const gs_sorted_tri *x = (const gs_sorted_tri *)a;
+    const gs_sorted_tri *y = (const gs_sorted_tri *)b;
+    // Far first: the painter's algorithm, same as the terrain uses.
+    if (x->depth < y->depth) return -1;
+    if (x->depth > y->depth) return 1;
+    return 0;
+}
+
+static void gs_tri(SDL_Renderer *ren, const SDL_FPoint p[3], SDL_FColor c) {
+    SDL_Vertex v[3];
+    for (int i = 0; i < 3; i++) {
+        v[i].position = p[i];
+        v[i].color = c;
+        v[i].tex_coord = (SDL_FPoint){ 0.0f, 0.0f };
+    }
+    SDL_RenderGeometry(ren, nullptr, v, 3, nullptr, 0);
+}
+
 static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
                         const gs_track *t, const gs_car *c, uint8_t index,
                         float alpha) {
@@ -178,7 +228,7 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
 
     // **Deliberately not to scale.** A real car is 2.7 m and a tile is four, so
     // an honest one is two thirds of a tile and reads as a speck against the
-    // ground it is driving on. These are about 1.3 tiles - roughly the
+    // ground it is driving on. The meshes are about 1.3 tiles long - roughly the
     // proportion the original used, and for the same reason: a two-car
     // collision has to be legible at a glance, and legibility is the entire
     // argument for this camera.
@@ -186,7 +236,7 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
     // Nothing in src/core/ knows about these numbers today. When collision
     // arrives it must use *these* rather than the metric truth, or a car is hit
     // by something the player cannot see.
-    const float half_len = 0.65f, half_wid = 0.38f, body = 0.32f;
+    const float half_len = 0.65f, half_wid = 0.38f;
 
     float fx[4], fy[4];
     gs_car_footprint(c, half_len, half_wid, fx, fy);
@@ -202,32 +252,114 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
     gs_quad(ren, sp, (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.35f * alpha });
 
-    // --- The body: a base quad, a roof quad, and the sides between them.
-    float z = gs_to_f(c->z);
-    SDL_FColor col = gs_car_colour[index & 3];
-    if (c->wrecked) { col.r *= 0.35f; col.g *= 0.35f; col.b *= 0.35f; }
-    col.a = alpha;
+    // --- The car itself, from the generated mesh.
+    //
+    // A basis rather than a heading alone: forward and left are tilted to
+    // follow the ground the car is standing on, so a car on a ramp points up
+    // the ramp instead of hovering flat above it. The simulation has no pitch
+    // or roll to give - it does not need any - so this is read straight off the
+    // terrain, which is where the answer was all along.
+    float ch = gs_to_f(gs_cos(c->heading));
+    float sh = gs_to_f(gs_sin(c->heading));
 
-    SDL_FPoint lo[4], hi[4];
-    for (int i = 0; i < 4; i++) {
-        gs_iso_project(cam, fx[i], fy[i], z + 0.04f, &lo[i].x, &lo[i].y);
-        gs_iso_project(cam, fx[i], fy[i], z + 0.04f + body, &hi[i].x, &hi[i].y);
+    float fz = 0.0f, lz = 0.0f;
+    if (c->grounded) {
+        gs_fix dzdx, dzdy;
+        gs_track_slope(t, c->x, c->y, &dzdx, &dzdy);
+        float gx = gs_to_f(dzdx), gy = gs_to_f(dzdy);
+        fz = gx * ch + gy * sh;
+        lz = -gx * sh + gy * ch;
+
+        // A cliff would stand a car on its nose. Clamped to something a car
+        // could plausibly be sitting on, which is also all the terrain now
+        // allows it to climb - see GS_MAX_CLIMB in gs_sim.c.
+        fz = SDL_clamp(fz, -1.2f, 1.2f);
+        lz = SDL_clamp(lz, -1.2f, 1.2f);
     }
 
-    SDL_FColor side = { col.r * 0.66f, col.g * 0.66f, col.b * 0.66f, alpha };
-    for (int i = 0; i < 4; i++) {
-        int j = (i + 1) & 3;
-        SDL_FPoint face[4] = { lo[i], lo[j], hi[j], hi[i] };
-        gs_quad(ren, face, side);
-    }
-    gs_quad(ren, hi, col);
+    // Forward, left, and up as their cross product, so the car is planted on
+    // the ground rather than intersecting it.
+    float f[3] = { ch, sh, fz };
+    float l[3] = { -sh, ch, lz };
+    float u[3] = { f[1] * l[2] - f[2] * l[1],
+                   f[2] * l[0] - f[0] * l[2],
+                   f[0] * l[1] - f[1] * l[0] };
+    float ulen = SDL_sqrtf(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+    if (ulen > 0.0001f) { u[0] /= ulen; u[1] /= ulen; u[2] /= ulen; }
 
-    // A nose flash, so which way the car is pointing is readable when it is
-    // sliding sideways - which, on ice, is most of the time.
-    SDL_FPoint nose[4] = { hi[0], hi[1],
-                           { (hi[1].x + hi[2].x) * 0.5f, (hi[1].y + hi[2].y) * 0.5f },
-                           { (hi[0].x + hi[3].x) * 0.5f, (hi[0].y + hi[3].y) * 0.5f } };
-    gs_quad(ren, nose, (SDL_FColor){ 1.0f, 1.0f, 1.0f, 0.85f * alpha });
+    float ox = gs_to_f(c->x), oy = gs_to_f(c->y), oz = gs_to_f(c->z);
+
+    SDL_FColor body = gs_car_colour[index & 3];
+    if (c->wrecked) { body.r *= 0.35f; body.g *= 0.35f; body.b *= 0.35f; }
+    body.a = alpha;
+
+    const gs_mesh *m = gs_mesh_for(c->vehicle);
+
+    static gs_sorted_tri sorted[GS_MESH_MAX_TRIS];
+    int count = 0;
+
+    for (uint16_t i = 0; i < m->tri_count && count < GS_MESH_MAX_TRIS; i++) {
+        const gs_mesh_tri *tri = &m->tri[i];
+        const uint16_t idx[3] = { tri->a, tri->b, tri->c };
+
+        float wx[3], wy[3], wz[3];
+        SDL_FPoint p[3];
+        for (int k = 0; k < 3; k++) {
+            const gs_mesh_vertex *v = &m->vertex[idx[k]];
+            wx[k] = ox + v->x * f[0] + v->y * l[0] + v->z * u[0];
+            wy[k] = oy + v->x * f[1] + v->y * l[1] + v->z * u[1];
+            wz[k] = oz + v->x * f[2] + v->y * l[2] + v->z * u[2];
+            gs_iso_project(cam, wx[k], wy[k], wz[k], &p[k].x, &p[k].y);
+        }
+
+        // Back-face culling in screen space, which needs no normals and cannot
+        // disagree with what is actually drawn. Two thirds of a closed mesh
+        // face away at any moment, and not drawing them is both faster and the
+        // reason the far side of a roll cage does not show through the near one.
+        float cross = (p[1].x - p[0].x) * (p[2].y - p[0].y) -
+                      (p[2].x - p[0].x) * (p[1].y - p[0].y);
+        if (cross <= 0.0f) continue;
+
+        // Flat shading from the world-space normal, so a roof catches the light
+        // and a flank does not. The same light direction as the terrain, or the
+        // car would look pasted onto it.
+        float ax = wx[1] - wx[0], ay = wy[1] - wy[0], az = wz[1] - wz[0];
+        float bx = wx[2] - wx[0], by = wy[2] - wy[0], bz = wz[2] - wz[0];
+        float nx = ay * bz - az * by;
+        float ny = az * bx - ax * bz;
+        float nz = ax * by - ay * bx;
+        float nlen = SDL_sqrtf(nx * nx + ny * ny + nz * nz);
+        float shade = 1.0f;
+        if (nlen > 0.0001f) {
+            static const float lxd = -0.42f, lyd = -0.57f, lzd = 0.71f;
+            float d = (nx * lxd + ny * lyd + nz * lzd) / nlen;
+            shade = SDL_clamp(0.62f + d * 0.38f, 0.45f, 1.15f);
+        }
+
+        SDL_FColor col = gs_paint_colour(tri->paint, body);
+        col.r = SDL_clamp(col.r * shade, 0.0f, 1.0f);
+        col.g = SDL_clamp(col.g * shade, 0.0f, 1.0f);
+        col.b = SDL_clamp(col.b * shade, 0.0f, 1.0f);
+
+        sorted[count].depth = (gs_mesh_depth(wx[0], wy[0], wz[0]) +
+                               gs_mesh_depth(wx[1], wy[1], wz[1]) +
+                               gs_mesh_depth(wx[2], wy[2], wz[2])) / 3.0f;
+        sorted[count].p[0] = p[0];
+        sorted[count].p[1] = p[1];
+        sorted[count].p[2] = p[2];
+        sorted[count].colour = col;
+        count++;
+    }
+
+    // A car is a handful of boxes and boxes are not convex together, so culling
+    // alone leaves a wheel drawn over the body that hides it. Sorted far to
+    // near, which for this many triangles costs nothing worth measuring.
+    SDL_qsort(sorted, (size_t)count, sizeof sorted[0], gs_tri_compare);
+
+    for (int i = 0; i < count; i++) {
+        gs_tri(ren, sorted[i].p, sorted[i].colour);
+        gs_stats.tris++;
+    }
 }
 
 // Two thresholds rather than one, in tiles: cars must come this close to merge

@@ -425,7 +425,7 @@ whatever the UI turns out to be — then the interface on top.
 
 ## Phase 10 — Presentation and release
 
-- [ ] **The art pipeline** — vehicles and surfaces generated rather than
+- [x] **The art pipeline** — vehicles and surfaces generated rather than
       hand-drawn, with attribution generated in the same run.
       *Verification: re-running the pipeline reproduces the committed output.*
 - [ ] **Sound.** Engine note that tracks the drivetrain, surface-dependent tyre

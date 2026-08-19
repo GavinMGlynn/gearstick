@@ -86,6 +86,7 @@ uint8_t gs_render_layout(uint8_t views, int w, int h, SDL_Rect *out);
 typedef struct gs_render_stats {
     uint32_t tiles;   // tiles whose geometry was built and submitted
     uint32_t cars;
+    uint32_t tris;    // car triangles that survived culling and were drawn
 } gs_render_stats;
 
 void gs_render_reset_stats(void);

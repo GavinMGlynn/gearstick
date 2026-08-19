@@ -9,6 +9,11 @@
 #   src/ui/dcimgui/        the C API over Dear ImGui, because generating it at
 #                          build time would put Python and ply between every
 #                          contributor and a working build
+#   src/gfx/gs_meshes.c    the vehicles, because they are generated from
+#                          parameters rather than modelled, and the attribution
+#                          is written in the same run - a licence statement that
+#                          can drift from the art it describes is worse than
+#                          none
 #
 # The cost of committing them is a promise nobody can see: that the files really
 # are what the generators write from the pinned inputs. This is the job that
@@ -22,16 +27,22 @@ on:
     paths:
       - 'tools/make_tables.py'
       - 'tools/make_imgui_bindings.py'
+      - 'tools/make_meshes.py'
       - 'src/core/gs_tables.h'
       - 'src/ui/dcimgui/**'
+      - 'src/gfx/gs_meshes.c'
+      - 'assets/ATTRIBUTION.md'
       - '.gitmodules'
       - '.github/workflows/tables.yml'
   pull_request:
     paths:
       - 'tools/make_tables.py'
       - 'tools/make_imgui_bindings.py'
+      - 'tools/make_meshes.py'
       - 'src/core/gs_tables.h'
       - 'src/ui/dcimgui/**'
+      - 'src/gfx/gs_meshes.c'
+      - 'assets/ATTRIBUTION.md'
       - '.gitmodules'
 
 jobs:
@@ -54,6 +65,33 @@ jobs:
             exit 1
           fi
           echo "The committed table is the baked table."
+
+  meshes:
+    name: Vehicle meshes and their attribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Re-generate
+        run: python3 tools/make_meshes.py
+
+      # Twice, and identically. A generator that is merely deterministic on one
+      # run could still be reading a dictionary in whatever order it felt like;
+      # running it again over its own output is what proves the art pipeline
+      # reproduces rather than happens to have matched.
+      - name: And again
+        run: python3 tools/make_meshes.py
+
+      - name: Diff
+        run: |
+          if ! git diff --exit-code -- src/gfx/gs_meshes.c assets/ATTRIBUTION.md; then
+            echo "::error::The committed meshes or attribution are not what tools/make_meshes.py produces."
+            exit 1
+          fi
+          echo "The committed art is the generated art, and the credits match it."
 
   imgui_bindings:
     name: Dear ImGui C bindings
