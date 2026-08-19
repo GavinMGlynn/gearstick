@@ -25,6 +25,7 @@
 #include "core/gs_net.h"
 #include "ui/gs_editor.h"
 #include "ui/gs_menu.h"
+#include "ui/gs_style.h"
 #include "core/gs_ai.h"
 #include "core/gs_ghost.h"
 
@@ -554,6 +555,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // Dear ImGui, for the editor's panels. See CMakeLists.txt for why there is
     // C++ in a C project at all.
     ImGui_CreateContext(nullptr);
+    gs_style_menu();
     ImGuiIO *io = ImGui_GetIO();
     // No imgui.ini. There is no window layout worth persisting yet, and the
     // default drops a file in whatever directory the game happened to start in.
@@ -945,7 +947,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             }
         }
 
+        // A tool's density for the tool, and room to breathe for the front
+        // end. Same colours, so they are recognisably one program.
+        gs_style_editor();
         gs_editor_frame(&a->editor, &a->t, &a->view[0], &a->input);
+        gs_style_menu();
 
         // Two ticks a frame at sixty frames a second is the ghost running at
         // real time. It is a headless simulation of the track being edited, so

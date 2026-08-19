@@ -12,6 +12,14 @@ this repository — a clone gets URLs and commit SHAs, not sources.
 | `imgui` | ocornut/imgui | `v1.92.9b` | **The editor's UI.** Not built yet — see below | MIT |
 | `dear_bindings` | dearimgui/dear_bindings | `v0.21` | **Build-time only.** Generates the C API for the above; never linked | MIT |
 | `sdl_net` | libsdl-org/SDL_net | `release-3.2.0` | **Linked by the shell only.** The datagram socket the rollback netcode sends over | Zlib |
+| `imgui_styles` | GraphicsProgramming/dear-imgui-styles | `2684aea` | **Reference only.** A collection of Dear ImGui themes; the front end's layout numbers follow their shape. Never built, never linked | MIT |
+
+`imgui_styles` is here because it was *consulted*, not because anything builds
+it. The front end's spacing, padding and rounding follow the shape those themes
+settled on rather than numbers invented here; the colours do not, and are taken
+from the game's own palette. Pinning it means the reference cannot silently
+become a different reference — the same reason every other line in this table
+carries a commit.
 
 `sdl_net` is a separate submodule rather than part of `sdl` because networking
 is a separate library from SDL, and it is a submodule rather than a system

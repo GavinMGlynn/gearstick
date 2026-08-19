@@ -569,7 +569,32 @@ in the hash, and somebody can repaint without invalidating a replay or a record.
 
 All of it is one file in the preferences directory, written when something
 changes and read at startup, so a second run of the game knows who you are and
-what you have done. `--session` runs a whole race by itself and stops on the
+what you have done.
+
+**The look** is dougbinks' "dark clear", ported from the collection pinned at
+`ext/imgui_styles`. What is worth taking from it is not the colours but the
+idea: there is *one* palette, written light, and "dark" is a transformation of
+it rather than a second palette to keep in step with the first. Invert the value
+of every colour with almost no saturation - the greys, the backgrounds, the text
+- and leave the saturated ones alone, so the blue accent comes through unchanged
+while everything around it turns inside out. "Clear" then scales the alpha of
+anything already translucent, which is what puts the track visibly behind the
+menu instead of merely behind it.
+
+The layout is not theirs: the reference is a debug overlay on a voxel editor,
+and a title screen is not. The front end gets room to breathe, aligned label
+columns, real tables for the grid and the results, and exactly one loud button
+per screen. The construction set keeps the same colours at a tool's density and
+much less transparency - a brush palette is read while the thing underneath it
+is being changed, and a see-through panel over moving terrain is one you squint
+at.
+
+One thing had to be given up. The panels obviously want to size themselves to
+their contents, and they cannot: an auto-fitting ImGui window is invisible for
+its first frame, and a screenshot is one frame, so the whole front end would
+photograph as an empty screen. That cost an afternoon once already on the
+editor's palette. The screens with tables in them compute their height from the
+number of rows instead, which gets the same result and can be captured. `--session` runs a whole race by itself and stops on the
 results, which is how the verification is checked rather than asserted: two
 drivers, a real race, a real table, and the records still there when a second
 process starts cold.

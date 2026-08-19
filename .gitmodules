@@ -10,3 +10,6 @@
 [submodule "ext/sdl_net"]
 	path = ext/sdl_net
 	url = https://github.com/libsdl-org/SDL_net.git
+[submodule "ext/imgui_styles"]
+	path = ext/imgui_styles
+	url = https://github.com/GraphicsProgramming/dear-imgui-styles.git

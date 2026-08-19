@@ -22,6 +22,9 @@ env:
   # building needs the header but not the generator. That asymmetry is the whole
   # point of committing the bindings, and this line is where it shows.
   #
+  # NOT ext/imgui_styles either: it is a reference that was read while writing
+  # the front end's look, and nothing builds or links it.
+  #
   # ext/sdl_net carries the datagram socket the rollback netcode sends over. It
   # is a separate library from SDL because networking is a separate library from
   # SDL, and no distribution packages the SDL3 version yet, so the submodule is
