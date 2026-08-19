@@ -10,7 +10,11 @@ on:
 # out, which is also what keeps README.md honest: a clone with this one
 # submodule builds and runs.
 env:
-  CI_SUBMODULES: ext/sdl
+  # ext/imgui too, now that the editor's panels are built on it. NOT
+  # ext/dear_bindings: it generates the C API and the result is committed, so
+  # building needs the header but not the generator. That asymmetry is the whole
+  # point of committing the bindings, and this line is where it shows.
+  CI_SUBMODULES: ext/sdl ext/imgui
 
 jobs:
   linux-debian:
@@ -173,7 +177,7 @@ jobs:
       - uses: actions/checkout@v5
         with: { submodules: false }
       - name: Check out build submodules
-        run: git submodule update --init --depth 1 ext/sdl
+        run: git submodule update --init --depth 1 ext/sdl ext/imgui
 
       - uses: ilammy/msvc-dev-cmd@v1
         with: { arch: x64 }

@@ -32,6 +32,12 @@ both the SDL3 and the SDL_Renderer3 backends are current as of August 2026. That
 pairing is not optional — the generator and the header it reads have to match,
 so the two pins move together or not at all.
 
+**Building needs `ext/imgui` but not `ext/dear_bindings`**, because the
+generated C API is committed under `src/ui/dcimgui/`. Only regenerating needs
+the generator, and `.github/workflows/tables.yml` is the one job that checks it
+out — which is also the job that proves the committed bindings really are what
+the pinned inputs produce.
+
 ## What the build actually needs
 
 ```sh

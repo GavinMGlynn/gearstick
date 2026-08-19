@@ -1,11 +1,19 @@
-# Is the committed trig table what the baker produces?
+# Is the committed generated code what the generators produce?
 #
-# src/core/gs_tables.h is generated and committed so that every platform reads
-# the same numbers - a table built at start-up is a table a different libm can
-# build differently, and the whole simulation is downstream of that. The cost of
-# committing it is a promise nobody can see: that the file really is what
-# tools/make_tables.py writes. This is the job that keeps it honest.
-name: tables
+# Two things in this tree are generated and committed, for the same reason in
+# both cases: so that a clone builds without the tool that made them.
+#
+#   src/core/gs_tables.h   the trig tables, because a table built at start-up is
+#                          a table a different libm can build differently, and
+#                          the whole simulation is downstream of that
+#   src/ui/dcimgui/        the C API over Dear ImGui, because generating it at
+#                          build time would put Python and ply between every
+#                          contributor and a working build
+#
+# The cost of committing them is a promise nobody can see: that the files really
+# are what the generators write from the pinned inputs. This is the job that
+# keeps it honest.
+name: generated
 
 on:
   workflow_dispatch:
@@ -13,19 +21,26 @@ on:
     branches: [main]
     paths:
       - 'tools/make_tables.py'
+      - 'tools/make_imgui_bindings.py'
       - 'src/core/gs_tables.h'
+      - 'src/ui/dcimgui/**'
+      - '.gitmodules'
       - '.github/workflows/tables.yml'
   pull_request:
     paths:
       - 'tools/make_tables.py'
+      - 'tools/make_imgui_bindings.py'
       - 'src/core/gs_tables.h'
+      - 'src/ui/dcimgui/**'
+      - '.gitmodules'
 
 jobs:
-  rebake:
-    name: Re-bake and diff
+  tables:
+    name: Trig tables
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
 
@@ -39,3 +54,41 @@ jobs:
             exit 1
           fi
           echo "The committed table is the baked table."
+
+  imgui_bindings:
+    name: Dear ImGui C bindings
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: false }
+
+      # Both of them: the generator and the header it reads have to match, which
+      # is exactly the pairing this job exists to police.
+      - name: Check out the generator and its input
+        run: git submodule update --init --depth 1 ext/imgui ext/dear_bindings
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Install the generator's dependency
+        run: python3 -m pip install --upgrade "ply==3.11"
+
+      - name: Re-bake
+        run: python3 tools/make_imgui_bindings.py
+
+      - name: Diff
+        run: |
+          if ! git diff --exit-code -- src/ui/dcimgui; then
+            echo "::error::src/ui/dcimgui is not what tools/make_imgui_bindings.py"\
+                 "produces from the pinned ext/imgui and ext/dear_bindings."
+            exit 1
+          fi
+          echo "The committed bindings are the generated bindings."
+
+      - name: Upload what was generated
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: freshly-generated-bindings
+          path: src/ui/dcimgui
