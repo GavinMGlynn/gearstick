@@ -1618,6 +1618,100 @@ TEST(holding_the_button_leaves_a_trail_and_not_a_carpet) {
     CHECK(span > GS_INT(4));
 }
 
+TEST(destruction_mode_ends_when_one_car_is_left_driving) {
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_DESTRUCTION);
+    for (int i = 0; i < 3; i++) {
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(5 + 8 * i), GS_INT(10), 0);
+    }
+
+    CHECK(!w.over);
+    CHECK(w.winner == GS_NO_WINNER);
+
+    // Two of them go. Nothing about the third changes.
+    w.car[0].wrecked = true;
+    w.car[0].damage = 255;
+    gs_world_step(&w, &t, nullptr);
+    CHECK(!w.over);
+
+    w.car[2].wrecked = true;
+    w.car[2].damage = 255;
+    gs_world_step(&w, &t, nullptr);
+
+    CHECK(w.over);
+    CHECK(w.winner == 1);
+
+    // Settled. A winner who drives off a cliff in the silence afterwards has
+    // still won, and taking it back would be absurd.
+    w.car[1].wrecked = true;
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+    CHECK(w.over);
+    CHECK(w.winner == 1);
+}
+
+TEST(everybody_going_at_once_is_a_draw_rather_than_a_win) {
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_DESTRUCTION);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(5), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(15), GS_INT(10), 0);
+
+    w.car[0].wrecked = true;
+    w.car[1].wrecked = true;
+    gs_world_step(&w, &t, nullptr);
+
+    CHECK(w.over);
+    CHECK(w.winner == GS_NO_WINNER);
+}
+
+TEST(a_race_does_not_end_just_because_somebody_was_wrecked) {
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);          // race mode, which is the default
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(5), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(15), GS_INT(10), 0);
+
+    w.car[0].wrecked = true;
+    w.car[1].wrecked = true;
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+
+    // Racing is decided by the flag, not by who is still moving - and this is
+    // the same track, cars and physics with one toggle between them.
+    CHECK(!w.over);
+    CHECK(w.winner == GS_NO_WINNER);
+}
+
+TEST(a_destruction_race_fought_out_between_two_cars_finishes_by_itself) {
+    // Not staged: two cars driven into each other until one of them stops.
+    static gs_track t;
+    gs_track_init(&t, 80, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_DESTRUCTION);
+    gs_world_add_car(&w, &t, GS_VEH_MOTORCYCLE, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_BAJA_BUG, GS_INT(60), GS_INT(10),
+                     (gs_angle)(GS_QUARTER * 2));
+
+    for (int i = 0; i < GS_TICK_HZ * 30 && !w.over; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, GS_IN_ACCEL, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+
+    CHECK(w.over);
+    // The baja bug is built for this and the motorcycle is not.
+    CHECK(w.winner == 1);
+}
+
 // ---------------------------------------------------------------------------
 // Determinism - the property everything else is built on
 // ---------------------------------------------------------------------------
@@ -1928,6 +2022,10 @@ int main(void) {
     run_oil_gives_the_grip_back_the_moment_you_are_off_it();
     run_a_mine_goes_off_once_and_hurts_whoever_found_it();
     run_holding_the_button_leaves_a_trail_and_not_a_carpet();
+    run_destruction_mode_ends_when_one_car_is_left_driving();
+    run_everybody_going_at_once_is_a_draw_rather_than_a_win();
+    run_a_race_does_not_end_just_because_somebody_was_wrecked();
+    run_a_destruction_race_fought_out_between_two_cars_finishes_by_itself();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

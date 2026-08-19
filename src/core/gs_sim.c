@@ -26,9 +26,18 @@ const gs_gravity_preset gs_gravity_presets[GS_GRAVITY_PRESETS] = {
 void gs_world_init(gs_world *w, gs_fix gravity_scale) {
     *w = (gs_world){ 0 };
     w->gravity        = gs_fix_mul(GS_GRAVITY_EARTH, gravity_scale);
+    w->mode           = (uint8_t)GS_MODE_RACE;
+    w->over           = false;
+    w->winner         = GS_NO_WINNER;
     w->drag_scale     = GS_ONE;
     w->friction_scale = GS_ONE;
     w->damage_scale   = GS_ONE;
+}
+
+void gs_world_set_mode(gs_world *w, gs_mode mode) {
+    w->mode = (uint8_t)mode;
+    w->over = false;
+    w->winner = GS_NO_WINNER;
 }
 
 int gs_world_add_car(gs_world *w, const gs_track *t,
@@ -510,6 +519,29 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
 
     gs_mines(w);
 
+    // Destruction mode ends when there is nobody left to fight. Settled once
+    // and never revisited: a winner who then drives off a cliff in the silence
+    // afterwards has still won, and taking it back would be absurd.
+    if (w->mode == (uint8_t)GS_MODE_DESTRUCTION && !w->over) {
+        uint8_t alive = 0, last = GS_NO_WINNER;
+        for (uint8_t i = 0; i < w->car_count; i++) {
+            if (w->car[i].active && !w->car[i].wrecked) {
+                alive++;
+                last = i;
+            }
+        }
+        if (alive <= 1) {
+            w->over = true;
+            // `last` is only ever set for a car that is still driving, so it is
+            // already nobody when nobody is - everybody going at once is a draw
+            // without needing to be spelled out. An earlier version said
+            // `alive == 1 ? last : GS_NO_WINNER`, which reads as though it is
+            // deciding something and is not: no perturbation of it could change
+            // the answer, which is how it was found.
+            w->winner = last;
+        }
+    }
+
     // After everybody has moved, in a fixed order, so the result does not
     // depend on who was stepped first.
     for (uint8_t i = 0; i < w->car_count; i++) {
@@ -541,6 +573,9 @@ uint64_t gs_world_hash(const gs_world *w) {
     gs_hash_i32(&h, w->friction_scale);
     gs_hash_i32(&h, w->damage_scale);
     gs_hash_u64(&h, w->car_count);
+    gs_hash_u64(&h, w->mode);
+    gs_hash_u64(&h, (uint64_t)w->over);
+    gs_hash_u64(&h, w->winner);
 
     // Wear is state that changes the race, so two machines disagreeing about it
     // is a desync exactly as much as a car in the wrong place would be.

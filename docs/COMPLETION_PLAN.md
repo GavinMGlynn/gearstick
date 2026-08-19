@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 46 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 47 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -351,8 +351,14 @@ whatever the UI turns out to be — then the interface on top.
       once, launches and hurts whoever found it, and is gone for the next car. A
       held button leaves about five hazards in five seconds rather than six
       hundred.*
-- [ ] **Destruction mode.** *Verification: a race ends correctly when one car is
-      left driving.*
+- [x] **Destruction mode.** *Verification: same track, same cars, same physics,
+      one toggle. Three cars, two wrecked, and the third is the winner; the
+      result is settled and does not change when the winner later drives off a
+      cliff in the silence afterwards. Everybody going at once is a draw and not
+      a win for whoever the loop saw last. A race in the other mode does not end
+      because somebody was wrecked. And an unstaged fight between a motorcycle
+      and a baja bug, both flat out at each other, finishes by itself with the
+      bug alive.*
 - [ ] **Wreckage that persists as track geometry.** *Verification: a wreck
       changes the racing line for the remaining laps.*
 

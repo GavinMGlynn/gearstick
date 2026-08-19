@@ -91,6 +91,16 @@ typedef struct gs_car {
 } gs_car;
 
 // Everything that changes during a race. No pointers - see the header comment.
+// The two things a race can be, and the toggle between them is the whole of it -
+// same track, same cars, same physics. That was true in 1985 and there is no
+// reason for it not to be now.
+typedef enum gs_mode {
+    GS_MODE_RACE = 0,     // first past the flag
+    GS_MODE_DESTRUCTION   // last one driving
+} gs_mode;
+
+#define GS_NO_WINNER 0xffu
+
 typedef struct gs_world {
     uint64_t tick;
 
@@ -107,6 +117,10 @@ typedef struct gs_world {
     uint8_t    hazard_count;
     gs_hazard  hazard[GS_MAX_HAZARDS];
 
+    uint8_t mode;      // gs_mode
+    bool    over;      // the result is settled and will not change
+    uint8_t winner;    // car index, or GS_NO_WINNER for nobody
+
     // What this race has done to the ground. In the world and not the track,
     // because it is not what the track *is* - reload the track and it is fresh
     // again, exactly as it should be. Eight kilobytes, so a snapshot is still a
@@ -120,6 +134,10 @@ typedef struct gs_world {
 } gs_world;
 
 void gs_world_init(gs_world *w, gs_fix gravity_scale);
+
+// Which game is being played. Set it before the race starts; changing it
+// half way through would be changing what everyone was doing.
+void gs_world_set_mode(gs_world *w, gs_mode mode);
 
 // Put a car on the ground at (x, y), facing `heading`, and return its index.
 // Returns -1 if the world is full.
