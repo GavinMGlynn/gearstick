@@ -311,7 +311,7 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
 // underneath would be the least readable thing in the game.
 #define GS_CAR_HEIGHT GS_RATIO(60, 100)
 
-static void gs_collide(gs_car *a, gs_car *b) {
+static void gs_collide(gs_world *w, gs_car *a, gs_car *b) {
     if (!a->active || !b->active) return;
 
     gs_fix dx = b->x - a->x;
@@ -335,14 +335,24 @@ static void gs_collide(gs_car *a, gs_car *b) {
         ny = gs_fix_div(dy, dist);
     }
 
+    // A wreck is scenery: it does not get shoved, and everything that hits it
+    // comes off worse. Being able to bounce a dead car around would make the
+    // debris a toy rather than an obstacle.
+    bool a_fixed = a->wrecked;
+    bool b_fixed = b->wrecked;
+    if (a_fixed && b_fixed) return;
+
     // Separate them first, so a pair that ends a tick overlapping does not sit
-    // inside each other trading impulses for the rest of the race.
+    // inside each other trading impulses for the rest of the race. All of the
+    // push goes to whichever of them can still move.
     gs_fix overlap = reach - dist;
-    gs_fix half = overlap / 2;
-    a->x -= gs_fix_mul(nx, half);
-    a->y -= gs_fix_mul(ny, half);
-    b->x += gs_fix_mul(nx, half);
-    b->y += gs_fix_mul(ny, half);
+    gs_fix a_share = b_fixed ? overlap : (a_fixed ? 0 : overlap / 2);
+    gs_fix b_share = a_fixed ? overlap : (b_fixed ? 0 : overlap / 2);
+
+    a->x -= gs_fix_mul(nx, a_share);
+    a->y -= gs_fix_mul(ny, a_share);
+    b->x += gs_fix_mul(nx, b_share);
+    b->y += gs_fix_mul(ny, b_share);
 
     // Only if they are coming together. Two cars sliding apart while still
     // overlapping have already had their collision.
@@ -352,19 +362,55 @@ static void gs_collide(gs_car *a, gs_car *b) {
     // Equal masses, so each takes half. Mass is not in the vehicle table and
     // does not need to be: a heavier car that shrugged off a hit would make the
     // choice of vehicle about winning collisions rather than about driving.
-    gs_fix impulse = gs_fix_mul(-closing, GS_ONE + GS_BOUNCE) / 2;
+    // Against a wreck the live car takes all of it, since the wreck is not
+    // going anywhere.
+    gs_fix impulse = gs_fix_mul(-closing, GS_ONE + GS_BOUNCE);
+    if (!a_fixed && !b_fixed) impulse /= 2;
 
-    a->vx -= gs_fix_mul(nx, impulse);
-    a->vy -= gs_fix_mul(ny, impulse);
-    b->vx += gs_fix_mul(nx, impulse);
-    b->vy += gs_fix_mul(ny, impulse);
+    if (!a_fixed) {
+        a->vx -= gs_fix_mul(nx, impulse);
+        a->vy -= gs_fix_mul(ny, impulse);
+    }
+    if (!b_fixed) {
+        b->vx += gs_fix_mul(nx, impulse);
+        b->vy += gs_fix_mul(ny, impulse);
+    }
 
+    // A shove is not a launch. Any closing collision produces *some* lift, and
+    // taking the wheels off the ground for all of them meant a gentle nudge put
+    // a car in the air - which then landed, and the landing did the damage. The
+    // hit looked harmless and the consequence arrived a moment later from
+    // somewhere else entirely.
     gs_fix lift = gs_fix_mul(impulse, GS_BOUNCE_LIFT);
-    a->vz += lift;
-    b->vz += lift;
-    if (lift > 0) {
-        a->grounded = false;
-        b->grounded = false;
+    // One tile a second upward is about a fifth of a tile of air: below that
+    // there is nothing to see and no reason to take the wheels off the ground.
+    if (lift > GS_ONE) {
+        if (!a_fixed) { a->vz += lift; a->grounded = false; }
+        if (!b_fixed) { b->vz += lift; b->grounded = false; }
+    }
+
+    // --- What it cost them.
+    //
+    // Same shape as a landing: below a threshold a knock is free, above it the
+    // damage climbs with the excess. So trading paint is part of racing and a
+    // proper hit is not, and the difference is legible from how hard it looked.
+    gs_fix closing_speed = -closing;
+    gs_car *pair[2] = { a, b };
+    for (int side = 0; side < 2; side++) {
+        gs_car *c = pair[side];
+        if (c->wrecked) continue;
+
+        const gs_vehicle_def *v = gs_vehicle(c->vehicle);
+        gs_fix hurt = gs_fix_div(gs_fix_mul(closing_speed, w->damage_scale),
+                                 v->toughness);
+
+        const gs_fix free_knock = GS_INT(2);
+        if (hurt <= free_knock) continue;
+
+        int32_t d = (int32_t)c->damage +
+                    (gs_fix_mul(hurt - free_knock, GS_INT(8)) >> GS_FIX_SHIFT);
+        c->damage = (uint8_t)GS_CLAMP(d, 0, 255);
+        if (c->damage >= 255) c->wrecked = true;
     }
 }
 
@@ -377,7 +423,7 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
     // depend on who was stepped first.
     for (uint8_t i = 0; i < w->car_count; i++) {
         for (uint8_t j = (uint8_t)(i + 1); j < w->car_count; j++) {
-            gs_collide(&w->car[i], &w->car[j]);
+            gs_collide(w, &w->car[i], &w->car[j]);
         }
     }
 

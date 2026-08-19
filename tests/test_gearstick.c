@@ -1342,6 +1342,100 @@ TEST(cars_that_are_already_overlapping_push_apart_rather_than_sit_inside_each_ot
     CHECK(apart >= GS_CAR_RADIUS * 2 - GS_ONE / 16);
 }
 
+TEST(a_car_can_be_destroyed_by_driving_and_by_being_hit) {
+    // Both halves of the item, side by side, because "a car can be destroyed"
+    // is two different claims and only one of them is about the ground.
+    static gs_track cliff;
+    gs_track_init(&cliff, 40, 12, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= cliff.h; y++)
+        for (uint8_t x = 0; x <= cliff.w; x++)
+            gs_track_set_corner(&cliff, x, y, x <= 8 ? GS_INT(40) : 0);
+
+    gs_world alone;
+    gs_world_init(&alone, GS_ONE);
+    gs_world_add_car(&alone, &cliff, GS_VEH_MOTORCYCLE, GS_INT(2), GS_INT(6), 0);
+    alone.car[0].vx = GS_INT(6);
+    for (int i = 0; i < GS_TICK_HZ * 8; i++) gs_world_step(&alone, &cliff, nullptr);
+
+    // Driving alone, off a cliff: nobody else involved.
+    CHECK(alone.car[0].wrecked);
+
+    // And by being hit, on flat ground where the landing can take no credit.
+    static gs_track flat;
+    gs_track_init(&flat, 80, 20, GS_SURF_PAVEMENT);
+
+    gs_world hit;
+    gs_world_init(&hit, GS_ONE);
+    gs_world_add_car(&hit, &flat, GS_VEH_MOTORCYCLE, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&hit, &flat, GS_VEH_STOCK_CAR, GS_INT(60), GS_INT(10),
+                     (gs_angle)(GS_QUARTER * 2));
+
+    bool ever_flew = false;
+    for (int i = 0; i < GS_TICK_HZ * 20; i++) {
+        // Both hold the throttle, facing each other, so every bounce is
+        // followed by another run at it - a derby rather than one crash.
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, GS_IN_ACCEL, 0, 0 };
+        gs_world_step(&hit, &flat, in);
+        if (!hit.car[0].grounded) ever_flew = true;
+    }
+
+    CHECK(hit.car[0].wrecked);       // destroyed by being hit, on flat ground
+    CHECK(ever_flew);
+
+    // And the damage is the *collision's*, not a landing's afterwards. A gentle
+    // shunt leaves both cars on the ground and still costs something, which is
+    // the only way to know the two sources are separate.
+    gs_world nudge;
+    gs_world_init(&nudge, GS_ONE);
+    gs_world_add_car(&nudge, &flat, GS_VEH_MOTORCYCLE, GS_INT(20), GS_INT(10), 0);
+    // Just outside touching distance, so a slow closing speed still reaches.
+    gs_world_add_car(&nudge, &flat, GS_VEH_MOTORCYCLE, GS_INT(21) + GS_HALF,
+                     GS_INT(10), (gs_angle)(GS_QUARTER * 2));
+    nudge.car[0].vx = GS_ONE;
+    nudge.car[1].vx = -GS_ONE;
+
+    bool left_ground = false;
+    for (int i = 0; i < GS_TICK_HZ; i++) {
+        gs_world_step(&nudge, &flat, nullptr);
+        if (!nudge.car[0].grounded || !nudge.car[1].grounded) left_ground = true;
+    }
+    CHECK(!left_ground);
+    CHECK(nudge.car[0].damage > 0);
+
+    // The fragile one takes far more of it than the sturdy one from the very
+    // same collisions, which is toughness meaning something in a fight and not
+    // only on a landing.
+    CHECK(hit.car[0].damage > hit.car[1].damage);
+}
+
+TEST(a_wreck_is_scenery_that_the_living_bounce_off) {
+    static gs_track t;
+    gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(10), 0);
+
+    // One of them is already finished.
+    w.car[1].wrecked = true;
+    w.car[1].damage = 255;
+    gs_fix wreck_x = w.car[1].x, wreck_y = w.car[1].y;
+
+    w.car[0].vx = GS_INT(6);
+    for (int i = 0; i < GS_TICK_HZ * 3; i++) gs_world_step(&w, &t, nullptr);
+
+    // The wreck did not move. Being able to shove a dead car around the track
+    // would make debris a toy rather than an obstacle - and Phase 7 wants it to
+    // become part of the course.
+    CHECK(w.car[1].x == wreck_x);
+    CHECK(w.car[1].y == wreck_y);
+
+    // And the living car came off it rather than through it.
+    CHECK(w.car[0].vx < 0);
+    CHECK(w.car[0].x < wreck_x);
+}
+
 TEST(a_hard_enough_hit_puts_a_car_in_the_air) {
     static gs_track t;
     gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
@@ -1687,6 +1781,8 @@ int main(void) {
     run_a_head_on_at_speed_sends_both_cars_somewhere();
     run_the_same_collision_happens_the_same_way_every_time();
     run_cars_that_are_already_overlapping_push_apart_rather_than_sit_inside_each_other();
+    run_a_car_can_be_destroyed_by_driving_and_by_being_hit();
+    run_a_wreck_is_scenery_that_the_living_bounce_off();
     run_a_hard_enough_hit_puts_a_car_in_the_air();
     run_a_car_flying_over_another_does_not_hit_it();
     run_the_same_inputs_produce_the_same_world_every_time();
