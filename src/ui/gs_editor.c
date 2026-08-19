@@ -305,6 +305,56 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     ImGui_End();
 }
 
+// How fast the pad drives the cursor across the track, in tiles a second. Slow
+// enough to land on the tile you meant, fast enough to cross a track without
+// putting the pad down.
+#define GS_PAD_CURSOR_SPEED 9.0f
+
+bool gs_editor_pad_input(gs_editor *e, gs_track *t, const gs_pad_edit *pad, float dt) {
+    if (!pad->present) return false;
+
+    if (pad->x != 0.0f || pad->y != 0.0f) {
+        // Screen-relative, not world-relative. Pushing the stick right has to
+        // move the cursor right *on the screen*, and in an isometric view that
+        // is a diagonal in the world - anything else is unusable within
+        // seconds.
+        float step = GS_PAD_CURSOR_SPEED * dt;
+        e->hover_x += (pad->x + pad->y) * step * 0.5f;
+        e->hover_y += (pad->y - pad->x) * step * 0.5f;
+
+        e->hover_x = GS_CLAMP(e->hover_x, 0.0f, (float)t->w - 0.01f);
+        e->hover_y = GS_CLAMP(e->hover_y, 0.0f, (float)t->h - 0.01f);
+        e->hover_on = true;
+
+        // The camera follows rather than the cursor running off the edge of it.
+        e->cam_x = e->hover_x;
+        e->cam_y = e->hover_y;
+    }
+
+    if (pad->zoom != 0.0f) {
+        e->zoom = GS_CLAMP(e->zoom - pad->zoom * dt, 0.4f, 3.0f);
+    }
+
+    if (pad->next_brush) {
+        e->brush = (e->brush + 1) % GS_BRUSH_COUNT;
+    }
+    if (pad->undo) gs_edit_undo(e->log, t);
+    if (pad->redo) gs_edit_redo(e->log, t);
+
+    // A held button is one stroke, exactly as a held mouse button is.
+    if (pad->paint && !e->stroke) {
+        gs_edit_begin(e->log);
+        e->stroke = true;
+    }
+    if (pad->paint) gs_editor_paint(e, t, e->hover_x, e->hover_y);
+    if (!pad->paint && e->stroke) {
+        gs_edit_end(e->log);
+        e->stroke = false;
+    }
+
+    return pad->drive;
+}
+
 void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view) {
     gs_editor_palette(e, t);
 
@@ -317,9 +367,17 @@ void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view) {
     gs_camera cam = view->cam;
     cam.vw = (float)view->rect.w;
     cam.vh = (float)view->rect.h;
-    e->hover_on = gs_iso_pick(&cam, t, mouse.x - (float)view->rect.x,
-                              mouse.y - (float)view->rect.y,
-                              &e->hover_x, &e->hover_y);
+
+    // Only when the pointer actually moved. Otherwise a stationary mouse drags
+    // the cursor back every frame and the pad cannot move it anywhere - the two
+    // fight, and the pad loses sixty times a second.
+    if (mouse.x != e->last_mouse_x || mouse.y != e->last_mouse_y) {
+        e->last_mouse_x = mouse.x;
+        e->last_mouse_y = mouse.y;
+        e->hover_on = gs_iso_pick(&cam, t, mouse.x - (float)view->rect.x,
+                                  mouse.y - (float)view->rect.y,
+                                  &e->hover_x, &e->hover_y);
+    }
 
     // The palette is a window over the world, so a click on it is not a click
     // on the track. WantCaptureMouse is how ImGui says which.

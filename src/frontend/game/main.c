@@ -207,6 +207,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // No imgui.ini. There is no window layout worth persisting yet, and the
     // default drops a file in whatever directory the game happened to start in.
     io->IniFilename = nullptr;
+    // The panel is walkable with a pad. Half this game is two people on a sofa,
+    // and an editor only one of them can drive is half a construction set.
+    io->ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     if (!cImGui_ImplSDL3_InitForSDLRenderer(a->win, a->ren) ||
         !cImGui_ImplSDLRenderer3_Init(a->ren)) {
@@ -334,6 +337,20 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             if (key[SDL_SCANCODE_RIGHT]) { a->editor.cam_x += pan; a->editor.cam_y -= pan; }
             if (key[SDL_SCANCODE_UP])    { a->editor.cam_x -= pan; a->editor.cam_y -= pan; }
             if (key[SDL_SCANCODE_DOWN])  { a->editor.cam_x += pan; a->editor.cam_y += pan; }
+        }
+
+        // The pad drives the editor too, unless ImGui is using it to walk the
+        // panel - which is what NavActive means. Without that check the stick
+        // would move the cursor and the selection at once.
+        ImGuiIO *eio = ImGui_GetIO();
+        if (!eio->NavActive) {
+            gs_pad_edit pad;
+            gs_input_editor_pad(&a->input, &pad);
+            float dt = (float)delta / 1e9f;
+            if (gs_editor_pad_input(&a->editor, &a->t, &pad, dt)) {
+                gs_editor_toggle(&a->editor, &a->view[0]);
+                gs_start_test_drive(a);
+            }
         }
 
         gs_editor_frame(&a->editor, &a->t, &a->view[0]);

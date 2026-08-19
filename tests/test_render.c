@@ -917,6 +917,89 @@ TEST(raising_a_ramp_changes_where_the_ghost_lands_without_being_told_to) {
     gs_editor_quit(&ed);
 }
 
+TEST(a_track_can_be_built_from_a_pad_with_no_mouse_at_all) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 32, 16);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 8192));
+    ed.hover_x = 4.0f;
+    ed.hover_y = 8.0f;
+    ed.hover_on = true;
+    ed.brush = GS_BRUSH_RAISE;
+    ed.radius = 1;
+    ed.step = 0.5f;
+
+    const float dt = 1.0f / 60.0f;
+    gs_pad_edit pad = { 0 };
+    pad.present = true;
+
+    // Push the stick right and hold the paint button: a stroke of raised ground
+    // across the track, from a pad, with no pointer involved.
+    pad.x = 1.0f;
+    pad.paint = true;
+    for (int frame = 0; frame < 60; frame++) {
+        CHECK(!gs_editor_pad_input(&ed, &t, &pad, dt));
+    }
+    pad.paint = false;
+    pad.x = 0.0f;
+    gs_editor_pad_input(&ed, &t, &pad, dt);
+
+    // The cursor moved, the ground rose, and the whole drag is one undo step.
+    CHECK(ed.hover_x > 5.0f);
+    CHECK(gs_track_height(&t, GS_INT(4), GS_INT(8)) > 0);
+    CHECK(gs_edit_undo_depth(ed.log) == 1);
+
+    uint64_t built = gs_track_hash(&t);
+
+    // Undo and redo from the shoulder buttons, on the press rather than the
+    // hold - a held undo firing every frame would walk back through an
+    // afternoon in under a second.
+    pad.undo = true;
+    gs_editor_pad_input(&ed, &t, &pad, dt);
+    CHECK(gs_track_hash(&t) != built);
+
+    pad.undo = false;
+    pad.redo = true;
+    gs_editor_pad_input(&ed, &t, &pad, dt);
+    CHECK(gs_track_hash(&t) == built);
+    pad.redo = false;
+
+    // The brush cycles from the pad, so every tool is reachable without a
+    // mouse - including the gate brush, which is what makes a route placeable.
+    int first = ed.brush;
+    pad.next_brush = true;
+    gs_editor_pad_input(&ed, &t, &pad, dt);
+    CHECK(ed.brush != first);
+    pad.next_brush = false;
+
+    bool saw_gate = ed.brush == GS_BRUSH_GATE;
+    for (int i = 0; i < GS_BRUSH_COUNT; i++) {
+        pad.next_brush = true;
+        gs_editor_pad_input(&ed, &t, &pad, dt);
+        pad.next_brush = false;
+        if (ed.brush == GS_BRUSH_GATE) saw_gate = true;
+    }
+    CHECK(saw_gate);
+
+    // Start asks for a test drive rather than doing something to the track.
+    pad.drive = true;
+    CHECK(gs_editor_pad_input(&ed, &t, &pad, dt));
+    pad.drive = false;
+
+    // With no pad plugged in, none of this happens at all.
+    uint64_t before = gs_track_hash(&t);
+    gs_pad_edit none = { 0 };
+    none.paint = true;
+    none.undo = true;
+    CHECK(!gs_editor_pad_input(&ed, &t, &none, dt));
+    CHECK(gs_track_hash(&t) == before);
+
+    gs_editor_quit(&ed);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -954,6 +1037,7 @@ int main(void) {
     run_a_test_drive_starts_where_you_were_looking_and_changes_nothing(ren);
     run_coming_back_from_a_drive_returns_you_to_where_you_were_building(ren);
     run_raising_a_ramp_changes_where_the_ghost_lands_without_being_told_to(ren);
+    run_a_track_can_be_built_from_a_pad_with_no_mouse_at_all(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

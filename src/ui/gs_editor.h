@@ -18,6 +18,7 @@
 #include "core/gs_edit.h"
 #include "core/gs_track.h"
 #include "gfx/gs_render.h"
+#include "platform/gs_input.h"
 
 typedef enum gs_brush {
     GS_BRUSH_RAISE = 0,
@@ -47,6 +48,7 @@ typedef struct gs_editor {
     float hover_x, hover_y;
     bool  hover_on;
     bool  stroke;       // inside a click-drag, which is one undo step
+    float last_mouse_x, last_mouse_y;
 
     bool  placed;       // the editor camera has been positioned at least once
 
@@ -84,6 +86,14 @@ void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view);
 // Returns false if there is nowhere sensible at all: no cursor and no route.
 bool gs_editor_drive_start(const gs_editor *e, const gs_track *t,
                            gs_fix *x, gs_fix *y, gs_angle *heading);
+
+// One frame of pad input. **Everything the mouse can do, a pad can do**, which
+// is not a courtesy: this game is two people on a sofa, and an editor only one
+// of them can drive is half a construction set.
+//
+// Separate from gs_editor_frame so it can be driven by a test with no window
+// and no pad plugged in. Returns true if the player asked for a test drive.
+bool gs_editor_pad_input(gs_editor *e, gs_track *t, const gs_pad_edit *pad, float dt);
 
 // Apply the current brush once, at a world position. The pointer path calls
 // this; so can a test or a script, which is the point of it being here rather

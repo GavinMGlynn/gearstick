@@ -16,9 +16,10 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 34 of 61 items, every
-one of them with its verification actually run.** Phase 4 is the editor and is
-about half the remaining work.
+**Phases 0 to 4 are complete — 35 of 61 items, every one of them with its
+verification actually run.** The editor was about half the remaining work and
+it is done: a track can be built, painted, given a route, validated, driven and
+undone, from a mouse or from a pad. Phase 5 is next.
 
 Where a verification says a deliberate bug "turns it red", that is not a figure
 of speech: the bug was introduced, the test was watched to fail, and the bug was
@@ -228,8 +229,13 @@ whatever the UI turns out to be — then the interface on top.
       the frontend drives it, two ticks a frame, because a ghost that restarts
       once per call looks perfect under one big call and never moves at all
       under the real thing.*
-- [ ] **The editor UI is usable with a pad as well as a mouse.**
-      *Verification: a track built end to end from a pad alone.*
+- [x] **The editor UI is usable with a pad as well as a mouse.**
+      *Verification: a track built from a pad with no pointer involved — the
+      stick moves the cursor, the south button paints a stroke that undoes as
+      one action, the shoulders undo and redo on the press rather than the hold,
+      the west button cycles every brush including the gate one, and start asks
+      for a test drive. The panel itself walks under ImGui's gamepad
+      navigation, and the pad is ignored while that is using it.*
 
 ## Phase 5 — Surfaces, vehicles and dials
 

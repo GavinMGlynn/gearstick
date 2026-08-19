@@ -13,7 +13,27 @@
 typedef struct gs_input_state {
     SDL_Gamepad *pad[GS_MAX_CARS];
     int          pads;
+
+    // Last frame's buttons on pad zero, so the editor can tell a press from a
+    // hold. The race does not care - a held accelerator is a held accelerator -
+    // but undo repeating sixty times a second would be a disaster.
+    uint32_t     was_down;
 } gs_input_state;
+
+// The editor's view of pad zero: sticks as floats, buttons as edges. Built here
+// rather than in the editor so that the editor can be driven by a test without
+// a pad, and so SDL's specifics stay in the platform layer.
+typedef struct gs_pad_edit {
+    bool  present;
+    float x, y;            // left stick, deadzoned, -1 to 1
+    float zoom;            // right stick vertical, for zooming
+    bool  paint;           // held: apply the brush
+    bool  undo, redo;      // pressed this frame
+    bool  next_brush;      // pressed this frame: cycle the brush
+    bool  drive;           // pressed this frame: take a test drive
+} gs_pad_edit;
+
+void gs_input_editor_pad(gs_input_state *s, gs_pad_edit *out);
 
 void gs_input_init(gs_input_state *s);
 void gs_input_quit(gs_input_state *s);

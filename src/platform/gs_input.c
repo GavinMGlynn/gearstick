@@ -97,3 +97,43 @@ void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars) {
         out[1] |= in;
     }
 }
+
+// A stick reading, deadzoned and normalised. The deadzone is generous because
+// this steers a cursor over a grid rather than a car: drift that would be
+// invisible while driving would leave a brush creeping across the track.
+static float gs_axis(SDL_Gamepad *g, SDL_GamepadAxis axis) {
+    float v = (float)SDL_GetGamepadAxis(g, axis) / 32767.0f;
+    if (v > -0.25f && v < 0.25f) return 0.0f;
+    return v;
+}
+
+void gs_input_editor_pad(gs_input_state *s, gs_pad_edit *out) {
+    *out = (gs_pad_edit){ 0 };
+    if (s->pads < 1 || s->pad[0] == nullptr) {
+        s->was_down = 0;
+        return;
+    }
+
+    SDL_Gamepad *g = s->pad[0];
+    out->present = true;
+    out->x = gs_axis(g, SDL_GAMEPAD_AXIS_LEFTX);
+    out->y = gs_axis(g, SDL_GAMEPAD_AXIS_LEFTY);
+    out->zoom = gs_axis(g, SDL_GAMEPAD_AXIS_RIGHTY);
+    out->paint = SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_SOUTH);
+
+    // Edges, not levels. A held undo button that fired every frame would walk
+    // back through an afternoon's work in under a second.
+    uint32_t down = 0;
+    if (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER))  down |= 1u << 0;
+    if (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) down |= 1u << 1;
+    if (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_WEST))           down |= 1u << 2;
+    if (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_START))          down |= 1u << 3;
+
+    uint32_t pressed = down & ~s->was_down;
+    s->was_down = down;
+
+    out->undo = (pressed & (1u << 0)) != 0;
+    out->redo = (pressed & (1u << 1)) != 0;
+    out->next_brush = (pressed & (1u << 2)) != 0;
+    out->drive = (pressed & (1u << 3)) != 0;
+}

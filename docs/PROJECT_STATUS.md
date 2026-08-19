@@ -14,10 +14,15 @@ terrain works".
 
 ## The honest summary, 2026-08-19
 
-**There is no game yet.** There is no editor, no lap, no checkpoint, no finish
-line, no opponent, no collision between cars, no hazard, no sound, no menu and
-no way to win or lose. The editor alone is about half this project and it has
-not been started.
+**There is still no game.** No lap counting, no finish, no opponent, no
+collision between cars, no hazard, no sound, no menu, and no way to win or
+lose. What there is now is a construction set and a simulation to drive in it.
+
+**The editor works.** Tab switches between building and driving with nothing
+loaded in between. You can raise and lower ground, paint surface and gravity,
+place a route of gates, undo any of it, save it, reload it and drive it — with
+a mouse or with a pad alone. A ghost re-races the design in the background as
+you change it.
 
 **What there is, is a simulation that works and can prove it.** A car drives,
 slides, climbs, launches off any shape that falls away fast enough, flies a
@@ -122,6 +127,27 @@ than a tick, so the leftover in the accumulator is the only thing that makes the
 simulation advance, and a clock that discards its remainder scores zero there
 while looking perfect at 30.
 
+### The editor — `src/ui/`, inside `gearstick`
+
+- **It is a mode of the game, not a second program**, because the loop between
+  changing something and feeling it is the point, and a separate binary puts a
+  reload in the middle of it. Tab drops a car where the pointer was, on the very
+  track object being edited. Coming back returns the camera to the part of the
+  track being *built*, not to wherever the car stopped.
+- **Brushes**: raise, lower, surface, gravity, and gate. One application moves
+  the ground by exactly the step shown in the panel. The brush is round rather
+  than square, because a square one leaves corners in the terrain nobody drew.
+- **Undo and redo** over any of it, a drag counting as one action however many
+  tiles it touched. Placing a gate is the exception and is recorded as a tail.
+- **A route of gates**, each directional and finite: reversing over the finish
+  is not a lap, and a gate can be missed. Gate zero is the start.
+- **Validation, shown continuously** rather than on a button — five problems,
+  each naming the gate at fault.
+- **The live ghost** re-races the track while you edit it, noticing that the
+  track changed by its own content hash rather than by being told.
+- **A pad drives all of it**, panel included, through ImGui's gamepad
+  navigation.
+
 ### The renderer — `src/gfx/`, `src/platform/`, `gearstick`
 
 - **2:1 isometric projection.** One tile is 64 px across, 32 deep, and one tile
@@ -137,6 +163,13 @@ while looking perfect at 30.
 - **Cars as boxes with a blob shadow** on the ground beneath them. Crude, and
   the gap between car and shadow is the only cue that says how high a car is —
   the same thing that sold it on a C64.
+- **Cars are drawn about 1.3 tiles long, which is not their metric size.** An
+  honest 2.7 m car is two thirds of a tile and reads as a speck against the
+  ground. The original's were never honest either: chunky relative to the view
+  is what makes a two-car collision legible, and legibility is the whole
+  argument for this camera. Nothing in `src/core/` knows these numbers today;
+  when collision arrives it has to use them rather than the metric truth, or a
+  car is hit by something the player cannot see.
 - **Split screen**, two views side by side, one per car.
 - **A fixed 120 Hz accumulator with render interpolation**, including
   short-way-round heading interpolation so a car crossing north does not spin on
@@ -180,9 +213,8 @@ standard-conformance.
 
 ## What does not exist
 
-- **The editor.** All of it. This is about half the project.
-- **A race.** No start, no laps, no checkpoints, no finish, no positions, no
-  timing, no HUD.
+- **A race.** Gates exist and can be crossed, but nothing counts laps, times a
+  run, decides a winner or shows any of it. There is no HUD.
 - **Collision between cars**, and every hazard, weapon and destruction-mode rule.
 - **AI.** No opponent of any kind.
 - **Ghosts, the track analyser, track sharing, rollback netcode.** All of them
@@ -194,8 +226,9 @@ standard-conformance.
   none of it is fetched yet.
 - **Sound and music.** Nothing plays.
 - **A front end.** No title, no race setup, no vehicle choice, no results.
-- **Track files.** There is no serialisation for a track and no way to save one.
-  The demo track is hard-coded in `main.c` and is a prototype.
+- **Shipped tracks.** The format, the editor and the route all work; nobody has
+  authored a track worth shipping with them. The demo track is hard-coded in
+  `main.c` and is a prototype.
 - **Any release.** CI and packaging work; nothing has been tagged or published.
 - **A player's guide.**
 
