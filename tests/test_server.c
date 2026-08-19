@@ -52,6 +52,7 @@ typedef struct gs_test_client {
     bool refused;
     char why[64];
     bool pinged;              // the server asked how far away we are
+    int  lobbies;             // how many rosters have arrived, ever
 } gs_test_client;
 
 static bool gs_client_open(gs_test_client *c, uint16_t server_port) {
@@ -100,6 +101,7 @@ static void gs_client_pump(gs_test_client *c) {
             break;
         case GS_MSG_LOBBY:
             gs_proto_read_lobby(d->buf, len, &c->lobby);
+            c->lobbies++;
             break;
         case GS_MSG_FULL:
             c->refused = gs_proto_read_full(d->buf, len, c->why, sizeof c->why);
@@ -539,6 +541,95 @@ TEST(the_games_own_client_gets_its_slot_from_the_server) {
 
     gs_wire_close(fifth);
     for (int i = 0; i < 4; i++) gs_wire_close(w[i]);
+    gs_wire_quit();
+    gs_server_stop();
+}
+
+TEST(the_roster_is_sent_again_rather_than_only_when_it_changes) {
+    // **One datagram over UDP is a promise of nothing.** The roster used to be
+    // sent only on a change, so a client that missed the announcement raced
+    // against somebody who had gone home and never found out - there was no next
+    // announcement to correct it. It passed on Linux and failed on macOS, whose
+    // default receive buffer is a fraction of the size, which is the same bug
+    // wearing a platform's name.
+    if (!gs_server_start("47836", GS_SERVER_LIFETIME)) { gs_failures++; return; }
+
+    gs_test_client c;
+    CHECK(gs_client_open(&c, 47836));
+    gs_client_say_hello(&c, "ada");
+
+    uint64_t until = SDL_GetTicks() + 5000;
+    while (SDL_GetTicks() < until && !c.welcomed) {
+        gs_client_pump(&c);
+        SDL_Delay(10);
+    }
+    CHECK(c.welcomed);
+
+    // Nothing changes from here: nobody joins, nobody leaves. Any roster that
+    // arrives now is the server saying the same thing again, which is the point.
+    int at_first = c.lobbies;
+    until = SDL_GetTicks() + 7000;
+    while (SDL_GetTicks() < until) {
+        gs_client_pump(&c);
+        SDL_Delay(10);
+    }
+
+    // Seven seconds against a two second ping is three chances; two is enough to
+    // show it repeats without pinning the exact rate.
+    CHECK(c.lobbies >= at_first + 2);
+    CHECK(c.lobby.count == 1);
+
+    gs_client_close(&c);
+    gs_server_stop();
+}
+
+TEST(a_client_that_quits_says_so_instead_of_being_waited_out) {
+    // A goodbye has been in the protocol since it was written and nothing ever
+    // sent one, so quitting looked exactly like crashing: everybody else raced
+    // a car that was not there until the silence timeout ran out. Fifteen
+    // seconds is most of a race.
+    //
+    // A long patience here on purpose - if the departure were still being waited
+    // out, this test would run out of time rather than quietly passing on the
+    // timeout instead.
+    if (!gs_server_start_full("47838", GS_SERVER_LIFETIME, "2", "30000")) {
+        gs_failures++;
+        return;
+    }
+    CHECK(gs_wire_init());
+
+    gs_wire *a = gs_wire_server("127.0.0.1", 47838, "ada");
+    gs_wire *b = gs_wire_server("127.0.0.1", 47838, "bez");
+    CHECK(a != nullptr && b != nullptr);
+
+    uint64_t until = SDL_GetTicks() + 8000;
+    while (SDL_GetTicks() < until && !(gs_wire_ready(a) && gs_wire_ready(b))) {
+        gs_wire_poll(a);
+        gs_wire_poll(b);
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_ready(a));
+    CHECK(gs_wire_ready(b));
+
+    gs_wire_close(b);
+
+    // Five seconds, against a thirty second patience. Noticing inside that means
+    // it was told, because being waited out could not possibly have happened
+    // yet.
+    bool noticed = false;
+    until = SDL_GetTicks() + 5000;
+    while (SDL_GetTicks() < until && !noticed) {
+        gs_wire_poll(a);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(a, drain, sizeof drain) > 0) { }
+
+        const gs_lobby *now = gs_wire_lobby(a);
+        noticed = now != nullptr && now->count == 1;
+        SDL_Delay(10);
+    }
+    CHECK(noticed);
+
+    gs_wire_close(a);
     gs_wire_quit();
     gs_server_stop();
 }
@@ -1172,6 +1263,8 @@ int main(void) {
     run_the_server_ignores_datagrams_that_are_not_ours();
     run_the_games_own_client_gets_its_slot_from_the_server();
     run_a_client_waiting_for_others_is_not_ready_yet();
+    run_the_roster_is_sent_again_rather_than_only_when_it_changes();
+    run_a_client_that_quits_says_so_instead_of_being_waited_out();
     run_a_placed_client_is_not_dropped_for_going_quiet();
     run_a_client_with_a_different_track_is_given_the_right_one();
     run_two_clients_that_cannot_see_each_other_race_through_the_server();

@@ -515,8 +515,22 @@ hard-coded demo track that has been sitting in the frontend since Phase 3.
       before: two random draws in one argument list are drawn in whichever order
       the compiler likes, and the two compilers disagreed.*
 - [ ] **A shipped set of stock tracks, chosen from the generator's output.**
+      A dozen picked by the analyser rather than by eye — spread across the
+      shapes, the sizes and the surfaces, so the set is a menu and not twelve
+      variations on one idea.
       *Verification: a fresh install has a dozen tracks to race, each one
       completable at Earth gravity in every vehicle that should manage it.*
+- [ ] **The server ships knowing every global track, and keeps everything it
+      knows in one place.** A default `gearstick.db` holding the stock tracks,
+      published, committed to the repository and copied into place the first time
+      a server runs — so a server nobody has set up still has a library to offer.
+      **All server state lives in that database**: the track it serves is chosen
+      from what it holds rather than named as a file on the command line, which
+      is the last thing it knows that the database does not.
+      *Verification: a server started with no store file at all comes up with the
+      full stock library published and serves one of them; and a test compares
+      the committed database against a freshly created one, so the shipped file
+      cannot drift from the schema `gs_store.c` writes.*
 
 ## Phase 13 — The rest of the feature list, and the tails
 
@@ -679,3 +693,12 @@ worth as much as what was decided about it.
       self-terminate is a safety net well past anything a test needs. Separately,
       handing SDL an argument vector dropped a `const` that MSVC treats as an
       error; the cast is now written down.
+- [x] **The roster was announced once, over UDP, and a client that quit never
+      said so.** *(Found in CI, on macOS.)* Two faults that hid each other: the
+      server sent the list of who is here only when it changed, so a single lost
+      datagram left somebody racing a car that had gone home with no later
+      announcement to correct it; and the goodbye message that has been in the
+      protocol since it was written was never sent by anything, so quitting
+      looked exactly like crashing and cost everybody else the full silence
+      timeout. The roster now rides along with the ping, and a client says
+      goodbye on its way out.

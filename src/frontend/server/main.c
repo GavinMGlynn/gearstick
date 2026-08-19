@@ -158,15 +158,30 @@ static void gs_send(gs_client *c, const uint8_t *buf, size_t len) {
 
 // Everybody hears about everybody. A lobby that only told the newcomer who was
 // there would leave the people already waiting looking at a stale list.
-static void gs_broadcast_lobby(void) {
+static void gs_send_lobby(gs_client *c) {
     gs_lobby l;
     gs_build_lobby(&l);
 
     uint8_t buf[GS_PROTO_MTU];
     size_t n = gs_proto_lobby(buf, sizeof buf, &l);
+    gs_send(c, buf, n);
+}
 
+// **Sent again on every ping, not only when it changes.**
+//
+// This is one datagram over UDP, which promises nothing. Announcing a departure
+// once means a single lost packet leaves somebody racing against a player who
+// went home - permanently, because there is no next announcement to correct it.
+// It showed up as a test that passed on Linux and failed on macOS, whose default
+// receive buffer for a socket is a fraction of the size, so a busy client drops
+// exactly the datagram that mattered.
+//
+// The roster is a few dozen bytes and the ping is every two seconds. Re-sending
+// state that is small and idempotent is how the rest of this protocol already
+// works; a roster that is only ever announced was the odd one out.
+static void gs_broadcast_lobby(void) {
     for (int i = 0; i < GS_PROTO_MAX_PLAYERS; i++) {
-        gs_send(&gs_srv.client[i], buf, n);
+        gs_send_lobby(&gs_srv.client[i]);
     }
 }
 
@@ -812,6 +827,10 @@ int main(int argc, char **argv) {
                 size_t n = gs_proto_ping(buf, sizeof buf,
                                          (uint32_t)(now & 0xffffffffu));
                 gs_send(c, buf, n);
+
+                // And who is here, so a roster lost on the way out is corrected
+                // two seconds later rather than never.
+                gs_send_lobby(c);
                 c->pinged_ms = now;
             }
         }

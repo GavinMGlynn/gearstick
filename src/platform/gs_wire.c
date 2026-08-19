@@ -342,7 +342,19 @@ gs_wire *gs_wire_join(const char *host, uint16_t port) {
 
 void gs_wire_close(gs_wire *w) {
     if (w == nullptr) return;
-    if (w->server_addr != nullptr) NET_UnrefAddress(w->server_addr);
+
+    // **Say goodbye on the way out.** The protocol has had a message for this
+    // since it was written and nothing ever sent one, so a player who quit was
+    // noticed only when they had been silent long enough to look crashed -
+    // fifteen seconds of everybody else racing a car that was not there. It is
+    // one datagram and it is not required to arrive: the silence timeout is
+    // still what catches a client that was unplugged rather than closed.
+    if (w->server_addr != nullptr) {
+        uint8_t buf[GS_PROTO_MTU];
+        size_t n = gs_proto_bye(buf, sizeof buf);
+        NET_SendDatagram(w->sock, w->server_addr, w->server_port, buf, (int)n);
+        NET_UnrefAddress(w->server_addr);
+    }
     for (int i = 0; i < GS_WIRE_PLAYERS; i++) {
         if (w->peer[i].addr != nullptr) NET_UnrefAddress(w->peer[i].addr);
     }
