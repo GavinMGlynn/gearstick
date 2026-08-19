@@ -18,6 +18,7 @@
 #ifndef GS_MENU_H
 #define GS_MENU_H
 
+#include "core/gs_library.h"
 #include "core/gs_profile.h"
 #include "core/gs_records.h"
 #include "core/gs_sim.h"
@@ -68,6 +69,11 @@ typedef struct gs_menu {
 
     gs_profiles profiles;
     gs_records  records;
+
+    // The tracks you have. Half a megabyte, which is why gs_menu is a static
+    // in the frontend rather than a local anywhere.
+    gs_library  library;
+    int         chosen;             // which track a race would be on, or -1
     bool        store_dirty;        // something changed and wants writing
 
     gs_race_setup setup;

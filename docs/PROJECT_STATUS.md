@@ -889,6 +889,35 @@ The claim and its proof travel separately and the server holds the first until
 it has the second. A claim that arrives with no proof is not a record: silence
 is not evidence, and a test sends one to make sure it stays that way.
 
+### The library
+
+Tracks are a collection rather than a save slot: up to thirty-two of them, kept
+by content hash, with a name and an author beside each. Stored in the same file
+as the drivers and the records, because they are one thing — a record with a
+name on it is only a record if the name still means somebody, and it is only a
+record of anything if the track is still there.
+
+**A name sits beside a track rather than identifying it.** Rename a track and it
+is the same track, which is what anybody would expect and what an id-keyed
+library gets wrong. Storing the same track twice stores it once, and two people
+who built the same thing have the same entry — that is what content addressing
+is *for*.
+
+Editing is the interesting case, because a changed track has a changed hash and
+is honestly a different track. `gs_library_replace` exists for when that is not
+what the person meant: they were working on *this* one and the slot should
+follow, keeping its name. Editing a track into one already in the library leaves
+one entry rather than two of the same thing.
+
+The stored hash is never read back from the file — it is derived from the track
+that was actually stored. A library whose recorded hash disagreed with its
+recorded track would be a library that lies about what it holds, and the track
+is the thing that is there.
+
+The store is version 2 and refuses a version 1 file rather than half-reading it.
+That is correct and it is also the first real reason to build the migration path
+the tails have been asking for.
+
 ---
 
 ## What does not exist

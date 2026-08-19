@@ -491,7 +491,7 @@ The track stops being a save slot and becomes a collection. This is the half of
 `FEATURES.md` that the front end has been waiting for, and it closes the
 hard-coded demo track that has been sitting in the frontend since Phase 3.
 
-- [ ] **Tracks live in a library rather than a save slot.** Many tracks, kept by
+- [x] **Tracks live in a library rather than a save slot.** Many tracks, kept by
       content hash, with names and authors beside them. *Verification: three
       tracks are saved, all three are still there after a restart, and editing
       one leaves the other two alone.*

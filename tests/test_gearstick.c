@@ -20,6 +20,7 @@
 #include "core/gs_clock.h"
 #include "core/gs_edit.h"
 #include "core/gs_ghost.h"
+#include "core/gs_library.h"
 #include "core/gs_net.h"
 #include "core/gs_pack.h"
 #include "core/gs_profile.h"
@@ -3481,6 +3482,159 @@ TEST(a_time_survives_the_wire_and_is_still_verifiable) {
     CHECK(v != GS_VERDICT_OK);
 }
 
+// ---------------------------------------------------------------------------
+// The library
+// ---------------------------------------------------------------------------
+
+static gs_library gs_lib;
+
+// A track that differs from its neighbours by something real, so two of them
+// are never accidentally the same track.
+static void gs_make_track(gs_track *t, uint8_t seed) {
+    gs_track_init(t, (uint8_t)(32 + seed), 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) {
+            gs_fix h = (x % (uint8_t)(4 + seed) == 0) ? GS_INT(1) : 0;
+            gs_track_set_corner(t, x, y, h);
+        }
+    }
+    gs_track_add_gate(t, GS_INT(4), GS_INT(8), 0, GS_INT(5));
+    gs_track_add_gate(t, GS_INT(20), GS_INT(8), 0, GS_INT(5));
+}
+
+TEST(three_tracks_are_kept_and_all_three_survive_a_restart) {
+    static gs_track a, b, c;
+    gs_make_track(&a, 1);
+    gs_make_track(&b, 2);
+    gs_make_track(&c, 3);
+
+    gs_library_clear(&gs_lib);
+    CHECK(gs_library_put(&gs_lib, &a, "the loop", "ada") == 0);
+    CHECK(gs_library_put(&gs_lib, &b, "the drop", "bez") == 1);
+    CHECK(gs_library_put(&gs_lib, &c, "the wall", "cy") == 2);
+    CHECK(gs_lib.count == 3);
+
+    // Three different tracks, or this proves nothing.
+    CHECK(gs_track_hash(&a) != gs_track_hash(&b));
+    CHECK(gs_track_hash(&b) != gs_track_hash(&c));
+
+    // **The same track twice is one track.** Content addressing, doing what it
+    // is for - and a name is a rename rather than a second copy.
+    CHECK(gs_library_put(&gs_lib, &a, "the loop, again", "ada") == 0);
+    CHECK(gs_lib.count == 3);
+    CHECK(strcmp(gs_library_at(&gs_lib, 0)->name, "the loop, again") == 0);
+
+    // Out to disk and back, which is the only form "still there after a
+    // restart" ever takes.
+    static uint8_t buf[GS_LIBRARY_MAX * (GS_TRACK_TILES * 4 + 4096) + 4096];
+    size_t n = gs_library_serialize(&gs_lib, buf, sizeof buf);
+    CHECK(n > 0);
+
+    // Far smaller than the library in memory: the tracks are serialised rather
+    // than copied whole.
+    CHECK(n < sizeof(gs_library) / 4);
+
+    static gs_library back;
+    CHECK(gs_library_deserialize(&back, buf, n));
+    CHECK(back.count == 3);
+
+    for (int i = 0; i < 3; i++) {
+        const gs_library_entry *was = gs_library_at(&gs_lib, i);
+        const gs_library_entry *now = gs_library_at(&back, i);
+        CHECK(now != nullptr);
+        if (now == nullptr) continue;
+
+        CHECK(now->hash == was->hash);
+        CHECK(strcmp(now->name, was->name) == 0);
+        CHECK(strcmp(now->author, was->author) == 0);
+
+        // The track itself, not merely its name.
+        CHECK(gs_track_hash(&now->track) == gs_track_hash(&was->track));
+        CHECK(now->track.w == was->track.w);
+        CHECK(now->track.gate_count == was->track.gate_count);
+    }
+
+    // Rubbish is refused rather than half-read.
+    CHECK(!gs_library_deserialize(&back, buf, 6));
+    buf[0] ^= 0xffu;
+    CHECK(!gs_library_deserialize(&back, buf, n));
+}
+
+TEST(editing_one_track_leaves_the_others_alone) {
+    static gs_track a, b, c;
+    gs_make_track(&a, 1);
+    gs_make_track(&b, 2);
+    gs_make_track(&c, 3);
+
+    gs_library_clear(&gs_lib);
+    gs_library_put(&gs_lib, &a, "one", "ada");
+    gs_library_put(&gs_lib, &b, "two", "bez");
+    gs_library_put(&gs_lib, &c, "three", "cy");
+
+    uint64_t was = gs_track_hash(&b);
+    uint64_t untouched_a = gs_track_hash(&a);
+    uint64_t untouched_c = gs_track_hash(&c);
+
+    // Edit the middle one.
+    gs_track edited = b;
+    gs_track_set_corner(&edited, 10, 8, GS_INT(3));
+    CHECK(gs_track_hash(&edited) != was);
+
+    int at = gs_library_replace(&gs_lib, was, &edited);
+    CHECK(at == 1);
+    CHECK(gs_lib.count == 3);
+
+    // The slot followed the edit, and kept its name.
+    CHECK(gs_library_at(&gs_lib, 1)->hash == gs_track_hash(&edited));
+    CHECK(strcmp(gs_library_at(&gs_lib, 1)->name, "two") == 0);
+    CHECK(gs_library_find(&gs_lib, was) < 0);
+
+    // And the other two are exactly as they were.
+    CHECK(gs_library_at(&gs_lib, 0)->hash == untouched_a);
+    CHECK(gs_library_at(&gs_lib, 2)->hash == untouched_c);
+    CHECK(strcmp(gs_library_at(&gs_lib, 0)->name, "one") == 0);
+    CHECK(strcmp(gs_library_at(&gs_lib, 2)->name, "three") == 0);
+
+    // Editing something that is not here changes nothing.
+    CHECK(gs_library_replace(&gs_lib, 0xdeadbeefull, &edited) == -1);
+    CHECK(gs_lib.count == 3);
+
+    // Editing one track *into* another leaves one entry rather than two of the
+    // same thing.
+    CHECK(gs_library_replace(&gs_lib, gs_track_hash(&edited), &c) == 
+          gs_library_find(&gs_lib, untouched_c));
+    CHECK(gs_lib.count == 2);
+    CHECK(gs_library_find(&gs_lib, untouched_a) >= 0);
+    CHECK(gs_library_find(&gs_lib, untouched_c) >= 0);
+
+    // Removing keeps the rest in order.
+    CHECK(gs_library_remove(&gs_lib, untouched_a));
+    CHECK(gs_lib.count == 1);
+    CHECK(gs_library_at(&gs_lib, 0)->hash == untouched_c);
+    CHECK(!gs_library_remove(&gs_lib, 0xabcdull));
+}
+
+TEST(a_library_that_is_full_says_so_rather_than_losing_something) {
+    gs_library_clear(&gs_lib);
+
+    for (int i = 0; i < GS_LIBRARY_MAX; i++) {
+        static gs_track t;
+        gs_make_track(&t, (uint8_t)(i + 1));
+        char name[GS_LIBRARY_NAME];
+        snprintf(name, sizeof name, "track %d", i);
+        CHECK(gs_library_put(&gs_lib, &t, name, "ada") == i);
+    }
+    CHECK(gs_lib.count == GS_LIBRARY_MAX);
+
+    static gs_track one_too_many;
+    gs_make_track(&one_too_many, GS_LIBRARY_MAX + 1);
+    CHECK(gs_library_put(&gs_lib, &one_too_many, "nope", "ada") == -1);
+
+    // And nothing was dropped to make room for it.
+    CHECK(gs_lib.count == GS_LIBRARY_MAX);
+    CHECK(strcmp(gs_library_at(&gs_lib, 0)->name, "track 0") == 0);
+}
+
 TEST(the_analyser_gives_the_same_answer_twice) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -3826,6 +3980,9 @@ int main(void) {
     run_the_analyser_calls_a_jump_nobody_can_clear_impossible();
     run_the_analyser_says_so_when_a_track_cannot_be_got_round_at_all();
     run_the_heatmap_shows_where_everybody_actually_went();
+    run_three_tracks_are_kept_and_all_three_survive_a_restart();
+    run_editing_one_track_leaves_the_others_alone();
+    run_a_library_that_is_full_says_so_rather_than_losing_something();
     run_an_honest_time_is_verified_and_a_doctored_one_is_not();
     run_a_time_from_a_different_race_is_not_this_record();
     run_a_time_survives_the_wire_and_is_still_verifiable();

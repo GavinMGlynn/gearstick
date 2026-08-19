@@ -1998,6 +1998,51 @@ TEST(the_store_remembers_drivers_and_records_between_runs) {
     CHECK(!gs_menu_load(&back, buf, n));
 }
 
+TEST(the_store_carries_the_library_too) {
+    (void)ren;
+
+    gs_menu_init(&gs_m);
+    gs_profile_add(&gs_m.profiles, "ada", GS_COLOUR_ORANGE, 0);
+
+    static gs_track t[3];
+    for (int i = 0; i < 3; i++) {
+        gs_flat_pavement(&t[i], (uint8_t)(30 + i), 16);
+        gs_track_set_corner(&t[i], (uint8_t)(5 + i), 8, GS_INT(2));
+        gs_track_add_gate(&t[i], GS_INT(4), GS_INT(8), 0, GS_INT(5));
+
+        char name[GS_LIBRARY_NAME];
+        SDL_snprintf(name, sizeof name, "track %d", i);
+        CHECK(gs_library_put(&gs_m.library, &t[i], name, "ada") == i);
+    }
+    CHECK(gs_m.library.count == 3);
+
+    static uint8_t buf[sizeof(gs_profiles) + sizeof(gs_records) +
+                       GS_LIBRARY_MAX * (GS_TRACK_TILES * 4 + 4096) + 8192];
+    size_t n = gs_menu_save(&gs_m, buf, sizeof buf);
+    CHECK(n > 0);
+
+    // A different program, starting cold.
+    static gs_menu back;
+    gs_menu_init(&back);
+    CHECK(gs_menu_load(&back, buf, n));
+
+    CHECK(back.profiles.count == 1);
+    CHECK(back.library.count == 3);
+    for (int i = 0; i < 3; i++) {
+        const gs_library_entry *e = gs_library_at(&back.library, i);
+        CHECK(e != nullptr);
+        if (e == nullptr) continue;
+        CHECK(e->hash == gs_track_hash(&t[i]));
+        CHECK(SDL_strcmp(e->author, "ada") == 0);
+    }
+
+    // The three are still three different tracks, not one repeated.
+    CHECK(gs_library_at(&back.library, 0)->hash !=
+          gs_library_at(&back.library, 1)->hash);
+    CHECK(gs_library_at(&back.library, 1)->hash !=
+          gs_library_at(&back.library, 2)->hash);
+}
+
 TEST(an_empty_store_round_trips_rather_than_failing) {
     (void)ren;
 
@@ -2254,6 +2299,7 @@ int main(void) {
     run_a_time_reads_the_way_people_say_it(ren);
     run_a_finished_race_becomes_a_table_in_the_order_it_finished(ren);
     run_the_store_remembers_drivers_and_records_between_runs(ren);
+    run_the_store_carries_the_library_too(ren);
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);

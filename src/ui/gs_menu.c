@@ -43,6 +43,7 @@ void gs_menu_init(gs_menu *m) {
     gs_records_clear(&m->records);
 
     m->screen = GS_SCREEN_TITLE;
+    m->chosen = -1;
     m->editing = -1;
     m->picking_for = -1;
     m->new_colour = GS_COLOUR_RED;
@@ -62,14 +63,19 @@ void gs_menu_init(gs_menu *m) {
 
 // --- the store --------------------------------------------------------------
 //
-// Profiles and records in one file, because they are one thing: a record with
-// a name on it is only a record if the name still means somebody.
+// Profiles, records and the library in one file, because they are one thing: a
+// record with a name on it is only a record if the name still means somebody,
+// and it is only a record of anything if the track is still here.
+//
+// Version 2 added the library. Version 1 files are refused rather than
+// half-read - see the tail in COMPLETION_PLAN.md about a migration path, which
+// this is now the first real reason to build.
 
 #define GS_STORE_MAGIC   0x54535347u   // "GSST"
-#define GS_STORE_VERSION 1u
+#define GS_STORE_VERSION 2u
 
 size_t gs_menu_save(const gs_menu *m, uint8_t *buf, size_t cap) {
-    size_t head = 12;
+    size_t head = 16;
     if (cap < head) return 0;
 
     size_t pn = gs_profiles_serialize(&m->profiles, buf + head, cap - head);
@@ -77,6 +83,10 @@ size_t gs_menu_save(const gs_menu *m, uint8_t *buf, size_t cap) {
 
     size_t rn = gs_records_serialize(&m->records, buf + head + pn, cap - head - pn);
     if (rn == 0 && m->records.count > 0) return 0;
+
+    size_t ln = gs_library_serialize(&m->library, buf + head + pn + rn,
+                                     cap - head - pn - rn);
+    if (ln == 0 && m->library.count > 0) return 0;
 
     buf[0] = (uint8_t)(GS_STORE_MAGIC & 0xffu);
     buf[1] = (uint8_t)((GS_STORE_MAGIC >> 8) & 0xffu);
@@ -88,22 +98,32 @@ size_t gs_menu_save(const gs_menu *m, uint8_t *buf, size_t cap) {
     buf[9]  = (uint8_t)((pn >> 8) & 0xffu);
     buf[10] = (uint8_t)((pn >> 16) & 0xffu);
     buf[11] = (uint8_t)((pn >> 24) & 0xffu);
-    return head + pn + rn;
+    buf[12] = (uint8_t)(rn & 0xffu);
+    buf[13] = (uint8_t)((rn >> 8) & 0xffu);
+    buf[14] = (uint8_t)((rn >> 16) & 0xffu);
+    buf[15] = (uint8_t)((rn >> 24) & 0xffu);
+    return head + pn + rn + ln;
 }
 
 bool gs_menu_load(gs_menu *m, const uint8_t *buf, size_t len) {
-    if (len < 12) return false;
+    if (len < 16) return false;
     uint32_t magic = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) |
                      ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
     if (magic != GS_STORE_MAGIC || buf[4] != GS_STORE_VERSION) return false;
 
     size_t pn = (size_t)buf[8] | ((size_t)buf[9] << 8) |
                 ((size_t)buf[10] << 16) | ((size_t)buf[11] << 24);
-    if (12 + pn > len) return false;
+    size_t rn = (size_t)buf[12] | ((size_t)buf[13] << 8) |
+                ((size_t)buf[14] << 16) | ((size_t)buf[15] << 24);
+    if (16 + pn + rn > len) return false;
 
-    if (pn > 0 && !gs_profiles_deserialize(&m->profiles, buf + 12, pn)) return false;
-    if (12 + pn < len) {
-        if (!gs_records_deserialize(&m->records, buf + 12 + pn, len - 12 - pn)) {
+    if (pn > 0 && !gs_profiles_deserialize(&m->profiles, buf + 16, pn)) return false;
+    if (rn > 0 && !gs_records_deserialize(&m->records, buf + 16 + pn, rn)) {
+        return false;
+    }
+    if (16 + pn + rn < len) {
+        if (!gs_library_deserialize(&m->library, buf + 16 + pn + rn,
+                                    len - 16 - pn - rn)) {
             return false;
         }
     }
