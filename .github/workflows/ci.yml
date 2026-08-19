@@ -100,8 +100,14 @@ jobs:
       # RHEL-family box needs EPEL too. See ext/README.md.
       - name: Install dependencies
         run: |
-          dnf -y install epel-release
-          dnf -y --enablerepo=crb install git gcc gcc-c++ cmake ninja-build \
+          # `install_weak_deps=False` is dnf's `--no-install-recommends`, and
+          # leaving it out cost more than anything else in CI: 351 packages and
+          # 253 MB into a minimal container, against 56 packages and 8 MB on
+          # the Debian side that had been told not to. `nodocs` drops manuals
+          # nothing in a container will ever read.
+          dnf_opts="--setopt=install_weak_deps=False --setopt=tsflags=nodocs -y"
+          dnf $dnf_opts install epel-release
+          dnf $dnf_opts --enablerepo=crb install git gcc gcc-c++ cmake ninja-build \
             libX11-devel libXext-devel libXrandr-devel libXi-devel \
             libXcursor-devel libXfixes-devel libXScrnSaver-devel libXtst-devel \
             libxkbcommon-devel \

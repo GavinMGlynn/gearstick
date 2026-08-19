@@ -272,6 +272,112 @@ static int cmd_validate(void) {
     return 0;
 }
 
+// --- the roster sweep -----------------------------------------------------
+//
+// Race every vehicle over a handful of deliberately different conditions and
+// see who wins what. **The claim being tested is that nobody wins everything**:
+// a roster where one machine is simply best is a roster with one vehicle in it
+// and five decorations, and the whole premise of the game is that everything is
+// a trade.
+//
+// This is the analyser in miniature. The real one sweeps gravity and vehicle
+// across an authored track and draws the result over the editor; that is Phase
+// 9. This asks the same question with fixed scenarios and no track files.
+
+typedef struct gs_scenario {
+    const char *name;
+    gs_surface  surface;
+    gs_fix      gravity;    // multiple of Earth
+    bool        twisty;     // steer back and forth rather than run straight
+    bool        drop;       // start on a cliff, so landing intact is the test
+} gs_scenario;
+
+static void gs_scenario_track(gs_track *t, const gs_scenario *sc) {
+    gs_track_init(t, 64, 24, sc->surface);
+    if (!sc->drop) return;
+
+    // A shelf that ends, so the run is decided by what the landing does rather
+    // than by how fast the car got there.
+    for (uint8_t y = 0; y <= t->h; y++)
+        for (uint8_t x = 0; x <= t->w; x++)
+            gs_track_set_corner(t, x, y, x <= 10 ? GS_INT(14) : 0);
+}
+
+// How far along the track a vehicle got in ten seconds, in tiles. A wreck
+// scores whatever it managed before it stopped, which is the point of including
+// a drop at all.
+static double gs_run_scenario(const gs_scenario *sc, uint8_t vehicle) {
+    static gs_track t;
+    gs_scenario_track(&t, sc);
+
+    gs_world w;
+    gs_world_init(&w, sc->gravity);
+    gs_world_add_car(&w, &t, vehicle, GS_INT(2), GS_INT(12), 0);
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * 10; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        if (sc->twisty) {
+            if ((i / 45u) % 2u == 0u) in[0] |= GS_IN_LEFT;
+            else in[0] |= GS_IN_RIGHT;
+        }
+        gs_world_step(&w, &t, in);
+    }
+    return (double)(w.car[0].x - GS_INT(2)) / (double)GS_ONE;
+}
+
+static int cmd_roster(void) {
+    const gs_scenario scenarios[] = {
+        { "pavement sprint", GS_SURF_PAVEMENT, GS_ONE,             false, false },
+        { "ice",             GS_SURF_ICE,      GS_ONE,             false, false },
+        { "dirt, twisty",    GS_SURF_DIRT,     GS_ONE,             true,  false },
+        { "pavement, twisty",GS_SURF_PAVEMENT, GS_ONE,             true,  false },
+        { "moon, twisty",    GS_SURF_PAVEMENT, GS_RATIO(17, 100),  true,  false },
+        { "jupiter",         GS_SURF_PAVEMENT, GS_RATIO(253, 100), false, false },
+        { "off a shelf",     GS_SURF_DIRT,     GS_ONE,             false, true  },
+    };
+    const size_t count = sizeof scenarios / sizeof scenarios[0];
+
+    printf("%-18s", "");
+    for (uint8_t v = 0; v < GS_VEH_COUNT; v++) printf("%12s", gs_vehicle(v)->name);
+    printf("\n");
+
+    uint8_t wins[GS_VEH_COUNT] = { 0 };
+
+    for (size_t i = 0; i < count; i++) {
+        double best = -1e9;
+        uint8_t winner = 0;
+        double got[GS_VEH_COUNT];
+
+        for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
+            got[v] = gs_run_scenario(&scenarios[i], v);
+            if (got[v] > best) { best = got[v]; winner = v; }
+        }
+        wins[winner]++;
+
+        printf("%-18s", scenarios[i].name);
+        for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
+            printf("%11.1f%s", got[v], v == winner ? "*" : " ");
+        }
+        printf("\n");
+    }
+
+    printf("\n%-18s", "wins");
+    for (uint8_t v = 0; v < GS_VEH_COUNT; v++) printf("%12u", wins[v]);
+    printf("\n\n");
+
+    uint8_t distinct = 0;
+    for (uint8_t v = 0; v < GS_VEH_COUNT; v++) if (wins[v] > 0) distinct++;
+
+    if (distinct < 2) {
+        printf("FAIL   one vehicle wins everything: that is a roster of one and "
+               "five decorations\n");
+        return 1;
+    }
+    printf("OK     %u different vehicles win something across %zu conditions\n",
+           distinct, count);
+    return 0;
+}
+
 static int cmd_vehicles(void) {
     printf("%-13s %7s %7s %6s %6s %8s %6s\n",
            "vehicle", "power", "brake", "top", "grip", "steer", "tough");
@@ -305,6 +411,7 @@ static int usage(void) {
            "hash\n"
            "  track FILE           write a track, read it back, check it survived\n"
            "  validate             show what the route checker accepts and refuses\n"
+           "  roster               race every vehicle over every condition\n"
            "  vehicles             the roster and its numbers\n"
            "  gravity              the presets\n\n"
            "This program links the simulation and nothing else - no SDL, no "
@@ -322,6 +429,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "track") == 0 && argc > 2) return cmd_track(argv[2]);
     if (strcmp(argv[1], "validate") == 0) return cmd_validate();
+    if (strcmp(argv[1], "roster") == 0) return cmd_roster();
     if (strcmp(argv[1], "vehicles") == 0) return cmd_vehicles();
     if (strcmp(argv[1], "gravity") == 0) return cmd_gravity();
 

@@ -112,6 +112,21 @@ and, in CI, on **Ubuntu 24.04 (GCC 14), Rocky Linux 10 (GCC), macOS arm64
 architectures, one number. That is the entire argument for the integer
 discipline, and it is now evidence rather than reasoning.
 
+### The golden hash has moved twice, both on purpose
+
+It is the tripwire that says the physics changed, so every time it moves the
+reason is recorded here rather than quietly absorbed:
+
+1. **Gates joined a track's identity.** Only the *track* hash moved; the world
+   hash did not, because the simulation does not read gates. That is exactly
+   what keeping the two numbers apart is for.
+2. **The grip circle.** Engine force is now capped by the traction available,
+   so tyres matter off the line and not only in corners, and low gravity takes
+   your acceleration away along with your weight. Every replay and ghost time
+   recorded before this is invalid. It was made because the roster sweep found
+   the alternative: with traction limiting cornering alone, nothing but top
+   speed decided a race and one vehicle won all seven conditions.
+
 ### The frame clock — `src/core/gs_clock.c`
 
 The accumulator that turns "however long that frame took" into "how many fixed

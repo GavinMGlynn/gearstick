@@ -732,6 +732,65 @@ TEST(ice_lets_go_of_a_sliding_car_long_after_pavement_has_caught_it) {
     CHECK(gs_fix_abs(wi.car[0].vy) > GS_INT(2));
 }
 
+// Take the same corner at the same speed on a given surface, and report both
+// halves of what happened: how far the car's *velocity* turned, and how far
+// that lags where the car is pointing.
+//
+// The lag is the interesting number. A car on ice will point wherever you steer
+// it while continuing in a straight line, so a test that watched the heading
+// alone would call that a corner taken.
+typedef struct gs_corner {
+    double turned;   // degrees the velocity came round
+    double slip;     // degrees between where it points and where it is going
+} gs_corner;
+
+static gs_corner gs_take_corner(gs_surface surface) {
+    static gs_track t;
+    gs_track_init(&t, 60, 60, surface);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+    w.car[0].vx = GS_INT(5);
+
+    gs_angle before = gs_atan2(w.car[0].vy, w.car[0].vx);
+
+    gs_input in[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_LEFT), 0, 0, 0 };
+    for (int i = 0; i < GS_TICK_HZ * 3 / 2; i++) gs_world_step(&w, &t, in);
+
+    gs_angle after = gs_atan2(w.car[0].vy, w.car[0].vx);
+
+    int32_t turned = gs_angle_delta(before, after);
+    int32_t slip = gs_angle_delta(after, w.car[0].heading);
+    if (turned < 0) turned = -turned;
+    if (slip < 0) slip = -slip;
+
+    return (gs_corner){ (double)turned / 65536.0 * 360.0,
+                        (double)slip / 65536.0 * 360.0 };
+}
+
+TEST(the_same_corner_at_the_same_speed_is_takeable_on_pavement_and_not_on_ice) {
+    gs_corner pavement = gs_take_corner(GS_SURF_PAVEMENT);
+    gs_corner dirt = gs_take_corner(GS_SURF_DIRT);
+    gs_corner ice = gs_take_corner(GS_SURF_ICE);
+
+    // On pavement the car goes exactly where it points: the corner is simply
+    // taken, and there is nothing to correct for.
+    CHECK(pavement.slip < 2.0);
+    CHECK(pavement.turned > 35.0);
+
+    // On ice it points into the corner and carries straight on, which is the
+    // whole character of the surface and the reason a corner that is nothing on
+    // pavement is a problem here.
+    CHECK(ice.slip > 20.0);
+    CHECK(ice.turned < pavement.turned / 3.0);
+
+    // Dirt is between them on both counts, so the three are a spread rather
+    // than two surfaces and a spare.
+    CHECK(dirt.turned < pavement.turned && dirt.turned > ice.turned);
+    CHECK(dirt.slip > pavement.slip && dirt.slip < ice.slip);
+}
+
 // ---------------------------------------------------------------------------
 // Jumping - the part the whole game is about
 // ---------------------------------------------------------------------------
@@ -1178,6 +1237,7 @@ int main(void) {
     run_a_car_left_on_a_slope_rolls_downhill_and_one_on_the_flat_does_not();
     run_a_car_turns_more_sharply_at_a_crawl_than_at_speed();
     run_ice_lets_go_of_a_sliding_car_long_after_pavement_has_caught_it();
+    run_the_same_corner_at_the_same_speed_is_takeable_on_pavement_and_not_on_ice();
     run_a_ramp_throws_a_car_into_the_air_without_being_told_it_is_a_ramp();
     run_a_jump_lands_where_the_closed_form_says_it_should();
     run_halving_gravity_doubles_a_jump_from_the_same_take_off();

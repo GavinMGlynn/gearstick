@@ -123,6 +123,21 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
             else accel -= gs_fix_mul(gs_fix_mul(v->power, GS_HALF), sd->drive);
         }
 
+        // --- The grip circle, in the one form simple enough to predict: you
+        // have only so much traction, and putting the engine through it does
+        // not create more. Without this, tyres matter in corners and nowhere
+        // else, low gravity costs you nothing off the line, and ice is merely a
+        // weaker engine for everybody - which makes the whole roster a contest
+        // of top speed.
+        //
+        // With it, a grippy car gets off the line on ice where a heavy one
+        // spins, and the Moon takes away your acceleration along with your
+        // weight. Both are things a player can feel and predict.
+        gs_fix traction = gs_fix_mul(gs_fix_mul(sd->grip, v->grip),
+                                     gs_fix_mul(g, w->friction_scale));
+        if (accel > traction) accel = traction;
+        if (accel < -traction) accel = -traction;
+
         vlong += gs_fix_mul(accel, dt);
 
         // --- Rolling resistance and air drag. Drag matters only near the top
@@ -138,9 +153,7 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in) 
         // acceleration the tyres and the surface can produce - and because that
         // is expressed as a multiple of gravity, a low-gravity pocket makes
         // every surface slippery. That interaction is the point of the brush.
-        gs_fix grip = gs_fix_mul(gs_fix_mul(sd->grip, v->grip),
-                                 gs_fix_mul(g, w->friction_scale));
-        vlat = gs_toward_zero(vlat, gs_fix_mul(grip, dt));
+        vlat = gs_toward_zero(vlat, gs_fix_mul(traction, dt));
 
         // --- Back to world axes.
         c->vx = gs_fix_mul(vlong, cos_h) - gs_fix_mul(vlat, sin_h);
