@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 27 of 60 items, every
+**Phases 0 to 3 are complete, and Phase 4 has started — 28 of 60 items, every
 one of them with its verification actually run.** Phase 4 is the editor and is
 about half the remaining work.
 
@@ -165,8 +165,13 @@ whatever the UI turns out to be — then the interface on top.
       brush stroke undoes as one action; a new edit drops the redo tail; edits
       that change nothing leave no step in the history; and a full log refuses
       the edit rather than applying one it could not take back.*
-- [ ] **A grid cursor and a piece palette.** *Verification: a track built
-      entirely through the editor saves, reloads and races.*
+- [x] **A grid cursor and a piece palette.** *Verification: a track built with
+      the brushes — a ramp raised a strip at a time, a field of ice, a painted
+      low-gravity pocket — saves, reloads to an identical hash, and is then
+      driven over: the car climbs what was built and leaves the ground at the
+      top of it. The cursor is pinned separately by a round trip: project a
+      known point, pick the pixel it landed on, and land back within a hundredth
+      of a tile.*
 - [ ] **Raise and lower elevation as a brush.** *Verification: an edited ramp
       matches what the editor drew when driven over.*
 - [ ] **Paint surface, and paint gravity.** *Verification: painted tiles change
@@ -282,3 +287,16 @@ Found while implementing something else. Added when found, not when remembered.
       frontend needs its own item to actually run a race.
 - [ ] **`assets/` is empty and exists only so the install rules have something
       to copy.** Fine now; a smell if it is still true at Phase 10.
+- [ ] **Import a corpus of real tracks to test against.** Our own tracks will
+      all have been built by whoever wrote the editor, which is the worst
+      possible sample. The *Stunts* corpus is the target — documented format,
+      grid-based with elevation and three surfaces, hundreds of community
+      tracks — and it belongs with the analyser in Phase 9, where "is this
+      completable" is the question being asked. Its repository's licence is
+      unclear and must be checked first. Reference only; nothing imported ships.
+- [ ] **Read the original's manual for its designers' notes on the 50 stock
+      tracks.** They say what each track was *for* — one built to aim both
+      drivers at each other on pavement, another the shortest buildable track so
+      you do not have to go far to find someone to hit. That is design rationale
+      from the authors, it needs no reverse engineering, and it should inform
+      our own stock tracks before they are built.

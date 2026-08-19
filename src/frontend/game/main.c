@@ -19,6 +19,11 @@
 #include "gfx/gs_render.h"
 #include "platform/gs_input.h"
 #include "platform/gs_paths.h"
+#include "ui/gs_editor.h"
+
+#include "dcimgui.h"
+#include "backends/dcimgui_impl_sdl3.h"
+#include "backends/dcimgui_impl_sdlrenderer3.h"
 
 #define GS_WINDOW_W 1280
 #define GS_WINDOW_H 720
@@ -34,6 +39,7 @@ typedef struct gs_app {
     uint8_t  views;
 
     gs_input_state input;
+    gs_editor      editor;
 
     uint64_t last_ns;
     gs_clock clock;
@@ -44,6 +50,7 @@ typedef struct gs_app {
     const char *shot_path;
     uint64_t    shot_at;
     bool        overlay;      // start with the painted-gravity overlay on
+    bool        start_in_editor;
     bool        quit;
 } gs_app;
 
@@ -123,11 +130,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->shot_at = (uint64_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--overlay") == 0) {
             a->overlay = true;
+        } else if (SDL_strcmp(argv[i], "--editor") == 0) {
+            a->start_in_editor = true;
         } else if (SDL_strcmp(argv[i], "--help") == 0) {
             SDL_Log("gearstick - arrows drive car one, WASD car two.");
             SDL_Log("  --shot FILE     write a frame and exit");
             SDL_Log("  --shot-at TICK  which tick to write it at (default 0)");
             SDL_Log("  --overlay       start with the painted-gravity overlay on");
+            SDL_Log("  --editor        open in the construction set");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
                     "Esc quits.");
             return SDL_APP_SUCCESS;
@@ -146,9 +156,31 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     }
 
     gs_input_init(&a->input);
+
+    // Dear ImGui, for the editor's panels. See CMakeLists.txt for why there is
+    // C++ in a C project at all.
+    ImGui_CreateContext(nullptr);
+    ImGuiIO *io = ImGui_GetIO();
+    // No imgui.ini. There is no window layout worth persisting yet, and the
+    // default drops a file in whatever directory the game happened to start in.
+    io->IniFilename = nullptr;
+
+    if (!cImGui_ImplSDL3_InitForSDLRenderer(a->win, a->ren) ||
+        !cImGui_ImplSDLRenderer3_Init(a->ren)) {
+        SDL_Log("could not start Dear ImGui");
+        return SDL_APP_FAILURE;
+    }
+
+    if (!gs_editor_init(&a->editor, 65536)) {
+        SDL_Log("could not allocate the edit history");
+        return SDL_APP_FAILURE;
+    }
+
     gs_demo_track(&a->t);
     gs_start_race(a);
     gs_layout(a);
+
+    if (a->start_in_editor) gs_editor_toggle(&a->editor, &a->view[0]);
 
     SDL_Log("gearstick: assets at %s", gs_assets_dir());
     SDL_Log("gearstick: track hash 0x%016llx",
@@ -163,6 +195,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
     gs_app *a = (gs_app *)appstate;
 
     gs_input_event(&a->input, e);
+    cImGui_ImplSDL3_ProcessEvent(e);
 
     switch (e->type) {
     case SDL_EVENT_QUIT:
@@ -177,6 +210,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
                 a->view[i].show_gravity = !a->view[i].show_gravity;
         }
         if (e->key.key == SDLK_R) gs_start_race(a);
+        // Tab is the whole loop: build, drive, build. No load step between
+        // them, which is the single biggest thing the original could not do.
+        if (e->key.key == SDLK_TAB) gs_editor_toggle(&a->editor, &a->view[0]);
         break;
     default:
         break;
@@ -210,6 +246,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         }
     }
 
+    // The race is paused while the track is being built - a car ploughing on
+    // through terrain that is changing under it helps nobody.
+    if (a->editor.active) steps = 0;
+
     for (uint32_t i = 0; i < steps; i++) {
         gs_input in[GS_MAX_CARS];
         gs_input_poll(&a->input, in, a->world.car_count);
@@ -220,22 +260,59 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
     float alpha = gs_to_f(gs_clock_alpha(&a->clock));
 
+    cImGui_ImplSDLRenderer3_NewFrame();
+    cImGui_ImplSDL3_NewFrame();
+    ImGui_NewFrame();
+
+    // While editing, one view of the whole window rather than a split screen:
+    // you are looking at the part of the track you are building, not at a car.
+    uint8_t views = a->editor.active ? (uint8_t)1 : a->views;
+    if (a->editor.active) {
+        int w = 0, h = 0;
+        SDL_GetRenderOutputSize(a->ren, &w, &h);
+        a->view[0].rect = (SDL_Rect){ 0, 0, w, h };
+        a->view[0].cam.cx = a->editor.cam_x;
+        a->view[0].cam.cy = a->editor.cam_y;
+        a->view[0].cam.cz = 0.0f;
+        a->view[0].cam.zoom = a->editor.zoom;
+
+        // Panning. Held keys rather than events, so it accelerates smoothly and
+        // does not depend on the OS's key-repeat rate.
+        const bool *key = SDL_GetKeyboardState(nullptr);
+        if (key != nullptr) {
+            float pan = 12.0f * (float)delta / 1e9f;
+            if (key[SDL_SCANCODE_LEFT])  { a->editor.cam_x -= pan; a->editor.cam_y += pan; }
+            if (key[SDL_SCANCODE_RIGHT]) { a->editor.cam_x += pan; a->editor.cam_y -= pan; }
+            if (key[SDL_SCANCODE_UP])    { a->editor.cam_x -= pan; a->editor.cam_y -= pan; }
+            if (key[SDL_SCANCODE_DOWN])  { a->editor.cam_x += pan; a->editor.cam_y += pan; }
+        }
+
+        gs_editor_frame(&a->editor, &a->t, &a->view[0]);
+    }
+
     SDL_SetRenderDrawColor(a->ren, 18, 20, 26, 255);
     SDL_RenderClear(a->ren);
 
-    for (uint8_t i = 0; i < a->views; i++) {
-        gs_render_track_camera(&a->view[i], &a->prev, &a->world, alpha);
+    for (uint8_t i = 0; i < views; i++) {
+        if (!a->editor.active) {
+            gs_render_track_camera(&a->view[i], &a->prev, &a->world, alpha);
+        }
         gs_render_view(a->ren, &a->t, &a->prev, &a->world, alpha, &a->view[i]);
     }
 
+    if (a->editor.active) gs_editor_draw_cursor(&a->editor, a->ren, &a->t, &a->view[0]);
+
     // The divider between the two halves of a split screen, so it reads as two
     // views and not as one confusing one.
-    if (a->views > 1) {
+    if (views > 1) {
         int w = 0, h = 0;
         SDL_GetRenderOutputSize(a->ren, &w, &h);
         SDL_SetRenderDrawColor(a->ren, 8, 9, 12, 255);
         SDL_RenderFillRect(a->ren, &(SDL_FRect){ (float)(w / 2 - 1), 0.0f, 3.0f, (float)h });
     }
+
+    ImGui_Render();
+    cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), a->ren);
 
     if (a->shot_path != nullptr) {
         SDL_Surface *s = SDL_RenderReadPixels(a->ren, nullptr);
@@ -259,6 +336,12 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     gs_app *a = (gs_app *)appstate;
     if (a == nullptr) return;
 
+    gs_editor_quit(&a->editor);
+    if (a->ren != nullptr) {
+        cImGui_ImplSDLRenderer3_Shutdown();
+        cImGui_ImplSDL3_Shutdown();
+        ImGui_DestroyContext(nullptr);
+    }
     gs_input_quit(&a->input);
     if (a->ren != nullptr) SDL_DestroyRenderer(a->ren);
     if (a->win != nullptr) SDL_DestroyWindow(a->win);

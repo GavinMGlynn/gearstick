@@ -18,6 +18,7 @@
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
 #include "gfx/gs_render.h"
+#include "ui/gs_editor.h"
 
 #define GS_W 640
 #define GS_H 480
@@ -313,6 +314,143 @@ TEST(a_ramp_is_drawn_with_no_seam_and_no_hole) {
     gs_frame_free(&f);
 }
 
+TEST(picking_a_pixel_finds_the_ground_that_was_drawn_there) {
+    (void)ren;   // this one is arithmetic, not pixels
+
+    static gs_track t;
+    gs_flat_pavement(&t, 24, 24);
+
+    // Sloped, so the iteration in gs_iso_pick has something to converge on. A
+    // flat track would pass even if the height feedback were missing entirely.
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++)
+            gs_track_set_corner(&t, x, y, (gs_fix)((int64_t)GS_INT(1) * x / 4));
+
+    gs_camera cam = gs_camera_on(12.0f, 12.0f, 1.0f);
+
+    // Project a spread of known ground points, then pick the pixel each landed
+    // on and check we get back where we started. Round trip, both directions.
+    double worst = 0.0;
+    for (float wy = 4.0f; wy < 20.0f; wy += 1.7f) {
+        for (float wx = 4.0f; wx < 20.0f; wx += 1.3f) {
+            gs_fix h = gs_track_height(&t, (gs_fix)(wx * GS_ONE), (gs_fix)(wy * GS_ONE));
+
+            float sx = 0, sy = 0;
+            gs_iso_project(&cam, wx, wy, gs_to_f(h), &sx, &sy);
+
+            float px = 0, py = 0;
+            bool on = gs_iso_pick(&cam, &t, sx, sy, &px, &py);
+            CHECK(on);
+
+            double err = SDL_fabs(px - wx) + SDL_fabs(py - wy);
+            if (err > worst) worst = err;
+        }
+    }
+    // A hundredth of a tile is far finer than a cursor needs to be.
+    CHECK(worst < 0.01);
+
+    // And a pixel well outside the track reports itself as outside rather than
+    // clamping silently onto the edge.
+    float ox = 0, oy = 0;
+    CHECK(!gs_iso_pick(&cam, &t, -10000.0f, 0.0f, &ox, &oy));
+
+    // Ground far steeper than the projection ray - a wall, which the editor can
+    // build - is where the iteration stops converging. It must still return.
+    static gs_track wall;
+    gs_flat_pavement(&wall, 24, 24);
+    for (uint8_t y = 0; y <= wall.h; y++)
+        for (uint8_t x = 0; x <= wall.w; x++)
+            gs_track_set_corner(&wall, x, y, x >= 12 ? GS_INT(30) : 0);
+
+    for (float sy = 0.0f; sy < (float)GS_H; sy += 37.0f) {
+        float px = 0, py = 0;
+        gs_iso_pick(&cam, &wall, (float)GS_W * 0.5f, sy, &px, &py);
+        CHECK(px > -5000.0f && px < 5000.0f);   // finite, and it came back
+    }
+}
+
+TEST(a_track_built_with_the_brushes_saves_reloads_and_races) {
+    (void)ren;
+
+    // The whole loop, end to end: build it with the brushes the editor gives a
+    // player, write it, read it back, and drive on what came back.
+    static gs_track built, loaded;
+    gs_flat_pavement(&built, 32, 12);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 8192));
+
+    // A ramp, raised a strip at a time exactly as dragging the brush would.
+    ed.brush = GS_BRUSH_RAISE;
+    ed.radius = 0;
+    ed.step = 0.25f;
+    gs_edit_begin(ed.log);
+    for (int pass = 0; pass < 4; pass++) {
+        for (float x = 9.0f + (float)pass; x < 14.0f; x += 1.0f) {
+            for (float y = 0.0f; y < 13.0f; y += 1.0f) {
+                gs_editor_paint(&ed, &built, x, y);
+            }
+        }
+    }
+    gs_edit_end(ed.log);
+
+    // A field of ice past the landing, and a low-gravity pocket over the jump.
+    ed.brush = GS_BRUSH_SURFACE;
+    ed.surface = GS_SURF_ICE;
+    ed.radius = 2;
+    gs_edit_begin(ed.log);
+    for (float x = 20.0f; x < 28.0f; x += 1.0f) gs_editor_paint(&ed, &built, x, 6.0f);
+    gs_edit_end(ed.log);
+
+    ed.brush = GS_BRUSH_GRAVITY;
+    ed.gravity = 0.35f;
+    gs_edit_begin(ed.log);
+    for (float x = 15.0f; x < 19.0f; x += 1.0f) gs_editor_paint(&ed, &built, x, 6.0f);
+    gs_edit_end(ed.log);
+
+    // Three strokes, three undo steps - not several hundred.
+    CHECK(gs_edit_undo_depth(ed.log) == 3);
+
+    // The brushes actually changed the ground, the surface and the gravity.
+    CHECK(gs_track_height(&built, GS_INT(13), GS_INT(6)) > 0);
+    CHECK(gs_track_surface(&built, GS_INT(24), GS_INT(6)) == GS_SURF_ICE);
+    CHECK(gs_track_gravity(&built, GS_INT(16), GS_INT(6)) < GS_ONE);
+
+    // And the radius is a radius. Checked off the line the brush was dragged
+    // along, because a tile on that line is painted by a brush of any size at
+    // all - including one that ignored the setting entirely.
+    CHECK(gs_track_surface(&built, GS_INT(24), GS_INT(4)) == GS_SURF_ICE);
+    CHECK(gs_track_surface(&built, GS_INT(24), GS_INT(1)) == GS_SURF_PAVEMENT);
+
+    // Saves, and reloads to the same track.
+    CHECK(gs_editor_save(&ed, &built));
+    gs_track_init(&loaded, 4, 4, GS_SURF_DIRT);      // deliberately not the same
+    CHECK(gs_editor_load(&ed, &loaded));
+    CHECK(gs_track_hash(&loaded) == gs_track_hash(&built));
+
+    // And races. Not "loads without crashing" - a car driven over the ramp that
+    // was built has to leave the ground, which is the only thing that proves
+    // the shape survived the trip.
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &loaded, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(6), 0);
+
+    bool flew = false;
+    gs_fix highest = 0;
+    for (int i = 0; i < GS_TICK_HZ * 12; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &loaded, in);
+        if (!w.car[0].grounded) flew = true;
+        if (w.car[0].z > highest) highest = w.car[0].z;
+    }
+
+    CHECK(w.car[0].x > GS_INT(14));   // it got past the ramp
+    CHECK(highest > 0);               // it climbed what was built
+    CHECK(flew);                      // and left the ground at the top of it
+
+    gs_editor_quit(&ed);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -340,6 +478,8 @@ int main(void) {
     run_the_view_does_not_jump_as_a_car_crosses_a_tile_boundary(ren);
     run_interpolation_places_a_car_between_the_two_ticks_it_sits_between(ren);
     run_a_ramp_is_drawn_with_no_seam_and_no_hole(ren);
+    run_picking_a_pixel_finds_the_ground_that_was_drawn_there(ren);
+    run_a_track_built_with_the_brushes_saves_reloads_and_races(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

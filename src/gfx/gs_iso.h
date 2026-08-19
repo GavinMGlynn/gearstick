@@ -35,4 +35,20 @@ static inline float gs_iso_depth(float wx, float wy) { return wx + wy; }
 // Convenience for the fixed-point side of the fence.
 static inline float gs_to_f(gs_fix v) { return (float)v / (float)GS_ONE; }
 
+// The inverse: which point on the ground is under this pixel.
+//
+// It is not a straight inversion, because the projection throws a dimension
+// away — a screen position maps to a *line* through the world, and which point
+// on that line you meant depends on how high the ground is there, which is what
+// you are trying to find out. So it iterates: assume the ground is at the
+// camera's height, solve, sample the terrain where that lands, solve again.
+// Four passes is plenty at any slope a car can drive on.
+//
+// Returns false if the answer is off the authored track, having still written
+// the position — the editor wants to know where the pointer is even when it is
+// out of bounds.
+struct gs_track;
+bool gs_iso_pick(const gs_camera *cam, const struct gs_track *t,
+                 float sx, float sy, float *wx, float *wy);
+
 #endif // GS_ISO_H

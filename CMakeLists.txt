@@ -3,7 +3,11 @@ cmake_minimum_required(VERSION 3.28)
 project(gearstick
     VERSION     0.1.0
     DESCRIPTION "Gearstick - a Racing Destruction Set-style construction racer in C23 + SDL3"
-    LANGUAGES   C)
+    # C is the project. CXX is here for exactly one reason: Dear ImGui, which
+    # the editor's panels are built on and which is C++ underneath its C API.
+    # Nothing of ours is written in it - see the gearstick_ui target below, and
+    # docs/PROJECT_STATUS.md for why the exception was worth making.
+    LANGUAGES   C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -27,6 +31,11 @@ endif()
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+
+# Dear ImGui's floor. Ours is C23; this applies to the vendored C++ alone.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)   # so clangd/IDEs see -std=c23
 
 include(Platform)
@@ -106,16 +115,64 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# The editor's UI - Dear ImGui, and the generated C API over it
+#
+# **The one C++ in the project, and none of it is ours.** Palettes, property
+# panels, validation output and live tuning dials are what C is worst at and
+# what kills projects shaped like this one; immediate mode removes widget
+# lifetimes and state synchronisation entirely, which is what makes it right for
+# a tool even where it would be wrong for a shipping interface.
+#
+# Deliberately NOT passed through gs_configure(): vendored and generated code is
+# built under its own settings, exactly like SDL. Warnings we cannot fix are
+# warnings people learn to scroll past.
+#
+# src/ui/dcimgui/ is generated and committed - see its README, and
+# tools/make_imgui_bindings.py.
+# ---------------------------------------------------------------------------
+add_library(gearstick_ui STATIC
+    ext/imgui/imgui.cpp
+    ext/imgui/imgui_draw.cpp
+    ext/imgui/imgui_tables.cpp
+    ext/imgui/imgui_widgets.cpp
+    # imgui_demo.cpp is not optional despite the name: ShowStyleSelector and
+    # ShowUserGuide live in it, the generated bindings export both, and leaving
+    # it out is an undefined reference at link time rather than a smaller
+    # binary. It brings the demo window along, which is worth having while
+    # building an editor anyway.
+    ext/imgui/imgui_demo.cpp
+    ext/imgui/backends/imgui_impl_sdl3.cpp
+    ext/imgui/backends/imgui_impl_sdlrenderer3.cpp
+    src/ui/dcimgui/dcimgui.cpp
+    src/ui/dcimgui/backends/dcimgui_impl_sdl3.cpp
+    src/ui/dcimgui/backends/dcimgui_impl_sdlrenderer3.cpp)
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui/imgui.cpp")
+    message(FATAL_ERROR
+        "ext/imgui is empty - the submodules are not checked out.\n"
+        "  git submodule update --init --depth 1 ext/imgui")
+endif()
+
+target_include_directories(gearstick_ui PUBLIC
+    ext/imgui
+    ext/imgui/backends
+    src/ui/dcimgui
+    src/ui/dcimgui/backends)
+target_link_libraries(gearstick_ui PUBLIC ${GS_SDL})
+set_target_properties(gearstick_ui PROPERTIES C_VISIBILITY_PRESET hidden)
+
+# ---------------------------------------------------------------------------
 # The shell - everything the simulation deliberately cannot do
 # ---------------------------------------------------------------------------
 add_library(gearstick_shell STATIC
+    src/ui/gs_editor.c
     src/gfx/gs_iso.c
     src/gfx/gs_render.c
     src/platform/gs_paths.c
     src/platform/gs_input.c)
 
 target_include_directories(gearstick_shell PUBLIC src)
-target_link_libraries(gearstick_shell PUBLIC gearstick_sim ${GS_SDL})
+target_link_libraries(gearstick_shell PUBLIC gearstick_sim gearstick_ui ${GS_SDL})
 
 # Where the art lives when running straight out of the build tree, so the
 # ordinary edit-build-run loop needs no install step. See src/platform/gs_paths.c.
