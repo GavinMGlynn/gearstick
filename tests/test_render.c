@@ -18,6 +18,7 @@
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
 #include "gfx/gs_render.h"
+#include "platform/gs_bind.h"
 #include "ui/gs_editor.h"
 
 #define GS_W 640
@@ -1281,39 +1282,49 @@ TEST(each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one) {
     }
 
     // Four quarter-sized views are a window's worth of pixels between them, so
-    // four-up should not cost four times one-up. Measured rather than assumed,
-    // because "it should be fine" is how frame rates go.
+    // four-up must not cost four times one-up. Counted rather than timed: the
+    // first version of this ran a stopwatch over both and failed one run in ten
+    // on a busy machine, which is worse than no test at all - a green tick that
+    // means "the machine was quiet" is not evidence.
     SDL_Rect quarters[GS_MAX_CARS];
     gs_render_layout(4, GS_W, GS_H, quarters);
 
-    uint64_t one_start = SDL_GetTicksNS();
-    for (int pass = 0; pass < 20; pass++) {
-        gs_view v = { 0 };
-        v.car = 0;
-        v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
-        v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
-        gs_render_track_camera(&v, &w, &w, 1.0f);
-        gs_render_view(ren, &t, &w, &w, 1.0f, &v);
-    }
-    uint64_t one_ns = SDL_GetTicksNS() - one_start;
+    gs_view full = { 0 };
+    full.car = 0;
+    full.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    full.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    gs_render_track_camera(&full, &w, &w, 1.0f);
 
-    uint64_t four_start = SDL_GetTicksNS();
-    for (int pass = 0; pass < 20; pass++) {
-        for (uint8_t i = 0; i < 4; i++) {
-            gs_view v = { 0 };
-            v.car = i;
-            v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
-            v.rect = quarters[i];
-            gs_render_track_camera(&v, &w, &w, 1.0f);
-            gs_render_view(ren, &t, &w, &w, 1.0f, &v);
-        }
-    }
-    uint64_t four_ns = SDL_GetTicksNS() - four_start;
+    gs_render_reset_stats();
+    gs_render_view(ren, &t, &w, &w, 1.0f, &full);
+    uint32_t one_view_tiles = gs_render_stats_now().tiles;
 
-    // Generous, because this is a software renderer on a shared machine. What
-    // it rules out is four-up costing four times a full-window view, which is
-    // what a naive "render the whole world four times" would.
-    CHECK(four_ns < one_ns * 3);
+    gs_render_reset_stats();
+    for (uint8_t i = 0; i < 4; i++) {
+        gs_view q = { 0 };
+        q.car = i;
+        q.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+        q.rect = quarters[i];
+        gs_render_track_camera(&q, &w, &w, 1.0f);
+        gs_render_view(ren, &t, &w, &w, 1.0f, &q);
+    }
+    uint32_t four_view_tiles = gs_render_stats_now().tiles;
+
+    // The track is 48 by 48, so an unculled view submits 2304 tiles and four of
+    // them submit 9216. The claim worth making is not a ratio picked to pass:
+    // it is that *four* split views between them build less geometry than a
+    // single view of the whole track would - which is only possible because
+    // each is culled to what it can actually see.
+    const uint32_t whole_track = 48u * 48u;
+
+    CHECK(one_view_tiles > 0);
+    CHECK(one_view_tiles < whole_track);
+    CHECK(four_view_tiles < whole_track);
+
+    // Four quarters do cost somewhat more than one full view - each carries its
+    // own margin of off-screen tiles, and four small viewports have more edge
+    // between them than one large one. Two and a bit times, not four.
+    CHECK(four_view_tiles < one_view_tiles * 3);
 }
 
 TEST(the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not) {
@@ -1451,6 +1462,127 @@ TEST(the_view_does_not_jump_when_the_screen_merges_or_splits) {
 }
 
 // ---------------------------------------------------------------------------
+// Controls
+// ---------------------------------------------------------------------------
+
+TEST(every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone) {
+    (void)ren;
+
+    gs_bindings b;
+    gs_bind_defaults(&b);
+
+    bool keys[SDL_SCANCODE_COUNT] = { false };
+
+    // Every player has a complete pad layout out of the box, because a pad
+    // belongs to one person and the fourth of them should not have to set one
+    // up before they can play.
+    for (uint8_t p = 0; p < GS_MAX_CARS; p++) {
+        for (int a = 0; a < GS_ACT_COUNT; a++) {
+            CHECK(b.button[p][a] != GS_BUTTON_NONE);
+        }
+
+        uint32_t all = 0;
+        for (int a = 0; a < GS_ACT_COUNT; a++) all |= 1u << (uint32_t)b.button[p][a];
+
+        gs_input in = gs_bind_resolve(&b, p, nullptr, 0, all);
+        CHECK(in == (gs_input)(GS_IN_ACCEL | GS_IN_BRAKE | GS_IN_LEFT |
+                               GS_IN_RIGHT | GS_IN_FIRE));
+    }
+
+    // The default keyboard drives the first two cars and nothing else, so a
+    // stray key cannot move somebody else's car.
+    keys[SDL_SCANCODE_UP] = true;
+    CHECK(gs_bind_resolve(&b, 0, keys, SDL_SCANCODE_COUNT, 0) == GS_IN_ACCEL);
+    CHECK(gs_bind_resolve(&b, 1, keys, SDL_SCANCODE_COUNT, 0) == 0);
+    keys[SDL_SCANCODE_UP] = false;
+
+    // Move a control. The old key stops doing it and the new one starts.
+    gs_bind_set_key(&b, 0, GS_ACT_ACCEL, SDL_SCANCODE_SPACE);
+    keys[SDL_SCANCODE_UP] = true;
+    CHECK(gs_bind_resolve(&b, 0, keys, SDL_SCANCODE_COUNT, 0) == 0);
+    keys[SDL_SCANCODE_UP] = false;
+    keys[SDL_SCANCODE_SPACE] = true;
+    CHECK(gs_bind_resolve(&b, 0, keys, SDL_SCANCODE_COUNT, 0) == GS_IN_ACCEL);
+
+    // Binding a key that another action on the same player already uses takes
+    // it away from that one. Two actions on one key is a control scheme nobody
+    // set out to make, and it would be discovered mid-corner.
+    gs_bind_set_key(&b, 0, GS_ACT_BRAKE, SDL_SCANCODE_SPACE);
+    CHECK(gs_bind_resolve(&b, 0, keys, SDL_SCANCODE_COUNT, 0) == GS_IN_BRAKE);
+    keys[SDL_SCANCODE_SPACE] = false;
+
+    // The same rule for pad buttons.
+    gs_bind_set_button(&b, 2, GS_ACT_LEFT, (int16_t)SDL_GAMEPAD_BUTTON_NORTH);
+    gs_bind_set_button(&b, 2, GS_ACT_RIGHT, (int16_t)SDL_GAMEPAD_BUTTON_NORTH);
+    CHECK(b.button[2][GS_ACT_LEFT] == GS_BUTTON_NONE);
+    CHECK(gs_bind_resolve(&b, 2, nullptr, 0, 1u << SDL_GAMEPAD_BUTTON_NORTH) ==
+          GS_IN_RIGHT);
+
+    // A control can be cleared outright, not merely moved - both halves of it.
+    gs_bind_set_button(&b, 2, GS_ACT_RIGHT, GS_BUTTON_NONE);
+    CHECK(gs_bind_resolve(&b, 2, nullptr, 0, 1u << SDL_GAMEPAD_BUTTON_NORTH) == 0);
+
+    gs_bindings cleared;
+    gs_bind_defaults(&cleared);
+    gs_bind_set_key(&cleared, 0, GS_ACT_ACCEL, GS_KEY_NONE);
+    gs_bind_set_button(&cleared, 0, GS_ACT_ACCEL, GS_BUTTON_NONE);
+    for (int k = 0; k < SDL_SCANCODE_COUNT; k++) keys[k] = true;
+    CHECK((gs_bind_resolve(&cleared, 0, keys, SDL_SCANCODE_COUNT, 0xffffffffu)
+           & GS_IN_ACCEL) == 0);
+    for (int k = 0; k < SDL_SCANCODE_COUNT; k++) keys[k] = false;
+
+    // Keyboard and pad both count at once, so a player can use either without
+    // switching modes.
+    gs_bindings mixed;
+    gs_bind_defaults(&mixed);
+    keys[SDL_SCANCODE_LEFT] = true;
+    gs_input both = gs_bind_resolve(&mixed, 0, keys, SDL_SCANCODE_COUNT,
+                                    1u << SDL_GAMEPAD_BUTTON_SOUTH);
+    CHECK(both == (gs_input)(GS_IN_LEFT | GS_IN_ACCEL));
+    keys[SDL_SCANCODE_LEFT] = false;
+
+    // Every action has a name to show in a rebinding screen.
+    for (int a = 0; a < GS_ACT_COUNT; a++) {
+        CHECK(gs_action_name((gs_action)a)[0] != '?');
+    }
+}
+
+TEST(changed_controls_survive_being_written_and_read_back) {
+    (void)ren;
+
+    gs_bindings b, back;
+    gs_bind_defaults(&b);
+    gs_bind_set_key(&b, 3, GS_ACT_FIRE, SDL_SCANCODE_F);
+    gs_bind_set_button(&b, 1, GS_ACT_ACCEL, (int16_t)SDL_GAMEPAD_BUTTON_NORTH);
+    gs_bind_set_key(&b, 0, GS_ACT_BRAKE, GS_KEY_NONE);
+
+    uint8_t buf[512];
+    size_t n = gs_bind_serialize(&b, buf, sizeof buf);
+    CHECK(n == gs_bind_size());
+    CHECK(gs_bind_deserialize(&back, buf, n));
+
+    for (uint8_t p = 0; p < GS_MAX_CARS; p++) {
+        for (int a = 0; a < GS_ACT_COUNT; a++) {
+            CHECK(back.key[p][a] == b.key[p][a]);
+            CHECK(back.button[p][a] == b.button[p][a]);
+        }
+    }
+
+    // A refused file leaves the player driving with the controls they had,
+    // rather than with half of somebody else's.
+    gs_bindings kept;
+    gs_bind_defaults(&kept);
+    SDL_Scancode was = kept.key[0][GS_ACT_ACCEL];
+
+    CHECK(!gs_bind_deserialize(&kept, buf, 4));
+    buf[0] ^= 0xffu;
+    CHECK(!gs_bind_deserialize(&kept, buf, n));
+    CHECK(kept.key[0][GS_ACT_ACCEL] == was);
+
+    CHECK(gs_bind_serialize(&b, buf, 8) == 0);
+}
+
+// ---------------------------------------------------------------------------
 
 int main(void) {
     printf("gearstick renderer tests\n");
@@ -1497,6 +1629,8 @@ int main(void) {
     run_the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not(ren);
     run_cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half(ren);
     run_the_view_does_not_jump_when_the_screen_merges_or_splits(ren);
+    run_every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone(ren);
+    run_changed_controls_survive_being_written_and_read_back(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

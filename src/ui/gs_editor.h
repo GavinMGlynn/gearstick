@@ -69,6 +69,12 @@ typedef struct gs_editor {
     uint64_t ghost_track;   // the track hash it is racing; a change restarts it
     uint32_t ghost_ticks;
 
+    // Rebinding: which control is waiting to be told what it should be. -1
+    // when nothing is.
+    int rebind_player;
+    int rebind_action;
+    bool show_controls;
+
     gs_edit_log *log;
     char status[192];
 } gs_editor;
@@ -82,7 +88,8 @@ void gs_editor_toggle(gs_editor *e, const gs_view *view);
 
 // Apply the brush and draw the palette. Call once a frame while active, after
 // ImGui's new frame and before its render.
-void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view);
+void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view,
+                     gs_input_state *input);
 
 // Where a test drive should begin, and facing which way.
 //

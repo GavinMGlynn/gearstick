@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include "core/gs_sim.h"
+#include "platform/gs_bind.h"
 
 typedef struct gs_input_state {
     SDL_Gamepad *pad[GS_MAX_CARS];
@@ -18,6 +19,10 @@ typedef struct gs_input_state {
     // hold. The race does not care - a held accelerator is a held accelerator -
     // but undo repeating sixty times a second would be a disaster.
     uint32_t     was_down;
+
+    // What each control does. Loaded from the player's own file if they have
+    // one, defaults otherwise.
+    gs_bindings  bind;
 } gs_input_state;
 
 // The editor's view of pad zero: sticks as floats, buttons as edges. Built here
@@ -46,6 +51,11 @@ void gs_input_combine(const gs_input *from_pads, int pads,
                       gs_input *out, uint8_t cars);
 
 void gs_input_init(gs_input_state *s);
+
+// Read and write the player's bindings. Failure to load is not an error - it
+// means they have never changed anything - and leaves the defaults in place.
+bool gs_input_load_bindings(gs_input_state *s);
+bool gs_input_save_bindings(const gs_input_state *s);
 void gs_input_quit(gs_input_state *s);
 
 // Reacts to pads arriving and leaving. Safe to call with any event.

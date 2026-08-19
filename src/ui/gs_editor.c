@@ -22,6 +22,8 @@ bool gs_editor_init(gs_editor *e, uint32_t history) {
     e->gate_width = 2.5f;
     e->zoom = GS_ISO_DEFAULT_ZOOM;
     e->ghost_on = true;
+    e->rebind_player = -1;
+    e->rebind_action = -1;
     e->dial_gravity = 1.0f;
     e->dial_drag = 1.0f;
     e->dial_friction = 1.0f;
@@ -341,6 +343,8 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     ImGui_SameLine();
     if (ImGui_Button("load")) gs_editor_load(e, t);
 
+    ImGui_Checkbox("controls...", &e->show_controls);
+
     ImGui_SeparatorText("");
     ImGui_Text("%s", e->status);
     ImGui_Text("Tab races it. Arrows pan. Drag to paint.");
@@ -398,8 +402,125 @@ bool gs_editor_pad_input(gs_editor *e, gs_track *t, const gs_pad_edit *pad, floa
     return pad->drive;
 }
 
-void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view) {
+// The name of whatever a control is currently pointed at, for the panel.
+static void gs_bind_label(const gs_bindings *b, uint8_t player, gs_action a,
+                          char *out, size_t cap) {
+    const char *key = b->key[player][a] == GS_KEY_NONE
+                          ? nullptr
+                          : SDL_GetScancodeName(b->key[player][a]);
+    if (b->button[player][a] == GS_BUTTON_NONE) {
+        SDL_snprintf(out, cap, "%s", key != nullptr && key[0] != '\0' ? key : "unset");
+        return;
+    }
+    const char *btn = SDL_GetGamepadStringForButton(
+        (SDL_GamepadButton)b->button[player][a]);
+    if (key != nullptr && key[0] != '\0') {
+        SDL_snprintf(out, cap, "%s / %s", key, btn != nullptr ? btn : "?");
+    } else {
+        SDL_snprintf(out, cap, "%s", btn != nullptr ? btn : "?");
+    }
+}
+
+// While a control is waiting to be told what it is, the next key or pad button
+// pressed becomes it. Escape leaves it alone, because changing your mind has to
+// be possible without binding something by accident.
+static void gs_capture_rebind(gs_editor *e, gs_input_state *input) {
+    if (e->rebind_player < 0) return;
+
+    int count = 0;
+    const bool *keys = SDL_GetKeyboardState(&count);
+    if (keys != nullptr) {
+        if (keys[SDL_SCANCODE_ESCAPE]) {
+            e->rebind_player = -1;
+            e->rebind_action = -1;
+            SDL_snprintf(e->status, sizeof e->status, "%s", "left alone");
+            return;
+        }
+        for (int k = 0; k < count; k++) {
+            if (!keys[k]) continue;
+            gs_bind_set_key(&input->bind, (uint8_t)e->rebind_player,
+                            (gs_action)e->rebind_action, (SDL_Scancode)k);
+            SDL_snprintf(e->status, sizeof e->status, "bound to %s",
+                         SDL_GetScancodeName((SDL_Scancode)k));
+            e->rebind_player = -1;
+            e->rebind_action = -1;
+            return;
+        }
+    }
+
+    for (int i = 0; i < input->pads; i++) {
+        if (input->pad[i] == nullptr) continue;
+        for (int btn = 0; btn < SDL_GAMEPAD_BUTTON_COUNT && btn < 32; btn++) {
+            if (!SDL_GetGamepadButton(input->pad[i], (SDL_GamepadButton)btn)) continue;
+            gs_bind_set_button(&input->bind, (uint8_t)e->rebind_player,
+                               (gs_action)e->rebind_action, (int16_t)btn);
+            SDL_snprintf(e->status, sizeof e->status, "bound to %s",
+                         SDL_GetGamepadStringForButton((SDL_GamepadButton)btn));
+            e->rebind_player = -1;
+            e->rebind_action = -1;
+            return;
+        }
+    }
+}
+
+static void gs_controls_panel(gs_editor *e, gs_input_state *input) {
+    if (!e->show_controls) return;
+
+    ImGui_SetNextWindowPos((ImVec2){ 380.0f, 16.0f }, ImGuiCond_FirstUseEver);
+    ImGui_SetNextWindowSize((ImVec2){ 420.0f, 420.0f }, ImGuiCond_FirstUseEver);
+
+    if (!ImGui_Begin("Controls", &e->show_controls, 0)) {
+        ImGui_End();
+        return;
+    }
+
+    ImGui_Text("Click a control, then press what you want it to be.");
+    ImGui_Text("Escape leaves it alone.");
+    ImGui_Separator();
+
+    for (uint8_t p = 0; p < GS_MAX_CARS; p++) {
+        char header[32];
+        SDL_snprintf(header, sizeof header, "player %u", p + 1);
+        ImGui_SeparatorText(header);
+
+        for (int a = 0; a < GS_ACT_COUNT; a++) {
+            char label[96], id[128];
+            gs_bind_label(&input->bind, p, (gs_action)a, label, sizeof label);
+
+            bool waiting = e->rebind_player == (int)p && e->rebind_action == a;
+            SDL_snprintf(id, sizeof id, "%-11s %s##%u_%d",
+                         gs_action_name((gs_action)a),
+                         waiting ? "press something..." : label, p, a);
+
+            if (ImGui_Button(id)) {
+                e->rebind_player = (int)p;
+                e->rebind_action = a;
+            }
+        }
+    }
+
+    ImGui_Separator();
+    if (ImGui_Button("save")) {
+        SDL_snprintf(e->status, sizeof e->status, "%s",
+                     gs_input_save_bindings(input) ? "controls saved"
+                                                   : "could not save controls");
+    }
+    ImGui_SameLine();
+    if (ImGui_Button("defaults")) {
+        gs_bind_defaults(&input->bind);
+        SDL_snprintf(e->status, sizeof e->status, "%s", "controls back to defaults");
+    }
+
+    ImGui_End();
+}
+
+void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view,
+                     gs_input_state *input) {
     gs_editor_palette(e, t);
+    if (input != nullptr) {
+        gs_controls_panel(e, input);
+        gs_capture_rebind(e, input);
+    }
 
     ImGuiIO *io = ImGui_GetIO();
 

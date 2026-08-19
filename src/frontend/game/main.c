@@ -384,7 +384,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             }
         }
 
-        gs_editor_frame(&a->editor, &a->t, &a->view[0]);
+        gs_editor_frame(&a->editor, &a->t, &a->view[0], &a->input);
 
         // Two ticks a frame at sixty frames a second is the ghost running at
         // real time. It is a headless simulation of the track being edited, so

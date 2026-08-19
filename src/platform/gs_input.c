@@ -1,9 +1,12 @@
 // gs_input.c - see gs_input.h.
 
 #include "platform/gs_input.h"
+#include "platform/gs_paths.h"
 
 void gs_input_init(gs_input_state *s) {
     *s = (gs_input_state){ 0 };
+    gs_bind_defaults(&s->bind);
+    gs_input_load_bindings(s);
 
     int count = 0;
     SDL_JoystickID *ids = SDL_GetGamepads(&count);
@@ -48,23 +51,30 @@ void gs_input_event(gs_input_state *s, const SDL_Event *e) {
 // steer.
 #define GS_STICK_ON 12000
 
-static gs_input gs_from_pad(SDL_Gamepad *g) {
-    gs_input in = 0;
-    if (g == nullptr) return in;
+// Which of a pad's buttons are down, as a bitmask the bindings can be resolved
+// against. The sticks and triggers are folded in as though they were the
+// buttons they stand in for, so a player who steers with the stick and one who
+// steers with the d-pad are asking for the same thing.
+static uint32_t gs_pad_buttons(SDL_Gamepad *g) {
+    if (g == nullptr) return 0;
 
-    if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000 ||
-        SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_SOUTH)) in |= GS_IN_ACCEL;
-    if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000 ||
-        SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_EAST)) in |= GS_IN_BRAKE;
+    uint32_t down = 0;
+    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT && b < 32; b++) {
+        if (SDL_GetGamepadButton(g, (SDL_GamepadButton)b)) down |= 1u << b;
+    }
+
+    if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000) {
+        down |= 1u << SDL_GAMEPAD_BUTTON_SOUTH;
+    }
+    if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000) {
+        down |= 1u << SDL_GAMEPAD_BUTTON_EAST;
+    }
 
     Sint16 lx = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX);
-    if (lx < -GS_STICK_ON || SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_DPAD_LEFT))
-        in |= GS_IN_LEFT;
-    if (lx > GS_STICK_ON || SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_DPAD_RIGHT))
-        in |= GS_IN_RIGHT;
+    if (lx < -GS_STICK_ON) down |= 1u << SDL_GAMEPAD_BUTTON_DPAD_LEFT;
+    if (lx > GS_STICK_ON)  down |= 1u << SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
 
-    if (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_WEST)) in |= GS_IN_FIRE;
-    return in;
+    return down;
 }
 
 void gs_input_combine(const gs_input *from_pads, int pads,
@@ -87,31 +97,48 @@ void gs_input_combine(const gs_input *from_pads, int pads,
 }
 
 void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars) {
-    gs_input pads[GS_MAX_CARS] = { 0 };
-    for (int i = 0; i < s->pads && i < GS_MAX_CARS; i++) {
-        pads[i] = gs_from_pad(s->pad[i]);
+    int key_count = 0;
+    const bool *keys = SDL_GetKeyboardState(&key_count);
+
+    gs_input from_pads[GS_MAX_CARS] = { 0 };
+    gs_input from_keys[GS_MAX_CARS] = { 0 };
+
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        uint32_t buttons = (int)i < s->pads ? gs_pad_buttons(s->pad[i]) : 0;
+        from_pads[i] = gs_bind_resolve(&s->bind, i, nullptr, 0, buttons);
+        from_keys[i] = gs_bind_resolve(&s->bind, i, keys, key_count, 0);
     }
 
-    // Two sets of keys, so one person at one keyboard can drive two cars -
-    // which is how most of this game gets tested, and how a lot of it will be
-    // played.
-    gs_input keys[2] = { 0, 0 };
-    const bool *key = SDL_GetKeyboardState(nullptr);
-    if (key != nullptr) {
-        if (key[SDL_SCANCODE_UP])     keys[0] |= GS_IN_ACCEL;
-        if (key[SDL_SCANCODE_DOWN])   keys[0] |= GS_IN_BRAKE;
-        if (key[SDL_SCANCODE_LEFT])   keys[0] |= GS_IN_LEFT;
-        if (key[SDL_SCANCODE_RIGHT])  keys[0] |= GS_IN_RIGHT;
-        if (key[SDL_SCANCODE_RSHIFT]) keys[0] |= GS_IN_FIRE;
+    gs_input_combine(from_pads, s->pads, from_keys, GS_MAX_CARS, out, cars);
+}
 
-        if (key[SDL_SCANCODE_W])      keys[1] |= GS_IN_ACCEL;
-        if (key[SDL_SCANCODE_S])      keys[1] |= GS_IN_BRAKE;
-        if (key[SDL_SCANCODE_A])      keys[1] |= GS_IN_LEFT;
-        if (key[SDL_SCANCODE_D])      keys[1] |= GS_IN_RIGHT;
-        if (key[SDL_SCANCODE_LSHIFT]) keys[1] |= GS_IN_FIRE;
-    }
+static bool gs_bind_path(char *out, size_t cap) {
+    const char *dir = gs_pref_dir();
+    if (dir == nullptr) return false;
+    SDL_snprintf(out, cap, "%scontrols.gsbind", dir);
+    return true;
+}
 
-    gs_input_combine(pads, s->pads, keys, 2, out, cars);
+bool gs_input_load_bindings(gs_input_state *s) {
+    char path[1024];
+    if (!gs_bind_path(path, sizeof path)) return false;
+
+    size_t n = 0;
+    void *data = SDL_LoadFile(path, &n);
+    if (data == nullptr) return false;      // never changed anything: fine
+
+    bool ok = gs_bind_deserialize(&s->bind, (const uint8_t *)data, n);
+    SDL_free(data);
+    return ok;
+}
+
+bool gs_input_save_bindings(const gs_input_state *s) {
+    char path[1024];
+    if (!gs_bind_path(path, sizeof path)) return false;
+
+    uint8_t buf[512];
+    size_t n = gs_bind_serialize(&s->bind, buf, sizeof buf);
+    return n != 0 && SDL_SaveFile(path, buf, n);
 }
 
 // A stick reading, deadzoned and normalised. The deadzone is generous because

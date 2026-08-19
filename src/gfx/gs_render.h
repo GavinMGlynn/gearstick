@@ -69,6 +69,21 @@ uint8_t gs_split_views(const gs_split *s, const gs_world *w,
 // Returns how many rectangles it wrote.
 uint8_t gs_render_layout(uint8_t views, int w, int h, SDL_Rect *out);
 
+// What the last stretch of drawing actually submitted.
+//
+// Here so that "four quarter-sized views cost about one window" can be checked
+// as a fact rather than as a stopwatch reading. The first version of that test
+// timed the two and failed one run in ten on a busy machine - which is worse
+// than no test, because a green tick that means "the machine was quiet" is not
+// evidence of anything.
+typedef struct gs_render_stats {
+    uint32_t tiles;   // tiles whose geometry was built and submitted
+    uint32_t cars;
+} gs_render_stats;
+
+void gs_render_reset_stats(void);
+gs_render_stats gs_render_stats_now(void);
+
 // Draw a single car ghosted - translucent, and without the nose flash, so it
 // reads as a prediction rather than as a competitor.
 void gs_render_ghost(SDL_Renderer *ren, const gs_track *t, const gs_car *c,

@@ -4,6 +4,13 @@
 
 typedef struct gs_rgb { float r, g, b; } gs_rgb;
 
+// Counting what was drawn, so the cost of a split screen can be asserted rather
+// than timed. Not thread safe and does not need to be: one renderer, one thread.
+static gs_render_stats gs_stats;
+
+void gs_render_reset_stats(void) { gs_stats = (gs_render_stats){ 0 }; }
+gs_render_stats gs_render_stats_now(void) { return gs_stats; }
+
 // Far apart on purpose: a player has to be able to tell what they are about to
 // drive onto from a glance at a 64-pixel diamond.
 static const gs_rgb gs_surface_colour[GS_SURF_COUNT] = {
@@ -118,6 +125,7 @@ static void gs_draw_tile(SDL_Renderer *ren, const gs_camera *cam,
                        &p[i].x, &p[i].y);
     }
 
+    gs_stats.tiles++;
     gs_quad(ren, p, gs_tile_colour(t, tx, ty, show_gravity));
 }
 
@@ -150,6 +158,7 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
                         const gs_track *t, const gs_car *c, uint8_t index,
                         float alpha) {
     if (!c->active) return;
+    gs_stats.cars++;
 
     // **Deliberately not to scale.** A real car is 2.7 m and a tile is four, so
     // an honest one is two thirds of a tile and reads as a speck against the

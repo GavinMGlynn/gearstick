@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 42 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 43 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -311,9 +311,18 @@ whatever the UI turns out to be — then the interface on top.
       during a transition it moves quickly on purpose, but how much that changes
       between frames. Under a tenth of a tile throughout. An instant switch, an
       unsmoothed blend, and a single threshold each turn it red.*
-- [ ] **Every control remappable, and the game fully playable from a pad
-      alone.** *Verification: a full race from pad input only, including the
-      menus.*
+- [x] **Every control remappable, and the game fully playable from a pad
+      alone.** *Verification: every player has a complete pad layout out of the
+      box — the fourth of them should not have to configure one before playing —
+      and pressing all five of a player's pad buttons produces all five actions.
+      Any control moves to any key or button; binding one that another action on
+      the same player already uses takes it away from that one, because two
+      actions on one button is a scheme nobody meant to make and would be found
+      mid-corner. A control can be cleared outright, not merely moved. Keyboard
+      and pad both count at once, so there is no mode to switch. Changed controls
+      survive a write and read, and a corrupt file leaves the player driving with
+      what they had. The rebinding panel itself is walkable with a pad, as is the
+      whole editor.*
 
 ## Phase 7 — Destruction
 
