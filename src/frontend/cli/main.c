@@ -478,6 +478,87 @@ static int cmd_ai(void) {
     return 0;
 }
 
+// --- pace ------------------------------------------------------------------
+//
+// The item asks for lap times against a human baseline on the shipped tracks.
+// There are no shipped tracks yet and nobody here can drive one, so this asks
+// the same question with what exists: is the opponent's pace somewhere a person
+// would find interesting?
+//
+// Difficulty is one number - how much of the available grip the driver is
+// willing to use - so a cautious driver and a quick one are the same code at
+// different settings. If the normal opponent sits strictly between them, it is
+// beatable by driving better and not merely by driving longer, which is the
+// property the item is really about.
+
+static double gs_lap_time(const gs_track *t, uint8_t vehicle, gs_fix gravity,
+                          gs_fix margin, uint32_t laps_wanted) {
+    gs_world w;
+    gs_world_init(&w, gravity);
+    gs_world_add_car(&w, t, vehicle, GS_INT(20), GS_INT(15), 0);
+
+    uint64_t started = 0;
+    for (uint32_t i = 0; i < GS_TICK_HZ * 400; i++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive_at(&w, t, 0, margin), 0, 0, 0 };
+        gs_world_step(&w, t, in);
+
+        // Timed from the first crossing of the start line, so the standing
+        // start off the grid is not counted against the lap.
+        if (started == 0 && w.car[0].laps == 1) started = w.tick;
+        if (started != 0 && w.car[0].laps == 1 + laps_wanted) {
+            return (double)(w.tick - started) / (double)GS_TICK_HZ / laps_wanted;
+        }
+    }
+    return -1.0;
+}
+
+static int cmd_pace(void) {
+    static const struct { const char *name; gs_surface surface; gs_fix gravity; }
+    conditions[] = {
+        { "pavement, Earth", GS_SURF_PAVEMENT, GS_ONE },
+        { "dirt, Earth",     GS_SURF_DIRT,     GS_ONE },
+        { "pavement, Moon",  GS_SURF_PAVEMENT, GS_RATIO(17, 100) },
+    };
+    static const struct { const char *name; gs_fix margin; } paces[] = {
+        { "cautious", GS_AI_CAUTIOUS },
+        { "normal",   GS_AI_NORMAL },
+        { "quick",    GS_AI_QUICK },
+    };
+
+    printf("%-18s %10s %10s %10s\n", "", "cautious", "normal", "quick");
+
+    int wrong = 0;
+    for (size_t i = 0; i < sizeof conditions / sizeof conditions[0]; i++) {
+        static gs_track t;
+        gs_ai_circuit(&t, conditions[i].surface);
+
+        double lap[3];
+        printf("%-18s", conditions[i].name);
+        for (int p = 0; p < 3; p++) {
+            lap[p] = gs_lap_time(&t, (uint8_t)GS_VEH_STOCK_CAR,
+                                 conditions[i].gravity, paces[p].margin, 3);
+            if (lap[p] < 0) printf("%10s", "never");
+            else printf("%9.2fs", lap[p]);
+        }
+
+        bool ordered = lap[0] > 0 && lap[1] > 0 && lap[2] > 0 &&
+                       lap[0] > lap[1] && lap[1] > lap[2];
+        printf("   %s\n", ordered ? "" : "  <- out of order");
+        if (!ordered) wrong++;
+    }
+
+    printf("\nDifficulty is how much of the available grip the driver will use,\n"
+           "and nothing else - no extra power, no cheating on the physics.\n");
+
+    if (wrong != 0) {
+        printf("FAIL   the normal opponent is not between the other two, so it is\n"
+               "       either unbeatable or not worth racing\n");
+        return 1;
+    }
+    printf("OK     driving better beats it and driving worse does not\n");
+    return 0;
+}
+
 static int cmd_vehicles(void) {
     printf("%-13s %7s %7s %6s %6s %8s %6s\n",
            "vehicle", "power", "brake", "top", "grip", "steer", "tough");
@@ -512,6 +593,7 @@ static int usage(void) {
            "  track FILE           write a track, read it back, check it survived\n"
            "  validate             show what the route checker accepts and refuses\n"
            "  ai                   race the AI round a circuit in every condition\n"
+           "  pace                 lap times for a cautious, normal and quick driver\n"
            "  roster               race every vehicle over every condition\n"
            "  vehicles             the roster and its numbers\n"
            "  gravity              the presets\n\n"
@@ -531,6 +613,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "track") == 0 && argc > 2) return cmd_track(argv[2]);
     if (strcmp(argv[1], "validate") == 0) return cmd_validate();
     if (strcmp(argv[1], "ai") == 0) return cmd_ai();
+    if (strcmp(argv[1], "pace") == 0) return cmd_pace();
     if (strcmp(argv[1], "roster") == 0) return cmd_roster();
     if (strcmp(argv[1], "vehicles") == 0) return cmd_vehicles();
     if (strcmp(argv[1], "gravity") == 0) return cmd_gravity();

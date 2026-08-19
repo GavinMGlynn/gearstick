@@ -258,6 +258,11 @@ if(GEARSTICK_TESTS)
     add_test(NAME gearstick_ai COMMAND gearstick_cli ai)
     set_tests_properties(gearstick_ai PROPERTIES TIMEOUT 180)
 
+    # The opponent is beatable by driving better and not merely by driving
+    # longer: a quicker driver beats it and a more cautious one does not.
+    add_test(NAME gearstick_pace COMMAND gearstick_cli pace)
+    set_tests_properties(gearstick_pace PROPERTIES TIMEOUT 300)
+
     # Every vehicle is best at something. A roster where one machine wins
     # everything is a roster of one and five decorations, and this is what
     # noticed that the first one was.

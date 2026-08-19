@@ -6,12 +6,12 @@
 // turns. A dead band is the difference between driving and hunting.
 #define GS_AI_DEADBAND 900
 
-// How much of the theoretical cornering speed the AI actually trusts. Under one
-// because the estimate below is a chord approximation and because a driver who
-// is exactly at the limit is a driver who is about to be over it.
-#define GS_AI_MARGIN GS_RATIO(82, 100)
-
 gs_input gs_ai_drive(const gs_world *w, const gs_track *t, uint8_t car) {
+    return gs_ai_drive_at(w, t, car, GS_AI_NORMAL);
+}
+
+gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
+                        gs_fix margin) {
     if (car >= w->car_count || t->gate_count == 0) return 0;
 
     const gs_car *c = &w->car[car];
@@ -78,7 +78,7 @@ gs_input gs_ai_drive(const gs_world *w, const gs_track *t, uint8_t car) {
         gs_fix radius = gs_fix_div(gs_fix_mul(leg, cos_half),
                                    gs_fix_mul(sin_half, GS_INT(2)));
         corner_speed = gs_fix_mul(gs_fix_sqrt(gs_fix_mul(traction, radius)),
-                                  GS_AI_MARGIN);
+                                  margin);
     }
 
     // And the turn it needs *right now* to stay pointed at the gate. Planning
@@ -92,7 +92,7 @@ gs_input gs_ai_drive(const gs_world *w, const gs_track *t, uint8_t car) {
         if (sine >= GS_RATIO(4, 100) && distance > 0) {
             gs_fix radius = gs_fix_div(distance, gs_fix_mul(sine, GS_INT(2)));
             here_limit = gs_fix_mul(gs_fix_sqrt(gs_fix_mul(traction, radius)),
-                                    GS_AI_MARGIN);
+                                    margin);
         }
     }
 

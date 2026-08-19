@@ -1961,6 +1961,36 @@ TEST(the_same_corner_is_braked_for_differently_in_a_different_car) {
     CHECK(on_ice > on_road * 3.0);
 }
 
+TEST(a_quicker_driver_carries_more_speed_through_the_same_corner) {
+    // Difficulty is one number: how much of the available grip the driver is
+    // willing to use. Not extra power, not rubber-banding, not cheating on the
+    // physics - the same thing that separates two people.
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(30), GS_QUARTER, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(50), GS_QUARTER, GS_INT(5));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    // Four tiles short of the corner at five tiles a second, which is exactly
+    // where a cautious driver has already decided and a quick one has not.
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(36), GS_INT(30), 0);
+    w.car[0].vx = GS_INT(5);
+
+    gs_input careful = gs_ai_drive_at(&w, &t, 0, GS_AI_CAUTIOUS);
+    gs_input quick = gs_ai_drive_at(&w, &t, 0, GS_AI_QUICK);
+
+    CHECK((careful & GS_IN_BRAKE) != 0);
+    CHECK((quick & GS_IN_BRAKE) == 0);
+    CHECK((quick & GS_IN_ACCEL) != 0);
+
+    // And the default sits between them rather than at one end, which is what
+    // makes it worth racing rather than a formality in either direction.
+    CHECK(GS_AI_CAUTIOUS < GS_AI_NORMAL);
+    CHECK(GS_AI_NORMAL < GS_AI_QUICK);
+    CHECK(GS_AI_QUICK < GS_ONE);
+}
+
 TEST(an_ai_race_is_deterministic_like_every_other_race) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -2305,6 +2335,7 @@ int main(void) {
     run_the_ai_gets_round_on_surfaces_and_vehicles_it_was_not_tuned_for();
     run_the_same_corner_is_braked_for_differently_under_different_gravity();
     run_the_same_corner_is_braked_for_differently_in_a_different_car();
+    run_a_quicker_driver_carries_more_speed_through_the_same_corner();
     run_an_ai_race_is_deterministic_like_every_other_race();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();

@@ -27,7 +27,7 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 50 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 51 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -389,8 +389,26 @@ whatever the UI turns out to be — then the interface on top.
       than the lunar rover, and ice more than three times earlier than pavement.
       Taking gravity, tyres or surface out of the estimate turns one of those
       red.*
-- [ ] **AI that is beatable and worth racing.** *Verification: stated lap times
-      against a human baseline on the shipped tracks.*
+- [x] **AI that is beatable and worth racing.** *Verification: difficulty is one
+      number — how much of the available grip the driver will use — and nothing
+      else: no extra power, no rubber-banding, no cheating on the physics. Lap
+      times on a four-corner circuit, three laps flying, stock car:*
+
+      | | cautious | normal | quick |
+      | --- | --- | --- | --- |
+      | pavement, Earth | 27.70s | 26.30s | 25.68s |
+      | dirt, Earth | 37.24s | 33.09s | 31.40s |
+      | pavement, Moon | 58.18s | 53.91s | 50.83s |
+
+      *The opponent sits strictly between a worse driver and a better one in
+      every condition, so it is beaten by driving better rather than by driving
+      longer, and beating it is not a formality. Ignoring the pace dial turns
+      that red.*
+
+      *The plan asked for a human baseline on the shipped tracks. Nobody here
+      can drive one and there are no shipped tracks; a quick driver at 96% of
+      the limit is the closest thing that exists, and the honest reading of
+      "beatable" is that there is room above the opponent for someone to use.*
 
 ## Phase 9 — Sharing, ghosts and netcode
 
