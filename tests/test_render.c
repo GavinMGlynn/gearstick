@@ -456,6 +456,126 @@ TEST(a_track_built_with_the_brushes_saves_reloads_and_races) {
     gs_editor_quit(&ed);
 }
 
+TEST(the_elevation_brush_moves_the_ground_by_exactly_the_step_it_is_set_to) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 24, 12);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 4096));
+    ed.brush = GS_BRUSH_RAISE;
+    ed.radius = 0;
+    ed.step = 0.25f;
+
+    // One application is one step. Not "about a step" - the number in the
+    // panel is what happens, or the panel is lying about what the tool does.
+    gs_editor_paint(&ed, &t, 5.0f, 5.0f);
+    CHECK(gs_track_height(&t, GS_INT(5), GS_INT(5)) == GS_INT(1) / 4);
+
+    for (int i = 0; i < 3; i++) gs_editor_paint(&ed, &t, 5.0f, 5.0f);
+    CHECK(gs_track_height(&t, GS_INT(5), GS_INT(5)) == GS_INT(1));
+
+    ed.brush = GS_BRUSH_LOWER;
+    gs_editor_paint(&ed, &t, 5.0f, 5.0f);
+    gs_editor_paint(&ed, &t, 5.0f, 5.0f);
+    CHECK(gs_track_height(&t, GS_INT(5), GS_INT(5)) == GS_INT(1) / 2);
+
+    // And it goes below the datum, because a dip is as buildable as a hill.
+    for (int i = 0; i < 4; i++) gs_editor_paint(&ed, &t, 5.0f, 5.0f);
+    CHECK(gs_track_height(&t, GS_INT(5), GS_INT(5)) < 0);
+
+    gs_editor_quit(&ed);
+}
+
+TEST(a_ramp_drawn_in_the_editor_drives_like_the_ramp_that_was_drawn) {
+    (void)ren;
+
+    // The claim: what the editor drew is what the car meets. Not "a ramp
+    // appears" - the slope the tool was asked for is the slope the physics
+    // sees, and the jump it produces is the one that slope predicts.
+    static gs_track t;
+    gs_flat_pavement(&t, 32, 12);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 8192));
+    ed.brush = GS_BRUSH_RAISE;
+    ed.radius = 0;
+    ed.step = 0.25f;
+
+    // A ramp climbing a quarter tile per tile between x = 8 and x = 12, drawn
+    // the way a person draws one: each column raised one more time than the
+    // column before it.
+    const float drawn_slope = 0.25f;
+    gs_edit_begin(ed.log);
+    for (int col = 1; col <= 4; col++) {
+        for (int rep = 0; rep < col; rep++) {
+            for (float y = 0.0f; y <= 12.0f; y += 1.0f) {
+                gs_editor_paint(&ed, &t, 8.0f + (float)col, y);
+            }
+        }
+    }
+    // Past the crest it stays up, so the far side is a flat table rather than a
+    // slope back down - the jump has to be the ramp's doing, not the landing's.
+    for (float x = 13.0f; x <= 32.0f; x += 1.0f) {
+        for (int rep = 0; rep < 4; rep++) {
+            for (float y = 0.0f; y <= 12.0f; y += 1.0f) {
+                gs_editor_paint(&ed, &t, x, y);
+            }
+        }
+    }
+    gs_edit_end(ed.log);
+
+    // What the track says the slope is, where the ramp is.
+    gs_fix dzdx = 0, dzdy = 0;
+    gs_track_slope(&t, GS_INT(10) + GS_HALF, GS_INT(6), &dzdx, &dzdy);
+    CHECK(SDL_fabs((double)gs_to_f(dzdx) - (double)drawn_slope) < 0.01);
+    CHECK(SDL_fabs((double)gs_to_f(dzdy)) < 0.01);
+
+    // And what a car makes of it. Drag and rolling resistance dialled out, so
+    // the arc is the ballistic one and the comparison is with arithmetic rather
+    // than with aerodynamics.
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    w.drag_scale = 0;
+    w.friction_scale = 0;
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(6), 0);
+    w.car[0].vx = GS_INT(5);
+
+    double launch_x = 0, launch_vx = 0, launch_vz = 0, range = -1.0;
+    bool flew = false;
+    for (int i = 0; i < GS_TICK_HZ * 20; i++) {
+        bool was_air = !w.car[0].grounded;
+        gs_world_step(&w, &t, nullptr);
+        bool is_air = !w.car[0].grounded;
+
+        if (!was_air && is_air) {
+            launch_x = (double)gs_to_f(w.car[0].x);
+            launch_vx = (double)gs_to_f(w.car[0].vx);
+            launch_vz = (double)gs_to_f(w.car[0].vz);
+            flew = true;
+        }
+        if (was_air && !is_air && flew) {
+            range = (double)gs_to_f(w.car[0].x) - launch_x;
+            break;
+        }
+    }
+
+    CHECK(flew);
+    CHECK(range > 0.0);
+
+    // The car left the ramp climbing at the slope that was drawn: vz is vx
+    // times the gradient. This is the line that ties the tool to the physics.
+    CHECK(SDL_fabs(launch_vz / launch_vx - (double)drawn_slope) < 0.02);
+
+    // And the arc is the one that launch predicts.
+    double gravity = (double)gs_to_f(w.gravity);
+    double predicted = 2.0 * launch_vx * launch_vz / gravity;
+    CHECK(SDL_fabs(range - predicted) < predicted * 0.06);
+
+    gs_editor_quit(&ed);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -485,6 +605,8 @@ int main(void) {
     run_a_ramp_is_drawn_with_no_seam_and_no_hole(ren);
     run_picking_a_pixel_finds_the_ground_that_was_drawn_there(ren);
     run_a_track_built_with_the_brushes_saves_reloads_and_races(ren);
+    run_the_elevation_brush_moves_the_ground_by_exactly_the_step_it_is_set_to(ren);
+    run_a_ramp_drawn_in_the_editor_drives_like_the_ramp_that_was_drawn(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

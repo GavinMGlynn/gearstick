@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 28 of 60 items, every
+**Phases 0 to 3 are complete, and Phase 4 has started — 29 of 60 items, every
 one of them with its verification actually run.** Phase 4 is the editor and is
 about half the remaining work.
 
@@ -172,8 +172,12 @@ whatever the UI turns out to be — then the interface on top.
       top of it. The cursor is pinned separately by a round trip: project a
       known point, pick the pixel it landed on, and land back within a hundredth
       of a tile.*
-- [ ] **Raise and lower elevation as a brush.** *Verification: an edited ramp
-      matches what the editor drew when driven over.*
+- [x] **Raise and lower elevation as a brush.** *Verification: one application
+      moves the ground by exactly the step in the panel, up or down, and below
+      the datum as readily as above it. A ramp drawn at a quarter tile per tile
+      measures as a quarter tile per tile, throws a car off its crest at that
+      exact gradient, and the jump lands where that launch predicts to within
+      six percent.*
 - [ ] **Paint surface, and paint gravity.** *Verification: painted tiles change
       the car's behaviour in a test drive.*
 - [ ] **Track validation** — is the loop closed, is the lap order derivable, can
