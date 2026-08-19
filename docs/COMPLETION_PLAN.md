@@ -16,12 +16,13 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phase 0 is all but done, Phases 1 and 2 are done, and Phase 3 is most of the
-way there — 19 of 60 items.** What is not ticked below is not-ticked for a
-reason stated in its own line: CI has never run, packaging is verified on one
-platform of three, and three renderer items are implemented but have not been
-*looked at* yet, which is not the same as working. `PROJECT_STATUS.md` has the
-detail.
+**Phases 0, 1, 2 and 3 are complete — 25 of 60 items, every one of them with
+its verification actually run.** Phase 4, the editor, is next and is about half
+the remaining work.
+
+Where a verification says a deliberate bug "turns it red", that is not a figure
+of speech: the bug was introduced, the test was watched to fail, and the bug was
+reverted. A test nobody has seen fail is a test nobody should trust.
 
 The phase order is not arbitrary. Determinism comes before everything because
 ghosts, replays, the editor's live ghost, the track analyser and rollback are
@@ -46,15 +47,17 @@ and finding that out cheaply is worth more than a pretty prototype.
       review. *Verification: a deliberate `#include <SDL3/SDL.h>` and a
       deliberate `double` each fail the configure with a message naming the file
       and the line; `ldd gearstick_cli` lists libc and nothing else.*
-- [ ] **CI on all three platforms** — Ubuntu, Rocky, Windows and macOS arm64 —
-      building, testing and running the headless driver. *Verification: green on
-      a pull request from a clean checkout.* **Written, never run.** No workflow
-      in this repository has executed once.
-- [ ] **Packaging** — a tarball for Linux, a zip for Windows, a disk image for
+- [x] **CI on all three platforms** — Ubuntu, Rocky, Windows and macOS arm64 —
+      building, testing and running the headless driver. *Verification: all four
+      jobs green on `main`, and with them the job that depends on all four —
+      four platforms, three compilers, two architectures, one state hash.*
+- [x] **Packaging** — a tarball for Linux, a zip for Windows, a disk image for
       macOS, each unpacking to something that runs in place.
-      *Verification: unpack each artifact on its platform and run it.* **Linux
-      only so far**: the tarball builds, unpacks and the unpacked copy passes
-      its own golden replay. The other two have never been produced.
+      *Verification: the `package` workflow unpacks each artifact into a
+      different directory on its own platform, re-races the golden replay out of
+      the unpacked copy, and draws a frame from it — which is the step that
+      proves the packaged layout is one the asset probe can find. The macOS job
+      also mounts the disk image and finds the app inside it.*
 - [x] **The three living documents exist and are honest** — this plan,
       `PROJECT_STATUS.md` and `FEATURES.md`. *Verification: someone who has not
       seen the code can say what works from `PROJECT_STATUS.md` alone.*
@@ -74,13 +77,12 @@ car, no art worth the name.
       *Verification: throttle reaches a cruise and the brake stops it and then
       reverses it; a car turns more sharply at a crawl than at speed; ice lets
       go of a slide long after pavement has caught it.*
-- [ ] **Fixed 120 Hz simulation step with an accumulator**, decoupled from the
-      frame rate. *Verification: the same input log gives the same result at 30,
-      60 and 240 frames per second.* **The accumulator is written and running in
-      the frontend; the three frame rates have not been compared.** The
-      simulation half is proven — the step is fixed by construction and the
-      hash is identical across five optimisation levels and two compilers — but
-      that is not the same claim.
+- [x] **Fixed 120 Hz simulation step with an accumulator**, decoupled from the
+      frame rate. *Verification: one second of wall clock chopped into 30, 60,
+      144 and 240 frames each deliver exactly 120 ticks, and a race paced
+      through the clock hashes equal to the same race stepped directly. A
+      ten-second stall delivers a quarter second of catching up rather than 1200
+      ticks.*
 - [x] **The simulation runs headless**, driven by the CLI with no window and no
       audio device. *Verification: `gearstick_cli` links libc and nothing else.*
 - [x] **Input-log replays**, recorded and replayed to an identical end state.
@@ -122,21 +124,21 @@ car, no art worth the name.
       arbitrary elevation joins are correct by construction.
       *Verification: frames captured headless show a ramp, a bowl and three
       surfaces with no seam and no hole.*
-- [ ] **Cars drawn with correct depth order** against the terrain and each other.
-      *Verification: a captured frame with a car behind a rise is occluded by
-      it.* **The painter's sweep is written — tiles and cars are drawn together
-      along the screen's depth axis — but the occluding frame has not been
-      captured, so this is untested rather than working.**
+- [x] **Cars drawn with correct depth order** against the terrain and each other.
+      *Verification: a car behind a five-tile rise contributes no pixels at all,
+      where the same car on open ground contributes hundreds. Drawing cars after
+      the terrain instead of among it turns that red.*
 - [x] **A shadow projected down to the ground under an airborne car.**
       *Verification: captured frames through a jump show the gap between car and
       shadow opening and closing with height.*
-- [ ] **Sub-pixel camera motion.** *Verification: a recording of a car crossing
-      tile boundaries shows no jump.* **The camera is continuous and in floating
-      point, so there is nothing to quantise it; nobody has watched a recording
-      to confirm it.**
-- [ ] **Render interpolation between simulation ticks.** *Verification: motion is
-      smooth at frame rates that are not multiples of 120.* **Written, including
-      the short-way-round heading interpolation; not watched.**
+- [x] **Sub-pixel camera motion.** *Verification: a car driven across a tile
+      boundary in equal steps produces frame-to-frame differences with no single
+      step more than three times the mean. Quantising the camera to whole tiles
+      — the bug that makes the world lurch 32 pixels at every boundary — turns
+      that red.*
+- [x] **Render interpolation between simulation ticks.** *Verification: drawn at
+      a third of the way between two ticks, the car's centroid is a third of the
+      way between the two positions, within a pixel of rasterisation.*
 - [x] **A frame can be captured from the command line**, so a change to the
       renderer can be looked at rather than described. *Verification: `--shot`
       writes a frame under the dummy video driver and the software renderer.*
@@ -265,8 +267,5 @@ Found while implementing something else. Added when found, not when remembered.
       checkpoints, no finish, no HUD — two cars drive around on a demo track.
       Lap order is a Phase 4 item because it is derived from the track, but the
       frontend needs its own item to actually run a race.
-- [ ] **The tests re-race scenarios but nothing tests the accumulator.** The
-      Phase 1 frame-rate item is blocked on there being somewhere to test it
-      that is not `main.c`.
 - [ ] **`assets/` is empty and exists only so the install rules have something
       to copy.** Fine now; a smell if it is still true at Phase 10.

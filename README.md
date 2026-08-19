@@ -3,11 +3,12 @@
 A construction-set racer in C23 and SDL3 — *Racing Destruction Set*, 1985,
 continued rather than remade.
 
-> **Status: early.** The simulation runs, is deterministic to the bit, and
-> proves it in CI. A car drives, jumps, slides on ice and folds on a bad
-> landing; gravity is paintable per tile; a race records and re-races exactly.
-> There is a window with a split screen, an isometric renderer and a hard-coded
-> demo track.
+> **Status: early.** The simulation runs and is deterministic to the bit —
+> the same race lands on the same state hash on Ubuntu, Rocky, macOS arm64 and
+> Windows, across three compilers, and CI fails if that ever stops being true.
+> A car drives, jumps, slides on ice and folds on a bad landing; gravity is
+> paintable per tile; a race records and re-races exactly. There is a window
+> with a split screen, an isometric renderer and a hard-coded demo track.
 >
 > **There is no editor, no lap, no opponent, no sound and no way to win.** The
 > editor is roughly half this project and it has not been started.

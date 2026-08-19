@@ -15,6 +15,7 @@
 // the trigonometry test has to come from somewhere, so it comes from here.
 #define GS_PI 3.14159265358979323846
 
+#include "core/gs_clock.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -445,17 +446,23 @@ TEST(the_same_jump_hurts_less_landed_on_a_downslope_than_landed_flat) {
 
 // A scripted race: enough throttle, steering and airtime that a change to any
 // part of the physics moves the answer.
+static void gs_script_inputs(uint32_t tick, uint8_t cars, gs_input *in) {
+    for (uint8_t c = 0; c < GS_MAX_CARS; c++) in[c] = 0;
+
+    in[0] = GS_IN_ACCEL;
+    if ((tick / 40u) % 3u == 1u) in[0] |= GS_IN_LEFT;
+    if ((tick / 55u) % 4u == 2u) in[0] |= GS_IN_RIGHT;
+    if (cars > 1) {
+        in[1] = GS_IN_ACCEL;
+        if ((tick / 33u) % 2u == 0u) in[1] |= GS_IN_RIGHT;
+    }
+}
+
 static void gs_scripted_race(gs_world *w, const gs_track *t, uint32_t ticks,
                              gs_replay *rec) {
     for (uint32_t i = 0; i < ticks; i++) {
-        gs_input in[GS_MAX_CARS] = { 0, 0, 0, 0 };
-        in[0] = GS_IN_ACCEL;
-        if ((i / 40u) % 3u == 1u) in[0] |= GS_IN_LEFT;
-        if ((i / 55u) % 4u == 2u) in[0] |= GS_IN_RIGHT;
-        if (w->car_count > 1) {
-            in[1] = GS_IN_ACCEL;
-            if ((i / 33u) % 2u == 0u) in[1] |= GS_IN_RIGHT;
-        }
+        gs_input in[GS_MAX_CARS];
+        gs_script_inputs(i, w->car_count, in);
         if (rec != nullptr) gs_replay_record(rec, in);
         gs_world_step(w, t, in);
     }
@@ -466,6 +473,107 @@ static void gs_demo_track(gs_track *t) {
     for (uint8_t x = 16; x < 24; x++)
         for (uint8_t y = 0; y < t->h; y++)
             gs_track_set_surface(t, x, y, GS_SURF_ICE);
+}
+
+// Feed the clock a sequence of frames and report how many simulation steps it
+// asked for in total. Bounded by construction: a broken clock makes this return
+// the wrong number, and never makes it fail to return. An earlier version of
+// this test drove the world until a tick count was reached, which *hung* rather
+// than failed when the clock stopped making progress - and a test that hangs is
+// worse than no test, because CI just sits there.
+static uint64_t gs_clock_steps(uint64_t frame_ns, uint32_t frames, uint64_t tail_ns) {
+    gs_clock c;
+    gs_clock_init(&c);
+
+    uint64_t total = 0;
+    for (uint32_t i = 0; i < frames; i++) total += gs_clock_advance(&c, frame_ns);
+    if (tail_ns != 0) total += gs_clock_advance(&c, tail_ns);
+    return total;
+}
+
+TEST(the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up) {
+    // Four frame rates, each chopping the *same* one second of wall clock into
+    // different pieces. The tail makes each sequence sum to exactly
+    // 1,000,000,000 ns, so this compares like with like rather than comparing
+    // rounding.
+    uint64_t at30 = gs_clock_steps(33333333ULL, 30, 10ULL);
+    uint64_t at60 = gs_clock_steps(16666666ULL, 60, 40ULL);
+    uint64_t at144 = gs_clock_steps(6944444ULL, 144, 64ULL);
+    uint64_t at240 = gs_clock_steps(4166666ULL, 240, 160ULL);
+
+    // One second at 120 Hz.
+    CHECK(at30 == 120);
+    CHECK(at60 == 120);
+    CHECK(at144 == 120);
+    CHECK(at240 == 120);
+
+    // 240 is the one that matters most: every frame there is *shorter* than a
+    // tick, so the leftover in the accumulator is the only thing that makes the
+    // simulation advance at all. A clock that discards its remainder scores
+    // zero here and looks fine at 30.
+    CHECK(at240 > 0);
+}
+
+TEST(a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run) {
+    static gs_track t;
+    gs_demo_track(&t);
+
+    // Driven exactly as the frontend drives it: frames in, steps out, and the
+    // input for a tick decided by the tick.
+    gs_world paced;
+    gs_world_init(&paced, GS_ONE);
+    gs_world_add_car(&paced, &t, GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(3), 0);
+    gs_world_add_car(&paced, &t, GS_VEH_MOTORCYCLE, GS_INT(2), GS_INT(5), 0);
+
+    gs_clock c;
+    gs_clock_init(&c);
+
+    uint32_t done = 0;
+    for (uint32_t frame = 0; frame < 240; frame++) {          // one second at 240 fps
+        uint32_t steps = gs_clock_advance(&c, 4166666ULL);
+        for (uint32_t i = 0; i < steps; i++) {
+            gs_input in[GS_MAX_CARS];
+            gs_script_inputs(done, paced.car_count, in);
+            gs_world_step(&paced, &t, in);
+            done++;
+        }
+    }
+
+    gs_world direct;
+    gs_world_init(&direct, GS_ONE);
+    gs_world_add_car(&direct, &t, GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(3), 0);
+    gs_world_add_car(&direct, &t, GS_VEH_MOTORCYCLE, GS_INT(2), GS_INT(5), 0);
+    gs_scripted_race(&direct, &t, done, nullptr);
+
+    // A second of frames is a second of simulation, near enough that the
+    // truncation of a 240 fps frame length is the only difference.
+    CHECK(done >= 119 && done <= 120);
+    CHECK(gs_world_hash(&paced) == gs_world_hash(&direct));
+}
+
+TEST(a_stalled_frame_makes_the_game_go_slow_rather_than_mad) {
+    gs_clock c;
+    gs_clock_init(&c);
+
+    // A breakpoint, a window drag, a laptop lid: ten seconds of nothing. Run
+    // uncapped that is 1200 ticks in one frame, and the game lurches across the
+    // track. Capped, it is a quarter second of catching up.
+    uint32_t steps = gs_clock_advance(&c, 10000000000ULL);
+    CHECK(steps <= GS_TICK_HZ / 4);
+    CHECK(steps > 0);
+}
+
+TEST(the_interpolation_fraction_never_reaches_the_next_tick) {
+    gs_clock c;
+    gs_clock_init(&c);
+
+    // Deliberately awkward frame lengths - nothing that divides evenly into a
+    // tick - so the leftover lands all over the range.
+    for (uint32_t i = 0; i < 5000; i++) {
+        gs_clock_advance(&c, 3000000ULL + (i % 37u) * 211111ULL);
+        gs_fix a = gs_clock_alpha(&c);
+        CHECK(a >= 0 && a < GS_ONE);
+    }
 }
 
 TEST(the_same_inputs_produce_the_same_world_every_time) {
@@ -605,6 +713,10 @@ int main(void) {
     run_a_low_gravity_tile_lengthens_a_jump_that_crosses_it();
     run_the_same_jump_hurts_less_landed_on_a_downslope_than_landed_flat();
     run_the_same_inputs_produce_the_same_world_every_time();
+    run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
+    run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();
+    run_a_stalled_frame_makes_the_game_go_slow_rather_than_mad();
+    run_the_interpolation_fraction_never_reaches_the_next_tick();
     run_a_world_snapshot_is_a_memory_copy_and_restores_exactly();
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();

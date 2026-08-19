@@ -27,9 +27,12 @@ per tick and re-races to the same state, to the bit, on every compiler and
 optimisation level tried. There is a window, a split screen and an isometric
 renderer that draws the ground as shaded geometry, with a shadow under each car.
 
-Twenty tests and a golden-replay tripwire, all green. **CI has never run** — the
-workflows are written and untested, so "it builds on Windows and macOS" is a
-claim this project has not yet earned.
+Twenty-six tests and a golden-replay tripwire, all green, on four platforms.
+CI builds and tests on Ubuntu, Rocky, Windows and macOS arm64, and all four land
+on the same state hash — so "the simulation is deterministic across machines" is
+now a measured fact rather than a design intention. Packages build on all three
+target platforms and are checked by unpacking them somewhere else and running
+what is inside.
 
 ---
 
@@ -96,13 +99,28 @@ each fail the configure with the file and the offending line named.
 ### Determinism — measured, not asserted
 
 The selftest race — 900 ticks, two cars, a ramp, an ice field and a painted
-low-gravity pocket — ends on **the same state hash under GCC at `-O0`, `-O1`,
-`-O2`, `-O3` and `-Os`, and under Clang at `-O2`**. `gearstick_cli selftest
---verify` compares against the number committed in
-`src/frontend/cli/golden.h`. A 1% change to pavement grip turns it red and
-prints both hashes. That is the tripwire, and it is wired into `ctest`.
+low-gravity pocket — ends on **the same state hash everywhere it has been run**:
+locally under GCC at `-O0`, `-O1`, `-O2`, `-O3` and `-Os` and under Clang,
 
-Cross-*platform* determinism is the claim CI exists to test, and CI has not run.
+and, in CI, on **Ubuntu 24.04 (GCC 14), Rocky Linux 10 (GCC), macOS arm64
+(AppleClang 17) and Windows x64 (MSVC)**. Four platforms, three compilers, two
+architectures, one number. That is the entire argument for the integer
+discipline, and it is now evidence rather than reasoning.
+
+### The frame clock — `src/core/gs_clock.c`
+
+The accumulator that turns "however long that frame took" into "how many fixed
+steps are owed" lives in the simulation rather than beside the window, because
+its correctness is a *simulation* property: get it wrong and the same input log
+produces different races on a fast machine and a slow one. It takes nanoseconds
+as an argument rather than asking SDL for the time, which is what makes it
+testable at all.
+
+One second of wall clock chopped into 30, 60, 144 and 240 frames each deliver
+exactly 120 ticks. The 240 case is the one that bites — every frame is shorter
+than a tick, so the leftover in the accumulator is the only thing that makes the
+simulation advance, and a clock that discards its remainder scores zero there
+while looking perfect at 30.
 
 ### The renderer — `src/gfx/`, `src/platform/`, `gearstick`
 
@@ -128,13 +146,27 @@ Cross-*platform* determinism is the claim CI exists to test, and CI has not run.
   every machine.
 - **Keyboard and gamepad**, one pad per car, pads arriving and leaving handled.
 
-### The build
+### The build, CI and packaging
 
 Configures, builds and tests green on Linux x86_64 with GCC 14.3.1, both against
 the vendored `ext/sdl` at `release-3.4.14` and against a system SDL3 3.2.4.
-`cpack` produces a tarball that unpacks to an executable, a headless driver,
-`assets/`, the licence and the readme — and the unpacked copy passes its own
-golden replay.
+
+CI runs four jobs — Ubuntu 24.04, Rocky Linux 10, macOS 15 arm64, Windows x64 —
+each building, testing and rendering a frame headless. The `package` workflow
+produces a tarball, a zip and a disk image, then **unpacks each into a different
+directory and runs what is inside**: the headless driver re-races the golden
+replay, and the game draws a frame, which is the step that proves the packaged
+layout is one the asset probe can find. The macOS job also mounts the disk image
+and looks for the app in it.
+
+Two findings worth keeping, both about building rather than about CI:
+
+- **RHEL-family systems need EPEL.** SDL fails its configure without XScrnSaver,
+  and `libXScrnSaver-devel` is in EPEL and nowhere else on RHEL 10;
+  `ninja-build` and `libdecor-devel` come from CRB. See `ext/README.md`.
+- **MSVC's partial C23 was not a problem.** It was the largest named risk here
+  and it built and tested clean first time. `windows-clang` stays as insurance
+  rather than as a plan.
 
 The sanitized preset builds and passes clean under address and UB sanitizers,
 tests and renderer both. UBSan found two left-shifts of negative values — one in
@@ -157,12 +189,15 @@ standard-conformance.
   are downstream of determinism, which is why determinism came first, but none
   of them are started.
 - **Surface wear and persistent wreckage.**
-- **Art.** No sprites, no textures, no font — the cars are coloured boxes.
+- **Art.** No meshes, no textures, no font — the cars are coloured boxes.
+  Where it will come from and how each source gets pinned is in `ASSETS.md`;
+  none of it is fetched yet.
 - **Sound and music.** Nothing plays.
 - **A front end.** No title, no race setup, no vehicle choice, no results.
 - **Track files.** There is no serialisation for a track and no way to save one.
   The demo track is hard-coded in `main.c` and is a prototype.
-- **CI, and any release.** The workflows are written and have never executed.
+- **Any release.** CI and packaging work; nothing has been tagged or published.
+- **A player's guide.**
 
 ---
 
@@ -209,6 +244,26 @@ no ownership machinery — is the asset.
 The track is *not* in the world. It does not change during a race, and copying
 22 KB per rollback frame for something immutable would be silly.
 
+### Cars are meshes, not sprites
+
+The camera is a fixed orthographic isometric and stays that way — it is what
+makes a two-car collision legible, which is the reason the view exists. What it
+looks at is real three-dimensional geometry.
+
+The deciding argument is a feature of this game rather than a preference.
+Terrain is per-corner heights, so a car's orientation is continuous in heading,
+pitch *and* roll — it leans into a banked turn and noses up a ramp. A sprite
+atlas must quantise all three: six vehicles across 32 headings, five pitch
+steps, five roll steps and three damage states is over fourteen thousand frames
+before a wheel turns. The original never faced this because its terrain was
+fixed templates with limited slopes; arbitrary player-built elevation is our own
+feature breaking the sprite path.
+
+The ground is already emitted as projected 3D geometry, so drawing cars the same
+way is the same operation on a different vertex set rather than a second
+renderer. It also deletes a great deal of planned work: no pre-render step, no
+sprite atlas, no atlas baker, and still no image decoder. See `ASSETS.md`.
+
 ### Rendering is SDL_Renderer, not SDL_GPU
 
 Shaded terrain geometry and textured quads is essentially the whole renderer,
@@ -238,9 +293,6 @@ fallback rather than as a discovery made late.
 
 ## Known risks
 
-- **Nothing has been built anywhere but this machine.** Windows and macOS are
-  asserted by a preset and a workflow, not observed. The MSVC C23 gap in
-  particular is a mitigation written down and untested.
 - **The feel is unproven.** The physics is correct against its own closed form,
   which is not the same as fun. That question opens the moment there is a track
   worth driving and a lap worth setting, and it is the one thing here that
@@ -253,3 +305,7 @@ fallback rather than as a discovery made late.
   — a downhill landing hurts less than a flat one — and not for feel.
 - **`GS_MAX_CARS` is 4 and baked into the replay format.** Changing it later
   changes every recorded replay, which is why it is 4 now rather than 2.
+- **`SDL_Renderer` has no depth buffer**, so once cars are meshes their
+  triangles sort by painter's order alone. Boxy near-convex silhouettes should
+  hold; when they do not, `SDL_GPU` is the swap the thin `src/gfx/` interface
+  exists to allow.

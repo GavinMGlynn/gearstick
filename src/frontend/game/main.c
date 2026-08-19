@@ -13,6 +13,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include "core/gs_clock.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
 #include "gfx/gs_render.h"
@@ -35,7 +36,7 @@ typedef struct gs_app {
     gs_input_state input;
 
     uint64_t last_ns;
-    uint64_t accum_ns;
+    gs_clock clock;
 
     // --shot: draw this tick, write it out, and exit. This is how a change to
     // the renderer gets looked at rather than described, and how CI proves the
@@ -45,8 +46,6 @@ typedef struct gs_app {
     bool        overlay;      // start with the painted-gravity overlay on
     bool        quit;
 } gs_app;
-
-static const uint64_t GS_STEP_NS = 1000000000ULL / GS_TICK_HZ;
 
 // The demo track, until the editor exists to make a real one. It is a
 // prototype and it is named as one: a hard-coded track is not content.
@@ -155,6 +154,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     SDL_Log("gearstick: track hash 0x%016llx",
             (unsigned long long)gs_track_hash(&a->t));
 
+    gs_clock_init(&a->clock);
     a->last_ns = SDL_GetTicksNS();
     return SDL_APP_CONTINUE;
 }
@@ -191,16 +191,17 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     uint64_t delta = now - a->last_ns;
     a->last_ns = now;
 
-    // A machine that stalls - a breakpoint, a window drag, a laptop lid - must
-    // not then run a thousand ticks to catch up. Capping the catch-up makes the
-    // game go briefly slow instead of briefly mad.
-    if (delta > 250000000ULL) delta = 250000000ULL;
-    a->accum_ns += delta;
+    // How many fixed steps this frame owes the simulation. The catch-up cap and
+    // the leftover fraction both live in gs_clock, which is in src/core/ so
+    // that it can be tested without a window - see gs_clock.h for why that is
+    // worth the trouble.
+    uint32_t steps = gs_clock_advance(&a->clock, delta);
 
     // In shot mode the clock is ignored entirely and the ticks are counted out,
     // so the captured frame is the same frame on every machine.
     if (a->shot_path != nullptr) {
-        a->accum_ns = 0;
+        steps = 0;
+        gs_clock_init(&a->clock);
         while (a->world.tick < a->shot_at) {
             gs_input in[GS_MAX_CARS];
             for (uint8_t i = 0; i < GS_MAX_CARS; i++) in[i] = GS_IN_ACCEL;
@@ -209,16 +210,15 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         }
     }
 
-    while (a->accum_ns >= GS_STEP_NS) {
+    for (uint32_t i = 0; i < steps; i++) {
         gs_input in[GS_MAX_CARS];
         gs_input_poll(&a->input, in, a->world.car_count);
 
         a->prev = a->world;
         gs_world_step(&a->world, &a->t, in);
-        a->accum_ns -= GS_STEP_NS;
     }
 
-    float alpha = (float)a->accum_ns / (float)GS_STEP_NS;
+    float alpha = gs_to_f(gs_clock_alpha(&a->clock));
 
     SDL_SetRenderDrawColor(a->ren, 18, 20, 26, 255);
     SDL_RenderClear(a->ren);

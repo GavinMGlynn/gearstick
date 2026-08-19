@@ -45,6 +45,7 @@ gs_check_layering()
 # in CI, and rollback netcode later. See cmake/Layering.cmake, which enforces it.
 # ---------------------------------------------------------------------------
 add_library(gearstick_sim STATIC
+    src/core/gs_clock.c
     src/core/gs_fixed.c
     src/core/gs_track.c
     src/core/gs_vehicle.c
