@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 30 of 60 items, every
+**Phases 0 to 3 are complete, and Phase 4 has started — 31 of 61 items, every
 one of them with its verification actually run.** Phase 4 is the editor and is
 about half the remaining work.
 
@@ -184,9 +184,31 @@ whatever the UI turns out to be — then the interface on top.
       painted ice field does not. A painted one-third-gravity pocket over a
       landing lengthens the jump by more than half, without the race gravity
       changing at all.*
-- [ ] **Track validation** — is the loop closed, is the lap order derivable, can
-      it be completed. *Verification: a deliberately broken track is refused with
-      a message naming the problem.*
+- [x] **A route: a start line and ordered gates.** A track is terrain — heights,
+      surface, gravity — and terrain alone does not say which way round it goes
+      or where a lap begins. *Verification: gates are placed with the editor's
+      gate brush where the pointer is, in the order clicked, removable with the
+      order behind them intact, and saved, reloaded and hashed with the track —
+      the same ground with a different route is a different track. A car driven
+      through a gate is seen to cross it; one driven past the end of it, or
+      backwards through it, or stopping short of it, is not.*
+
+      **Added after the fact.** Validation was the next item on the original
+      list, and writing it made plain that there was nothing to validate: "is
+      the loop closed" presumes a loop, and no part of a track said which way
+      round it went. Gates rather than road tiles, because the terrain here is
+      free-form — a bowl, a plateau, a jump to nowhere are all buildable — and a
+      ribbon of road tiles would insist the drivable part is a ribbon. Authored
+      order also beats inferred order on the one axis this game cares about
+      most: a player can predict it.
+
+- [ ] **Track validation** — is there a start, are the gates in a closed order,
+      is every one of them reachable ground. *Verification: a deliberately
+      broken track is refused with a message naming the problem.*
+
+      *Completability — "can a car actually get round it" — is not here. It
+      needs something that drives, so it belongs with the analyser in Phase 9,
+      and claiming it as validation would be claiming a check nothing performs.*
 - [ ] **Instant test-drive from the cursor, and snap back.** *Verification: no
       load step, and edits made before the drive survive returning from it.*
 - [ ] **The live ghost** — a car continuously re-racing the design as it is
@@ -295,6 +317,11 @@ Found while implementing something else. Added when found, not when remembered.
       frontend needs its own item to actually run a race.
 - [ ] **`assets/` is empty and exists only so the install rules have something
       to copy.** Fine now; a smell if it is still true at Phase 10.
+- [ ] **Placing a gate is not in the undo history.** The undo model records a
+      cell changing from one value to another, and a gate is a list entry rather
+      than a cell. Removing a misplaced gate is easy, so this is an
+      inconsistency rather than a hole — but it is one, and undo that covers
+      most of what you did is a promise with a footnote.
 - [ ] **Import a corpus of real tracks to test against.** Our own tracks will
       all have been built by whoever wrote the editor, which is the worst
       possible sample. The *Stunts* corpus is the target — documented format,

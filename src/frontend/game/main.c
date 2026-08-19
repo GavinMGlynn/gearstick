@@ -84,6 +84,13 @@ static void gs_demo_track(gs_track *t) {
             if (x >= 15 && x < 21) gs_track_set_gravity(t, x, y, GS_RATIO(35, 100));
         }
     }
+
+    // A route, so there is something to look at and something to drive. Like
+    // the terrain around it this is a prototype: it goes when the editor can
+    // author a track worth shipping.
+    gs_track_add_gate(t, GS_INT(6), GS_INT(12), 0, GS_INT(5));
+    gs_track_add_gate(t, GS_INT(20), GS_INT(12), 0, GS_INT(5));
+    gs_track_add_gate(t, GS_INT(34), GS_INT(12), 0, GS_INT(5));
 }
 
 static void gs_start_race(gs_app *a) {

@@ -18,6 +18,8 @@ bool gs_editor_init(gs_editor *e, uint32_t history) {
     e->gravity = 1.0f;
     e->radius = 1;
     e->step = 0.25f;
+    e->gate_heading = 0.0f;
+    e->gate_width = 2.5f;
     e->zoom = 1.0f;
 
     // Sixty-five thousand edits of history is about eight hundred kilobytes,
@@ -71,12 +73,30 @@ static void gs_brush_at(gs_editor *e, gs_track *t, int tx, int ty) {
         gs_edit_gravity(e->log, t, (uint8_t)tx, (uint8_t)ty,
                         (gs_fix)(e->gravity * (float)GS_ONE));
         break;
+    case GS_BRUSH_GATE:
     case GS_BRUSH_COUNT:
         break;
     }
 }
 
 void gs_editor_paint(gs_editor *e, gs_track *t, float wx, float wy) {
+    // A gate is placed, not painted: it goes where the pointer is rather than
+    // over a disc of tiles, and one click makes one of them.
+    if (e->brush == GS_BRUSH_GATE) {
+        gs_angle heading = (gs_angle)(int32_t)(e->gate_heading / 360.0f * 65536.0f);
+        int at = gs_track_add_gate(t, (gs_fix)(wx * (float)GS_ONE),
+                                   (gs_fix)(wy * (float)GS_ONE), heading,
+                                   (gs_fix)(e->gate_width * (float)GS_ONE));
+        if (at < 0) {
+            SDL_snprintf(e->status, sizeof e->status,
+                         "the route is full at %d gates", GS_TRACK_MAX_GATES);
+        } else {
+            SDL_snprintf(e->status, sizeof e->status, "%s %d",
+                         at == 0 ? "placed the start line, gate" : "placed gate", at);
+        }
+        return;
+    }
+
     int cx = (int)SDL_floorf(wx);
     int cy = (int)SDL_floorf(wy);
     int r = e->radius;
@@ -121,13 +141,34 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     ImGui_RadioButtonIntPtr("surface", &e->brush, GS_BRUSH_SURFACE);
     ImGui_SameLine();
     ImGui_RadioButtonIntPtr("gravity", &e->brush, GS_BRUSH_GRAVITY);
+    // Second row: five of these do not fit across the panel, and a control
+    // clipped at the edge is a control nobody finds.
+    ImGui_RadioButtonIntPtr("gate", &e->brush, GS_BRUSH_GATE);
 
-    ImGui_SliderInt("radius", &e->radius, 0, 8);
+    if (e->brush != GS_BRUSH_GATE) ImGui_SliderInt("radius", &e->radius, 0, 8);
 
     if (e->brush == GS_BRUSH_RAISE || e->brush == GS_BRUSH_LOWER) {
         ImGui_SliderFloat("step (tiles)", &e->step, 0.05f, 2.0f);
     } else if (e->brush == GS_BRUSH_SURFACE) {
         ImGui_ComboChar("surface", &e->surface, gs_surface_names, GS_SURF_COUNT);
+    } else if (e->brush == GS_BRUSH_GATE) {
+        // The route. Gate zero is the start and the finish; the rest say which
+        // way round, in the order they were placed.
+        ImGui_SliderFloat("heading (deg)", &e->gate_heading, 0.0f, 359.0f);
+        ImGui_SliderFloat("half width", &e->gate_width, 0.5f, 8.0f);
+        ImGui_Text("click to place gate %u", t->gate_count);
+
+        for (uint8_t i = 0; i < t->gate_count; i++) {
+            char label[32];
+            SDL_snprintf(label, sizeof label, "remove##%u", i);
+            ImGui_Text("%u: %.1f, %.1f", i, (double)gs_to_f(t->gate[i].x),
+                       (double)gs_to_f(t->gate[i].y));
+            ImGui_SameLine();
+            if (ImGui_Button(label)) {
+                gs_track_remove_gate(t, i);
+                break;
+            }
+        }
     } else {
         // The gravity brush. The presets are named because "Jupiter" tells a
         // player something a number does not, and the slider is continuous
@@ -213,8 +254,6 @@ void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view) {
 
 void gs_editor_draw_cursor(const gs_editor *e, SDL_Renderer *ren,
                            const gs_track *t, const gs_view *view) {
-    if (!e->hover_on) return;
-
     SDL_SetRenderViewport(ren, &view->rect);
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(ren, 255, 245, 180, 220);
@@ -223,32 +262,74 @@ void gs_editor_draw_cursor(const gs_editor *e, SDL_Renderer *ren,
     cam.vw = (float)view->rect.w;
     cam.vh = (float)view->rect.h;
 
-    int cx = (int)SDL_floorf(e->hover_x);
-    int cy = (int)SDL_floorf(e->hover_y);
-    int r = e->radius;
-
     // Outline every tile the brush would touch, on the ground rather than flat
     // on the screen - so the cursor climbs a ramp with the terrain and reads as
     // being *on* the track rather than drawn over a picture of it.
-    for (int y = cy - r; y <= cy + r; y++) {
-        for (int x = cx - r; x <= cx + r; x++) {
-            int dx = x - cx, dy = y - cy;
-            if (dx * dx + dy * dy > r * r + r) continue;
-            if (x < 0 || y < 0 || x >= (int)t->w || y >= (int)t->h) continue;
+    //
+    // "No cursor" is expressed by not drawing one. Saying it with a radius of
+    // -1 looks tidier and is a trap: `cy + r` then underflows past INT_MIN and
+    // the loop runs four billion times.
+    if (e->hover_on && e->brush != GS_BRUSH_GATE) {
+        int cx = (int)SDL_floorf(e->hover_x);
+        int cy = (int)SDL_floorf(e->hover_y);
+        int r = e->radius;
 
-            static const int ox[5] = { 0, 1, 1, 0, 0 };
-            static const int oy[5] = { 0, 0, 1, 1, 0 };
-            SDL_FPoint p[5];
-            for (int i = 0; i < 5; i++) {
-                gs_fix wx = GS_INT(x + ox[i]);
-                gs_fix wy = GS_INT(y + oy[i]);
-                gs_fix wz = gs_track_height(t, wx, wy);
-                gs_iso_project(&cam, gs_to_f(wx), gs_to_f(wy), gs_to_f(wz) + 0.02f,
-                               &p[i].x, &p[i].y);
+        for (int y = cy - r; y <= cy + r; y++) {
+            for (int x = cx - r; x <= cx + r; x++) {
+                int dx = x - cx, dy = y - cy;
+                if (dx * dx + dy * dy > r * r + r) continue;
+                if (x < 0 || y < 0 || x >= (int)t->w || y >= (int)t->h) continue;
+
+                static const int ox[5] = { 0, 1, 1, 0, 0 };
+                static const int oy[5] = { 0, 0, 1, 1, 0 };
+                SDL_FPoint p[5];
+                for (int i = 0; i < 5; i++) {
+                    gs_fix wx = GS_INT(x + ox[i]);
+                    gs_fix wy = GS_INT(y + oy[i]);
+                    gs_fix wz = gs_track_height(t, wx, wy);
+                    gs_iso_project(&cam, gs_to_f(wx), gs_to_f(wy), gs_to_f(wz) + 0.02f,
+                                   &p[i].x, &p[i].y);
+                }
+                SDL_RenderLines(ren, p, 5);
             }
-            SDL_RenderLines(ren, p, 5);
         }
     }
+    // The route, drawn as the lines cars have to cross. Gate zero is the start
+    // and is drawn brighter, because "which one is the finish" is the first
+    // thing anyone asks of a track they did not build.
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        const gs_gate *g = &t->gate[i];
+
+        float fx = gs_to_f(gs_cos(g->heading));
+        float fy = gs_to_f(gs_sin(g->heading));
+        float gx = gs_to_f(g->x), gy = gs_to_f(g->y);
+        float hw = gs_to_f(g->half_width);
+
+        // Across the direction of travel: that is what a car drives through.
+        float ax = gx + fy * hw, ay = gy - fx * hw;
+        float bx = gx - fy * hw, by = gy + fx * hw;
+
+        gs_fix az = gs_track_height(t, (gs_fix)(ax * (float)GS_ONE), (gs_fix)(ay * (float)GS_ONE));
+        gs_fix bz = gs_track_height(t, (gs_fix)(bx * (float)GS_ONE), (gs_fix)(by * (float)GS_ONE));
+
+        SDL_FPoint line[2];
+        gs_iso_project(&cam, ax, ay, gs_to_f(az) + 0.05f, &line[0].x, &line[0].y);
+        gs_iso_project(&cam, bx, by, gs_to_f(bz) + 0.05f, &line[1].x, &line[1].y);
+
+        if (i == 0) SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
+        else SDL_SetRenderDrawColor(ren, 120, 220, 255, 210);
+        SDL_RenderLines(ren, line, 2);
+
+        // A stub pointing the way through, so a gate placed backwards is
+        // obvious while building rather than while racing.
+        gs_fix cz = gs_track_height(t, g->x, g->y);
+        SDL_FPoint arrow[2];
+        gs_iso_project(&cam, gx, gy, gs_to_f(cz) + 0.05f, &arrow[0].x, &arrow[0].y);
+        gs_iso_project(&cam, gx + fx * 1.2f, gy + fy * 1.2f, gs_to_f(cz) + 0.05f,
+                       &arrow[1].x, &arrow[1].y);
+        SDL_RenderLines(ren, arrow, 2);
+    }
+
     SDL_SetRenderViewport(ren, nullptr);
 }
 

@@ -24,6 +24,7 @@ typedef enum gs_brush {
     GS_BRUSH_LOWER,
     GS_BRUSH_SURFACE,
     GS_BRUSH_GRAVITY,
+    GS_BRUSH_GATE,
     GS_BRUSH_COUNT
 } gs_brush;
 
@@ -35,6 +36,9 @@ typedef struct gs_editor {
     float gravity;      // multiplier to paint, 1.0 being normal
     int   radius;       // in tiles, 0 being a single tile or corner
     float step;         // how far one application raises or lowers, in tiles
+
+    float gate_heading; // degrees, the way a car drives through a placed gate
+    float gate_width;   // half width, in tiles
 
     // The editor's own camera. It does not follow a car, because the thing you
     // are looking at while building is the part of the track you are building.

@@ -449,6 +449,94 @@ TEST(the_far_corners_of_a_track_can_be_edited) {
 }
 
 // ---------------------------------------------------------------------------
+// The route
+// ---------------------------------------------------------------------------
+
+TEST(a_car_driving_through_a_gate_is_seen_to_cross_it) {
+    // A gate at (10, 6) that cars pass through heading along +x, reaching two
+    // tiles either side of centre.
+    gs_gate g = { .x = GS_INT(10), .y = GS_INT(6), .half_width = GS_INT(2),
+                  .heading = 0, .pad = 0 };
+
+    // Straight through the middle.
+    CHECK(gs_gate_crossed(&g, GS_INT(9), GS_INT(6), GS_INT(11), GS_INT(6)));
+
+    // Through it near the edge, still a crossing.
+    CHECK(gs_gate_crossed(&g, GS_INT(9), GS_INT(4) + GS_HALF,
+                          GS_INT(11), GS_INT(4) + GS_HALF));
+
+    // Past the end of it is not. A gate is a gate, not a tripwire strung across
+    // the whole world - you can miss one, and missing one has to mean something.
+    CHECK(!gs_gate_crossed(&g, GS_INT(9), GS_INT(1), GS_INT(11), GS_INT(1)));
+
+    // Backwards is not a crossing either, which is what stops a player
+    // reversing over the finish line to score laps.
+    CHECK(!gs_gate_crossed(&g, GS_INT(11), GS_INT(6), GS_INT(9), GS_INT(6)));
+
+    // Nor is driving up to it and stopping short.
+    CHECK(!gs_gate_crossed(&g, GS_INT(8), GS_INT(6), GS_INT(9), GS_INT(6)));
+
+    // A gate turned to face another way is crossed from that way instead.
+    gs_gate north = { .x = GS_INT(10), .y = GS_INT(6), .half_width = GS_INT(2),
+                      .heading = GS_QUARTER, .pad = 0 };
+    CHECK(gs_gate_crossed(&north, GS_INT(10), GS_INT(5), GS_INT(10), GS_INT(7)));
+    CHECK(!gs_gate_crossed(&north, GS_INT(9), GS_INT(6), GS_INT(11), GS_INT(6)));
+}
+
+TEST(a_route_is_part_of_the_track_and_survives_being_saved) {
+    static gs_track a, b, back;
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+
+    gs_track_init(&a, 24, 12, GS_SURF_PAVEMENT);
+    gs_track_init(&b, 24, 12, GS_SURF_PAVEMENT);
+    CHECK(gs_track_hash(&a) == gs_track_hash(&b));
+
+    CHECK(gs_track_add_gate(&a, GS_INT(4), GS_INT(6), 0, GS_INT(3)) == 0);
+    CHECK(gs_track_add_gate(&a, GS_INT(16), GS_INT(6), GS_QUARTER, GS_INT(3)) == 1);
+
+    // The same ground with a route is not the same track: a lap time on it is
+    // not comparable with a lap time on bare terrain.
+    CHECK(gs_track_hash(&a) != gs_track_hash(&b));
+
+    size_t n = gs_track_serialize(&a, buf, sizeof buf);
+    CHECK(gs_track_deserialize(&back, buf, n));
+    CHECK(back.gate_count == 2);
+    CHECK(gs_track_hash(&back) == gs_track_hash(&a));
+    CHECK(back.gate[1].heading == GS_QUARTER);
+
+    // Direction is part of it too - the same gates the other way round are a
+    // different track, which is the whole reason a gate has a heading.
+    back.gate[0].heading = (gs_angle)(back.gate[0].heading + GS_QUARTER * 2);
+    CHECK(gs_track_hash(&back) != gs_track_hash(&a));
+}
+
+TEST(removing_a_gate_closes_the_gap_and_leaves_the_order_alone) {
+    static gs_track t;
+    gs_track_init(&t, 24, 12, GS_SURF_PAVEMENT);
+
+    for (int i = 0; i < 5; i++) {
+        CHECK(gs_track_add_gate(&t, GS_INT(2 * i), GS_INT(6), (gs_angle)(i * 1000),
+                                GS_INT(2)) == i);
+    }
+    CHECK(t.gate_count == 5);
+
+    CHECK(gs_track_remove_gate(&t, 1));
+    CHECK(t.gate_count == 4);
+    // What was third is now second, and everything after it moved up with it.
+    CHECK(t.gate[1].x == GS_INT(4));
+    CHECK(t.gate[3].x == GS_INT(8));
+
+    CHECK(!gs_track_remove_gate(&t, 9));
+
+    // And the route has a ceiling that is refused rather than overrun.
+    while (t.gate_count < GS_TRACK_MAX_GATES) {
+        CHECK(gs_track_add_gate(&t, GS_INT(1), GS_INT(1), 0, GS_INT(1)) >= 0);
+    }
+    CHECK(gs_track_add_gate(&t, GS_INT(1), GS_INT(1), 0, GS_INT(1)) == -1);
+    CHECK(t.gate_count == GS_TRACK_MAX_GATES);
+}
+
+// ---------------------------------------------------------------------------
 // Driving
 // ---------------------------------------------------------------------------
 
@@ -996,6 +1084,9 @@ int main(void) {
     run_an_edit_that_changes_nothing_leaves_no_step_in_the_history();
     run_a_full_log_refuses_the_edit_rather_than_applying_it();
     run_the_far_corners_of_a_track_can_be_edited();
+    run_a_car_driving_through_a_gate_is_seen_to_cross_it();
+    run_a_route_is_part_of_the_track_and_survives_being_saved();
+    run_removing_a_gate_closes_the_gap_and_leaves_the_order_alone();
     run_a_car_accelerates_under_throttle_and_stops_under_the_brake();
     run_a_car_left_on_a_slope_rolls_downhill_and_one_on_the_flat_does_not();
     run_a_car_turns_more_sharply_at_a_crawl_than_at_speed();

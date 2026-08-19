@@ -692,6 +692,44 @@ TEST(painting_gravity_changes_how_far_the_car_flies_over_it) {
     gs_editor_quit(&ed);
 }
 
+TEST(the_gate_brush_places_a_route_where_the_pointer_is) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 32, 12);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 4096));
+    ed.brush = GS_BRUSH_GATE;
+    ed.gate_heading = 90.0f;      // travelling along +y
+    ed.gate_width = 3.0f;
+
+    gs_editor_paint(&ed, &t, 8.0f, 4.0f);
+    CHECK(t.gate_count == 1);
+    CHECK(t.gate[0].x == GS_INT(8));
+    CHECK(t.gate[0].y == GS_INT(4));
+    CHECK(t.gate[0].half_width == GS_INT(3));
+
+    // Ninety degrees is a quarter turn, and a car driving that way goes through
+    // it while one crossing the other way does not.
+    CHECK(t.gate[0].heading == GS_QUARTER);
+    CHECK(gs_gate_crossed(&t.gate[0], GS_INT(8), GS_INT(3), GS_INT(8), GS_INT(5)));
+    CHECK(!gs_gate_crossed(&t.gate[0], GS_INT(7), GS_INT(4), GS_INT(9), GS_INT(4)));
+
+    // Placed in the order they are clicked, which is the order they are driven.
+    gs_editor_paint(&ed, &t, 20.0f, 4.0f);
+    CHECK(t.gate_count == 2);
+    CHECK(t.gate[1].x == GS_INT(20));
+
+    // And the route has a ceiling the editor reports rather than overruns.
+    for (int i = 0; i < GS_TRACK_MAX_GATES + 4; i++) {
+        gs_editor_paint(&ed, &t, 4.0f, 4.0f);
+    }
+    CHECK(t.gate_count == GS_TRACK_MAX_GATES);
+
+    gs_editor_quit(&ed);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -725,6 +763,7 @@ int main(void) {
     run_a_ramp_drawn_in_the_editor_drives_like_the_ramp_that_was_drawn(ren);
     run_painting_ice_changes_what_the_car_does_when_it_gets_there(ren);
     run_painting_gravity_changes_how_far_the_car_flies_over_it(ren);
+    run_the_gate_brush_places_a_route_where_the_pointer_is(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

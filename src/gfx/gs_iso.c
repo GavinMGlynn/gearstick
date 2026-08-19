@@ -59,7 +59,11 @@ bool gs_iso_pick(const gs_camera *cam, const struct gs_track *t,
         if (moved > -0.00025f && moved < 0.00025f) break;
     }
 
-    *wx = x;
-    *wy = y;
+    // Clamped on the way out, not just for sampling. A pointer dragged far off
+    // the window produces coordinates that overflow anything they are later
+    // converted to, and "(int)floorf(huge)" is undefined - which cost an hour
+    // once already, as a four-billion-iteration loop in the cursor.
+    *wx = GS_CLAMP(x, -4096.0f, 4096.0f);
+    *wy = GS_CLAMP(y, -4096.0f, 4096.0f);
     return x >= 0.0f && y >= 0.0f && x < (float)t->w && y < (float)t->h;
 }

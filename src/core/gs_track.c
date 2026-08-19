@@ -29,6 +29,50 @@ void gs_track_init(gs_track *t, uint8_t w, uint8_t h, gs_surface surface) {
 
     t->w = w;
     t->h = h;
+    t->gate_count = 0;
+    for (size_t i = 0; i < GS_TRACK_MAX_GATES; i++) t->gate[i] = (gs_gate){ 0 };
+}
+
+int gs_track_add_gate(gs_track *t, gs_fix x, gs_fix y, gs_angle heading, gs_fix half_width) {
+    if (t->gate_count >= GS_TRACK_MAX_GATES) return -1;
+
+    uint8_t i = t->gate_count++;
+    t->gate[i] = (gs_gate){ .x = x, .y = y, .half_width = half_width,
+                            .heading = heading, .pad = 0 };
+    return (int)i;
+}
+
+bool gs_track_remove_gate(gs_track *t, uint8_t index) {
+    if (index >= t->gate_count) return false;
+
+    for (uint8_t i = index; i + 1 < t->gate_count; i++) t->gate[i] = t->gate[i + 1];
+    t->gate_count--;
+    t->gate[t->gate_count] = (gs_gate){ 0 };
+    return true;
+}
+
+bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny) {
+    gs_fix fx = gs_cos(g->heading);
+    gs_fix fy = gs_sin(g->heading);
+
+    // How far in front of the gate each end of the step is. Crossing means
+    // starting behind it and finishing in front - the other way round is a car
+    // reversing over the line, which does not count.
+    gs_fix before = gs_fix_mul(px - g->x, fx) + gs_fix_mul(py - g->y, fy);
+    gs_fix after = gs_fix_mul(nx - g->x, fx) + gs_fix_mul(ny - g->y, fy);
+    if (before >= 0 || after < 0) return false;
+
+    // Where along the step the plane was met, and how far off centre that was.
+    // A step that passes the plane outside the gate's width misses it, which is
+    // what makes this a gate and not a tripwire across the whole world.
+    gs_fix span = after - before;
+    gs_fix at = span == 0 ? 0 : gs_fix_div(-before, span);
+
+    gs_fix cx = px + gs_fix_mul(nx - px, at);
+    gs_fix cy = py + gs_fix_mul(ny - py, at);
+
+    gs_fix lateral = gs_fix_mul(cx - g->x, -fy) + gs_fix_mul(cy - g->y, fx);
+    return gs_fix_abs(lateral) <= g->half_width;
 }
 
 // The tile a point falls in, clamped to the track. Off-track sampling returns
@@ -131,6 +175,14 @@ static void gs_hash_bytes(uint64_t *h, const void *p, size_t n) {
     }
 }
 
+static void gs_hash_i32(uint64_t *h, int32_t v) {
+    uint8_t le[4] = { (uint8_t)((uint32_t)v & 0xffu),
+                      (uint8_t)(((uint32_t)v >> 8) & 0xffu),
+                      (uint8_t)(((uint32_t)v >> 16) & 0xffu),
+                      (uint8_t)(((uint32_t)v >> 24) & 0xffu) };
+    gs_hash_bytes(h, le, sizeof le);
+}
+
 uint64_t gs_track_hash(const gs_track *t) {
     uint64_t h = 0xcbf29ce484222325ULL;
 
@@ -154,6 +206,17 @@ uint64_t gs_track_hash(const gs_track *t) {
             gs_hash_bytes(&h, &t->gravity[GS_TILE_INDEX(x, y)], 1);
         }
     }
+
+    // The route is part of the track's identity: the same ground driven the
+    // other way round is a different track, and its times are not comparable.
+    gs_hash_bytes(&h, &t->gate_count, sizeof t->gate_count);
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        const gs_gate *g = &t->gate[i];
+        gs_hash_i32(&h, g->x);
+        gs_hash_i32(&h, g->y);
+        gs_hash_i32(&h, g->half_width);
+        gs_hash_i32(&h, (int32_t)g->heading);
+    }
     return h;
 }
 
@@ -175,13 +238,17 @@ static uint32_t gs_get_u32(const uint8_t *p) {
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-// magic, version, width, height.
-#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1)
+// magic, version, width, height, gate count.
+#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1 + 1)
+
+// x, y, half width, heading.
+#define GS_GATE_BYTES (4 + 4 + 4 + 2)
 
 static size_t gs_track_payload(const gs_track *t) {
     size_t corners = ((size_t)t->w + 1) * ((size_t)t->h + 1) * 2;  // int16 each
     size_t tiles = (size_t)t->w * (size_t)t->h * 2;                // surface, gravity
-    return corners + tiles;
+    size_t gates = (size_t)t->gate_count * GS_GATE_BYTES;
+    return corners + tiles + gates;
 }
 
 size_t gs_track_size(const gs_track *t) {
@@ -197,6 +264,7 @@ size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap) {
     gs_put_u32(p, GS_TRACK_VERSION); p += 4;
     *p++ = t->w;
     *p++ = t->h;
+    *p++ = t->gate_count;
 
     for (uint32_t y = 0; y <= t->h; y++) {
         for (uint32_t x = 0; x <= t->w; x++) {
@@ -210,6 +278,15 @@ size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap) {
             *p++ = t->surface[GS_TILE_INDEX(x, y)];
             *p++ = t->gravity[GS_TILE_INDEX(x, y)];
         }
+    }
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        const gs_gate *g = &t->gate[i];
+        gs_put_u32(p, (uint32_t)g->x);          p += 4;
+        gs_put_u32(p, (uint32_t)g->y);          p += 4;
+        gs_put_u32(p, (uint32_t)g->half_width); p += 4;
+        p[0] = (uint8_t)(g->heading & 0xffu);
+        p[1] = (uint8_t)((g->heading >> 8) & 0xffu);
+        p += 2;
     }
     return need;
 }
@@ -225,14 +302,17 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
 
     uint8_t w = *p++;
     uint8_t h = *p++;
+    uint8_t gates = *p++;
     if (w == 0 || h == 0 || w > GS_TRACK_MAX || h > GS_TRACK_MAX) return false;
+    if (gates > GS_TRACK_MAX_GATES) return false;
 
     // Everything is checked before anything is written, so a refused file
     // leaves the caller's track exactly as it was. Half-loading is the failure
     // that matters here: it races, and it is not the track anybody built.
     size_t corners = ((size_t)w + 1) * ((size_t)h + 1) * 2;
     size_t tiles = (size_t)w * (size_t)h * 2;
-    if (len < GS_TRACK_HEADER_BYTES + corners + tiles) return false;
+    size_t route = (size_t)gates * GS_GATE_BYTES;
+    if (len < GS_TRACK_HEADER_BYTES + corners + tiles + route) return false;
 
     gs_track_init(t, w, h, GS_SURF_PAVEMENT);
 
@@ -253,5 +333,15 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
             t->gravity[GS_TILE_INDEX(x, y)] = g;
         }
     }
+    for (uint8_t i = 0; i < gates; i++) {
+        gs_gate *g = &t->gate[i];
+        g->x = (gs_fix)gs_get_u32(p);          p += 4;
+        g->y = (gs_fix)gs_get_u32(p);          p += 4;
+        g->half_width = (gs_fix)gs_get_u32(p); p += 4;
+        g->heading = (gs_angle)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+        g->pad = 0;
+        p += 2;
+    }
+    t->gate_count = gates;
     return true;
 }

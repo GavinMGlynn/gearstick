@@ -9,7 +9,12 @@
 #ifndef GS_GOLDEN_H
 #define GS_GOLDEN_H
 
-#define GS_SELFTEST_TRACK_HASH 0x45680cd170357efeULL
+// Moved once, deliberately, when gates were added: a track's identity now
+// includes its route, because the same ground driven the other way round is a
+// different track and its times are not comparable. The *world* hash below did
+// not move, which is the point - the physics was untouched, and that is exactly
+// what these two numbers being separate is for.
+#define GS_SELFTEST_TRACK_HASH 0x254cc5e1aae6c99aULL
 #define GS_SELFTEST_WORLD_HASH 0x1efc0b9d2feb87b1ULL
 
 #endif // GS_GOLDEN_H

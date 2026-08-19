@@ -54,6 +54,24 @@ extern const gs_surface_def gs_surfaces[GS_SURF_COUNT];
 // spans nothing at all up to just under 4x - Moon to well past Jupiter.
 #define GS_GRAVITY_UNIT 64
 
+// A gate is a line a car drives through, and a route is an ordered list of
+// them. Gate zero is the start and the finish.
+//
+// **Gates rather than road tiles.** The terrain here is free-form - a bowl, a
+// plateau, a jump to nowhere are all things a player can build - and a ribbon
+// of road tiles would insist that the drivable part of a track is a ribbon.
+// Gates leave the ground alone and say only which way round it goes, which is
+// also the more predictable of the two: the order is authored rather than
+// inferred from a shape.
+#define GS_TRACK_MAX_GATES 32
+
+typedef struct gs_gate {
+    gs_fix   x, y;          // centre, in tiles
+    gs_fix   half_width;    // how far the gate reaches either side of centre
+    gs_angle heading;       // the direction a car travels *through* it
+    uint16_t pad;
+} gs_gate;
+
 typedef struct gs_track {
     uint8_t w, h;                        // in tiles; both in [1, GS_TRACK_MAX]
 
@@ -65,6 +83,9 @@ typedef struct gs_track {
 
     uint8_t surface[GS_TRACK_TILES];     // gs_surface, indexed [y * GS_TRACK_MAX + x]
     uint8_t gravity[GS_TRACK_TILES];     // multiples of 1/GS_GRAVITY_UNIT
+
+    uint8_t gate_count;
+    gs_gate gate[GS_TRACK_MAX_GATES];    // gate[0] is the start and the finish
 } gs_track;
 
 #define GS_CORNER_STRIDE (GS_TRACK_MAX + 1)
@@ -98,6 +119,20 @@ void gs_track_set_corner(gs_track *t, uint8_t x, uint8_t y, gs_fix height);
 void gs_track_set_surface(gs_track *t, uint8_t x, uint8_t y, gs_surface s);
 void gs_track_set_gravity(gs_track *t, uint8_t x, uint8_t y, gs_fix multiplier);
 
+// Append a gate to the route. Returns its index, or -1 if the route is full.
+int gs_track_add_gate(gs_track *t, gs_fix x, gs_fix y, gs_angle heading, gs_fix half_width);
+
+// Remove a gate, closing the gap so the remaining order is unchanged.
+bool gs_track_remove_gate(gs_track *t, uint8_t index);
+
+// Did a car travelling from (px, py) to (nx, ny) pass through this gate?
+//
+// A gate is directional: driving through it backwards is not a crossing, which
+// is what stops a player reversing over the finish line to score laps. And it
+// is finite: passing the plane beyond the gate's width misses it, which is what
+// makes a gate a gate rather than an infinite tripwire across the world.
+bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny);
+
 // A track's identity is its content. Two players who built the same track
 // independently have the same track, without a server deciding so, and a
 // one-tile edit cleanly produces a different one - which is what lets ghosts
@@ -116,7 +151,7 @@ uint64_t gs_track_hash(const gs_track *t);
 // provides the buffer and asks how big it needs to be.
 
 #define GS_TRACK_MAGIC   0x4b525447u   // "GTRK"
-#define GS_TRACK_VERSION 1u
+#define GS_TRACK_VERSION 2u
 
 // Bytes `gs_track_serialize` will write for this track.
 size_t gs_track_size(const gs_track *t);
