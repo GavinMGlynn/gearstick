@@ -2,7 +2,11 @@
 
 #include <string.h>
 
-#define GS_RECORD_BYTES (8 + 8 + 4 + 4 + 2 + 1 + 1 + GS_NAME_MAX)
+// What one row takes on disk, per version. Version two appended eight bytes for
+// the date; everything before it is byte for byte where it was, which is what
+// lets one reader handle both.
+#define GS_RECORD_BYTES_V1 (8 + 8 + 4 + 4 + 2 + 1 + 1 + GS_NAME_MAX)
+#define GS_RECORD_BYTES    (GS_RECORD_BYTES_V1 + 8)
 #define GS_RECORDS_HEADER (4 + 4 + 4)
 
 void gs_records_clear(gs_records *r) {
@@ -121,7 +125,7 @@ static gs_record *gs_find_or_add(gs_records *r, uint64_t track, uint64_t conditi
 gs_record_beat gs_records_submit(gs_records *r, uint64_t track, uint64_t conditions,
                                  uint8_t vehicle, uint8_t mode, uint16_t laps,
                                  uint32_t lap_ticks, uint32_t race_ticks,
-                                 const char *who) {
+                                 const char *who, uint64_t when) {
     gs_record_beat beat = { false, false };
     if (who == nullptr) who = "";
 
@@ -141,8 +145,18 @@ gs_record_beat gs_records_submit(gs_records *r, uint64_t track, uint64_t conditi
     e->vehicle = vehicle;
     e->mode = mode;
 
-    if (lap_ticks > 0 && (e->lap == 0 || lap_ticks < e->lap)) e->lap = lap_ticks;
-    if (race_ticks > 0 && (e->race == 0 || race_ticks < e->race)) e->race = race_ticks;
+    // Dated only when something was actually beaten, so the date belongs to the
+    // time in the row rather than to the last occasion somebody drove past.
+    bool improved = false;
+    if (lap_ticks > 0 && (e->lap == 0 || lap_ticks < e->lap)) {
+        e->lap = lap_ticks;
+        improved = true;
+    }
+    if (race_ticks > 0 && (e->race == 0 || race_ticks < e->race)) {
+        e->race = race_ticks;
+        improved = true;
+    }
+    if (improved) e->when = when;
     return beat;
 }
 
@@ -200,6 +214,7 @@ size_t gs_records_serialize(const gs_records *r, uint8_t *buf, size_t cap) {
         *p++ = e->vehicle;
         *p++ = e->mode;
         memcpy(p, e->who, GS_NAME_MAX); p += GS_NAME_MAX;
+        gs_put64(p, e->when);       p += 8;      // version 2
     }
     return need;
 }
@@ -210,12 +225,18 @@ bool gs_records_deserialize(gs_records *r, const uint8_t *buf, size_t len) {
     const uint8_t *p = buf;
     if (gs_get32(p) != GS_RECORDS_MAGIC) return false;
     p += 4;
-    if (gs_get32(p) != GS_RECORDS_VERSION) return false;
-    p += 4;
+
+    // **Anything from the oldest layout to this one.** Refusing everything but
+    // the current version is not safety, it is somebody's history disappearing
+    // the first time a field is added - and the field always gets added.
+    uint32_t version = gs_get32(p); p += 4;
+    if (version < GS_RECORDS_OLDEST || version > GS_RECORDS_VERSION) return false;
+
+    size_t row = version >= 2 ? GS_RECORD_BYTES : GS_RECORD_BYTES_V1;
 
     uint32_t count = gs_get32(p); p += 4;
     if (count > GS_RECORDS_MAX) return false;
-    if (len < GS_RECORDS_HEADER + (size_t)count * GS_RECORD_BYTES) return false;
+    if (len < GS_RECORDS_HEADER + (size_t)count * row) return false;
 
     gs_records_clear(r);
     r->count = (uint16_t)count;
@@ -231,6 +252,12 @@ bool gs_records_deserialize(gs_records *r, const uint8_t *buf, size_t len) {
         e->mode = *p++;
         memcpy(e->who, p, GS_NAME_MAX); p += GS_NAME_MAX;
         e->who[GS_NAME_MAX - 1] = '\0';
+
+        // Older rows end here. A record from before dates existed says it does
+        // not know when it was set, which is the truth and is why zero means
+        // that rather than the epoch.
+        if (version >= 2) { e->when = gs_get64(p); p += 8; }
+        else              { e->when = 0; }
     }
     return true;
 }

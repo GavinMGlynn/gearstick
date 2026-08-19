@@ -16,7 +16,15 @@
 #include "core/gs_vehicle.h"
 
 #define GS_PROFILE_MAGIC   0x50525347u   // "GSRP" with a P
-#define GS_PROFILE_VERSION 1u
+// **Two, because a profile now remembers when it last drove.**
+//
+// Version one is still read, which is the point of there being a number. See
+// gs_records.h: a format that only recognises itself is a format that loses
+// somebody's history the first time a field is added, and a field always is.
+#define GS_PROFILE_VERSION 2u
+
+// The oldest layout still read.
+#define GS_PROFILE_OLDEST 1u
 
 #define GS_PROFILES_MAX 16
 #define GS_PROFILE_NAME 16
@@ -50,6 +58,11 @@ typedef struct gs_profile {
     uint32_t podiums;
     uint32_t wrecks;
     uint64_t tiles;         // how far they have driven, all told
+
+    // The last time they raced, as a Unix time; zero for "never recorded",
+    // which is what every profile written before version two says. Passed in
+    // from outside, because src/core/ links nothing and cannot read a clock.
+    uint64_t last_raced;
 } gs_profile;
 
 typedef struct gs_profiles {
@@ -72,9 +85,10 @@ int gs_profile_find(const gs_profiles *p, const char *name);
 // rewrite the history of a track.
 bool gs_profile_remove(gs_profiles *p, uint8_t index);
 
-// After a race.
+// After a race. `when` is a Unix time, or zero from a caller with no clock -
+// which is everything inside src/core/, because it links nothing.
 void gs_profile_raced(gs_profiles *p, uint8_t index, bool won, bool podium,
-                      bool wrecked, uint32_t tiles);
+                      bool wrecked, uint32_t tiles, uint64_t when);
 
 size_t gs_profiles_size(const gs_profiles *p);
 size_t gs_profiles_serialize(const gs_profiles *p, uint8_t *buf, size_t cap);

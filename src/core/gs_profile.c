@@ -44,7 +44,7 @@ bool gs_profile_remove(gs_profiles *p, uint8_t index) {
 }
 
 void gs_profile_raced(gs_profiles *p, uint8_t index, bool won, bool podium,
-                      bool wrecked, uint32_t tiles) {
+                      bool wrecked, uint32_t tiles, uint64_t when) {
     if (index >= p->count) return;
     gs_profile *e = &p->entry[index];
     e->races++;
@@ -52,11 +52,16 @@ void gs_profile_raced(gs_profiles *p, uint8_t index, bool won, bool podium,
     if (podium) e->podiums++;
     if (wrecked) e->wrecks++;
     e->tiles += tiles;
+    if (when != 0) e->last_raced = when;
 }
 
 // --- the wire format -------------------------------------------------------
 
-#define GS_PROFILE_BYTES (GS_PROFILE_NAME + 1 + 1 + 4 + 4 + 4 + 4 + 8)
+// What one profile takes on disk, per version. Version two appended eight bytes
+// for the date; everything before it is where it was, which is what lets one
+// reader handle both.
+#define GS_PROFILE_BYTES_V1 (GS_PROFILE_NAME + 1 + 1 + 4 + 4 + 4 + 4 + 8)
+#define GS_PROFILE_BYTES    (GS_PROFILE_BYTES_V1 + 8)
 #define GS_PROFILES_HEADER (4 + 4 + 4)
 
 static void gs_put32(uint8_t *p, uint32_t v) {
@@ -102,6 +107,7 @@ size_t gs_profiles_serialize(const gs_profiles *p, uint8_t *buf, size_t cap) {
         gs_put32(q, e->podiums); q += 4;
         gs_put32(q, e->wrecks);  q += 4;
         gs_put64(q, e->tiles);   q += 8;
+        gs_put64(q, e->last_raced); q += 8;      // version 2
     }
     return need;
 }
@@ -112,12 +118,14 @@ bool gs_profiles_deserialize(gs_profiles *p, const uint8_t *buf, size_t len) {
     const uint8_t *q = buf;
     if (gs_get32(q) != GS_PROFILE_MAGIC) return false;
     q += 4;
-    if (gs_get32(q) != GS_PROFILE_VERSION) return false;
-    q += 4;
+    uint32_t version = gs_get32(q); q += 4;
+    if (version < GS_PROFILE_OLDEST || version > GS_PROFILE_VERSION) return false;
+
+    size_t row = version >= 2 ? GS_PROFILE_BYTES : GS_PROFILE_BYTES_V1;
 
     uint32_t count = gs_get32(q); q += 4;
     if (count > GS_PROFILES_MAX) return false;
-    if (len < GS_PROFILES_HEADER + (size_t)count * GS_PROFILE_BYTES) return false;
+    if (len < GS_PROFILES_HEADER + (size_t)count * row) return false;
 
     gs_profiles_clear(p);
     p->count = (uint8_t)count;
@@ -135,6 +143,11 @@ bool gs_profiles_deserialize(gs_profiles *p, const uint8_t *buf, size_t len) {
         e->podiums = gs_get32(q); q += 4;
         e->wrecks = gs_get32(q);  q += 4;
         e->tiles = gs_get64(q);   q += 8;
+
+        // Older rows end here, and say they do not know - which is the truth,
+        // and why zero means that rather than the epoch.
+        if (version >= 2) { e->last_raced = gs_get64(q); q += 8; }
+        else              { e->last_raced = 0; }
     }
     return true;
 }

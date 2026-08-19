@@ -1045,6 +1045,16 @@ gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {
 
 // --- what a race did --------------------------------------------------------
 
+// The wall clock, in Unix seconds, for stamping a record with the day it was
+// set. Nothing in src/core/ may read a clock - it links nothing, and a result
+// that depended on the time of day would not be reproducible - so it is asked
+// for out here and passed in.
+static uint64_t gs_now(void) {
+    SDL_Time now = 0;
+    if (!SDL_GetCurrentTime(&now)) return 0;
+    return (uint64_t)(now / 1000000000);
+}
+
 void gs_menu_finish(gs_menu *m, const gs_world *w, const gs_track *t) {
     m->result_count = 0;
 
@@ -1096,16 +1106,19 @@ void gs_menu_finish(gs_menu *m, const gs_world *w, const gs_track *t) {
         int8_t who = m->setup.profile[r->car];
         if (who < 0 || who >= (int8_t)m->profiles.count) continue;
 
+        // The clock comes from here rather than from the table: src/core/ links
+        // nothing, and a simulation that could read the time is a simulation
+        // whose answer depends on when it ran.
         gs_record_beat beat = gs_records_submit(
             &m->records, track, conditions, m->setup.vehicle[r->car],
             w->mode, w->laps_to_win, r->best_lap, r->finish_tick,
-            m->profiles.entry[who].name);
+            m->profiles.entry[who].name, gs_now());
 
         r->beat_lap = beat.lap;
         r->beat_race = beat.race;
 
         gs_profile_raced(&m->profiles, (uint8_t)who, r->place == 1,
-                         r->place <= 3, r->wrecked, r->laps);
+                         r->place <= 3, r->wrecked, r->laps, gs_now());
         m->store_dirty = true;
     }
 }

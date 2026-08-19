@@ -1372,6 +1372,34 @@ against the amalgamation, and the job that checks it configures with
 `-DGEARSTICK_SQLITE_AMALGAMATION=ON`. With the writer fixed the file is
 reproducible; with it floating, "reproducible" was a property of one machine.
 
+### The store survives a format change
+
+Profiles and records refused anything but their own version, which reads like
+caution and means somebody's history disappears the first time a field is added
+— and a field always is. Both are at version two now, and both readers still
+accept version one.
+
+**The format had to actually move, or the migration would be code nobody has
+ever run.** So each gained the thing it was missing: a record says when it was
+set, a profile when it last drove. Both are Unix times passed in from outside,
+because `src/core/` links nothing and a simulation that could read a clock is a
+simulation whose answer depends on when it ran. Version one rows load with zero
+there, meaning "not recorded" rather than the epoch, which is the truth.
+
+The test writes the old layout **byte by byte with a frozen writer kept in the
+test file**. Generating it with the current code would prove nothing at all: the
+two would move together, and the day somebody changes the layout the "old" file
+would change with it.
+
+Tolerant of the past and not of the future: a version this build has never heard
+of is refused, because a table of times read by guesswork is worse than one that
+will not open.
+
+One thing the perturbation caught that a passing suite never would: the test
+dereferenced the record it looked up, so when the loader was broken on purpose
+the suite died with a segmentation fault instead of naming the fact that had
+stopped being true. A test that crashes reports nothing.
+
 ---
 
 ## What does not exist

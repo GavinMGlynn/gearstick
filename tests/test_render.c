@@ -1972,13 +1972,13 @@ TEST(the_store_remembers_drivers_and_records_between_runs) {
     gs_menu_init(&gs_m);
     gs_profile_add(&gs_m.profiles, "ada", GS_COLOUR_ORANGE,
                    (uint8_t)GS_VEH_BAJA_BUG);
-    gs_profile_raced(&gs_m.profiles, 0, true, true, false, 500);
+    gs_profile_raced(&gs_m.profiles, 0, true, true, false, 500, 1700000000ull);
 
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_records_submit(&gs_m.records, 0xfeedULL, gs_conditions_hash(&w),
                       (uint8_t)GS_VEH_BAJA_BUG, (uint8_t)GS_MODE_RACE, 3,
-                      4200, 13000, "ada");
+                      4200, 13000, "ada", 1700000000ull);
 
     static uint8_t buf[sizeof(gs_profiles) + sizeof(gs_records) + 4096];
     size_t n = gs_menu_save(&gs_m, buf, sizeof buf);

@@ -20,7 +20,18 @@
 #include "core/gs_sim.h"
 
 #define GS_RECORDS_MAGIC   0x43525347u   // "GSRC"
-#define GS_RECORDS_VERSION 1u
+// **Two, because a record now says when it was set.**
+//
+// Version one is still read, and that is the point of there being a number at
+// all. A format that only recognised itself meant somebody's history vanished
+// the first time it moved - which is what "refuses to load anything it does not
+// recognise" amounts to, however correct it looks written down.
+#define GS_RECORDS_VERSION 2u
+
+// The oldest layout this can still read. Everything from here to the current
+// version loads; anything else is refused, because guessing at a format is how
+// a table of times becomes a table of noise.
+#define GS_RECORDS_OLDEST 1u
 
 // Enough for a lot of tracks, and small enough to be a static object: about
 // forty kilobytes.
@@ -38,6 +49,12 @@ typedef struct gs_record {
     uint8_t  mode;           // gs_mode
 
     char     who[GS_NAME_MAX];
+
+    // When it was set, as a Unix time; zero for "not recorded", which is what
+    // every record written before version two says. **Passed in rather than
+    // read**: src/core/ links nothing, and a simulation that could read a clock
+    // is a simulation whose result depends on when it ran.
+    uint64_t when;
 } gs_record;
 
 typedef struct gs_records {
@@ -58,10 +75,12 @@ typedef struct gs_record_beat {
     bool race;
 } gs_record_beat;
 
+// `when` is a Unix time, or zero if the caller has no clock worth trusting -
+// which every caller inside src/core/ is, since it links nothing.
 gs_record_beat gs_records_submit(gs_records *r, uint64_t track, uint64_t conditions,
                                  uint8_t vehicle, uint8_t mode, uint16_t laps,
                                  uint32_t lap_ticks, uint32_t race_ticks,
-                                 const char *who);
+                                 const char *who, uint64_t when);
 
 // The best on this track under these conditions, or null if nobody has been
 // round it. The lap record is across every vehicle; a per-vehicle one is a

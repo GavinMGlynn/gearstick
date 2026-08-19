@@ -3054,7 +3054,7 @@ TEST(a_record_belongs_to_a_track_and_the_conditions_it_was_set_under) {
     gs_record_beat first = gs_records_submit(&gs_rec, track, e,
                                              (uint8_t)GS_VEH_STOCK_CAR,
                                              (uint8_t)GS_MODE_RACE, 3,
-                                             5040, 15900, "gavin");
+                                             5040, 15900, "gavin", 1700000000ull);
     CHECK(first.lap);      // the first time round is a record by definition
     CHECK(first.race);
 
@@ -3082,12 +3082,12 @@ TEST(beating_a_record_is_reported_and_not_beating_one_is_not) {
     uint64_t c = gs_conditions_hash(&w);
     const uint64_t track = 0x1111ULL;
 
-    gs_records_submit(&gs_rec, track, c, 0, (uint8_t)GS_MODE_RACE, 3, 5000, 16000, "ann");
+    gs_records_submit(&gs_rec, track, c, 0, (uint8_t)GS_MODE_RACE, 3, 5000, 16000, "ann", 1700000000ull);
 
     // Slower. Nothing is beaten, and the table still says what it said.
     gs_record_beat slower = gs_records_submit(&gs_rec, track, c, 0,
                                               (uint8_t)GS_MODE_RACE, 3,
-                                              5200, 16400, "bob");
+                                              5200, 16400, "bob", 1700000000ull);
     CHECK(!slower.lap);
     CHECK(!slower.race);
     CHECK(gs_records_best_lap(&gs_rec, track, c)->lap == 5000);
@@ -3096,7 +3096,7 @@ TEST(beating_a_record_is_reported_and_not_beating_one_is_not) {
     // brilliant lap and three ordinary ones.
     gs_record_beat mixed = gs_records_submit(&gs_rec, track, c, 0,
                                              (uint8_t)GS_MODE_RACE, 3,
-                                             4800, 16900, "bob");
+                                             4800, 16900, "bob", 1700000000ull);
     CHECK(mixed.lap);
     CHECK(!mixed.race);
     CHECK(gs_records_best_lap(&gs_rec, track, c)->lap == 4800);
@@ -3116,7 +3116,7 @@ TEST(beating_a_record_is_reported_and_not_beating_one_is_not) {
     // five-lap time does not take a three-lap record.
     gs_record_beat longer = gs_records_submit(&gs_rec, track, c, 0,
                                               (uint8_t)GS_MODE_RACE, 5,
-                                              4900, 26000, "ann");
+                                              4900, 26000, "ann", 1700000000ull);
     CHECK(!longer.lap);
     CHECK(longer.race);         // the first five-lap race, so a record for that
     CHECK(gs_records_best_race(&gs_rec, track, c, 3)->race == 16000);
@@ -3133,7 +3133,8 @@ TEST(records_survive_being_written_and_read_back) {
         snprintf(who, sizeof who, "driver%d", i);
         gs_records_submit(&gs_rec, 0x2000ULL + (uint64_t)(unsigned)(i % 7), c,
                           (uint8_t)(i % GS_VEH_COUNT), (uint8_t)GS_MODE_RACE, 3,
-                          (uint32_t)(4000 + i * 13), (uint32_t)(14000 + i * 40), who);
+                          (uint32_t)(4000 + i * 13), (uint32_t)(14000 + i * 40), who,
+                          1700000000ull);
     }
     uint16_t before = gs_rec.count;
     CHECK(before == 40);
@@ -3171,8 +3172,8 @@ TEST(a_profile_is_a_person_rather_than_a_settings_entry) {
     CHECK(p.entry[0].vehicle == (uint8_t)GS_VEH_BAJA_BUG);
 
     // A history, which is what makes it a person.
-    gs_profile_raced(&p, 0, true, true, false, 420);
-    gs_profile_raced(&p, 0, false, true, true, 380);
+    gs_profile_raced(&p, 0, true, true, false, 420, 1700000000ull);
+    gs_profile_raced(&p, 0, false, true, true, 380, 1700000001ull);
     CHECK(p.entry[0].races == 2);
     CHECK(p.entry[0].wins == 1);
     CHECK(p.entry[0].podiums == 2);
@@ -3256,13 +3257,13 @@ TEST(the_race_that_sets_a_record_is_the_race_that_reports_it) {
 
     gs_record_beat first = gs_records_submit(
         &gs_rec, gs_track_hash(&t), conditions, machine[quick],
-        (uint8_t)GS_MODE_RACE, 3, times[quick], races[quick], "quick");
+        (uint8_t)GS_MODE_RACE, 3, times[quick], races[quick], "quick", 1700000000ull);
     CHECK(first.lap);
     CHECK(first.race);
 
     gs_record_beat second = gs_records_submit(
         &gs_rec, gs_track_hash(&t), conditions, machine[slow],
-        (uint8_t)GS_MODE_RACE, 3, times[slow], races[slow], "slow");
+        (uint8_t)GS_MODE_RACE, 3, times[slow], races[slow], "slow", 1700000000ull);
     CHECK(!second.lap);
 
     const gs_record *best = gs_records_best_lap(&gs_rec, gs_track_hash(&t),
@@ -3996,6 +3997,157 @@ TEST(a_wrecked_car_stops_moving) {
     CHECK(w.car[0].x == x);
 }
 
+
+// ---------------------------------------------------------------------------
+// A store written by an older version
+// ---------------------------------------------------------------------------
+
+// **A version one writer, frozen.** This is what the previous release wrote, and
+// it is spelled out here rather than produced by the current code precisely so
+// that it cannot follow it: a migration test whose old format is generated by
+// the new program tests nothing, because the two move together.
+static void gs_put32_le(uint8_t *p, uint32_t v) {
+    for (int i = 0; i < 4; i++) p[i] = (uint8_t)((v >> (8 * i)) & 0xffu);
+}
+static void gs_put64_le(uint8_t *p, uint64_t v) {
+    for (int i = 0; i < 8; i++) p[i] = (uint8_t)((v >> (8 * i)) & 0xffu);
+}
+// Reading one back, for checking what a saved file says its version is.
+static uint32_t gs_get32_at(const uint8_t *p, size_t at) {
+    return (uint32_t)p[at] | ((uint32_t)p[at + 1] << 8) |
+           ((uint32_t)p[at + 2] << 16) | ((uint32_t)p[at + 3] << 24);
+}
+
+static void gs_put16_le(uint8_t *p, uint16_t v) {
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+}
+
+TEST(records_written_by_the_previous_version_still_load) {
+    // Two rows in the version one layout: no date on the end of either, because
+    // dates did not exist.
+    static uint8_t old_file[512];
+    uint8_t *p = old_file;
+
+    gs_put32_le(p, 0x43525347u); p += 4;    // "GSRC"
+    gs_put32_le(p, 1u);          p += 4;    // version one
+    gs_put32_le(p, 2u);          p += 4;    // two records
+
+    struct { uint64_t track, cond; uint32_t lap, race; uint16_t laps;
+             uint8_t veh, mode; const char *who; } rows[2] = {
+        { 0xabc1ULL, 0x0f0fULL, 4211, 13000, 3, 1, 0, "ada" },
+        { 0xabc2ULL, 0x0f0fULL, 5000, 16000, 3, 2, 0, "bez" },
+    };
+
+    for (int i = 0; i < 2; i++) {
+        gs_put64_le(p, rows[i].track); p += 8;
+        gs_put64_le(p, rows[i].cond);  p += 8;
+        gs_put32_le(p, rows[i].lap);   p += 4;
+        gs_put32_le(p, rows[i].race);  p += 4;
+        gs_put16_le(p, rows[i].laps);  p += 2;
+        *p++ = rows[i].veh;
+        *p++ = rows[i].mode;
+        memset(p, 0, GS_NAME_MAX);
+        memcpy(p, rows[i].who, strlen(rows[i].who));
+        p += GS_NAME_MAX;
+    }
+    size_t n = (size_t)(p - old_file);
+
+    // **It loads, and everything that was in it is still in it.**
+    static gs_records back;
+    CHECK(gs_records_deserialize(&back, old_file, n));
+    CHECK(back.count == 2);
+
+    const gs_record *best = gs_records_best_lap(&back, 0xabc1ULL, 0x0f0fULL);
+    CHECK(best != nullptr);
+    if (best != nullptr) {
+        CHECK(best->lap == 4211);
+        CHECK(best->race == 13000);
+        CHECK(best->vehicle == 1);
+        CHECK(strcmp(best->who, "ada") == 0);
+
+        // And the field that did not exist says it does not know, rather than
+        // claiming the epoch.
+        CHECK(best->when == 0);
+    }
+
+    // Saved again, it comes back as the current version with everything intact -
+    // which is what makes this an upgrade rather than a read-only compatibility
+    // shim.
+    static uint8_t rewritten[4096];
+    size_t m = gs_records_serialize(&back, rewritten, sizeof rewritten);
+    CHECK(m > 0);
+    CHECK(gs_get32_at(rewritten, 4) == GS_RECORDS_VERSION);
+
+    static gs_records again;
+    CHECK(gs_records_deserialize(&again, rewritten, m));
+    CHECK(again.count == 2);
+
+    // Guarded, because a test that crashes instead of failing reports nothing:
+    // the first version of this dereferenced the result, and when the loader was
+    // broken on purpose the suite died with a segmentation fault rather than
+    // naming the fact that had stopped being true.
+    const gs_record *reread = gs_records_best_lap(&again, 0xabc1ULL, 0x0f0fULL);
+    CHECK(reread != nullptr);
+    if (reread != nullptr) CHECK(reread->lap == 4211);
+}
+
+TEST(profiles_written_by_the_previous_version_still_load) {
+    static uint8_t old_file[512];
+    uint8_t *p = old_file;
+
+    gs_put32_le(p, 0x50525347u); p += 4;    // "GSRP"
+    gs_put32_le(p, 1u);          p += 4;
+    gs_put32_le(p, 1u);          p += 4;    // one profile
+
+    memset(p, 0, GS_PROFILE_NAME);
+    memcpy(p, "ada", 3);
+    p += GS_PROFILE_NAME;
+    *p++ = 2;                    // colour
+    *p++ = 1;                    // vehicle
+    gs_put32_le(p, 12u); p += 4; // races
+    gs_put32_le(p, 5u);  p += 4; // wins
+    gs_put32_le(p, 9u);  p += 4; // podiums
+    gs_put32_le(p, 1u);  p += 4; // wrecks
+    gs_put64_le(p, 4321u); p += 8;  // tiles
+
+    size_t n = (size_t)(p - old_file);
+
+    static gs_profiles back;
+    CHECK(gs_profiles_deserialize(&back, old_file, n));
+    CHECK(back.count == 1);
+    CHECK(strcmp(back.entry[0].name, "ada") == 0);
+    CHECK(back.entry[0].colour == 2);
+    CHECK(back.entry[0].vehicle == 1);
+    CHECK(back.entry[0].races == 12);
+    CHECK(back.entry[0].wins == 5);
+    CHECK(back.entry[0].podiums == 9);
+    CHECK(back.entry[0].wrecks == 1);
+    CHECK(back.entry[0].tiles == 4321);
+    CHECK(back.entry[0].last_raced == 0);
+}
+
+TEST(a_store_from_a_version_that_does_not_exist_is_refused) {
+    // Tolerant of the past and not of the future: a file from a version this
+    // build has never heard of cannot be read by guessing at it, and a table of
+    // times read wrongly is worse than one that would not open.
+    static uint8_t bad[64];
+    gs_put32_le(bad, 0x43525347u);
+    gs_put32_le(bad + 4, GS_RECORDS_VERSION + 1u);
+    gs_put32_le(bad + 8, 0u);
+
+    static gs_records back;
+    CHECK(!gs_records_deserialize(&back, bad, 12));
+
+    gs_put32_le(bad, 0x43525347u);
+    gs_put32_le(bad + 4, 0u);              // and version zero never existed
+    CHECK(!gs_records_deserialize(&back, bad, 12));
+
+    // Nor is a different format read as this one.
+    gs_put32_le(bad, 0x4b525447u);
+    gs_put32_le(bad + 4, GS_RECORDS_VERSION);
+    CHECK(!gs_records_deserialize(&back, bad, 12));
+}
 
 // ---------------------------------------------------------------------------
 // Undo, and the route
@@ -5009,6 +5161,9 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_records_written_by_the_previous_version_still_load();
+    run_profiles_written_by_the_previous_version_still_load();
+    run_a_store_from_a_version_that_does_not_exist_is_refused();
     run_placing_a_gate_can_be_undone_like_anything_else();
     run_removing_a_gate_puts_it_back_where_it_was_in_the_order();
     run_the_route_and_the_ground_undo_in_one_history();

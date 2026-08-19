@@ -605,10 +605,18 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       track. Taking one out of the middle of a route restores its position in
       the order too, and a gate placed inside a brush stroke comes back with the
       stroke.*
-- [ ] **The store survives a format change.** Profiles and records refuse to
-      load anything they do not recognise, which is correct and means somebody's
-      history vanishes the first time the format moves. *Verification: a store
-      written by the previous version loads, with its records intact.*
+- [x] **The store survives a format change.** Both formats moved to version two
+      — a record now says when it was set and a profile when it last drove — and
+      both readers accept version one and fill the new field with "not
+      recorded". A migration path with nothing to migrate from is code nobody has
+      ever run, so the format was moved for a reason and the old one kept.
+      *Verification: a file in the version one layout, written byte by byte by a
+      frozen writer kept in the test rather than produced by the current code —
+      which would follow it and prove nothing — loads with every field intact,
+      and saving it again writes version two. A version this build has never
+      heard of is still refused, in both directions: tolerant of the past, and
+      not of the future, because a table of times read by guesswork is worse than
+      one that will not open.*
 - [ ] **Read a foreign track format, and test against a corpus nobody here
       wrote.** Our own tracks were all built by whoever wrote the editor, which
       is the worst possible sample — a generator has the same problem, because
