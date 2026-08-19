@@ -1,0 +1,205 @@
+// main.c - the headless driver.
+//
+// **This program links gearstick_sim and nothing else.** No SDL, no window, no
+// audio device. That is not a convenience: it is the standing proof that the
+// simulation does not know it is being looked at, which is what lets the editor
+// re-race a track in the background, lets CI notice a physics change, and will
+// let rollback resimulate without a renderer attached.
+//
+// Run `gearstick_cli` with no arguments for the list.
+
+#include <stdio.h>
+#include <string.h>
+
+#include "core/gs_replay.h"
+#include "core/gs_sim.h"
+#include "core/gs_track.h"
+#include "core/gs_vehicle.h"
+
+#include "golden.h"
+
+static double as_double(gs_fix v) { return (double)v / (double)GS_ONE; }
+
+// ---------------------------------------------------------------------------
+// The selftest scenario
+//
+// Fixed, and fixed forever: a ramp to put both cars in the air, a stripe of ice
+// to make the slip model matter, and a painted low-gravity pocket so the brush
+// is exercised too. Two cars with different vehicles and different scripted
+// inputs, long enough that any change to any part of the physics moves the
+// final hash.
+// ---------------------------------------------------------------------------
+
+#define GS_SELFTEST_TICKS 900
+
+static void selftest_track(gs_track *t) {
+    gs_track_init(t, 32, 12, GS_SURF_PAVEMENT);
+
+    // A ramp climbing one tile between x = 8 and x = 12, flat either side.
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) {
+            gs_fix h;
+            if (x <= 8) h = 0;
+            else if (x >= 12) h = GS_INT(1);
+            else h = (gs_fix)((int64_t)GS_INT(1) * (x - 8) / 4);
+            gs_track_set_corner(t, x, y, h);
+        }
+    }
+
+    for (uint8_t x = 16; x < 24; x++)
+        for (uint8_t y = 0; y < t->h; y++)
+            gs_track_set_surface(t, x, y, GS_SURF_ICE);
+
+    for (uint8_t x = 13; x < 16; x++)
+        for (uint8_t y = 0; y < t->h; y++)
+            gs_track_set_gravity(t, x, y, GS_RATIO(35, 100));
+}
+
+static void selftest_inputs(uint32_t tick, gs_input *in) {
+    in[0] = GS_IN_ACCEL;
+    if ((tick / 40u) % 3u == 1u) in[0] |= GS_IN_LEFT;
+    if ((tick / 55u) % 4u == 2u) in[0] |= GS_IN_RIGHT;
+
+    in[1] = GS_IN_ACCEL;
+    if ((tick / 33u) % 2u == 0u) in[1] |= GS_IN_RIGHT;
+    if ((tick / 91u) % 3u == 0u) in[1] |= GS_IN_BRAKE;
+
+    in[2] = 0;
+    in[3] = 0;
+}
+
+static void selftest_world(gs_world *w, const gs_track *t) {
+    gs_world_init(w, GS_ONE);
+    gs_world_add_car(w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(4), 0);
+    gs_world_add_car(w, t, (uint8_t)GS_VEH_MOTORCYCLE, GS_INT(2), GS_INT(8), 0);
+}
+
+static int cmd_selftest(bool verify) {
+    static gs_track t;
+    static gs_replay rec;
+    gs_world w;
+
+    selftest_track(&t);
+    selftest_world(&w, &t);
+    gs_replay_begin(&rec, &w, &t);
+
+    for (uint32_t i = 0; i < GS_SELFTEST_TICKS; i++) {
+        gs_input in[GS_MAX_CARS];
+        selftest_inputs(i, in);
+        gs_replay_record(&rec, in);
+        gs_world_step(&w, &t, in);
+    }
+
+    uint64_t track_hash = gs_track_hash(&t);
+    uint64_t world_hash = gs_world_hash(&w);
+
+    printf("track  %u x %u, hash 0x%016llx\n", t.w, t.h,
+           (unsigned long long)track_hash);
+    printf("race   %u ticks at %d Hz (%.2f s)\n", GS_SELFTEST_TICKS, GS_TICK_HZ,
+           (double)GS_SELFTEST_TICKS / GS_TICK_HZ);
+
+    for (uint8_t i = 0; i < w.car_count; i++) {
+        const gs_car *c = &w.car[i];
+        printf("car %u  %-12s x %8.3f  y %8.3f  z %7.3f  speed %6.3f  "
+               "damage %3u%s\n",
+               i, gs_vehicle(c->vehicle)->name, as_double(c->x), as_double(c->y),
+               as_double(c->z), as_double(gs_car_speed(c)), c->damage,
+               c->wrecked ? "  WRECKED" : "");
+    }
+    printf("world  hash 0x%016llx\n", (unsigned long long)world_hash);
+
+    // The replay has to re-race to the same place, or the recording is a lie.
+    gs_world back;
+    if (!gs_replay_restore(&rec, &back, &t)) {
+        printf("FAIL   the replay refused its own track\n");
+        return 1;
+    }
+    selftest_world(&back, &t);
+    back.gravity = rec.meta.gravity;
+    gs_replay_playback(&rec, &t, &back);
+
+    if (gs_world_hash(&back) != world_hash) {
+        printf("FAIL   the replay did not re-race to the same world\n");
+        return 1;
+    }
+    printf("replay %u ticks, %zu bytes, re-races exactly\n",
+           rec.meta.tick_count, gs_replay_size(&rec));
+
+    if (!verify) return 0;
+
+    if (GS_SELFTEST_WORLD_HASH == 0ULL) {
+        printf("FAIL   src/frontend/cli/golden.h has no hash recorded yet\n");
+        return 1;
+    }
+    if (track_hash != GS_SELFTEST_TRACK_HASH) {
+        printf("FAIL   the selftest track is not the one the golden hash was "
+               "taken from\n       want 0x%016llx\n       got  0x%016llx\n",
+               (unsigned long long)GS_SELFTEST_TRACK_HASH,
+               (unsigned long long)track_hash);
+        return 1;
+    }
+    if (world_hash != GS_SELFTEST_WORLD_HASH) {
+        printf("FAIL   the physics moved. Every ghost time and every shared\n"
+               "       replay in existence is now wrong.\n"
+               "       want 0x%016llx\n       got  0x%016llx\n"
+               "       See src/frontend/cli/golden.h before changing this.\n",
+               (unsigned long long)GS_SELFTEST_WORLD_HASH,
+               (unsigned long long)world_hash);
+        return 1;
+    }
+
+    printf("OK     the golden replay still lands where it did\n");
+    return 0;
+}
+
+static int cmd_vehicles(void) {
+    printf("%-13s %7s %7s %6s %6s %8s %6s\n",
+           "vehicle", "power", "brake", "top", "grip", "steer", "tough");
+    for (uint8_t i = 0; i < GS_VEH_COUNT; i++) {
+        const gs_vehicle_def *v = gs_vehicle(i);
+        printf("%-13s %7.2f %7.2f %6.2f %6.2f %8.0f %6.2f\n", v->name,
+               as_double(v->power), as_double(v->brake), as_double(v->top),
+               as_double(v->grip), as_double(v->steer), as_double(v->toughness));
+    }
+    printf("\npower and brake in tiles/s^2, top in tiles/s, steer in angle "
+           "units/s.\nOne tile is %d metres.\n", GS_TILE_METRES);
+    return 0;
+}
+
+static int cmd_gravity(void) {
+    printf("%-9s %7s %10s\n", "preset", "x Earth", "tiles/s^2");
+    for (int i = 0; i < GS_GRAVITY_PRESETS; i++) {
+        const gs_gravity_preset *g = &gs_gravity_presets[i];
+        printf("%-9s %7.2f %10.3f\n", g->name, as_double(g->scale),
+               as_double(gs_fix_mul(GS_GRAVITY_EARTH, g->scale)));
+    }
+    printf("\nThe dial between them is continuous, and every tile carries its "
+           "own\nmultiplier on top - see the gravity brush in "
+           "docs/FEATURES.md.\n");
+    return 0;
+}
+
+static int usage(void) {
+    printf("gearstick_cli - the simulation, with nothing watching it\n\n"
+           "  selftest [--verify]  race the fixed scenario and print its state "
+           "hash\n"
+           "  vehicles             the roster and its numbers\n"
+           "  gravity              the presets\n\n"
+           "This program links the simulation and nothing else - no SDL, no "
+           "window,\nno audio device. If it stops linking, the simulation has "
+           "grown a\ndependency on being looked at.\n");
+    return 2;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 2) return usage();
+
+    if (strcmp(argv[1], "selftest") == 0) {
+        bool verify = argc > 2 && strcmp(argv[2], "--verify") == 0;
+        return cmd_selftest(verify);
+    }
+    if (strcmp(argv[1], "vehicles") == 0) return cmd_vehicles();
+    if (strcmp(argv[1], "gravity") == 0) return cmd_gravity();
+
+    return usage();
+}

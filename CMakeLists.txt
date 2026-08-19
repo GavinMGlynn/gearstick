@@ -1,0 +1,235 @@
+cmake_minimum_required(VERSION 3.28)
+
+project(gearstick
+    VERSION     0.1.0
+    DESCRIPTION "Gearstick - a Racing Destruction Set-style construction racer in C23 + SDL3"
+    LANGUAGES   C)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# ---------------------------------------------------------------------------
+# Options
+# ---------------------------------------------------------------------------
+option(GEARSTICK_USE_SYSTEM_SDL "Use find_package(SDL3) instead of ext/sdl" OFF)
+option(GEARSTICK_TESTS          "Build the unit tests"                      ON)
+
+# Warnings are errors, in **every** build type - not debug and CI alone.
+# A warning that is only fatal somewhere else is a warning that gets committed
+# here and discovered by someone else's build.
+#   cmake -B build -DGEARSTICK_WERROR=OFF
+option(GEARSTICK_WERROR         "Treat compiler warnings as errors"         ON)
+option(GEARSTICK_ASAN           "Build with address+UB sanitizers"          OFF)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
+endif()
+
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)   # so clangd/IDEs see -std=c23
+
+include(Platform)
+include(CompilerWarnings)
+include(Layering)
+
+gs_check_layering()
+
+# ---------------------------------------------------------------------------
+# The simulation
+#
+# **A standalone C library that links nothing.** Not SDL, not libm, not the
+# renderer. Everything good in this design is downstream of that: input-log
+# replays that reproduce a race exactly, the editor's background ghost, the
+# headless sweep that answers "is this track completable between 0.4g and 1.8g"
+# in CI, and rollback netcode later. See cmake/Layering.cmake, which enforces it.
+# ---------------------------------------------------------------------------
+add_library(gearstick_sim STATIC
+    src/core/gs_fixed.c
+    src/core/gs_track.c
+    src/core/gs_vehicle.c
+    src/core/gs_sim.c
+    src/core/gs_replay.c)
+
+# One include root, so every #include names the layer it crosses:
+#   #include "core/gs_sim.h"   not   #include "../core/gs_sim.h"
+target_include_directories(gearstick_sim PUBLIC src)
+gs_configure(gearstick_sim)
+
+# ---------------------------------------------------------------------------
+# Dependencies
+#
+# SDL is a pinned submodule under ext/ rather than a FetchContent download, so a
+# clone records the exact commit it builds against and an offline build works.
+# See ext/README.md. Nothing below this line is linked into gearstick_sim.
+#
+# SDL is the only dependency, and there is deliberately no image library yet:
+# the terrain is generated geometry rather than a tile atlas, and until there
+# are vehicle sprites to decode, an image decoder would be a dependency on three
+# platforms for a file type this game does not ship.
+# ---------------------------------------------------------------------------
+if(GEARSTICK_USE_SYSTEM_SDL)
+    find_package(SDL3 3.2 REQUIRED CONFIG)
+    set(GS_SDL SDL3::SDL3)
+    message(STATUS "gearstick: using system SDL3 ${SDL3_VERSION}")
+else()
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext/sdl/CMakeLists.txt")
+        message(FATAL_ERROR
+            "ext/sdl is empty - the submodules are not checked out.\n"
+            "  git submodule update --init --depth 1 ext/sdl\n"
+            "Or configure with -DGEARSTICK_USE_SYSTEM_SDL=ON to use an "
+            "installed SDL3 instead.")
+    endif()
+
+    set(SDL_SHARED       OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC       ON  CACHE BOOL "" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS        OFF CACHE BOOL "" FORCE)
+    set(SDL_EXAMPLES     OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL      OFF CACHE BOOL "" FORCE)
+
+    # Four pads on one couch is the point of this game, and an Xbox pad speaks a
+    # vendor-specific protocol: on Linux it needs either the kernel's xpad or
+    # SDL talking to it through libusb. WSL2 has no xpad, so without this the
+    # pad is invisible there. If libusb is missing at configure time SDL turns
+    # it back off by itself.
+    if(UNIX AND NOT APPLE)
+        set(SDL_HIDAPI_LIBUSB ON CACHE BOOL "" FORCE)
+    endif()
+
+    add_subdirectory(ext/sdl EXCLUDE_FROM_ALL)
+    set(GS_SDL SDL3::SDL3-static)
+
+    message(STATUS "gearstick: SDL3 from the ext/ submodule")
+endif()
+
+# ---------------------------------------------------------------------------
+# The shell - everything the simulation deliberately cannot do
+# ---------------------------------------------------------------------------
+add_library(gearstick_shell STATIC
+    src/gfx/gs_iso.c
+    src/gfx/gs_render.c
+    src/platform/gs_paths.c
+    src/platform/gs_input.c)
+
+target_include_directories(gearstick_shell PUBLIC src)
+target_link_libraries(gearstick_shell PUBLIC gearstick_sim ${GS_SDL})
+
+# Where the art lives when running straight out of the build tree, so the
+# ordinary edit-build-run loop needs no install step. See src/platform/gs_paths.c.
+target_compile_definitions(gearstick_shell PRIVATE
+    GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+
+gs_configure(gearstick_shell)
+
+# ---------------------------------------------------------------------------
+# Frontends
+# ---------------------------------------------------------------------------
+add_executable(gearstick src/frontend/game/main.c)
+target_link_libraries(gearstick PRIVATE gearstick_shell)
+gs_configure(gearstick)
+
+# Windows: GUI subsystem so no console window pops up. SDL_MAIN_USE_CALLBACKS
+# in main.c supplies WinMain via SDL3/SDL_main.h.
+set_target_properties(gearstick PROPERTIES
+    WIN32_EXECUTABLE ON
+    MACOSX_BUNDLE    OFF
+    C_VISIBILITY_PRESET hidden)
+
+# The headless driver. **Links gearstick_sim and nothing else** - no SDL, no
+# window, no audio device. That is not a convenience, it is the proof: if this
+# stops linking, the simulation has grown a dependency on being watched.
+add_executable(gearstick_cli src/frontend/cli/main.c)
+target_link_libraries(gearstick_cli PRIVATE gearstick_sim)
+gs_configure(gearstick_cli)
+set_target_properties(gearstick_cli PROPERTIES C_VISIBILITY_PRESET hidden)
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+if(GEARSTICK_TESTS)
+    enable_testing()
+    add_executable(gearstick_tests tests/test_gearstick.c)
+    target_link_libraries(gearstick_tests PRIVATE gearstick_sim)
+
+    # The tests link libm and the simulation does not. That asymmetry is the
+    # point: checking the fixed-point trigonometry against double precision is
+    # exactly the job that needs a maths library, and doing it out here is what
+    # lets the rule in src/core/ be absolute.
+    if(NOT MSVC)
+        target_link_libraries(gearstick_tests PRIVATE m)
+    endif()
+
+    gs_configure(gearstick_tests)
+
+    add_test(NAME gearstick COMMAND gearstick_tests)
+    set_tests_properties(gearstick PROPERTIES TIMEOUT 120)
+
+    # The golden replay: an input log in, a state hash out. This is the test
+    # that fails when a "harmless" change to the physics quietly rewrites every
+    # ghost time and every shared replay in existence.
+    add_test(NAME gearstick_golden_replay
+             COMMAND gearstick_cli selftest --verify)
+    set_tests_properties(gearstick_golden_replay PROPERTIES TIMEOUT 120)
+endif()
+
+# ---------------------------------------------------------------------------
+# Installing, and packaging
+#
+# **A package is a folder somebody unpacks and runs**, so the layout is the one
+# src/platform/gs_paths.c probes: the executables at the top and assets/ beside
+# them.
+# ---------------------------------------------------------------------------
+set(GS_DOCS README.md LICENSE)
+
+if(APPLE)
+    set_target_properties(gearstick PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME          "gearstick"
+        MACOSX_BUNDLE_GUI_IDENTIFIER       "dev.gavin.gearstick"
+        MACOSX_BUNDLE_BUNDLE_VERSION       "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_COPYRIGHT            "GPL-3.0-or-later")
+    install(TARGETS gearstick BUNDLE DESTINATION .)
+    # Inside Resources/assets, not Resources itself: SDL_GetBasePath returns a
+    # bundle's *resourcePath*, so the `<base>/assets` the probe in gs_paths.c
+    # looks for is Contents/Resources/assets.
+    install(DIRECTORY assets/ DESTINATION "gearstick.app/Contents/Resources/assets")
+    install(TARGETS gearstick_cli RUNTIME DESTINATION .)
+    install(FILES ${GS_DOCS} DESTINATION .)
+else()
+    install(TARGETS gearstick gearstick_cli RUNTIME DESTINATION .)
+    install(DIRECTORY assets/ DESTINATION assets)
+    install(FILES ${GS_DOCS} DESTINATION .)
+endif()
+
+# ---------------------------------------------------------------------------
+# CPack
+# ---------------------------------------------------------------------------
+# What a release calls itself, which is not always the project version - a beta
+# of 0.1.0 is still 0.1.0, and somebody with the file in their downloads folder
+# needs to be able to tell. Set by the release job from the tag.
+set(GEARSTICK_RELEASE "${PROJECT_VERSION}" CACHE STRING
+    "Version the packages are named for, e.g. 0.1.0-beta.1")
+
+set(CPACK_PACKAGE_NAME          "gearstick")
+set(CPACK_PACKAGE_VENDOR        "Gavin Glynn")
+set(CPACK_PACKAGE_VERSION       "${GEARSTICK_RELEASE}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY   "Gearstick")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_CHECKSUM      SHA256)
+set(CPACK_STRIP_FILES           ON)
+set(CPACK_VERBATIM_VARIABLES    ON)
+set(CPACK_PACKAGE_FILE_NAME "gearstick-${GEARSTICK_RELEASE}-${GS_PLATFORM}")
+
+if(WIN32)
+    set(CPACK_GENERATOR "ZIP")
+elseif(APPLE)
+    set(CPACK_GENERATOR "TGZ;DragNDrop")
+    set(CPACK_DMG_VOLUME_NAME "Gearstick ${PROJECT_VERSION}")
+else()
+    set(CPACK_GENERATOR "TGZ")
+endif()
+
+include(CPack)

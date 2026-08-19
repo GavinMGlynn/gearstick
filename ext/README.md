@@ -1,0 +1,58 @@
+# Third-party dependencies
+
+Everything here is a pinned git submodule. Nothing in this directory is our
+code, nothing here is modified in place, and nothing here is redistributed by
+this repository — a clone gets URLs and commit SHAs, not sources.
+
+## What is here
+
+| Submodule | Upstream | Pinned at | Role | Licence |
+| --- | --- | --- | --- | --- |
+| `sdl` | libsdl-org/SDL | `release-3.4.14` | **Linked by the shell only.** Window, renderer, input, audio, filesystem, timing | Zlib |
+
+That is the whole list, and it is meant to stay short.
+
+## What the build actually needs
+
+```sh
+git submodule update --init --depth 1 ext/sdl
+cmake --preset linux-release && cmake --build --preset linux-release
+ctest --preset linux-release
+```
+
+Or, to build against an SDL3 the system already has:
+
+```sh
+cmake -B build -G Ninja -DGEARSTICK_USE_SYSTEM_SDL=ON
+```
+
+`CMakeLists.txt` fails with an actionable message if `ext/sdl` is missing rather
+than with a wall of CMake.
+
+## What is deliberately not here
+
+**No image library.** `SDL_image` was checked out for this and then removed
+before it was ever built, because nothing decodes an image: the terrain is
+emitted as shaded geometry rather than assembled from a tile atlas, precisely so
+that arbitrary elevation joins stitch by construction. Until there are vehicle
+sprites to decode, an image decoder is a dependency on three platforms for a
+file type this game does not ship. It comes back with the art pipeline in
+Phase 10, and not before.
+
+**No audio library.** SDL3 loads and converts WAVs by itself, and the engine
+note is going to be generated rather than sampled, so mixing is a few hundred
+lines rather than a dependency.
+
+**No UI toolkit — yet.** The editor will want Dear ImGui through `cimgui` with
+the SDL3 backends, and that is the one dependency this project is planning to
+add. It arrives with Phase 4, and whether `cimgui` is currently tracking the
+SDL3 backends is a thing to check *before* that phase rather than during it.
+
+**No maths library in the simulation.** `gearstick_sim` links nothing at all —
+not SDL, not libm. The tests link libm to check the fixed-point trigonometry
+against double precision, which is the only place a maths library appears.
+
+## Why submodules rather than FetchContent
+
+A clone records the exact commit it builds against, and an offline build works.
+`ext/sdl` is a shallow checkout of one release tag; nothing here needs history.

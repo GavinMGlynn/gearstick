@@ -1,0 +1,149 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# SDL is the only submodule and the only dependency. Nothing else is checked
+# out, which is also what keeps README.md honest: a clone with this one
+# submodule builds and runs.
+env:
+  CI_SUBMODULES: ext/sdl
+
+jobs:
+  linux-debian:
+    name: Linux x86_64 (GCC 14, Debian family)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false }
+      - name: Check out build submodules
+        run: git submodule update --init --depth 1 $CI_SUBMODULES
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 ninja-build \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libxfixes-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols \
+            libgl-dev libegl-dev libpulse-dev libasound2-dev \
+            libdbus-1-dev libudev-dev libusb-1.0-0-dev
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_C_COMPILER=gcc-14
+                   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGEARSTICK_WERROR=ON
+      - name: Build
+        run: cmake --build build -j
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      # The tests cover the simulation. This covers everything the simulation
+      # deliberately cannot touch: the renderer, the camera, the asset path
+      # search. A game that passes ctest and cannot draw a frame is still broken.
+      - name: Smoke test - render a frame headless
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+          SDL_AUDIODRIVER: dummy
+        run: |
+          ./build/gearstick --shot smoke.bmp --shot-at 420 --overlay
+          test -s smoke.bmp || { echo "no frame was written"; exit 1; }
+
+      - name: Upload the frame
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: frame-linux, path: smoke.bmp, if-no-files-found: ignore }
+
+  linux-rhel:
+    name: Linux x86_64 (RHEL family)
+    runs-on: ubuntu-latest
+    container: rockylinux/rockylinux:10
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf -y install git gcc cmake ninja-build \
+            libX11-devel libXext-devel libXrandr-devel libXi-devel \
+            libXcursor-devel libXfixes-devel libxkbcommon-devel \
+            wayland-devel wayland-protocols-devel \
+            mesa-libGL-devel mesa-libEGL-devel pulseaudio-libs-devel \
+            alsa-lib-devel dbus-devel systemd-devel libusb1-devel
+
+      - uses: actions/checkout@v4
+        with: { submodules: false }
+      - name: Check out build submodules
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule update --init --depth 1 $CI_SUBMODULES
+
+      - name: Configure, build, test
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGEARSTICK_WERROR=ON
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
+
+  macos:
+    name: macOS arm64 (AppleClang)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false }
+      - name: Check out build submodules
+        run: git submodule update --init --depth 1 $CI_SUBMODULES
+
+      - name: Install ninja
+        run: brew install ninja
+
+      - name: Configure, build, test
+        run: |
+          cmake --preset macos-release
+          cmake --build --preset macos-release -j
+          ctest --preset macos-release
+
+      - name: Smoke test - render a frame headless
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+          SDL_AUDIODRIVER: dummy
+        run: |
+          ./build/macos-release/gearstick --shot smoke.bmp --shot-at 420
+          test -s smoke.bmp || { echo "no frame was written"; exit 1; }
+
+  windows:
+    name: Windows x64 (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false }
+      - name: Check out build submodules
+        run: git submodule update --init --depth 1 ext/sdl
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: { arch: x64 }
+
+      - name: Configure, build, test
+        shell: cmd
+        run: |
+          cmake --preset windows-release
+          cmake --build --preset windows-release
+          ctest --preset windows-release
+
+  # ---------------------------------------------------------------------------
+  # The one that matters most.
+  #
+  # Every job above runs `gearstick_cli selftest --verify` as part of ctest, and
+  # that compares one state hash against a number committed in the source. Four
+  # platforms, three compilers and two architectures all landing on the same
+  # hash is what turns "the simulation is deterministic" from a design intention
+  # into a fact somebody checked. This job exists to say so out loud when they
+  # all pass.
+  # ---------------------------------------------------------------------------
+  determinism:
+    name: The same race everywhere
+    needs: [linux-debian, linux-rhel, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say it
+        run: echo "Every platform re-raced the golden replay to the same state hash."

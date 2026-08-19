@@ -1,0 +1,41 @@
+# Is the committed trig table what the baker produces?
+#
+# src/core/gs_tables.h is generated and committed so that every platform reads
+# the same numbers - a table built at start-up is a table a different libm can
+# build differently, and the whole simulation is downstream of that. The cost of
+# committing it is a promise nobody can see: that the file really is what
+# tools/make_tables.py writes. This is the job that keeps it honest.
+name: tables
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/make_tables.py'
+      - 'src/core/gs_tables.h'
+      - '.github/workflows/tables.yml'
+  pull_request:
+    paths:
+      - 'tools/make_tables.py'
+      - 'src/core/gs_tables.h'
+
+jobs:
+  rebake:
+    name: Re-bake and diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Re-bake
+        run: python3 tools/make_tables.py
+
+      - name: Diff
+        run: |
+          if ! git diff --exit-code -- src/core/gs_tables.h; then
+            echo "::error::src/core/gs_tables.h is not what tools/make_tables.py produces."
+            exit 1
+          fi
+          echo "The committed table is the baked table."

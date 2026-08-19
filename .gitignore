@@ -1,0 +1,32 @@
+build/
+build-*/
+out/
+_deps/
+compile_commands.json
+.cache/
+.vs/
+.vscode/
+.idea/
+*.o
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.dSYM/
+.DS_Store
+tools/__pycache__/
+__pycache__/
+
+# Capture output from --shot and the CI smoke test.
+*.bmp
+!assets/*.bmp
+
+# Tracks somebody makes while playing about are theirs, not the project's - the
+# ones gearstick ships are content, and are committed.
+*.gstrack
+!assets/tracks/*.gstrack
+
+# Recorded races. A replay worth keeping is one attached to a bug report or
+# checked in as a golden test, not one left lying in the tree.
+*.gsreplay
+!tests/golden/*.gsreplay

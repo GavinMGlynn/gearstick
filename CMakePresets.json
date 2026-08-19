@@ -1,0 +1,107 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "GEARSTICK_WERROR": "ON"
+      }
+    },
+    {
+      "name": "debug-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GEARSTICK_ASAN": "ON"
+      }
+    },
+    {
+      "name": "release-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+
+    {
+      "name": "linux-debug",
+      "displayName": "Linux x86_64 - debug, sanitized",
+      "inherits": "debug-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux x86_64 - release",
+      "inherits": "release-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "macos-debug",
+      "displayName": "macOS arm64 - debug, sanitized",
+      "inherits": "debug-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "arm64" }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "macOS arm64 - release",
+      "inherits": "release-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "arm64" }
+    },
+    {
+      "name": "windows-debug",
+      "displayName": "Windows x64 - debug (MSVC)",
+      "inherits": "debug-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "architecture": { "value": "x64", "strategy": "external" },
+      "cacheVariables": { "GEARSTICK_ASAN": "OFF" }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows x64 - release (MSVC)",
+      "inherits": "release-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "architecture": { "value": "x64", "strategy": "external" }
+    },
+    {
+      "name": "windows-clang",
+      "displayName": "Windows x64 - release (clang-cl, full C23)",
+      "inherits": "release-base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "architecture": { "value": "x64", "strategy": "external" },
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang-cl" }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "linux-debug",     "configurePreset": "linux-debug" },
+    { "name": "linux-release",   "configurePreset": "linux-release" },
+    { "name": "macos-debug",     "configurePreset": "macos-debug" },
+    { "name": "macos-release",   "configurePreset": "macos-release" },
+    { "name": "windows-debug",   "configurePreset": "windows-debug",   "configuration": "Debug" },
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "RelWithDebInfo" },
+    { "name": "windows-clang",   "configurePreset": "windows-clang",   "configuration": "RelWithDebInfo" }
+  ],
+
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    { "name": "linux-debug",     "inherits": "test-base", "configurePreset": "linux-debug" },
+    { "name": "linux-release",   "inherits": "test-base", "configurePreset": "linux-release" },
+    { "name": "macos-debug",     "inherits": "test-base", "configurePreset": "macos-debug" },
+    { "name": "macos-release",   "inherits": "test-base", "configurePreset": "macos-release" },
+    { "name": "windows-debug",   "inherits": "test-base", "configurePreset": "windows-debug",   "configuration": "Debug" },
+    { "name": "windows-release", "inherits": "test-base", "configurePreset": "windows-release", "configuration": "RelWithDebInfo" },
+    { "name": "windows-clang",   "inherits": "test-base", "configurePreset": "windows-clang",   "configuration": "RelWithDebInfo" }
+  ]
+}

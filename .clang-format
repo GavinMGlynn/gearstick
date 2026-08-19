@@ -1,0 +1,38 @@
+# Formatting for gearstick's own sources. Vendored code in ext/ is never
+# reformatted - see .clang-format-ignore.
+#
+# Chosen to match what is already written rather than to impose a new style:
+# 4-space indent, 88-column lines, braces on the same line, and pointers bound
+# to the name. The column limit is 88 rather than 80 because the comment blocks
+# this codebase leans on read badly when wrapped tighter, and rather than 100
+# because a wider limit lets deeply nested tile arithmetic sprawl.
+Language: Cpp
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 88
+
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+
+# The terrain, item and rumble tables are written as designated-initialiser
+# blocks with one entry per line and aligned columns. Leaving them alone is the
+# point: they are read as tables, and a formatter that reflows them into
+# paragraphs destroys the only thing that makes them scannable.
+AlignArrayOfStructures: Left
+AlignConsecutiveMacros: Consecutive
+AlignTrailingComments: true
+
+IndentCaseLabels: false
+SpaceAfterCStyleCast: false
+SortIncludes: false          # include order here is layer order, not alphabetical
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1

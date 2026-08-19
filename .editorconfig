@@ -1,0 +1,21 @@
+# Applies to editors that read it, so the whitespace rules hold even where
+# clang-format does not run - CMake files, YAML, Markdown and Python.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+# Markdown gives trailing spaces meaning (a hard line break), so leave them.
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
