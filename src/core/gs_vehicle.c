@@ -9,42 +9,61 @@
 // Steering is the yaw rate at a crawl; it falls away with speed in the physics,
 // which is what stops a car pirouetting at 80.
 const gs_vehicle_def gs_vehicles[GS_VEH_COUNT] = {
-    // Balanced, and the one to learn the track in.
+    // **Every one of these is worst at something.** That is the whole roster
+    // design, and it is checked rather than asserted: `gearstick_cli roster`
+    // races all six over conditions chosen to reward different things and fails
+    // if one machine wins everything. The first version of this table did - the
+    // sprint car had the best top speed *and* good grip *and* high power, which
+    // made it a roster of one vehicle and five decorations.
+    //
+    // Grip does double duty since the grip circle arrived: it limits cornering
+    // *and* acceleration. So a low-grip car is not merely bad in corners, it is
+    // slow off the line on anything loose - and a high-grip one keeps moving on
+    // ice and on the Moon where everybody else is skating.
+
+    // The baseline. Good at nothing in particular, bad at nothing in
+    // particular, and the one to learn a track in.
     [GS_VEH_STOCK_CAR] = {
         "stock car",
         GS_RATIO(60, 10), GS_RATIO(90, 10), GS_INT(6),
-        GS_ONE, GS_INT(9000), GS_RATIO(6, 1000), GS_ONE,
+        GS_ONE, GS_INT(9500), GS_RATIO(6, 1000), GS_RATIO(110, 100),
     },
-    // Fastest on pavement, punished everywhere else, and fragile.
+    // The fastest thing here in a straight line on good ground, and it pays for
+    // it everywhere else: least grip in the roster, so it slides in corners and
+    // struggles to put its power down on anything but pavement, and it is
+    // fragile.
     [GS_VEH_SPRINT_CAR] = {
         "sprint car",
-        GS_RATIO(82, 10), GS_RATIO(105, 10), GS_RATIO(72, 10),
-        GS_RATIO(115, 100), GS_INT(7600), GS_RATIO(5, 1000), GS_RATIO(70, 100),
+        GS_RATIO(85, 10), GS_RATIO(105, 10), GS_RATIO(78, 10),
+        GS_RATIO(78, 100), GS_INT(7000), GS_RATIO(5, 1000), GS_RATIO(55, 100),
     },
-    // Turns in on dirt, gives away a lot of straight-line speed.
+    // Turns in beautifully and shrugs off rough ground; gives away a lot of
+    // straight-line speed for it.
     [GS_VEH_DUNE_BUGGY] = {
         "dune buggy",
-        GS_RATIO(55, 10), GS_RATIO(80, 10), GS_RATIO(52, 10),
-        GS_RATIO(105, 100), GS_INT(11500), GS_RATIO(9, 1000), GS_RATIO(120, 100),
+        GS_RATIO(56, 10), GS_RATIO(85, 10), GS_RATIO(53, 10),
+        GS_RATIO(122, 100), GS_INT(12500), GS_RATIO(9, 1000), GS_RATIO(135, 100),
     },
-    // Slow, tough, lands well. The one to take somewhere silly.
+    // Slow, and it does not care what you drive it over or how you land it.
     [GS_VEH_BAJA_BUG] = {
         "baja bug",
-        GS_RATIO(48, 10), GS_RATIO(70, 10), GS_RATIO(48, 10),
-        GS_RATIO(95, 100), GS_INT(10200), GS_RATIO(10, 1000), GS_RATIO(165, 100),
+        GS_RATIO(50, 10), GS_RATIO(75, 10), GS_INT(5),
+        GS_RATIO(110, 100), GS_INT(10500), GS_RATIO(10, 1000), GS_INT(2),
     },
-    // Enormous grip and steering, no mass to speak of, folds on a bad landing.
+    // Enormous grip and steering and the best acceleration in the game, and it
+    // folds on a landing that the rest would shrug off.
     [GS_VEH_MOTORCYCLE] = {
         "motorcycle",
-        GS_RATIO(95, 10), GS_RATIO(115, 10), GS_RATIO(68, 10),
-        GS_RATIO(120, 100), GS_INT(14000), GS_RATIO(4, 1000), GS_RATIO(45, 100),
+        GS_INT(9), GS_RATIO(115, 10), GS_RATIO(66, 10),
+        GS_RATIO(130, 100), GS_INT(15000), GS_RATIO(4, 1000), GS_RATIO(35, 100),
     },
-    // A joke on Earth and the only sane choice on the Moon: no speed, no grip
-    // to lose, and it will survive anything.
+    // A joke on Earth and the only sane choice on the Moon. Huge tyres, so it
+    // still has traction where gravity has taken everyone else's away - and no
+    // speed whatsoever to use it with.
     [GS_VEH_LUNAR_ROVER] = {
         "lunar rover",
-        GS_RATIO(30, 10), GS_RATIO(45, 10), GS_RATIO(32, 10),
-        GS_RATIO(70, 100), GS_INT(8200), GS_RATIO(14, 1000), GS_RATIO(230, 100),
+        GS_RATIO(34, 10), GS_INT(5), GS_RATIO(36, 10),
+        GS_RATIO(155, 100), GS_INT(8500), GS_RATIO(14, 1000), GS_RATIO(260, 100),
     },
 };
 

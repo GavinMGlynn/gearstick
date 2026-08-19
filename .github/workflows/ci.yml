@@ -44,29 +44,50 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           # The runner image ships third-party apt sources - Microsoft, Google
-          # Chrome - that this build has no use for and that have twice wedged
-          # apt for ten minutes or more.
-          #
-          # Globbed by name rather than by filename, because the first attempt
-          # at this removed `google-chrome.list` and the image had already moved
-          # to deb822 `.sources` files. It looked fixed and dl.google.com was
-          # still being fetched on the next run.
+          # Chrome - that this build has no use for. Globbed by name rather than
+          # by filename, because the first attempt removed `google-chrome.list`
+          # and the image had already moved to deb822 `.sources`; it looked
+          # fixed and dl.google.com was still being fetched the next run.
           sudo rm -f /etc/apt/sources.list.d/*google* \
                      /etc/apt/sources.list.d/*microsoft* \
                      /etc/apt/sources.list.d/*azure* 2>/dev/null || true
 
-          # The same bounds on *both* commands. The first version put them on
-          # `update` alone, and the hang that followed was in `install` - which
-          # downloads far more and had no timeout at all. ForceIPv4 because the
-          # runners reach archive.ubuntu.com over v6 by preference and that is
-          # where the stalls happen.
+          # The runner's own background apt jobs hold the dpkg lock and are a
+          # documented cause of exactly this stall. They have nothing useful to
+          # do while a build runs.
+          sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer \
+                              unattended-upgrades.service 2>/dev/null || true
+
+          # apt on GitHub's hosted runners stalls indefinitely, intermittently,
+          # and it is their bug rather than ours - actions/runner-images#11382.
+          # Two rounds of tuning Acquire options is how that was established:
+          # timeouts, retries and ForceIPv4 were all still hanging. So it is
+          # bounded from the outside and retried, which is the handling that
+          # issue recommends and the only thing that works against a hang rather
+          # than against a slow mirror.
           APT_OPTS="-o Acquire::Retries=3 \
                     -o Acquire::http::Timeout=30 \
                     -o Acquire::https::Timeout=30 \
                     -o Acquire::ForceIPv4=true \
-                    -o DPkg::Lock::Timeout=120"
-          sudo apt-get $APT_OPTS update
-          sudo apt-get $APT_OPTS install -y --no-install-recommends \
+                    -o DPkg::Lock::Timeout=60"
+
+          apt_run() {
+            for attempt in 1 2 3; do
+              if sudo timeout 240 apt-get $APT_OPTS "$@"; then return 0; fi
+              echo "::warning::apt attempt $attempt stalled; killing it and retrying"
+              sudo pkill -9 -f apt-get 2>/dev/null || true
+              sudo pkill -9 -f dpkg 2>/dev/null || true
+              sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock \
+                         /var/lib/dpkg/lock-frontend 2>/dev/null || true
+              sudo dpkg --configure -a 2>/dev/null || true
+              sleep 10
+            done
+            echo "::error::apt would not complete in three attempts"
+            return 1
+          }
+
+          apt_run update
+          apt_run install -y --no-install-recommends \
             gcc-14 g++-14 ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
             libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \

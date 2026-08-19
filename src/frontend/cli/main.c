@@ -289,18 +289,29 @@ typedef struct gs_scenario {
     gs_surface  surface;
     gs_fix      gravity;    // multiple of Earth
     bool        twisty;     // steer back and forth rather than run straight
-    bool        drop;       // start on a cliff, so landing intact is the test
+    int32_t     drop;       // shelf height in tiles, 0 for flat ground
+    gs_fix      bumps;      // washboard amplitude in tiles, 0 for smooth
 } gs_scenario;
 
 static void gs_scenario_track(gs_track *t, const gs_scenario *sc) {
     gs_track_init(t, 64, 24, sc->surface);
-    if (!sc->drop) return;
 
-    // A shelf that ends, so the run is decided by what the landing does rather
-    // than by how fast the car got there.
-    for (uint8_t y = 0; y <= t->h; y++)
-        for (uint8_t x = 0; x <= t->w; x++)
-            gs_track_set_corner(t, x, y, x <= 10 ? GS_INT(14) : 0);
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) {
+            gs_fix z = 0;
+
+            // A shelf that ends, so the run is decided by what the landing does
+            // rather than by how fast the car got there.
+            if (sc->drop != 0 && x <= 10) z += GS_INT(sc->drop);
+
+            // Washboard: ridges a car cannot avoid and has to survive. This is
+            // where toughness stops being insurance against a mistake and
+            // becomes the thing being measured.
+            if (sc->bumps != 0 && x > 6 && (x % 3u) == 0u) z += sc->bumps;
+
+            gs_track_set_corner(t, x, y, z);
+        }
+    }
 }
 
 // How far along the track a vehicle got in ten seconds, in tiles. A wreck
@@ -326,14 +337,22 @@ static double gs_run_scenario(const gs_scenario *sc, uint8_t vehicle) {
 }
 
 static int cmd_roster(void) {
+    // Chosen so that different things decide them: top speed, grip, survival,
+    // and grip again where gravity has taken most of it away.
     const gs_scenario scenarios[] = {
-        { "pavement sprint", GS_SURF_PAVEMENT, GS_ONE,             false, false },
-        { "ice",             GS_SURF_ICE,      GS_ONE,             false, false },
-        { "dirt, twisty",    GS_SURF_DIRT,     GS_ONE,             true,  false },
-        { "pavement, twisty",GS_SURF_PAVEMENT, GS_ONE,             true,  false },
-        { "moon, twisty",    GS_SURF_PAVEMENT, GS_RATIO(17, 100),  true,  false },
-        { "jupiter",         GS_SURF_PAVEMENT, GS_RATIO(253, 100), false, false },
-        { "off a shelf",     GS_SURF_DIRT,     GS_ONE,             false, true  },
+        { "pavement sprint",  GS_SURF_PAVEMENT, GS_ONE,             false,  0, 0 },
+        { "pavement, twisty", GS_SURF_PAVEMENT, GS_ONE,             true,   0, 0 },
+        { "jupiter",          GS_SURF_PAVEMENT, GS_RATIO(253, 100), false,  0, 0 },
+        { "ice",              GS_SURF_ICE,      GS_ONE,             false,  0, 0 },
+        { "dirt, twisty",     GS_SURF_DIRT,     GS_ONE,             true,   0, 0 },
+        { "the moon",         GS_SURF_PAVEMENT, GS_RATIO(17, 100),  true,   0, 0 },
+        { "ceres",            GS_SURF_PAVEMENT, GS_RATIO(3, 100),   true,   0, 0 },
+        { "off a shelf",      GS_SURF_DIRT,     GS_ONE,             false, 14, 0 },
+        { "off a cliff",      GS_SURF_DIRT,     GS_ONE,             false, 30, 0 },
+        { "washboard",        GS_SURF_DIRT,     GS_ONE,             false,  0,
+          GS_RATIO(45, 100) },
+        { "broken ground",    GS_SURF_DIRT,     GS_ONE,             false,  0,
+          GS_RATIO(90, 100) },
     };
     const size_t count = sizeof scenarios / sizeof scenarios[0];
 
