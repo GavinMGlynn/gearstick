@@ -14,6 +14,7 @@
 #include "core/gs_ai.h"
 #include "core/gs_analyse.h"
 #include "core/gs_ghost.h"
+#include "core/gs_share.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -623,6 +624,66 @@ static int cmd_pace(void) {
     return 0;
 }
 
+// --- sharing ----------------------------------------------------------------
+
+static int cmd_code(const char *path, bool as_url) {
+    static gs_track t;
+
+    FILE *f = fopen(path, "rb");
+    if (f == nullptr) {
+        printf("could not open %s\n", path);
+        return 1;
+    }
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+    size_t n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+
+    if (!gs_track_deserialize(&t, buf, n)) {
+        printf("%s is not a track\n", path);
+        return 1;
+    }
+
+    static char code[GS_SHARE_MAX];
+    size_t len = as_url ? gs_track_to_url(&t, code, sizeof code)
+                        : gs_track_to_code(&t, code, sizeof code);
+    if (len == 0) {
+        printf("FAIL   the track did not fit a code\n");
+        return 1;
+    }
+
+    printf("%s\n", code);
+    fprintf(stderr, "%zu bytes on disk, %zu characters shared (%.0f%%)\n",
+            n, len, 100.0 * (double)len / (double)n);
+    return 0;
+}
+
+static int cmd_decode(const char *code, const char *path) {
+    static gs_track t;
+
+    if (!gs_track_from_code(&t, code)) {
+        printf("FAIL   that is not a code for a track anybody built\n");
+        return 1;
+    }
+
+    printf("track  %u x %u, %u gates, id %016llx\n", t.w, t.h, t.gate_count,
+           (unsigned long long)gs_track_hash(&t));
+    printf("route  %s\n", gs_track_problem_text(gs_track_validate(&t).problem));
+
+    if (path == nullptr) return 0;
+
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+    size_t n = gs_track_serialize(&t, buf, sizeof buf);
+    FILE *f = fopen(path, "wb");
+    if (f == nullptr || n == 0 || fwrite(buf, 1, n, f) != n) {
+        printf("FAIL   could not write %s\n", path);
+        if (f != nullptr) fclose(f);
+        return 1;
+    }
+    fclose(f);
+    printf("wrote  %s, %zu bytes\n", path, n);
+    return 0;
+}
+
 // --- the analyser -----------------------------------------------------------
 
 static gs_analysis gs_report;
@@ -706,6 +767,9 @@ static int usage(void) {
            "  validate             show what the route checker accepts and refuses\n"
            "  ai                   race the AI round a circuit in every condition\n"
            "  analyse FILE         what gravities and machines can get round a track\n"
+           "  code FILE            print a track as a code somebody can paste back\n"
+           "  url FILE             the same code wrapped as a link\n"
+           "  decode CODE [FILE]   read a code, and optionally write the track out\n"
            "  pace                 lap times for a cautious, normal and quick driver\n"
            "  roster               race every vehicle over every condition\n"
            "  vehicles             the roster and its numbers\n"
@@ -728,6 +792,11 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "ai") == 0) return cmd_ai();
     if (strcmp(argv[1], "pace") == 0) return cmd_pace();
     if (strcmp(argv[1], "analyse") == 0 && argc > 2) return cmd_analyse(argv[2]);
+    if (strcmp(argv[1], "code") == 0 && argc > 2) return cmd_code(argv[2], false);
+    if (strcmp(argv[1], "url") == 0 && argc > 2) return cmd_code(argv[2], true);
+    if (strcmp(argv[1], "decode") == 0 && argc > 2) {
+        return cmd_decode(argv[2], argc > 3 ? argv[3] : nullptr);
+    }
     if (strcmp(argv[1], "roster") == 0) return cmd_roster();
     if (strcmp(argv[1], "vehicles") == 0) return cmd_vehicles();
     if (strcmp(argv[1], "gravity") == 0) return cmd_gravity();

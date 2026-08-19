@@ -291,6 +291,35 @@ of the same race at *every one* of the nine hundred ticks - not merely at the
 end. A ghost that agrees only at the end is one that drifts and then arrives,
 which is exactly the ghost nobody can race against.
 
+### Sharing a track, and what a run-length coder could not see
+
+A track leaves the room as about seven hundred characters of URL-safe text -
+`copy code` in the editor puts it on the clipboard, `paste code` takes one back,
+and `gearstick_cli code`, `url` and `decode` do the same from a terminal. There
+is no server, no account and no upload: the track *is* the message.
+
+The first packer was PackBits, and it was nearly useless here for a reason worth
+recording. A track is mostly flat identical ground - but surface and gravity are
+interleaved per tile, so flat identical ground is not a run of one byte, it is a
+*pattern* of two, and a run-length coder sees no runs in it at all. It saved an
+eighth. LZSS with a four kilobyte window sees the period and saves nine tenths:
+a 4,009 byte track became 3,515 characters, and now becomes 704. That is the
+difference between a code you can paste into a message and one you cannot. The
+worst case - a full 64x64 track with every corner randomised - packs in 5.6 ms,
+which is fine for a button and would not have been for a frame.
+
+The code carries the track's own content hash, and decoding rebuilds the track
+and checks it. A code that lost a character usually still decodes to *something*,
+and that something must never be handed over as a track somebody built. Every
+single-character change to a real code is either refused or decodes to the
+identical track; the ones that are accepted differ in bytes the track format
+does not read, which is slack in the format rather than in the check.
+
+Because a code is a wire format between two people rather than inside one
+program, it is pinned like the golden replay: a small fixed track and the exact
+string it encodes to are committed in the tests. It is byte-identical across
+gcc -O0 through -Os and clang, and clean under UBSan and ASan.
+
 ---
 
 ## What does not exist

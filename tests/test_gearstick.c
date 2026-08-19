@@ -20,6 +20,8 @@
 #include "core/gs_clock.h"
 #include "core/gs_edit.h"
 #include "core/gs_ghost.h"
+#include "core/gs_pack.h"
+#include "core/gs_share.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -2274,6 +2276,184 @@ TEST(a_ghost_that_runs_out_stays_where_it_finished) {
     CHECK(gs_ghost_car(&g)->x == GS_INT(4));
 }
 
+// ---------------------------------------------------------------------------
+// Sharing a track
+// ---------------------------------------------------------------------------
+
+static void gs_share_track(gs_track *t) {
+    gs_track_init(t, 40, 24, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) {
+            gs_fix h = 0;
+            if (x > 10 && x < 15) h = (gs_fix)((int64_t)GS_INT(1) * (x - 10) / 4);
+            else if (x >= 15 && x < 22) h = GS_INT(1);
+            gs_track_set_corner(t, x, y, h);
+        }
+    }
+    for (uint8_t x = 0; x < t->w; x++) {
+        for (uint8_t y = 0; y < t->h; y++) {
+            if (x >= 26 && x < 34) gs_track_set_surface(t, x, y, GS_SURF_ICE);
+            else if (y < 6) gs_track_set_surface(t, x, y, GS_SURF_DIRT);
+            if (x >= 15 && x < 21) gs_track_set_gravity(t, x, y, GS_RATIO(35, 100));
+        }
+    }
+    gs_track_add_gate(t, GS_INT(6), GS_INT(12), 0, GS_INT(5));
+    gs_track_add_gate(t, GS_INT(34), GS_INT(12), 0, GS_INT(5));
+}
+
+TEST(the_packer_gives_back_exactly_what_it_was_given) {
+    static uint8_t in[9000], packed[GS_PACK_BOUND(sizeof in)], out[sizeof in];
+
+    // Four shapes of input, because a packer that only handles the easy one is
+    // a packer that corrupts a track somebody spent an evening on.
+    for (int shape = 0; shape < 4; shape++) {
+        size_t n = sizeof in;
+        uint32_t seed = 7u;
+        for (size_t i = 0; i < n; i++) {
+            seed = seed * 1103515245u + 12345u;
+            switch (shape) {
+            case 0: in[i] = 0; break;                             // all one byte
+            case 1: in[i] = (uint8_t)(i & 1u); break;             // a two-byte pattern
+            case 2: in[i] = (uint8_t)(seed >> 16); break;         // nothing repeated
+            default: in[i] = (uint8_t)((i / 64u) & 0xffu); break; // long stretches
+            }
+        }
+
+        size_t pn = gs_pack(in, n, packed, sizeof packed);
+        CHECK(pn > 0);
+        CHECK(gs_unpack(packed, pn, out, sizeof out) == n);
+        CHECK(memcmp(in, out, n) == 0);
+
+        // And the repetitive shapes have to actually be smaller, or the packer
+        // is only proving it can copy.
+        if (shape != 2) CHECK(pn < n / 4);
+    }
+
+    // Nothing at all, which is the input every codec gets wrong once.
+    CHECK(gs_pack(in, 0, packed, sizeof packed) == 0);
+    CHECK(gs_unpack(packed, 0, out, sizeof out) == 0);
+
+    // And a buffer too small is refused rather than written past.
+    CHECK(gs_pack(in, sizeof in, packed, 4) == 0);
+}
+
+TEST(a_track_survives_being_pasted_into_a_chat_window) {
+    static gs_track t, back;
+    gs_share_track(&t);
+
+    static char code[GS_SHARE_MAX];
+    size_t n = gs_track_to_code(&t, code, sizeof code);
+    CHECK(n > 0);
+
+    // Short enough to be a code rather than a file. A track is four kilobytes
+    // of mostly flat ground; if this is not a fraction of that, sharing it in a
+    // message is not a thing anybody will do.
+    static uint8_t raw[GS_TRACK_TILES * 4 + 4096];
+    size_t raw_n = gs_track_serialize(&t, raw, sizeof raw);
+    CHECK(n < raw_n / 4);
+
+    CHECK(gs_track_from_code(&back, code));
+    CHECK(gs_track_hash(&back) == gs_track_hash(&t));
+
+    // Not merely the same hash - the same track, corner by corner and tile by
+    // tile, including the gravity somebody painted and the route they laid.
+    CHECK(back.w == t.w && back.h == t.h);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            size_t c = (size_t)y * (GS_TRACK_MAX + 1) + x;
+            CHECK(back.corner[c] == t.corner[c]);
+        }
+    }
+    for (uint8_t x = 0; x < t.w; x++) {
+        for (uint8_t y = 0; y < t.h; y++) {
+            gs_fix cx = GS_INT(x) + GS_HALF, cy = GS_INT(y) + GS_HALF;
+            CHECK(gs_track_surface(&back, cx, cy) == gs_track_surface(&t, cx, cy));
+            CHECK(gs_track_gravity(&back, cx, cy) == gs_track_gravity(&t, cx, cy));
+        }
+    }
+    CHECK(back.gate_count == t.gate_count);
+
+    // As a URL, which is the other thing people send.
+    static char url[GS_SHARE_MAX];
+    CHECK(gs_track_to_url(&t, url, sizeof url) > 0);
+    CHECK(gs_track_from_code(&back, url));
+    CHECK(gs_track_hash(&back) == gs_track_hash(&t));
+
+    // And with whatever the chat client wrapped it in.
+    static char messy[GS_SHARE_MAX + 8];
+    snprintf(messy, sizeof messy, "  \n\t%s\n ", code);
+    CHECK(gs_track_from_code(&back, messy));
+    CHECK(gs_track_hash(&back) == gs_track_hash(&t));
+
+    // Things that are not codes are refused, not guessed at.
+    CHECK(!gs_track_from_code(&back, ""));
+    CHECK(!gs_track_from_code(&back, "GST1"));
+    CHECK(!gs_track_from_code(&back, "hello"));
+    CHECK(!gs_track_from_code(&back, "GST2AAAAAAAAAAAA"));
+    CHECK(!gs_track_from_code(&back, nullptr));
+}
+
+TEST(a_damaged_code_never_becomes_a_different_track) {
+    static gs_track t, back;
+    gs_share_track(&t);
+
+    static char code[GS_SHARE_MAX];
+    size_t n = gs_track_to_code(&t, code, sizeof code);
+    uint64_t want = gs_track_hash(&t);
+
+    // Every single-character change, one at a time. Each has to be either
+    // refused or the same track: what must never happen is a code that lost a
+    // character in a chat window quietly becoming a track nobody built.
+    int accepted = 0;
+    for (size_t i = 4; i < n; i++) {
+        char save = code[i];
+        code[i] = (save == 'A') ? 'B' : 'A';
+        if (gs_track_from_code(&back, code)) {
+            accepted++;
+            CHECK(gs_track_hash(&back) == want);
+        }
+        code[i] = save;
+    }
+    // Some changes genuinely encode the same track - the track format has slack
+    // in it. This just pins that the loop did something.
+    CHECK(accepted < (int)n);
+
+    // A truncated code, which is what a line-wrapping chat client produces.
+    for (size_t cut = 8; cut < n; cut += 37) {
+        char save = code[cut];
+        code[cut] = '\0';
+        if (gs_track_from_code(&back, code)) CHECK(gs_track_hash(&back) == want);
+        code[cut] = save;
+    }
+}
+
+TEST(a_code_is_the_same_code_on_every_machine) {
+    // A small fixed track and the exact string it encodes to. A code is a wire
+    // format between two people, so it is pinned the same way the golden replay
+    // is: if this moves, every code anybody has shared has stopped working, and
+    // that should be a decision rather than a surprise.
+    static const char *want =
+        "GST1nO3tcjgrKaH_R1RSSwIAAAATCAYFAQADAQkGEQ8RDzARDxEPEQ8RDgFAAQ8BDUEC"
+        "Ew8BDwEPAQJqAwMDAALoAwYNCA";
+
+    static gs_track t, back;
+    gs_track_init(&t, 8, 6, GS_SURF_DIRT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++)
+            gs_track_set_corner(&t, x, y, x == 4 ? GS_INT(1) : 0);
+    gs_track_set_surface(&t, 2, 2, GS_SURF_ICE);
+    gs_track_add_gate(&t, GS_INT(1), GS_INT(3), 0, GS_INT(2));
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(3), 0, GS_INT(2));
+
+    static char code[GS_SHARE_MAX];
+    CHECK(gs_track_to_code(&t, code, sizeof code) > 0);
+    CHECK(strcmp(code, want) == 0);
+
+    // And the committed string still reads back as the track it was taken from.
+    CHECK(gs_track_from_code(&back, want));
+    CHECK(gs_track_hash(&back) == gs_track_hash(&t));
+}
+
 TEST(the_analyser_gives_the_same_answer_twice) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -2624,6 +2804,10 @@ int main(void) {
     run_a_ghost_from_another_track_is_refused_rather_than_raced();
     run_a_ghost_carries_its_own_starting_grid();
     run_a_ghost_that_runs_out_stays_where_it_finished();
+    run_the_packer_gives_back_exactly_what_it_was_given();
+    run_a_track_survives_being_pasted_into_a_chat_window();
+    run_a_damaged_code_never_becomes_a_different_track();
+    run_a_code_is_the_same_code_on_every_machine();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

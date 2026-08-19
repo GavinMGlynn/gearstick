@@ -7,6 +7,8 @@
 #include "platform/gs_paths.h"
 #include "ui/gs_editor.h"
 
+#include "core/gs_share.h"
+
 #define GS_EDITOR_HISTORY 65536
 #define GS_TRACK_FILENAME "current.gstrack"
 
@@ -363,6 +365,10 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     // people who built the same thing share times without a server agreeing.
     ImGui_Text("id %016llx", (unsigned long long)gs_track_hash(t));
 
+    if (ImGui_Button("copy code")) gs_editor_copy_code(e, t);
+    ImGui_SameLine();
+    if (ImGui_Button("paste code")) gs_editor_paste_code(e, t);
+
     if (ImGui_Button("save")) gs_editor_save(e, t);
     ImGui_SameLine();
     if (ImGui_Button("load")) gs_editor_load(e, t);
@@ -704,6 +710,72 @@ void gs_editor_analyse(gs_editor *e, const gs_track *t) {
 
 const gs_analysis *gs_editor_heat(const gs_editor *e) {
     return (e->analysed && e->heat_on) ? &e->heat : nullptr;
+}
+
+// **The clipboard is the transport.** A track leaves as a few hundred
+// characters, which goes in a message, a forum post or a text file without
+// anything having to host it - and arrives as the same track, because the code
+// carries the content hash and decoding checks it.
+void gs_editor_copy_code(gs_editor *e, const gs_track *t) {
+    static char code[GS_SHARE_MAX];
+    size_t n = gs_track_to_code(t, code, sizeof code);
+    if (n == 0 || !SDL_SetClipboardText(code)) {
+        SDL_snprintf(e->status, sizeof e->status, "could not copy the code");
+        return;
+    }
+    SDL_snprintf(e->status, sizeof e->status,
+                 "copied a %zu character code to the clipboard", n);
+}
+
+void gs_editor_paste_code(gs_editor *e, gs_track *t) {
+    char *text = SDL_GetClipboardText();
+    if (text == nullptr) {
+        SDL_snprintf(e->status, sizeof e->status, "nothing on the clipboard");
+        return;
+    }
+
+    static gs_track incoming;
+    bool ok = gs_track_from_code(&incoming, text);
+    SDL_free(text);
+
+    if (!ok) {
+        SDL_snprintf(e->status, sizeof e->status,
+                     "that is not a code for a track anybody built");
+        return;
+    }
+
+    // The size first: the corner edits below are bounds-checked against the
+    // track they are being applied to, so a bigger track pasted into a smaller
+    // one would otherwise lose everything past the old edge.
+    t->w = incoming.w;
+    t->h = incoming.h;
+
+    // One undo step, like any other edit. Pasting somebody's track over your
+    // own is exactly the moment you want ctrl-Z to exist.
+    gs_edit_begin(e->log);
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) {
+            size_t c = (size_t)y * GS_CORNER_STRIDE + x;
+            if (t->corner[c] == incoming.corner[c]) continue;
+
+            // A multiply rather than a shift: corner heights go below the datum
+            // and shifting a negative value left is undefined. The same thing
+            // was found by UBSan twice already in this codebase.
+            gs_edit_corner(e->log, t, x, y,
+                           (gs_fix)((int32_t)incoming.corner[c] * 256));
+        }
+    }
+    gs_edit_end(e->log);
+
+    // The rest of the track is not under the undo log yet - see the tails in
+    // docs/COMPLETION_PLAN.md, which already records that gates are outside it.
+    SDL_memcpy(t->surface, incoming.surface, sizeof t->surface);
+    SDL_memcpy(t->gravity, incoming.gravity, sizeof t->gravity);
+    t->gate_count = incoming.gate_count;
+    SDL_memcpy(t->gate, incoming.gate, sizeof t->gate);
+
+    SDL_snprintf(e->status, sizeof e->status, "pasted a %u x %u track, id %016llx",
+                 t->w, t->h, (unsigned long long)gs_track_hash(t));
 }
 
 bool gs_editor_save(gs_editor *e, const gs_track *t) {

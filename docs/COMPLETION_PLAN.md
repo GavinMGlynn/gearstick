@@ -417,7 +417,7 @@ whatever the UI turns out to be — then the interface on top.
       jump impossible.*
 - [x] **Ghosts** — race against a recorded run, yours or someone else's.
       *Verification: a ghost replays identically on another machine.*
-- [ ] **Track sharing as a code or URL.** *Verification: a track round-trips
+- [x] **Track sharing as a code or URL.** *Verification: a track round-trips
       through the code and hashes equal.*
 - [ ] **Rollback netcode for two players online.** *Verification: a race under
       simulated latency and packet loss ends in the same state on both

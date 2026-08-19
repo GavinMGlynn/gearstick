@@ -1572,6 +1572,51 @@ static void gs_routed_pavement(gs_track *t) {
     gs_track_add_gate(t, GS_INT(34), GS_INT(8), 0, GS_INT(5));
 }
 
+TEST(a_track_goes_out_through_the_clipboard_and_comes_back_the_same) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 32, 20);
+    for (uint8_t x = 8; x < 14; x++)
+        for (uint8_t y = 0; y <= t.h; y++)
+            gs_track_set_corner(&t, x, y, GS_INT(2));
+    gs_track_set_surface(&t, 20, 10, GS_SURF_ICE);
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(10), 0, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(26), GS_INT(10), 0, GS_INT(5));
+    uint64_t sent = gs_track_hash(&t);
+
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 65536));
+    gs_editor_copy_code(&ed, &t);
+    CHECK(SDL_strstr(ed.status, "copied") != nullptr);
+
+    // Somebody else's editor, with their own track in it.
+    static gs_track theirs;
+    gs_flat_pavement(&theirs, 12, 8);
+    CHECK(gs_track_hash(&theirs) != sent);
+
+    gs_editor them;
+    CHECK(gs_editor_init(&them, 65536));
+    gs_editor_paste_code(&them, &theirs);
+    CHECK(gs_track_hash(&theirs) == sent);
+    CHECK(theirs.w == t.w && theirs.h == t.h);
+    CHECK(theirs.gate_count == t.gate_count);
+
+    // And it is one undo step, not thirty thousand.
+    gs_edit_undo(them.log, &theirs);
+    CHECK(gs_track_hash(&theirs) != sent);
+
+    // Rubbish on the clipboard is refused rather than half-applied.
+    CHECK(SDL_SetClipboardText("not a track code"));
+    uint64_t before = gs_track_hash(&theirs);
+    gs_editor_paste_code(&them, &theirs);
+    CHECK(gs_track_hash(&theirs) == before);
+    CHECK(SDL_strstr(them.status, "not a code") != nullptr);
+
+    gs_editor_quit(&ed);
+    gs_editor_quit(&them);
+}
+
 TEST(the_heatmap_puts_the_line_everybody_drove_on_the_screen) {
     static gs_track t;
     gs_routed_pavement(&t);
@@ -1758,6 +1803,7 @@ int main(void) {
     run_the_view_does_not_jump_when_the_screen_merges_or_splits(ren);
     run_every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone(ren);
     run_changed_controls_survive_being_written_and_read_back(ren);
+    run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
 

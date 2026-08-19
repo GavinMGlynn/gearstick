@@ -154,6 +154,11 @@ void gs_editor_analyse(gs_editor *e, const gs_track *t);
 // moment ago is more use than no heatmap, and the panel says which it is.
 const gs_analysis *gs_editor_heat(const gs_editor *e);
 
+// A track as a code on the clipboard, and back. This is the whole of track
+// sharing: no server, no account, no upload - the track *is* the message.
+void gs_editor_copy_code(gs_editor *e, const gs_track *t);
+void gs_editor_paste_code(gs_editor *e, gs_track *t);
+
 bool gs_editor_save(gs_editor *e, const gs_track *t);
 bool gs_editor_load(gs_editor *e, gs_track *t);
 
