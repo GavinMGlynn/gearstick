@@ -1101,6 +1101,50 @@ CI was setting `SDL_AUDIODRIVER`, which is SDL2's name for the variable; SDL3
 reads `SDL_AUDIO_DRIVER`. It had never mattered, because the subsystem was never
 up. It does now.
 
+### The tracks that ship, and the library that carries them
+
+Sixteen tracks in `assets/tracks/`. Four are still written out by hand in
+`tools/make_tracks.c`, because a first track wants a shape somebody chose. The
+other twelve come out of the generator and are **kept by being driven**: every
+one of the six vehicles has to get round at Earth gravity, or the seed is passed
+over. Earth specifically rather than the analyser's whole range — the analyser
+answers "can this be got round at all", which is the right question for somebody
+looking at their own work and the wrong one for a set that ships to a player who
+picked a car and left the dial where it was. Three per shape, so the set is a
+menu rather than twelve variations on one idea.
+
+Of a hundred and twenty generated tracks, ninety clear that bar, so the
+constraint is real without being scarce.
+
+`assets/server/gearstick.db` is the library a server ships with: every stock
+track, published, built by `tools/make_store.c` through the same `gs_store` the
+server uses. A server started with no store at all copies it into place and
+comes up with sixteen tracks to offer, rather than an empty list and no reason
+for the first visitor to stay.
+
+**Committing a binary needs two guards, and it has both.** A test opens the
+shipped file and exercises every table the server writes to, so a schema change
+that forgets to rebuild it turns the tree red instead of failing in somebody's
+hands; and a CI job rebuilds the tracks and the database and diffs the result,
+twice, so the committed bytes are the built bytes and the choosing is
+reproducible. The database came out byte-identical across runs, which is what
+made the second guard possible at all.
+
+The server now takes what it serves **out of the store**. `--track FILE` still
+works and now means *import*: the file goes into the library, is published, and
+is then served from there like anything else. With no `--track` it serves the
+first published track it holds. A file named on the command line was the last
+thing the server knew that its database did not.
+
+Two smaller things came out of it. Seeding a store by copying bytes into place
+is unsafe if SQLite's write-ahead log from a previous database is still lying
+beside it — the next open replays it, and yesterday's rows appear inside today's
+library. A journal whose database does not exist is orphaned by definition, so
+seeding removes it. And the `*.db-wal` and `*.db-shm` files that tests had been
+leaving in the repository root turned out to be *committed*; they are gone and
+`.gitignore` now covers them, with an exception for the one database that really
+does ship.
+
 ---
 
 ## What does not exist

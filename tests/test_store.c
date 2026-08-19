@@ -3,6 +3,7 @@
 // Every test runs against an in-memory database, so nothing here depends on a
 // file left behind by the last run - which is the failure mode that makes a
 // storage test pass on one machine and fail on a fresh checkout.
+#include "core/gs_track.h"
 #include "net/gs_store.h"
 
 #include <stdio.h>
@@ -274,6 +275,106 @@ TEST(what_is_written_is_still_there_after_a_reopen) {
     remove(path);
 }
 
+// --- the database that ships -----------------------------------------------
+
+#ifndef GS_SOURCE_ASSETS
+#define GS_SOURCE_ASSETS "assets"
+#endif
+
+// A working copy. Opening the committed file would leave SQLite's journal
+// sidecars beside it and modify the very thing being checked.
+static bool gs_copy_shipped(const char *to) {
+    FILE *in = fopen(GS_SOURCE_ASSETS "/server/gearstick.db", "rb");
+    if (in == nullptr) return false;
+
+    FILE *out = fopen(to, "wb");
+    if (out == nullptr) { fclose(in); return false; }
+
+    static uint8_t buf[65536];
+    size_t n;
+    bool ok = true;
+    while ((n = fread(buf, 1, sizeof buf, in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) { ok = false; break; }
+    }
+    fclose(in);
+    fclose(out);
+    return ok;
+}
+
+TEST(the_shipped_library_is_a_database_this_code_can_still_use) {
+    // **The one that stops a committed binary rotting.** The shipped database
+    // is built by a tool and checked in, so a schema change here and a forgotten
+    // rebuild there would ship a file that fails in somebody's hands rather than
+    // in the build. Exercised through the whole API rather than compared as
+    // text: what matters is that this code can use that file.
+    const char *path = "shipped-copy.db";
+    if (!gs_copy_shipped(path)) {
+        printf("  FAIL no shipped library at %s\n",
+               GS_SOURCE_ASSETS "/server/gearstick.db");
+        gs_failures++;
+        return;
+    }
+
+    gs_store *shipped = gs_store_open(path);
+    CHECK(shipped != nullptr);
+    if (shipped == nullptr) { remove(path); return; }
+
+    gs_store *fresh = gs_store_open(":memory:");
+    CHECK(fresh != nullptr);
+    if (fresh != nullptr) {
+        CHECK(gs_store_version(shipped) == gs_store_version(fresh));
+        gs_store_close(fresh);
+    }
+
+    // Every table the server writes to, written to. A column that had moved
+    // would fail here rather than the first time somebody set a lap time.
+    CHECK(gs_store_put_driver(shipped, "ada", 2, 1) > 0);
+    CHECK(gs_store_put_record(shipped, 1234, 1, 3, "ada", 1, 900, 2700));
+    CHECK(gs_store_best_lap(shipped, 1234, 1, nullptr, 0) == 900);
+    CHECK(gs_store_put_track(shipped, 4321, "scratch", "ada",
+                             (const uint8_t *)"not a track", 11));
+    CHECK(gs_store_publish(shipped, 4321, "scratch", "ada"));
+    CHECK(gs_store_withdraw(shipped, 4321, "ada"));
+
+    gs_store_close(shipped);
+    remove(path);
+}
+
+TEST(the_shipped_library_holds_the_stock_tracks_and_they_are_tracks) {
+    // Not "it has rows in it": every published entry is read back as a track and
+    // has to hash to the key it was filed under. A library of blobs that will
+    // not load is worse than an empty one, because the empty one is honest.
+    const char *path = "shipped-tracks.db";
+    if (!gs_copy_shipped(path)) { gs_failures++; return; }
+
+    gs_store *s = gs_store_open(path);
+    CHECK(s != nullptr);
+    if (s == nullptr) { remove(path); return; }
+
+    static gs_track_row rows[64];
+    int n = gs_store_list_published(s, rows, 64);
+
+    // A dozen is what a fresh install is promised. There are more than that.
+    CHECK(n >= 12);
+
+    static uint8_t bytes[GS_TRACK_TILES * 4 + 4096];
+    static gs_track t;
+    for (int i = 0; i < n; i++) {
+        size_t len = 0;
+        CHECK(gs_store_get_track(s, rows[i].hash, bytes, sizeof bytes, &len));
+        CHECK(gs_track_deserialize(&t, bytes, len));
+        CHECK(gs_track_hash(&t) == rows[i].hash);
+
+        // And it is a track somebody could race: a route, and ground under it.
+        CHECK(t.gate_count >= 2);
+        CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+        CHECK(rows[i].name[0] != '\0');
+    }
+
+    gs_store_close(s);
+    remove(path);
+}
+
 int main(void) {
     printf("gearstick store tests\n");
 
@@ -284,6 +385,8 @@ int main(void) {
     run_publishing_is_a_separate_thing_from_storing();
     run_a_name_with_a_quote_in_it_is_a_name_and_not_an_instruction();
     run_what_is_written_is_still_there_after_a_reopen();
+    run_the_shipped_library_is_a_database_this_code_can_still_use();
+    run_the_shipped_library_holds_the_stock_tracks_and_they_are_tracks();
 
     if (gs_failures > 0) {
         printf("%d check%s failed\n", gs_failures, gs_failures == 1 ? "" : "s");

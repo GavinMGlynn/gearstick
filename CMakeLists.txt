@@ -332,14 +332,29 @@ add_executable(gearstick_server
     src/net/gs_proto.c
     src/net/gs_carrier.c
     src/net/gs_store.c
-    src/net/gs_verify.c)
+    src/net/gs_verify.c
+    # Where the shipped library is. The server has no window and no art, but it
+    # does ship a database of tracks, and finding it is the same problem the
+    # game already solved.
+    src/platform/gs_paths.c)
 # The carrier rebuilds a track, so the server needs the track format - and with
 # it the simulation, which it will need anyway the day it verifies a lap time.
 target_include_directories(gearstick_server PRIVATE src)
+# The same build-tree assets the game finds, so a server run straight out of the
+# build tree ships with the same library a packaged one does.
+target_compile_definitions(gearstick_server PRIVATE
+    GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 target_link_libraries(gearstick_server PRIVATE ${GS_SDL} ${GS_SDL_NET}
     gearstick_sim gearstick_sqlite)
 gs_configure(gearstick_server)
 set_target_properties(gearstick_server PROPERTIES C_VISIBILITY_PRESET hidden)
+
+# The database a server ships with. Built through the same gs_store the server
+# uses, so there is no second copy of the schema to disagree with.
+add_executable(gearstick_make_store tools/make_store.c src/net/gs_store.c)
+target_include_directories(gearstick_make_store PRIVATE src)
+target_link_libraries(gearstick_make_store PRIVATE gearstick_sim gearstick_sqlite)
+gs_configure(gearstick_make_store)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -403,7 +418,11 @@ if(GEARSTICK_TESTS)
         tests/test_store.c
         src/net/gs_store.c)
     target_include_directories(gearstick_store_tests PRIVATE src)
-    target_link_libraries(gearstick_store_tests PRIVATE gearstick_sqlite)
+    # gearstick_sim so the shipped library's tracks can be read back as tracks
+    # rather than trusted as blobs; it links nothing, so this stays SDL-free.
+    target_link_libraries(gearstick_store_tests PRIVATE gearstick_sqlite gearstick_sim)
+    target_compile_definitions(gearstick_store_tests PRIVATE
+        GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets")
     gs_configure(gearstick_store_tests)
 
     add_test(NAME gearstick_store COMMAND gearstick_store_tests)

@@ -514,23 +514,28 @@ hard-coded demo track that has been sitting in the frontend since Phase 3.
       seed gives the same track under gcc and clang alike, which it did not
       before: two random draws in one argument list are drawn in whichever order
       the compiler likes, and the two compilers disagreed.*
-- [ ] **A shipped set of stock tracks, chosen from the generator's output.**
+- [x] **A shipped set of stock tracks, chosen from the generator's output.**
       A dozen picked by the analyser rather than by eye — spread across the
       shapes, the sizes and the surfaces, so the set is a menu and not twelve
       variations on one idea.
-      *Verification: a fresh install has a dozen tracks to race, each one
-      completable at Earth gravity in every vehicle that should manage it.*
-- [ ] **The server ships knowing every global track, and keeps everything it
+      *Verification: sixteen tracks ship — four built by hand and twelve chosen
+      by racing them — and every one of the twelve was kept only because all six
+      vehicles got round it at Earth gravity. `gearstick_make_tracks` re-runs the
+      choosing, and CI diffs the result, so a change that quietly made a stock
+      track unfinishable shows up as a different set of tracks.*
+- [x] **The server ships knowing every global track, and keeps everything it
       knows in one place.** A default `gearstick.db` holding the stock tracks,
       published, committed to the repository and copied into place the first time
       a server runs — so a server nobody has set up still has a library to offer.
       **All server state lives in that database**: the track it serves is chosen
       from what it holds rather than named as a file on the command line, which
       is the last thing it knows that the database does not.
-      *Verification: a server started with no store file at all comes up with the
-      full stock library published and serves one of them; and a test compares
-      the committed database against a freshly created one, so the shipped file
-      cannot drift from the schema `gs_store.c` writes.*
+      *Verification: a server started with no store file at all comes up with all
+      sixteen tracks published and serves one — checked by a client that connects
+      to a brand new server and lists them. The committed database is exercised
+      through the whole store API by a test, so a schema change that forgets it
+      turns the tree red; and CI rebuilds it and diffs, so the shipped bytes are
+      the built bytes.*
 
 ## Phase 13 — The rest of the feature list, and the tails
 

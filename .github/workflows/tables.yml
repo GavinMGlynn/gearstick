@@ -14,6 +14,12 @@
 #                          is written in the same run - a licence statement that
 #                          can drift from the art it describes is worse than
 #                          none
+#   assets/tracks/         the stock tracks, chosen out of the generator by
+#                          racing them, so the set is reproducible from the seeds
+#   assets/server/         the library a server ships with, so a server nobody
+#                          has set up still has something to offer - and so a
+#                          schema change that forgets it fails here rather than
+#                          in somebody's hands
 #
 # The cost of committing them is a promise nobody can see: that the files really
 # are what the generators write from the pinned inputs. This is the job that
@@ -26,6 +32,12 @@ on:
     branches: [main]
     paths:
       - 'tools/make_tables.py'
+      - 'tools/make_tracks.c'
+      - 'tools/make_store.c'
+      - 'src/core/gs_generate.c'
+      - 'src/net/gs_store.c'
+      - 'assets/tracks/**'
+      - 'assets/server/**'
       - 'tools/make_imgui_bindings.py'
       - 'tools/make_meshes.py'
       - 'src/core/gs_tables.h'
@@ -37,6 +49,12 @@ on:
   pull_request:
     paths:
       - 'tools/make_tables.py'
+      - 'tools/make_tracks.c'
+      - 'tools/make_store.c'
+      - 'src/core/gs_generate.c'
+      - 'src/net/gs_store.c'
+      - 'assets/tracks/**'
+      - 'assets/server/**'
       - 'tools/make_imgui_bindings.py'
       - 'tools/make_meshes.py'
       - 'src/core/gs_tables.h'
@@ -130,3 +148,42 @@ jobs:
         with:
           name: freshly-generated-bindings
           path: src/ui/dcimgui
+
+  stock_tracks:
+    name: The stock tracks and the library that ships them
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: recursive }
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure and build the tools
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build build --target gearstick_make_tracks gearstick_make_store
+
+      # The tracks are chosen by racing them, so this also re-runs the choosing.
+      # A generator change that quietly stopped a stock track being finishable
+      # would change which tracks are picked, and that shows up as a diff.
+      - name: Re-choose the stock tracks
+        run: ./build/gearstick_make_tracks assets/tracks
+
+      - name: Rebuild the shipped library
+        run: ./build/gearstick_make_store assets/server/gearstick.db assets/tracks/*.gstrack
+
+      # Twice, because a database is a file format with a lot of room in it for
+      # a timestamp or a page written in whatever order occurred to it. If the
+      # second run differs from the first, the file cannot be committed at all
+      # and this needs to be a build step instead.
+      - name: And again
+        run: ./build/gearstick_make_store assets/server/gearstick.db assets/tracks/*.gstrack
+
+      - name: Diff
+        run: |
+          if ! git diff --exit-code -- assets/tracks assets/server; then
+            echo "::error::The shipped tracks or library are not what the tools produce."
+            exit 1
+          fi
+          echo "The shipped library is the built library, and the tracks are the chosen ones."

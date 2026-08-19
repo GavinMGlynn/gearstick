@@ -16,6 +16,7 @@
 #include "net/gs_proto.h"
 #include "net/gs_store.h"
 #include "net/gs_verify.h"
+#include "platform/gs_paths.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
@@ -688,6 +689,73 @@ static bool gs_load_track(const char *path) {
     return true;
 }
 
+// **The library a server ships with.**
+//
+// A server nobody has set up still has to have something to offer, or the first
+// person to connect finds an empty list and no reason to stay. The shipped
+// database is copied into place rather than opened where it lies: the copy is
+// the server's to write to, and the original stays as it was built so the next
+// fresh server gets the same start.
+//
+// Only when there is nothing there. A store that exists is somebody's history
+// and is never overwritten, and `:memory:` is a test asking for nothing to be
+// remembered at all.
+static void gs_seed_store(const char *path) {
+    if (SDL_strcmp(path, ":memory:") == 0) return;
+
+    SDL_PathInfo info;
+    if (SDL_GetPathInfo(path, &info)) return;          // already there
+
+    // **A journal without its database is not a journal.** SQLite keeps its
+    // write-ahead log in files beside the database, and if one is left behind by
+    // something that removed only the database itself, the next open replays it
+    // onto whatever is there now - which, once a fresh store is a *copy* of a
+    // shipped one, means yesterday's rows appearing inside today's library. The
+    // database is known not to exist at this point, so anything claiming to be
+    // its journal is orphaned.
+    char side[1024];
+    SDL_snprintf(side, sizeof side, "%s-wal", path);
+    remove(side);
+    SDL_snprintf(side, sizeof side, "%s-shm", path);
+    remove(side);
+
+    char shipped[1024];
+    gs_asset_path(shipped, sizeof shipped, "server/gearstick.db");
+
+    size_t len = 0;
+    void *bytes = SDL_LoadFile(shipped, &len);
+    if (bytes == nullptr) {
+        SDL_Log("no shipped library at %s - starting empty", shipped);
+        return;
+    }
+
+    if (SDL_SaveFile(path, bytes, len)) {
+        SDL_Log("started %s from the shipped library (%zu bytes)", path, len);
+    } else {
+        SDL_Log("could not write %s: %s", path, SDL_GetError());
+    }
+    SDL_free(bytes);
+}
+
+// Take the track out of the store and make it the one this lobby races.
+static bool gs_serve_track(uint64_t hash) {
+    if (!gs_store_get_track(gs_srv.store, hash, gs_srv.track,
+                            sizeof gs_srv.track, &gs_srv.track_len)) {
+        return false;
+    }
+
+    static gs_track probe;
+    if (!gs_track_deserialize(&probe, gs_srv.track, gs_srv.track_len)) {
+        gs_srv.track_len = 0;
+        return false;
+    }
+
+    // Derived from the bytes rather than taken from the row that named them: a
+    // track's identity is what it is, not what a column says it is.
+    gs_srv.track_hash = gs_track_hash(&probe);
+    return true;
+}
+
 static void gs_usage(void) {
     printf("gearstick_server - the meeting point for online races\n\n");
     printf("  --port N       listen on this port (default %u)\n", GS_DEFAULT_PORT);
@@ -762,6 +830,10 @@ int main(int argc, char **argv) {
     signal(SIGINT, gs_on_signal);
     signal(SIGTERM, gs_on_signal);
 
+    // A track named on the command line is *imported*, not served from where it
+    // lies. Everything this server knows is in the store; a file is a way to put
+    // something into it and never a second place it is kept.
+    uint64_t wanted = 0;
     if (track_path != nullptr) {
         if (!gs_load_track(track_path)) {
             printf("could not read a track from %s\n", track_path);
@@ -770,13 +842,12 @@ int main(int argc, char **argv) {
             SDL_Quit();
             return 1;
         }
-        SDL_Log("serving track %016llx, %zu bytes in %u chunks",
-                (unsigned long long)gs_srv.track_hash, gs_srv.track_len,
-                gs_carrier_chunks(gs_srv.track_len));
+        wanted = gs_srv.track_hash;
     }
 
     // Opened before anybody can knock, so a server that cannot remember
     // anything says so at the start rather than the first time it tries.
+    gs_seed_store(store_path);
     gs_srv.store = gs_store_open(store_path);
     if (gs_srv.store == nullptr) {
         printf("could not open the store at %s\n", store_path);
@@ -790,10 +861,30 @@ int main(int argc, char **argv) {
             gs_store_record_count(gs_srv.store),
             gs_store_track_count(gs_srv.store));
 
-    // And the track being served is a track the library has.
-    if (gs_srv.track_len > 0) {
-        gs_store_put_track(gs_srv.store, gs_srv.track_hash, "", "",
+    // The imported one goes in, and is published: somebody who ran a server with
+    // a track meant that track to be raced.
+    if (wanted != 0 && gs_srv.track_len > 0) {
+        gs_store_put_track(gs_srv.store, wanted, "", "",
                            gs_srv.track, gs_srv.track_len);
+        gs_store_publish(gs_srv.store, wanted, "", "");
+    }
+
+    // **What this lobby races comes out of the store**, whether it arrived by
+    // being imported a moment ago or by having shipped with the server. Nothing
+    // else is a track this server can be asked for.
+    if (wanted == 0) {
+        gs_track_row rows[1];
+        if (gs_store_list_published(gs_srv.store, rows, 1) == 1) wanted = rows[0].hash;
+    }
+
+    gs_srv.track_len = 0;
+    if (wanted != 0 && gs_serve_track(wanted)) {
+        SDL_Log("serving track %016llx, %zu bytes in %u chunks",
+                (unsigned long long)gs_srv.track_hash, gs_srv.track_len,
+                gs_carrier_chunks(gs_srv.track_len));
+    } else if (wanted != 0) {
+        SDL_Log("the library has no usable track %016llx",
+                (unsigned long long)wanted);
     }
 
     SDL_Log("gearstick server listening on port %u for up to %u players",

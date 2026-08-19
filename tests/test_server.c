@@ -545,6 +545,64 @@ TEST(the_games_own_client_gets_its_slot_from_the_server) {
     gs_server_stop();
 }
 
+TEST(a_server_nobody_has_set_up_still_has_a_library_to_offer) {
+    // **A fresh server is not an empty one.** The stock tracks are built into a
+    // database that ships beside the binary and is copied into place the first
+    // time a server runs, so the first person to connect finds something to race
+    // rather than an empty list and no reason to stay.
+    //
+    // A store path that does not exist, deliberately: this is the first run.
+    remove("brand-new.db");
+    remove("brand-new.db-wal");
+    remove("brand-new.db-shm");
+
+    if (!gs_server_start_with_store("47840", GS_SERVER_LIFETIME, "1",
+                                    "brand-new.db")) {
+        gs_failures++;
+        return;
+    }
+    CHECK(gs_wire_init());
+
+    gs_wire *w = gs_wire_server("127.0.0.1", 47840, "ada");
+    CHECK(w != nullptr);
+
+    uint64_t until = SDL_GetTicks() + 8000;
+    while (SDL_GetTicks() < until && !gs_wire_ready(w)) {
+        gs_wire_poll(w);
+        SDL_Delay(10);
+    }
+
+    // Ready at all means it was sent a track, which a server with nothing to
+    // serve could not have done.
+    CHECK(gs_wire_ready(w));
+
+    gs_wire_ask_published(w);
+
+    const gs_wire_listing *rows = nullptr;
+    uint16_t total = 0, got = 0;
+    until = SDL_GetTicks() + 8000;
+    while (SDL_GetTicks() < until && got < 12) {
+        gs_wire_poll(w);
+        uint8_t drain[GS_WIRE_MTU];
+        while (gs_wire_recv(w, drain, sizeof drain) > 0) { }
+        got = gs_wire_published(w, &rows, &total);
+        SDL_Delay(10);
+    }
+
+    // The dozen a fresh install is promised, by name.
+    CHECK(total >= 12);
+    CHECK(got >= 12);
+    if (rows != nullptr && got > 0) CHECK(rows[0].name[0] != '\0');
+
+    gs_wire_close(w);
+    gs_wire_quit();
+    gs_server_stop();
+
+    remove("brand-new.db");
+    remove("brand-new.db-wal");
+    remove("brand-new.db-shm");
+}
+
 TEST(the_roster_is_sent_again_rather_than_only_when_it_changes) {
     // **One datagram over UDP is a promise of nothing.** The roster used to be
     // sent only on a change, so a client that missed the announcement raced
@@ -1013,6 +1071,8 @@ TEST(a_time_is_kept_only_if_re_racing_it_produces_it) {
     if (io != nullptr) { SDL_WriteIO(io, track_bytes, track_len); SDL_CloseIO(io); }
 
     remove("verified.db");
+    remove("verified.db-wal");
+    remove("verified.db-shm");
     if (!gs_server_start_verifying("47830", GS_SERVER_LIFETIME, "2", track_path,
                                    "verified.db")) {
         gs_failures++;
@@ -1178,16 +1238,19 @@ TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
         SDL_Delay(10);
     }
 
-    // Nothing published yet, and the server says so rather than saying nothing.
+    // What is up before ada puts anything up. **Not zero**: a server ships with
+    // the stock library published, so this is a delta rather than an absolute -
+    // and a delta is the honest measurement anyway, because what is being tested
+    // is that publishing adds one and withdrawing takes it away again.
     gs_wire_ask_published(b);
     const gs_wire_listing *rows = nullptr;
-    uint16_t total = 1;
+    uint16_t total = 0;
     for (int k = 0; k < 60; k++) {
         gs_pump(b, 5);
-        gs_wire_published(b, &rows, &total);
-        if (total == 0) break;
+        if (gs_wire_published(b, &rows, &total) > 0) break;
     }
-    CHECK(total == 0);
+    uint16_t before = total;
+    CHECK(before > 0);
 
     // ada puts one up.
     gs_wire_publish(a, &mine, "the dirt loop");
@@ -1195,16 +1258,20 @@ TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
 
     // bez finds it, by name and by author, having never seen the track.
     bool found = false;
+    int at = -1;
     for (int k = 0; k < 80 && !found; k++) {
         gs_wire_ask_published(b);
         gs_pump(b, 10);
         uint16_t n = gs_wire_published(b, &rows, &total);
-        found = n == 1 && total == 1 && rows[0].track == hash;
+        for (uint16_t i = 0; i < n; i++) {
+            if (rows[i].track == hash) { found = true; at = (int)i; break; }
+        }
     }
     CHECK(found);
-    if (found) {
-        CHECK(SDL_strcmp(rows[0].name, "the dirt loop") == 0);
-        CHECK(SDL_strcmp(rows[0].author, "ada") == 0);
+    CHECK(total == before + 1);
+    if (found && at >= 0) {
+        CHECK(SDL_strcmp(rows[at].name, "the dirt loop") == 0);
+        CHECK(SDL_strcmp(rows[at].author, "ada") == 0);
     }
 
     // **And it is playable**, which a listing alone does not prove: the track
@@ -1227,7 +1294,8 @@ TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
     gs_pump(b, 40);
     gs_wire_ask_published(b);
     gs_pump(b, 20);
-    CHECK(gs_wire_published(b, &rows, &total) == 1);
+    gs_wire_published(b, &rows, &total);
+    CHECK(total == before + 1);
 
     // ada can.
     gs_wire_withdraw(a, hash);
@@ -1238,7 +1306,7 @@ TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
         gs_wire_ask_published(b);
         gs_pump(b, 10);
         gs_wire_published(b, &rows, &total);
-        gone = total == 0;
+        gone = total == before;
     }
     CHECK(gone);
 
@@ -1263,6 +1331,7 @@ int main(void) {
     run_the_server_ignores_datagrams_that_are_not_ours();
     run_the_games_own_client_gets_its_slot_from_the_server();
     run_a_client_waiting_for_others_is_not_ready_yet();
+    run_a_server_nobody_has_set_up_still_has_a_library_to_offer();
     run_the_roster_is_sent_again_rather_than_only_when_it_changes();
     run_a_client_that_quits_says_so_instead_of_being_waited_out();
     run_a_placed_client_is_not_dropped_for_going_quiet();
