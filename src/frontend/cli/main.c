@@ -152,6 +152,66 @@ static int cmd_selftest(bool verify) {
     return 0;
 }
 
+// Write the selftest track to a file, read it back, and check it is the same
+// track. **The file I/O lives here and not in src/core/**: the simulation links
+// nothing, so the buffer is core's business and the filesystem is the
+// frontend's. The game does the same thing through SDL rather than stdio, over
+// the identical core functions.
+static int cmd_track(const char *path) {
+    static gs_track built, loaded;
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+
+    selftest_track(&built);
+
+    size_t n = gs_track_serialize(&built, buf, sizeof buf);
+    if (n == 0) {
+        printf("FAIL   the track did not fit its own buffer\n");
+        return 1;
+    }
+
+    FILE *f = fopen(path, "wb");
+    if (f == nullptr) {
+        printf("FAIL   could not open %s for writing\n", path);
+        return 1;
+    }
+    size_t wrote = fwrite(buf, 1, n, f);
+    fclose(f);
+    if (wrote != n) {
+        printf("FAIL   wrote %zu of %zu bytes\n", wrote, n);
+        return 1;
+    }
+
+    f = fopen(path, "rb");
+    if (f == nullptr) {
+        printf("FAIL   could not open %s for reading\n", path);
+        return 1;
+    }
+    static uint8_t back[sizeof buf];
+    size_t got = fread(back, 1, sizeof back, f);
+    fclose(f);
+
+    if (got != n) {
+        printf("FAIL   read %zu bytes, wrote %zu\n", got, n);
+        return 1;
+    }
+    if (!gs_track_deserialize(&loaded, back, got)) {
+        printf("FAIL   the file we just wrote was refused\n");
+        return 1;
+    }
+
+    uint64_t a = gs_track_hash(&built), b = gs_track_hash(&loaded);
+    printf("track  %u x %u, %zu bytes on disk\n", built.w, built.h, n);
+    printf("wrote  0x%016llx\n", (unsigned long long)a);
+    printf("read   0x%016llx\n", (unsigned long long)b);
+
+    if (a != b) {
+        printf("FAIL   the track that came back is not the track that went in\n");
+        return 1;
+    }
+    printf("OK     it round-trips through the filesystem unchanged\n");
+    return 0;
+}
+
 static int cmd_vehicles(void) {
     printf("%-13s %7s %7s %6s %6s %8s %6s\n",
            "vehicle", "power", "brake", "top", "grip", "steer", "tough");
@@ -183,6 +243,7 @@ static int usage(void) {
     printf("gearstick_cli - the simulation, with nothing watching it\n\n"
            "  selftest [--verify]  race the fixed scenario and print its state "
            "hash\n"
+           "  track FILE           write a track, read it back, check it survived\n"
            "  vehicles             the roster and its numbers\n"
            "  gravity              the presets\n\n"
            "This program links the simulation and nothing else - no SDL, no "
@@ -198,6 +259,7 @@ int main(int argc, char **argv) {
         bool verify = argc > 2 && strcmp(argv[2], "--verify") == 0;
         return cmd_selftest(verify);
     }
+    if (strcmp(argv[1], "track") == 0 && argc > 2) return cmd_track(argv[2]);
     if (strcmp(argv[1], "vehicles") == 0) return cmd_vehicles();
     if (strcmp(argv[1], "gravity") == 0) return cmd_gravity();
 

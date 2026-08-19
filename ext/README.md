@@ -9,8 +9,28 @@ this repository — a clone gets URLs and commit SHAs, not sources.
 | Submodule | Upstream | Pinned at | Role | Licence |
 | --- | --- | --- | --- | --- |
 | `sdl` | libsdl-org/SDL | `release-3.4.14` | **Linked by the shell only.** Window, renderer, input, audio, filesystem, timing | Zlib |
+| `imgui` | ocornut/imgui | `v1.92.9b` | **The editor's UI.** Not built yet — see below | MIT |
+| `dear_bindings` | dearimgui/dear_bindings | `v0.21` | **Build-time only.** Generates the C API for the above; never linked | MIT |
 
-That is the whole list, and it is meant to stay short.
+Nothing links `imgui` yet. The first Phase 4 items — the track file format,
+identity by content, and the undo model — are pure C and needed whichever way
+the UI goes, so the submodules are pinned now and wired into the build when
+there are widgets to draw.
+
+**Dear ImGui is C++.** `dear_bindings` generates a C API over it, which is what
+makes it usable here, but the implementation underneath is still C++: adopting
+it means `LANGUAGES C CXX` and the C++ standard library linked on all three
+platforms. That is a deliberate exception to this project's preference for no
+dependency over a small one, taken because palettes, property panels, validation
+output and live tuning dials are the part of an editor that C is worst at and
+the part that kills projects shaped like this one. The simulation is untouched
+by it: `src/core/` still links nothing, and `gearstick_cli` still links only the
+simulation.
+
+`dear_bindings` v0.21 is the release that pairs with Dear ImGui v1.92.9b, and
+both the SDL3 and the SDL_Renderer3 backends are current as of August 2026. That
+pairing is not optional — the generator and the header it reads have to match,
+so the two pins move together or not at all.
 
 ## What the build actually needs
 
@@ -42,11 +62,6 @@ Phase 10, and not before.
 **No audio library.** SDL3 loads and converts WAVs by itself, and the engine
 note is going to be generated rather than sampled, so mixing is a few hundred
 lines rather than a dependency.
-
-**No UI toolkit — yet.** The editor will want Dear ImGui through `cimgui` with
-the SDL3 backends, and that is the one dependency this project is planning to
-add. It arrives with Phase 4, and whether `cimgui` is currently tracking the
-SDL3 backends is a thing to check *before* that phase rather than during it.
 
 **No maths library in the simulation.** `gearstick_sim` links nothing at all —
 not SDL, not libm. The tests link libm to check the fixed-point trigonometry

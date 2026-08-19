@@ -16,9 +16,9 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0, 1, 2 and 3 are complete — 25 of 60 items, every one of them with
-its verification actually run.** Phase 4, the editor, is next and is about half
-the remaining work.
+**Phases 0 to 3 are complete, and Phase 4 has started — 26 of 60 items, every
+one of them with its verification actually run.** Phase 4 is the editor and is
+about half the remaining work.
 
 Where a verification says a deliberate bug "turns it red", that is not a figure
 of speech: the bug was introduced, the test was watched to fail, and the bug was
@@ -147,22 +147,32 @@ car, no art worth the name.
 
 Half the project. Not deferred, not bolted on.
 
+**Reordered from the original list**, because it had a dependency inversion: the
+first item's verification was "a track built in the editor saves, reloads and
+races", which needs the file format that was item seven. The order below builds
+the data model first — all of it pure C in `src/core/`, and all of it needed
+whatever the UI turns out to be — then the interface on top.
+
+- [x] **A track file format, and identity by content.** Save, load, and a
+      version stamp. *Verification: a track round-trips through a real file on
+      disk and hashes equal; two tracks built independently to the same design
+      produce the same identifier; a one-tile edit produces a different one; a
+      short read, a truncated payload, a bad magic and a version from the future
+      are each refused with the caller's track left untouched.*
+- [ ] **An edit model with undo and redo**, unlimited within a session.
+      *Verification: any sequence of edits undone completely returns the track to
+      its starting hash, and redone returns it to the edited one.*
 - [ ] **A grid cursor and a piece palette.** *Verification: a track built
       entirely through the editor saves, reloads and races.*
 - [ ] **Raise and lower elevation as a brush.** *Verification: an edited ramp
       matches what the editor drew when driven over.*
 - [ ] **Paint surface, and paint gravity.** *Verification: painted tiles change
       the car's behaviour in a test drive.*
-- [ ] **Undo and redo, unlimited within a session.** *Verification: any sequence
-      of edits undone completely returns the track to its saved hash.*
 - [ ] **Track validation** — is the loop closed, is the lap order derivable, can
-      it be completed. *Verification: a deliberately broken track is refused
-      with a message naming the problem.*
+      it be completed. *Verification: a deliberately broken track is refused with
+      a message naming the problem.*
 - [ ] **Instant test-drive from the cursor, and snap back.** *Verification: no
       load step, and edits made before the drive survive returning from it.*
-- [ ] **Save and load**, with tracks identified by their content.
-      *Verification: two identical tracks built independently produce the same
-      identifier; a one-tile edit produces a different one.*
 - [ ] **The live ghost** — a car continuously re-racing the design as it is
       edited. *Verification: raising a ramp visibly changes the ghost's landing
       without any explicit re-run.*

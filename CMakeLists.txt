@@ -182,6 +182,13 @@ if(GEARSTICK_TESTS)
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIODRIVER=dummy"
         TIMEOUT 180)
 
+    # A track through a real file, not just a buffer: the format is what a
+    # shared track travels in, so "it round-trips in memory" is not the claim
+    # that matters.
+    add_test(NAME gearstick_track_file
+             COMMAND gearstick_cli track round_trip.gstrack)
+    set_tests_properties(gearstick_track_file PROPERTIES TIMEOUT 60)
+
     # The golden replay: an input log in, a state hash out. This is the test
     # that fails when a "harmless" change to the physics quietly rewrites every
     # ghost time and every shared replay in existence.

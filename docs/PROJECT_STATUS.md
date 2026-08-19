@@ -299,8 +299,24 @@ fallback rather than as a discovery made late.
   cannot be derisked by architecture.
 - **The editor is roughly half the work** and is the usual cause of death for
   projects shaped like this one.
-- **cimgui's SDL3 backend currency is unverified**, and the editor plan leans on
-  it. That check belongs before Phase 4, not at it.
+- **The editor's UI toolkit is decided and pinned, and its cost is real.**
+  The currency check is done and passed: Dear Bindings v0.21 pairs with Dear
+  ImGui v1.92.9b as of August 2026, and the SDL3 and SDL_Renderer3 backends are
+  both supported. cimgui is alive too. What the check *also* turned up is the
+  part the plan had not accounted for: Dear ImGui is C++, so a C binding is an
+  API over C++ and the project would need `LANGUAGES C CXX` and the C++ standard
+  library linked on all three platforms. That is a real departure from a
+  deliberately C23 project and from "prefer no dependency to a small one", and
+  it is weighed against the fact that the panels, palettes and dial-tweaking an
+  editor needs are the thing C is worst at and the thing that kills projects
+  shaped like this one.
+
+  That cost is accepted: `ext/imgui` at `v1.92.9b` and `ext/dear_bindings` at
+  `v0.21` are pinned submodules. Nothing links them yet — the first Phase 4
+  items are pure C and needed regardless, so the build gains C++ when there are
+  widgets to draw and not before. The simulation is untouched either way:
+  `src/core/` links nothing and `gearstick_cli` links only the simulation, and
+  both of those are checked rather than asserted.
 - **The damage model has one shape and few numbers.** It is tested for direction
   — a downhill landing hurts less than a flat one — and not for feel.
 - **`GS_MAX_CARS` is 4 and baked into the replay format.** Changing it later

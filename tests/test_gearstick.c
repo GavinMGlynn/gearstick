@@ -164,6 +164,110 @@ TEST(a_track_edit_changes_its_identity_and_an_undone_edit_restores_it) {
     CHECK(gs_track_hash(&a) != before);
 }
 
+TEST(a_track_survives_the_round_trip_through_its_file_format) {
+    static gs_track built, loaded;
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+
+    gs_build_ramp(&built, 8, 12, GS_INT(1));
+    for (uint8_t x = 16; x < 24; x++)
+        for (uint8_t y = 0; y < built.h; y++)
+            gs_track_set_surface(&built, x, y, GS_SURF_ICE);
+    for (uint8_t x = 4; x < 9; x++)
+        for (uint8_t y = 0; y < built.h; y++)
+            gs_track_set_gravity(&built, x, y, GS_RATIO(35, 100));
+    // Ground below the datum, so the sign of a corner height has to survive too.
+    gs_track_set_corner(&built, 2, 2, GS_INT(-3));
+
+    size_t n = gs_track_serialize(&built, buf, sizeof buf);
+    CHECK(n == gs_track_size(&built));
+    CHECK(n > 0);
+
+    CHECK(gs_track_deserialize(&loaded, buf, n));
+    CHECK(loaded.w == built.w && loaded.h == built.h);
+
+    // The hash is the identity, so this single line is the round-trip test:
+    // every corner, every surface and every painted gravity value, or it fails.
+    CHECK(gs_track_hash(&loaded) == gs_track_hash(&built));
+    CHECK(gs_track_height(&loaded, GS_INT(2), GS_INT(2)) ==
+          gs_track_height(&built, GS_INT(2), GS_INT(2)));
+
+    // Only the used region is written - a 32x8 track is not a 22 KB file.
+    CHECK(n < 2048);
+}
+
+TEST(a_corrupt_track_file_is_refused_rather_than_half_loaded) {
+    static gs_track built, target;
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+
+    gs_track_init(&built, 20, 20, GS_SURF_DIRT);
+    gs_track_set_corner(&built, 5, 5, GS_INT(4));
+    size_t n = gs_track_serialize(&built, buf, sizeof buf);
+
+    // Something recognisable in the target, so a partial load would show.
+    gs_track_init(&target, 8, 8, GS_SURF_ICE);
+    uint64_t untouched = gs_track_hash(&target);
+
+    CHECK(!gs_track_deserialize(&target, buf, 4));          // shorter than a header
+    CHECK(gs_track_hash(&target) == untouched);
+
+    CHECK(!gs_track_deserialize(&target, buf, n - 1));      // truncated payload
+    CHECK(gs_track_hash(&target) == untouched);
+
+    uint8_t bad_magic[64];
+    for (size_t i = 0; i < sizeof bad_magic; i++) bad_magic[i] = buf[i];
+    bad_magic[0] ^= 0xffu;
+    CHECK(!gs_track_deserialize(&target, bad_magic, sizeof bad_magic));
+    CHECK(gs_track_hash(&target) == untouched);
+
+    static uint8_t bad_version[GS_TRACK_TILES * 4 + 4096];
+    for (size_t i = 0; i < n; i++) bad_version[i] = buf[i];
+    bad_version[4] = 99;                                    // a version from the future
+    CHECK(!gs_track_deserialize(&target, bad_version, n));
+    CHECK(gs_track_hash(&target) == untouched);
+
+    // A surface byte that is not a surface would index the surface table off
+    // its end. It is normalised on the way in, once.
+    //
+    // Checked on the *stored byte*, deliberately. The obvious version of this
+    // asserts on gs_track_surface(), which has a clamp of its own - so it
+    // passes whether or not the loader normalises anything, and pins nothing.
+    static uint8_t bad_surface[GS_TRACK_TILES * 4 + 4096];
+    for (size_t i = 0; i < n; i++) bad_surface[i] = buf[i];
+    size_t first_tile = 10 + ((size_t)built.w + 1) * ((size_t)built.h + 1) * 2;
+    bad_surface[first_tile] = 200;
+    CHECK(gs_track_deserialize(&target, bad_surface, n));
+    CHECK(target.surface[GS_TILE_INDEX(0, 0)] < GS_SURF_COUNT);
+
+    // And the buffer has to be big enough to write into in the first place.
+    CHECK(gs_track_serialize(&built, buf, 8) == 0);
+}
+
+TEST(two_tracks_built_the_same_way_share_an_identity_through_a_file) {
+    static gs_track a, b, back;
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+
+    // Built independently, by the same steps, in a different order.
+    gs_track_init(&a, 24, 10, GS_SURF_PAVEMENT);
+    gs_track_set_corner(&a, 3, 4, GS_INT(2));
+    gs_track_set_surface(&a, 7, 2, GS_SURF_ICE);
+
+    gs_track_init(&b, 24, 10, GS_SURF_PAVEMENT);
+    gs_track_set_surface(&b, 7, 2, GS_SURF_ICE);
+    gs_track_set_corner(&b, 3, 4, GS_INT(2));
+
+    CHECK(gs_track_hash(&a) == gs_track_hash(&b));
+
+    // And the identity survives the journey, which is what lets a shared track
+    // aggregate ghosts and times without a server deciding anything.
+    size_t n = gs_track_serialize(&a, buf, sizeof buf);
+    CHECK(gs_track_deserialize(&back, buf, n));
+    CHECK(gs_track_hash(&back) == gs_track_hash(&b));
+
+    // One tile moved is a different track.
+    gs_track_set_corner(&b, 3, 4, GS_INT(2) + 256);
+    CHECK(gs_track_hash(&b) != gs_track_hash(&back));
+}
+
 // ---------------------------------------------------------------------------
 // Driving
 // ---------------------------------------------------------------------------
@@ -702,6 +806,9 @@ int main(void) {
     run_the_ground_is_continuous_across_a_tile_boundary();
     run_a_flat_tile_has_no_slope_and_a_ramp_has_the_slope_it_was_built_with();
     run_a_track_edit_changes_its_identity_and_an_undone_edit_restores_it();
+    run_a_track_survives_the_round_trip_through_its_file_format();
+    run_a_corrupt_track_file_is_refused_rather_than_half_loaded();
+    run_two_tracks_built_the_same_way_share_an_identity_through_a_file();
     run_a_car_accelerates_under_throttle_and_stops_under_the_brake();
     run_a_car_left_on_a_slope_rolls_downhill_and_one_on_the_flat_does_not();
     run_a_car_turns_more_sharply_at_a_crawl_than_at_speed();

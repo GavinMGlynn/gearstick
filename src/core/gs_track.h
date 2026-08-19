@@ -105,4 +105,29 @@ void gs_track_set_gravity(gs_track *t, uint8_t x, uint8_t y, gs_fix multiplier);
 // track's identity does not depend on GS_TRACK_MAX.
 uint64_t gs_track_hash(const gs_track *t);
 
+// --- the file format ------------------------------------------------------
+//
+// Explicit little-endian on the wire, like the replay format, so a track
+// authored on one machine loads on another regardless of what the compiler
+// chose to pad. Only the used region is written, so a 16x16 track is a small
+// file rather than a mostly-empty 22 KB one.
+//
+// No allocation happens here: `src/core/` owns no allocator, so the caller
+// provides the buffer and asks how big it needs to be.
+
+#define GS_TRACK_MAGIC   0x4b525447u   // "GTRK"
+#define GS_TRACK_VERSION 1u
+
+// Bytes `gs_track_serialize` will write for this track.
+size_t gs_track_size(const gs_track *t);
+
+// Returns the number of bytes written, or 0 if `cap` is too small.
+size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap);
+
+// Returns false — and leaves `t` untouched — on a bad magic, an unknown
+// version, impossible dimensions, or a buffer that ends early. A half-loaded
+// track is worse than a refused one: it races, and it is not the track anybody
+// built.
+bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len);
+
 #endif // GS_TRACK_H

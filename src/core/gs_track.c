@@ -156,3 +156,102 @@ uint64_t gs_track_hash(const gs_track *t) {
     }
     return h;
 }
+
+// --- the file format ------------------------------------------------------
+//
+// See gs_track.h. Written a byte at a time on purpose: this is the format a
+// shared track travels in, and it must not depend on the endianness or the
+// struct padding of the machine that wrote it.
+
+static void gs_put_u32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+    p[2] = (uint8_t)((v >> 16) & 0xffu);
+    p[3] = (uint8_t)((v >> 24) & 0xffu);
+}
+
+static uint32_t gs_get_u32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+// magic, version, width, height.
+#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1)
+
+static size_t gs_track_payload(const gs_track *t) {
+    size_t corners = ((size_t)t->w + 1) * ((size_t)t->h + 1) * 2;  // int16 each
+    size_t tiles = (size_t)t->w * (size_t)t->h * 2;                // surface, gravity
+    return corners + tiles;
+}
+
+size_t gs_track_size(const gs_track *t) {
+    return GS_TRACK_HEADER_BYTES + gs_track_payload(t);
+}
+
+size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap) {
+    size_t need = gs_track_size(t);
+    if (cap < need) return 0;
+
+    uint8_t *p = buf;
+    gs_put_u32(p, GS_TRACK_MAGIC);   p += 4;
+    gs_put_u32(p, GS_TRACK_VERSION); p += 4;
+    *p++ = t->w;
+    *p++ = t->h;
+
+    for (uint32_t y = 0; y <= t->h; y++) {
+        for (uint32_t x = 0; x <= t->w; x++) {
+            uint16_t v = (uint16_t)t->corner[(size_t)y * GS_CORNER_STRIDE + (size_t)x];
+            *p++ = (uint8_t)(v & 0xffu);
+            *p++ = (uint8_t)((v >> 8) & 0xffu);
+        }
+    }
+    for (uint32_t y = 0; y < t->h; y++) {
+        for (uint32_t x = 0; x < t->w; x++) {
+            *p++ = t->surface[GS_TILE_INDEX(x, y)];
+            *p++ = t->gravity[GS_TILE_INDEX(x, y)];
+        }
+    }
+    return need;
+}
+
+bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
+    if (len < GS_TRACK_HEADER_BYTES) return false;
+
+    const uint8_t *p = buf;
+    if (gs_get_u32(p) != GS_TRACK_MAGIC) return false;
+    p += 4;
+    if (gs_get_u32(p) != GS_TRACK_VERSION) return false;
+    p += 4;
+
+    uint8_t w = *p++;
+    uint8_t h = *p++;
+    if (w == 0 || h == 0 || w > GS_TRACK_MAX || h > GS_TRACK_MAX) return false;
+
+    // Everything is checked before anything is written, so a refused file
+    // leaves the caller's track exactly as it was. Half-loading is the failure
+    // that matters here: it races, and it is not the track anybody built.
+    size_t corners = ((size_t)w + 1) * ((size_t)h + 1) * 2;
+    size_t tiles = (size_t)w * (size_t)h * 2;
+    if (len < GS_TRACK_HEADER_BYTES + corners + tiles) return false;
+
+    gs_track_init(t, w, h, GS_SURF_PAVEMENT);
+
+    for (uint32_t y = 0; y <= h; y++) {
+        for (uint32_t x = 0; x <= w; x++) {
+            uint16_t v = (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+            p += 2;
+            t->corner[(size_t)y * GS_CORNER_STRIDE + (size_t)x] = (int16_t)v;
+        }
+    }
+    for (uint32_t y = 0; y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            uint8_t s = *p++;
+            uint8_t g = *p++;
+            // A surface out of range would index the surface table off its end
+            // every tick of every race. Clamped on the way in, once.
+            t->surface[GS_TILE_INDEX(x, y)] = s < GS_SURF_COUNT ? s : (uint8_t)GS_SURF_PAVEMENT;
+            t->gravity[GS_TILE_INDEX(x, y)] = g;
+        }
+    }
+    return true;
+}
