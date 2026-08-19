@@ -21,6 +21,7 @@
 #include "gfx/gs_meshes.h"
 #include "platform/gs_bind.h"
 #include "ui/gs_editor.h"
+#include "platform/gs_paths.h"
 #include "ui/gs_menu.h"
 
 #define GS_W 640
@@ -1998,6 +1999,54 @@ TEST(the_store_remembers_drivers_and_records_between_runs) {
     CHECK(!gs_menu_load(&back, buf, n));
 }
 
+TEST(the_stock_tracks_ship_and_are_worth_racing) {
+    (void)ren;
+
+    // **The tracks that ship are data, not C.** This reads the files as
+    // installed - if the frontend went back to carrying a track, or the tracks
+    // stopped being copied into a package, this is what notices.
+    char dir[1024];
+    const char *assets = gs_assets_dir();
+    CHECK(assets != nullptr);
+    if (assets == nullptr) return;
+
+    static const char *const names[] = {
+        "first-light", "the-long-drop", "ice-house", "jupiter-run",
+    };
+
+    for (size_t i = 0; i < SDL_arraysize(names); i++) {
+        SDL_snprintf(dir, sizeof dir, "%s/tracks/%s.gstrack", assets, names[i]);
+
+        size_t len = 0;
+        void *bytes = SDL_LoadFile(dir, &len);
+        CHECK(bytes != nullptr);
+        if (bytes == nullptr) continue;
+
+        static gs_track t;
+        CHECK(gs_track_deserialize(&t, (const uint8_t *)bytes, len));
+        SDL_free(bytes);
+
+        // A route somebody can actually drive, which is the difference between
+        // a track and a field.
+        CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+        CHECK(t.gate_count >= 2);
+        CHECK(t.w >= 24 && t.h >= 12);
+
+        // And it is not flat: a stock track with no elevation would mean the
+        // generator wrote nothing and nobody looked.
+        bool raised = false;
+        for (uint8_t y = 0; y <= t.h && !raised; y++) {
+            for (uint8_t x = 0; x <= t.w; x++) {
+                if (t.corner[(size_t)y * GS_CORNER_STRIDE + x] != 0) {
+                    raised = true;
+                    break;
+                }
+            }
+        }
+        CHECK(raised);
+    }
+}
+
 TEST(choosing_a_track_from_the_library_changes_what_is_raced) {
     (void)ren;
 
@@ -2386,6 +2435,7 @@ int main(void) {
     run_a_time_reads_the_way_people_say_it(ren);
     run_a_finished_race_becomes_a_table_in_the_order_it_finished(ren);
     run_the_store_remembers_drivers_and_records_between_runs(ren);
+    run_the_stock_tracks_ship_and_are_worth_racing(ren);
     run_choosing_a_track_from_the_library_changes_what_is_raced(ren);
     run_loading_a_track_throws_away_the_undo_history(ren);
     run_the_store_carries_the_library_too(ren);

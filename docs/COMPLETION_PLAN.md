@@ -498,7 +498,7 @@ hard-coded demo track that has been sitting in the frontend since Phase 3.
 - [x] **Choose a track in the front end.** Browse what you have, pick one, race
       it. *Verification: a full session picks a track that is not the first one
       and races it, without a command line.*
-- [ ] **The hard-coded demo track goes.** The frontend stops carrying a track in
+- [x] **The hard-coded demo track goes.** The frontend stops carrying a track in
       C and ships one built in the editor instead. *Verification: no track
       geometry remains in `src/frontend/`, and a fresh install still has
       something to race on.*
@@ -596,7 +596,9 @@ worth as much as what was decided about it.
       car that drives off continues onto a plain that carries on at the height
       and surface of the nearest edge tile, so leaving the track currently costs
       nothing at all. It should probably cost something.
-- [ ] **A hard-coded demo track is in the game frontend.** *(Now Phase 12.)* It is a prototype and
+- [x] **A hard-coded demo track is in the game frontend.** *(Closed in Phase 12:
+      four stock tracks ship as data in `assets/tracks/`, written by
+      `tools/make_tracks.c`, and the frontend states no geometry at all.)* It is a prototype and
       it goes the moment the editor can write a real one.
 - [x] **Nothing in the game frontend is a race.** ~~No start, no laps, no
       checkpoints, no finish, no HUD — two cars drive around on a demo track.~~

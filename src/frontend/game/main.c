@@ -113,44 +113,58 @@ typedef struct gs_app {
 
 // The demo track, until the editor exists to make a real one. It is a
 // prototype and it is named as one: a hard-coded track is not content.
-static void gs_demo_track(gs_track *t) {
-    gs_track_init(t, 40, 24, GS_SURF_PAVEMENT);
+// The stock tracks, loaded from assets/tracks/ rather than compiled in.
+//
+// **A track in C is a track nobody can edit, share or replace.** This one was a
+// prototype from the day it was written, and it is gone: what ships is data,
+// produced by tools/make_tracks.c, which the editor opens like anything else.
 
-    for (uint8_t y = 0; y <= t->h; y++) {
-        for (uint8_t x = 0; x <= t->w; x++) {
-            gs_fix h = 0;
-            if (x > 10 && x < 15) h = (gs_fix)((int64_t)GS_INT(1) * (x - 10) / 4);
-            else if (x >= 15 && x < 22) h = GS_INT(1);
-            else if (x >= 22 && x < 26) h = (gs_fix)((int64_t)GS_INT(1) * (26 - x) / 4);
+static SDL_EnumerationResult SDLCALL gs_take_track(void *userdata, const char *dir,
+                                                   const char *name) {
+    gs_app *a = (gs_app *)userdata;
 
-            // A shallow bowl across the middle, so there is something to be
-            // thrown out of sideways.
-            int32_t dy = (int32_t)y - (int32_t)t->h / 2;
-            h -= (gs_fix)((int64_t)GS_INT(1) * (12 - dy * dy) / 90);
-            gs_track_set_corner(t, x, y, h);
-        }
+    size_t n = SDL_strlen(name);
+    if (n < 9 || SDL_strcmp(name + n - 8, ".gstrack") != 0) {
+        return SDL_ENUM_CONTINUE;
     }
 
-    for (uint8_t x = 0; x < t->w; x++) {
-        for (uint8_t y = 0; y < t->h; y++) {
-            if (x >= 26 && x < 34) gs_track_set_surface(t, x, y, GS_SURF_ICE);
-            else if (y < 6 || y >= t->h - 6) gs_track_set_surface(t, x, y, GS_SURF_DIRT);
+    char path[1024];
+    SDL_snprintf(path, sizeof path, "%s%s", dir, name);
 
-            // A painted low-gravity pocket over the landing, so the brush is
-            // visible from the first run.
-            if (x >= 15 && x < 21) gs_track_set_gravity(t, x, y, GS_RATIO(35, 100));
+    size_t len = 0;
+    void *bytes = SDL_LoadFile(path, &len);
+    if (bytes == nullptr) return SDL_ENUM_CONTINUE;
+
+    static gs_track loaded;
+    if (gs_track_deserialize(&loaded, (const uint8_t *)bytes, len)) {
+        // The file name is the track's name, tidied: "the-long-drop.gstrack"
+        // reads as "the long drop".
+        char label[GS_LIBRARY_NAME];
+        SDL_strlcpy(label, name, sizeof label);
+        char *dot = SDL_strrchr(label, '.');
+        if (dot != nullptr) *dot = '\0';
+        for (char *c = label; *c != '\0'; c++) {
+            if (*c == '-' || *c == '_') *c = ' ';
         }
+        gs_library_put(&a->menu.library, &loaded, label, "gearstick");
     }
-
-    // A route, so there is something to look at and something to drive. Like
-    // the terrain around it this is a prototype: it goes when the editor can
-    // author a track worth shipping.
-    gs_track_add_gate(t, GS_INT(6), GS_INT(12), 0, GS_INT(5));
-    gs_track_add_gate(t, GS_INT(20), GS_INT(12), 0, GS_INT(5));
-    gs_track_add_gate(t, GS_INT(34), GS_INT(12), 0, GS_INT(5));
+    SDL_free(bytes);
+    return SDL_ENUM_CONTINUE;
 }
 
-static void gs_layout(gs_app *a);
+// Everything in assets/tracks/, into the library. Run on every start rather
+// than only the first: a track that ships should come back if somebody deletes
+// it, and putting the same track twice puts it once.
+static void gs_load_stock_tracks(gs_app *a) {
+    char dir[1024];
+    const char *assets = gs_assets_dir();
+    if (assets == nullptr) return;
+
+    SDL_snprintf(dir, sizeof dir, "%s/tracks/", assets);
+    SDL_EnumerateDirectory(dir, gs_take_track, a);
+}
+
+static void gs_layout(gs_app *a);static void gs_layout(gs_app *a);
 
 // Drop into the world from wherever the editor is looking. **Nothing is
 // loaded**: the track object the editor has been writing to is the track the
@@ -599,7 +613,27 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         return SDL_APP_FAILURE;
     }
 
-    gs_demo_track(&a->t);
+    // The stock tracks, and the first of them as the one loaded. A fresh
+    // install has something to race on; a returning player has whatever their
+    // library already held as well.
+    gs_load_stock_tracks(a);
+
+    const gs_track *first = gs_library_track(&a->menu.library, 0);
+    if (first != nullptr) {
+        a->t = *first;
+        a->menu.chosen = 0;
+    } else {
+        // Nothing on disk at all - a broken install, or somebody running from a
+        // directory with no assets. Flat ground beats a black screen, and the
+        // construction set can build on it.
+        SDL_Log("no tracks in assets/tracks - starting on flat ground");
+        // Flat by construction - gs_track_init zeroes every corner - so the
+        // frontend states no geometry of its own even here.
+        gs_track_init(&a->t, 40, 24, GS_SURF_PAVEMENT);
+        gs_track_add_gate(&a->t, GS_INT(6), GS_INT(12), 0, GS_INT(6));
+        gs_track_add_gate(&a->t, GS_INT(34), GS_INT(12), 0, GS_INT(6));
+    }
+
     gs_start_race(a);
 
     if (a->online) {
@@ -686,22 +720,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                                         : GS_SCREEN_TITLE;
 
         if (a->demo_library) {
-            // A few tracks to look at, for a screenshot of the library. Built
-            // rather than loaded, so the capture does not depend on whatever
-            // happens to be in somebody's store.
-            static const char *names[] = { "first light", "the long drop",
-                                           "ice house", "jupiter run" };
-            for (int k = 0; k < 4; k++) {
-                static gs_track made;
-                gs_demo_track(&made);
-                for (uint8_t y = 0; y <= made.h; y++) {
-                    gs_track_set_corner(&made, (uint8_t)(4 + k * 3), y,
-                                        GS_INT(1 + k));
-                }
-                gs_library_put(&a->menu.library, &made, names[k],
-                               k % 2 == 0 ? "ada" : "bez");
-            }
-            a->menu.picked = 1;
+            // The stock tracks are already in the library; this only picks one
+            // so a screenshot has a selection in it.
+            a->menu.picked = a->menu.library.count > 1 ? 1 : 0;
         }
 
         if (a->session) {

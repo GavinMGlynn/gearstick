@@ -298,6 +298,12 @@ set_target_properties(gearstick PROPERTIES
 # The headless driver. **Links gearstick_sim and nothing else** - no SDL, no
 # window, no audio device. That is not a convenience, it is the proof: if this
 # stops linking, the simulation has grown a dependency on being watched.
+# The stock tracks, written as data. Links the simulation and nothing else, like
+# every other tool that touches the formats.
+add_executable(gearstick_make_tracks tools/make_tracks.c)
+target_link_libraries(gearstick_make_tracks PRIVATE gearstick_sim)
+gs_configure(gearstick_make_tracks)
+
 add_executable(gearstick_cli src/frontend/cli/main.c)
 target_link_libraries(gearstick_cli PRIVATE gearstick_sim)
 gs_configure(gearstick_cli)
@@ -487,9 +493,18 @@ if(APPLE)
     # looks for is Contents/Resources/assets.
     install(DIRECTORY assets/ DESTINATION "gearstick.app/Contents/Resources/assets")
     install(TARGETS gearstick_cli RUNTIME DESTINATION .)
+    if(GEARSTICK_SERVER)
+        install(TARGETS gearstick_server RUNTIME DESTINATION .)
+    endif()
     install(FILES ${GS_DOCS} DESTINATION .)
 else()
     install(TARGETS gearstick gearstick_cli RUNTIME DESTINATION .)
+    # The server goes in the package too. docs/RELEASES.md lists it as something
+    # a release contains, and a document describing a file nobody has is worse
+    # than no document.
+    if(GEARSTICK_SERVER)
+        install(TARGETS gearstick_server RUNTIME DESTINATION .)
+    endif()
     install(DIRECTORY assets/ DESTINATION assets)
     install(FILES ${GS_DOCS} DESTINATION .)
 endif()

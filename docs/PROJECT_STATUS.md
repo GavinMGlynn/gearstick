@@ -943,6 +943,38 @@ would apply one track's edits to another. `gs_edit_reset` exists for that and a
 test walks it: undo after a load does nothing at all, rather than reaching into
 the new track.
 
+### The demo track is gone
+
+It had been in the frontend since Phase 3, and it was a prototype the day it was
+written. **A track in C is a track nobody can edit, share or replace.**
+
+Four stock tracks now ship as data in `assets/tracks/`, written by
+`tools/make_tracks.c` — first light, the long drop, ice house, jupiter run. Each
+one is a shape with a reason: a ramp with room either side to learn what the car
+does; a shelf that ends, so the landing decides the run; an ice sheet where grip
+is the whole problem; and a painted low-gravity pocket over a jump, which is the
+thing this game has that the original could not. The game loads all of them into
+the library at startup, so a fresh install has four tracks and a returning
+player keeps whatever else they built.
+
+`grep` for track geometry in `src/frontend/` now returns nothing. Even the
+fallback used when no assets are found states none: `gs_track_init` zeroes every
+corner, so flat ground is what it already is rather than something the frontend
+writes out.
+
+All four are completable between 0.15x and 2.55x Earth gravity, checked with the
+analyser rather than by driving them once and hoping. A test reads them as
+installed and requires a sound route, at least two gates, and some elevation — a
+stock track with no elevation would mean the tool wrote nothing and nobody
+looked.
+
+Two things this turned up. The assets directory has no trailing separator, so
+the first version looked in a path with the directory name run into the
+subdirectory and quietly found nothing — the fallback made that look like a
+design decision rather than a bug. And **the server was not in the install rules
+at all**, while `docs/RELEASES.md` already listed it as something a release
+contains. A document describing a file nobody has is worse than no document.
+
 ---
 
 ## What does not exist
