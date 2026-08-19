@@ -106,7 +106,9 @@ static void gs_start_test_drive(gs_app *a) {
     gs_angle heading = 0;
     gs_editor_drive_start(&a->editor, &a->t, &x, &y, &heading);
 
-    gs_world_init(&a->world, GS_ONE);
+    // Under whatever the dials are set to. Tuning gravity and then driving
+    // under the old one would make the panel a lie.
+    gs_editor_apply_dials(&a->editor, &a->world);
     gs_world_add_car(&a->world, &a->t, (uint8_t)GS_VEH_STOCK_CAR, x, y, heading);
 
     // The second car alongside, offset across the direction of travel so both

@@ -22,6 +22,10 @@ bool gs_editor_init(gs_editor *e, uint32_t history) {
     e->gate_width = 2.5f;
     e->zoom = GS_ISO_DEFAULT_ZOOM;
     e->ghost_on = true;
+    e->dial_gravity = 1.0f;
+    e->dial_drag = 1.0f;
+    e->dial_friction = 1.0f;
+    e->dial_damage = 1.0f;
 
     // Sixty-five thousand edits of history is about eight hundred kilobytes,
     // which is nothing, and is far more strokes than anyone makes between
@@ -111,10 +115,17 @@ static void gs_brush_at(gs_editor *e, gs_track *t, int tx, int ty) {
 // again quickly.
 #define GS_GHOST_TICKS (GS_TICK_HZ * 12)
 
+void gs_editor_apply_dials(const gs_editor *e, gs_world *w) {
+    gs_world_init(w, (gs_fix)(e->dial_gravity * (float)GS_ONE));
+    w->drag_scale = (gs_fix)(e->dial_drag * (float)GS_ONE);
+    w->friction_scale = (gs_fix)(e->dial_friction * (float)GS_ONE);
+    w->damage_scale = (gs_fix)(e->dial_damage * (float)GS_ONE);
+}
+
 static void gs_ghost_restart(gs_editor *e, const gs_track *t) {
     e->ghost_track = gs_track_hash(t);
     e->ghost_ticks = 0;
-    gs_world_init(&e->ghost, GS_ONE);
+    gs_editor_apply_dials(e, &e->ghost);
 
     if (t->gate_count == 0) return;
     gs_world_add_car(&e->ghost, t, (uint8_t)GS_VEH_STOCK_CAR,
@@ -127,7 +138,24 @@ void gs_editor_ghost_step(gs_editor *e, const gs_track *t, uint32_t ticks) {
     // The track changing is what restarts it, and the track's own hash is how
     // that is noticed - no notification to forget to send, and no way for an
     // edit to slip past.
-    if (gs_track_hash(t) != e->ghost_track || e->ghost.car_count == 0) {
+    // A dial moving has to restart it too. The track's hash does not change
+    // when gravity does, and a ghost still flying under the old one is worse
+    // than no ghost: it is a wrong answer that looks like a right one.
+    uint64_t under = gs_track_hash(t)
+                     ^ (uint64_t)(uint32_t)e->ghost.gravity
+                     ^ ((uint64_t)(uint32_t)e->ghost.drag_scale << 8)
+                     ^ ((uint64_t)(uint32_t)e->ghost.friction_scale << 16)
+                     ^ ((uint64_t)(uint32_t)e->ghost.damage_scale << 24);
+    gs_world want;
+    gs_editor_apply_dials(e, &want);
+    uint64_t wanted = gs_track_hash(t)
+                      ^ (uint64_t)(uint32_t)want.gravity
+                      ^ ((uint64_t)(uint32_t)want.drag_scale << 8)
+                      ^ ((uint64_t)(uint32_t)want.friction_scale << 16)
+                      ^ ((uint64_t)(uint32_t)want.damage_scale << 24);
+
+    if (under != wanted || gs_track_hash(t) != e->ghost_track ||
+        e->ghost.car_count == 0) {
         gs_ghost_restart(e, t);
         if (e->ghost.car_count == 0) return;
     }
@@ -266,6 +294,21 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     if (redo == 0) ImGui_EndDisabled();
     ImGui_SameLine();
     ImGui_Text("%u back, %u forward", undo, redo);
+
+    ImGui_SeparatorText("Dials");
+    // Continuous, not stepped. The original's fourteen gravity settings were a
+    // 6502 limitation; the planet names were doing real work and are kept as
+    // shortcuts rather than as the only choices.
+    ImGui_SliderFloat("gravity (x Earth)", &e->dial_gravity, 0.0f, 3.0f);
+    for (int i = 0; i < GS_GRAVITY_PRESETS; i++) {
+        if (i % 4 != 0) ImGui_SameLine();
+        if (ImGui_Button(gs_gravity_presets[i].name)) {
+            e->dial_gravity = gs_to_f(gs_gravity_presets[i].scale);
+        }
+    }
+    ImGui_SliderFloat("air drag", &e->dial_drag, 0.0f, 4.0f);
+    ImGui_SliderFloat("friction", &e->dial_friction, 0.0f, 2.0f);
+    ImGui_SliderFloat("damage", &e->dial_damage, 0.0f, 4.0f);
 
     ImGui_Checkbox("live ghost", &e->ghost_on);
     ImGui_SameLine();

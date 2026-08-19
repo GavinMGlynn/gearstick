@@ -52,6 +52,14 @@ typedef struct gs_editor {
 
     bool  placed;       // the editor camera has been positioned at least once
 
+    // The dials, live. Everything is a dial and nothing is locked - so they sit
+    // in the editor beside the brushes rather than behind a race-setup screen,
+    // and the ghost re-races under them the moment one moves.
+    float dial_gravity;    // multiple of Earth
+    float dial_drag;
+    float dial_friction;
+    float dial_damage;
+
     // The live ghost: a car re-racing the design in the background, so that
     // changing a ramp shows you what it does to a landing a second later
     // instead of when you next go and drive it. Editing stops being blind
@@ -100,6 +108,10 @@ bool gs_editor_pad_input(gs_editor *e, gs_track *t, const gs_pad_edit *pad, floa
 // than buried in the mouse handling. Does not open a transaction - the caller
 // decides what counts as one action.
 void gs_editor_paint(gs_editor *e, gs_track *t, float wx, float wy);
+
+// Set a world up under the editor's current dials. Both the ghost and a test
+// drive go through here, so what you tuned is what you drive.
+void gs_editor_apply_dials(const gs_editor *e, gs_world *w);
 
 // Advance the ghost. **It notices for itself that the track changed** - by its
 // hash - and starts again, which is what makes it live rather than a thing you

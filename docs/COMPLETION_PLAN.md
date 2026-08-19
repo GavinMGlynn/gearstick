@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 4 are complete — 37 of 61 items, every one of them with its
+**Phases 0 to 4 are complete — 38 of 61 items, every one of them with its
 verification actually run.** The editor was about half the remaining work and
 it is done: a track can be built, painted, given a route, validated, driven and
 undone, from a mouse or from a pad. Phase 5 is next.
@@ -258,9 +258,15 @@ whatever the UI turns out to be — then the interface on top.
       vehicle wins everything" — two winners and four also-rans passes the
       second and is still a roster of two. A machine that is best at nothing is
       a choice nobody would make.*
-- [ ] **The dials: gravity, air drag, friction scale, damage multiplier**, all
-      continuous, all changeable before a race. *Verification: each dial changes
-      the outcome of the same input log in the expected direction.*
+- [x] **The dials: gravity, air drag, friction scale, damage multiplier**, all
+      continuous, all changeable before a race. *Verification: each is swept
+      across its range against the same input log — two points would pass a dial
+      with three settings pretending to be a slider. More drag is strictly less
+      speed at every step; more gravity is strictly less jump; more damage is
+      never less damage; more friction turns the car further until grip stops
+      being the limit and the steering starts, which is pinned as a plateau
+      rather than asserted past. They live in the editor beside the brushes, and
+      the ghost re-races the moment one moves.*
 - [ ] **Surface wear over a race.** *Verification: lap five on dirt is measurably
       slower on the used line than lap one.*
 

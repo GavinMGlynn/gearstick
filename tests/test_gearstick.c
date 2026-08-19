@@ -955,6 +955,163 @@ TEST(the_same_jump_hurts_less_landed_on_a_downslope_than_landed_flat) {
 }
 
 // ---------------------------------------------------------------------------
+// The dials
+// ---------------------------------------------------------------------------
+
+// Each of these runs the *same* input log and changes one dial, so anything
+// that moves is that dial's doing. Swept across several values rather than
+// compared at two, because the claim is that they are continuous: a dial with
+// three settings pretending to be a slider would pass a two-point test.
+
+static gs_world gs_dialled(gs_fix gravity, gs_fix drag, gs_fix friction,
+                           gs_fix damage, const gs_track *t, uint32_t ticks,
+                           gs_input held) {
+    gs_world w;
+    gs_world_init(&w, gravity);
+    w.drag_scale = drag;
+    w.friction_scale = friction;
+    w.damage_scale = damage;
+    gs_world_add_car(&w, t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(20), 0);
+
+    gs_input in[GS_MAX_CARS] = { held, 0, 0, 0 };
+    for (uint32_t i = 0; i < ticks; i++) gs_world_step(&w, t, in);
+    return w;
+}
+
+TEST(air_drag_is_a_dial_and_more_of_it_means_less_speed) {
+    static gs_track t;
+    gs_track_init(&t, 60, 40, GS_SURF_PAVEMENT);
+
+    gs_fix last = INT32_MAX;
+    for (int32_t setting = 0; setting <= 8; setting++) {
+        gs_world w = gs_dialled(GS_ONE, GS_INT(setting), GS_ONE, GS_ONE, &t,
+                                GS_TICK_HZ * 8, GS_IN_ACCEL);
+        gs_fix speed = gs_car_speed(&w.car[0]);
+
+        // Strictly slower every step of the way: no plateau, no dead zone.
+        CHECK(speed < last);
+        last = speed;
+    }
+    CHECK(last > 0);   // and it never stops the car outright
+}
+
+// How far the velocity comes round in one second of full lock, at a given
+// friction setting.
+static double gs_turn_at_friction(gs_fix friction) {
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    w.friction_scale = friction;
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+    w.car[0].vx = GS_INT(5);
+
+    gs_angle before = gs_atan2(w.car[0].vy, w.car[0].vx);
+    gs_input in[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_LEFT), 0, 0, 0 };
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, in);
+
+    int32_t turned = gs_angle_delta(before, gs_atan2(w.car[0].vy, w.car[0].vx));
+    return (double)(turned < 0 ? -turned : turned) / 65536.0 * 360.0;
+}
+
+TEST(the_friction_scale_is_a_dial_and_more_of_it_means_more_grip_until_it_does_not) {
+    // While traction is what limits the corner, every step up the dial turns
+    // the car further, with no flat spots.
+    double last = -1.0;
+    for (int32_t setting = 1; setting <= 9; setting++) {
+        double deg = gs_turn_at_friction(GS_RATIO(setting, 10));
+        CHECK(deg > last);
+        last = deg;
+    }
+
+    // Past full grip it stops mattering, because the limit is no longer the
+    // tyres - it is how fast the car can be steered. That plateau is the model
+    // being honest rather than the dial being broken, and it is worth pinning:
+    // a version of this that kept climbing would mean grip was buying
+    // something it should not.
+    double full = gs_turn_at_friction(GS_ONE);
+    double double_grip = gs_turn_at_friction(GS_INT(2));
+    double quadruple = gs_turn_at_friction(GS_INT(4));
+
+    CHECK(full > last);
+    CHECK(double_grip - full < 0.5);
+    CHECK(quadruple - full < 0.5);
+
+    // And the whole range is worth having: full grip turns several times as
+    // much as a tenth of it.
+    CHECK(full > gs_turn_at_friction(GS_RATIO(1, 10)) * 4.0);
+}
+
+TEST(the_damage_multiplier_is_a_dial_and_more_of_it_hurts_more) {
+    // The same fall, every time. Only the dial moves.
+    static gs_track t;
+    gs_track_init(&t, 40, 12, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++)
+            gs_track_set_corner(&t, x, y, x <= 6 ? GS_INT(9) : 0);
+
+    int32_t last = -1;
+    for (int32_t setting = 2; setting <= 14; setting += 2) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        w.damage_scale = GS_RATIO(setting, 10);
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(6), 0);
+        w.car[0].vx = GS_INT(5);
+
+        for (int i = 0; i < GS_TICK_HZ * 6; i++) gs_world_step(&w, &t, nullptr);
+
+        CHECK((int32_t)w.car[0].damage >= last);
+        last = (int32_t)w.car[0].damage;
+    }
+    // At the top of the range the same landing that was survivable is not.
+    CHECK(last > 0);
+}
+
+TEST(gravity_is_a_dial_and_it_is_continuous_between_the_planets) {
+    static gs_track t;
+    gs_build_ramp(&t, 8, 12, GS_INT(1));
+
+    // Range of a jump against gravity: closed form says it is proportional to
+    // 1/g, so every step up the dial must shorten it, with no flat spots where
+    // a range of settings does the same thing.
+    double last = 1e9;
+    for (int32_t setting = 2; setting <= 20; setting += 2) {
+        gs_world w;
+        gs_world_init(&w, GS_RATIO(setting, 10));
+        w.drag_scale = 0;
+        w.friction_scale = 0;
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(4), 0);
+        w.car[0].vx = GS_INT(5);
+
+        double launch = 0, range = 0;
+        bool flew = false;
+        for (int i = 0; i < GS_TICK_HZ * 30; i++) {
+            bool was_air = !w.car[0].grounded;
+            gs_world_step(&w, &t, nullptr);
+            bool is_air = !w.car[0].grounded;
+            if (!was_air && is_air) { launch = gs_to_double(w.car[0].x); flew = true; }
+            if (was_air && !is_air && flew) {
+                range = gs_to_double(w.car[0].x) - launch;
+                break;
+            }
+        }
+        CHECK(flew);
+        CHECK(range < last);
+        last = range;
+    }
+
+    // And the presets are named, because "Jupiter" tells a player something a
+    // number does not - which was the point of keeping them.
+    CHECK(GS_GRAVITY_PRESETS >= 6);
+    for (int i = 0; i < GS_GRAVITY_PRESETS; i++) {
+        CHECK(gs_gravity_presets[i].name != nullptr);
+        CHECK(gs_gravity_presets[i].scale > 0);
+        if (i > 0) CHECK(gs_gravity_presets[i].scale > gs_gravity_presets[i - 1].scale);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Determinism - the property everything else is built on
 // ---------------------------------------------------------------------------
 
@@ -1244,6 +1401,10 @@ int main(void) {
     run_a_ramp_throws_a_car_further_under_lower_gravity_than_the_arc_alone_explains();
     run_a_low_gravity_tile_lengthens_a_jump_that_crosses_it();
     run_the_same_jump_hurts_less_landed_on_a_downslope_than_landed_flat();
+    run_air_drag_is_a_dial_and_more_of_it_means_less_speed();
+    run_the_friction_scale_is_a_dial_and_more_of_it_means_more_grip_until_it_does_not();
+    run_the_damage_multiplier_is_a_dial_and_more_of_it_hurts_more();
+    run_gravity_is_a_dial_and_it_is_continuous_between_the_planets();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();
     run_a_race_paced_by_the_clock_is_the_race_the_simulation_would_have_run();

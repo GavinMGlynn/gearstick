@@ -1000,6 +1000,52 @@ TEST(a_track_can_be_built_from_a_pad_with_no_mouse_at_all) {
     gs_editor_quit(&ed);
 }
 
+TEST(moving_a_dial_restarts_the_ghost_under_the_new_one) {
+    (void)ren;
+
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 12);
+    gs_track_add_gate(&t, GS_INT(2), GS_INT(6), 0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(6), 0, GS_INT(4));
+
+    // A ramp, so gravity has something visible to change.
+    gs_editor ed;
+    CHECK(gs_editor_init(&ed, 8192));
+    ed.brush = GS_BRUSH_RAISE;
+    ed.radius = 0;
+    ed.step = 0.3f;
+    gs_edit_begin(ed.log);
+    for (int col = 1; col <= 5; col++)
+        for (int rep = 0; rep < col; rep++)
+            for (float y = 0.0f; y <= 12.0f; y += 1.0f)
+                gs_editor_paint(&ed, &t, 9.0f + (float)col, y);
+    gs_edit_end(ed.log);
+
+    gs_ghost_run(&ed, &t, 400);
+    const gs_car *g = gs_editor_ghost_car(&ed);
+    CHECK(g != nullptr);
+    gs_fix earth_x = g->x, earth_z = g->z;
+
+    // Turn gravity down. The *track* has not changed, so a ghost that only
+    // watches the track hash would carry on flying under the old gravity -
+    // which is a wrong answer that looks like a right one.
+    ed.dial_gravity = 0.2f;
+    gs_ghost_run(&ed, &t, 400);
+    g = gs_editor_ghost_car(&ed);
+    CHECK(g != nullptr);
+    CHECK(g->x != earth_x || g->z != earth_z);
+
+    // And back again, to the same place as before: it is the dial doing this
+    // and not merely the restart.
+    ed.dial_gravity = 1.0f;
+    gs_ghost_run(&ed, &t, 400);
+    g = gs_editor_ghost_car(&ed);
+    CHECK(g->x == earth_x);
+    CHECK(g->z == earth_z);
+
+    gs_editor_quit(&ed);
+}
+
 // ---------------------------------------------------------------------------
 
 int main(void) {
@@ -1038,6 +1084,7 @@ int main(void) {
     run_coming_back_from_a_drive_returns_you_to_where_you_were_building(ren);
     run_raising_a_ramp_changes_where_the_ghost_lands_without_being_told_to(ren);
     run_a_track_can_be_built_from_a_pad_with_no_mouse_at_all(ren);
+    run_moving_a_dial_restarts_the_ghost_under_the_new_one(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
