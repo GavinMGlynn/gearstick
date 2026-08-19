@@ -27,10 +27,15 @@ sed -n '/^## Phase /,/^## Tails/p' docs/COMPLETION_PLAN.md | grep '^- \[ \]'
 The tails below the phases are found-work rather than planned work, and are
 counted separately.
 
-**Phases 0 to 4 are complete — 51 of 61 items, every one of them with its
-verification actually run.** The editor was about half the remaining work and
-it is done: a track can be built, painted, given a route, validated, driven and
-undone, from a mouse or from a pad. Phase 5 is next.
+**Phases 0 to 10 are complete — 61 items, every one with its verification
+actually run.** The game builds, races, edits, records, remembers and ships on
+three platforms.
+
+**Phases 11 to 14 are the rest of `FEATURES.md`, the tails, and installers.** Everything on
+the feature list that is not yet built now has an item here, and so does every
+tail — the plan is no longer a subset of the intention. Three of those items
+cannot be finished by whoever is writing the code alone; they say so in their
+own text rather than being quietly dropped.
 
 Where a verification says a deliberate bug "turns it red", that is not a figure
 of speech: the bug was introduced, the test was watched to fail, and the bug was
@@ -446,15 +451,136 @@ whatever the UI turns out to be — then the interface on top.
 
 ---
 
+## Phase 11 — The server
+
+A central server that clients meet at. **It is a librarian and a referee, never
+a player**: it holds what people have made, checks what they claim, and puts
+them in touch with each other — and it does not simulate a race, because a race
+simulated on a server means every steering input waits a round trip. See the
+platform section of `FEATURES.md` for why that line is drawn where it is.
+
+- [ ] **A server that runs and shows who is there.** A `gearstick_server` that
+      listens, takes up to four clients, and displays them live with the stats
+      that say whether it is healthy. *Verification: four clients connect and
+      appear by name; one leaves and disappears within a second.*
+- [ ] **The lobby — the server hands out the slots.** Who is player one is the
+      server's decision rather than whoever happened to host. *Verification:
+      four clients get four different slots, and a fifth is turned away with a
+      reason it can show its user.*
+- [ ] **The track travels with the race.** The server sends the track for the
+      race it is starting, and every client checks it against the hash it was
+      told to expect. *Verification: a client holding a completely different
+      track receives the right one and agrees about its hash before the race
+      starts.*
+- [ ] **The relay, for players whose routers will not cooperate.** Peers that
+      can reach each other still race directly; the rest are forwarded by the
+      server. *Verification: a race between two clients that cannot see each
+      other at all ends in the same state on both.*
+- [ ] **Profiles and records live on the server too.** A driver is the same
+      driver on another machine, and a record set on one is visible from the
+      other. *Verification: a record set on one client is shown by a second
+      client that has never seen that race.*
+- [ ] **Times verified by re-racing them.** A submitted time arrives with the
+      inputs that produced it and the server re-simulates them. *Verification: a
+      time whose replay does not produce it is rejected, and an honest one from
+      the same client is accepted.*
+
+## Phase 12 — The library
+
+The track stops being a save slot and becomes a collection. This is the half of
+`FEATURES.md` that the front end has been waiting for, and it closes the
+hard-coded demo track that has been sitting in the frontend since Phase 3.
+
+- [ ] **Tracks live in a library rather than a save slot.** Many tracks, kept by
+      content hash, with names and authors beside them. *Verification: three
+      tracks are saved, all three are still there after a restart, and editing
+      one leaves the other two alone.*
+- [ ] **Choose a track in the front end.** Browse what you have, pick one, race
+      it. *Verification: a full session picks a track that is not the first one
+      and races it, without a command line.*
+- [ ] **The hard-coded demo track goes.** The frontend stops carrying a track in
+      C and ships one built in the editor instead. *Verification: no track
+      geometry remains in `src/frontend/`, and a fresh install still has
+      something to race on.*
+- [ ] **Publish a track to a server, and take one down again.** *Verification: a
+      track published from one client is browsable and playable from another,
+      and disappears from it when withdrawn.*
+
+## Phase 13 — The rest of the feature list, and the tails
+
+Everything left on `FEATURES.md`, and every tail found along the way.
+
+- [ ] **A HUD.** Lap, position, times and damage while you are driving, rather
+      than on the results screen afterwards. *Verification: a two-lap race is
+      readable from the frame alone — position and lap change on screen when
+      they change in the simulation.*
+- [ ] **Wreckage that stays.** A destroyed car leaves debris that is real track
+      geometry for the rest of the race. *Verification: a car driving the same
+      line at the same speed is deflected by the wreck of an earlier one, and is
+      not deflected when the wreck is removed.*
+- [ ] **A landing-prediction arc, off by default.** A dotted trajectory to the
+      predicted touchdown while airborne. *Verification: the car lands where the
+      arc said it would, at three gravities.*
+- [ ] **Decide what surrounds a track.** Leaving the track currently costs
+      nothing at all — the ground continues forever at the edge tile's height.
+      *Verification: whatever is decided, driving off the edge has a consequence
+      a player can see coming.*
+- [ ] **Placing a gate goes into the undo history.** Undo covers terrain,
+      surface and gravity but not the route, which is a promise with a footnote.
+      *Verification: place a gate, undo, and the track hash is what it was
+      before.*
+- [ ] **The store survives a format change.** Profiles and records refuse to
+      load anything they do not recognise, which is correct and means somebody's
+      history vanishes the first time the format moves. *Verification: a store
+      written by the previous version loads, with its records intact.*
+- [ ] **A corpus of real tracks to test the analyser against.** Our own tracks
+      were all built by whoever wrote the editor, which is the worst possible
+      sample. The *Stunts* corpus is the target and **its licence has to be
+      checked before anything is imported**; reference only, nothing ships.
+      *Verification: the analyser runs over a corpus nobody here authored and
+      its verdicts are spot-checked by driving them.*
+- [ ] **Read the original's designer notes and build stock tracks.** The 1985
+      manual says what each of its fifty tracks was *for*. That is design
+      rationale from the authors, it needs no reverse engineering, and it should
+      inform our own stock tracks before they are built. **Needs the manual**,
+      which nobody here has yet. *Verification: at least six stock tracks ship,
+      each with a stated purpose, and each one completable — checked by the
+      analyser.*
+- [ ] **Sound listened to on Windows and macOS.** The synthesiser is
+      platform-independent and the device path is not. **This one cannot be
+      finished by whoever writes the code** — it needs a person with speakers on
+      each platform. *Verification: a human says it sounds right on all three.*
+
+## Phase 14 — Installers
+
+The releases are archives you unpack. On Linux that is normal and on macOS the
+disk image is the convention, but on Windows an application people actually
+install is an installer.
+
+- [ ] **An MSI for Windows, built by CI.** Installs the game, the headless
+      driver and the assets, puts it in the Start Menu, and uninstalls cleanly.
+      *Verification: the MSI installs on a machine that has never had a
+      toolchain on it, the game runs from the Start Menu, and uninstalling
+      leaves nothing behind.*
+- [ ] **The installer is in the release beside the archive.** Somebody who wants
+      a zip still gets a zip. *Verification: a tagged release carries both, and
+      both carry a provenance attestation.*
+
 ## Tails
 
 Found while implementing something else. Added when found, not when remembered.
 
-- [ ] **What surrounds a track is undecided.** There is no wall at the edge — a
+**Every open tail has now been promoted to a phase item**, which is where the
+work will actually happen — a tail is a note that something is wrong, and a
+plan item is a commitment to fix it with a verification attached. They are left
+here with a pointer rather than deleted, because where a problem was found is
+worth as much as what was decided about it.
+
+- [ ] **What surrounds a track is undecided.** *(Now Phase 13.)* There is no wall at the edge — a
       car that drives off continues onto a plain that carries on at the height
       and surface of the nearest edge tile, so leaving the track currently costs
       nothing at all. It should probably cost something.
-- [ ] **A hard-coded demo track is in the game frontend.** It is a prototype and
+- [ ] **A hard-coded demo track is in the game frontend.** *(Now Phase 12.)* It is a prototype and
       it goes the moment the editor can write a real one.
 - [x] **Nothing in the game frontend is a race.** ~~No start, no laps, no
       checkpoints, no finish, no HUD — two cars drive around on a demo track.~~
@@ -470,12 +596,12 @@ Found while implementing something else. Added when found, not when remembered.
       `ATTRIBUTION.md`, written by the same script that generates the art. The
       smell was real and the answer turned out to be that the directory has
       almost nothing to do.*
-- [ ] **Placing a gate is not in the undo history.** The undo model records a
+- [ ] **Placing a gate is not in the undo history.** *(Now Phase 13.)* The undo model records a
       cell changing from one value to another, and a gate is a list entry rather
       than a cell. Removing a misplaced gate is easy, so this is an
       inconsistency rather than a hole — but it is one, and undo that covers
       most of what you did is a promise with a footnote.
-- [ ] **Import a corpus of real tracks to test against.** Our own tracks will
+- [ ] **Import a corpus of real tracks to test against.** *(Now Phase 13.)* Our own tracks will
       all have been built by whoever wrote the editor, which is the worst
       possible sample. The *Stunts* corpus is the target — documented format,
       grid-based with elevation and three surfaces, hundreds of community
@@ -483,25 +609,25 @@ Found while implementing something else. Added when found, not when remembered.
       completable" is the question being asked. Its repository's licence is
       unclear and must be checked first. Reference only; nothing imported ships.
 - [ ] **Read the original's manual for its designers' notes on the 50 stock
-      tracks.** They say what each track was *for* — one built to aim both
+      tracks.** *(Now Phase 13.)* They say what each track was *for* — one built to aim both
       drivers at each other on pavement, another the shortest buildable track so
       you do not have to go far to find someone to hit. That is design rationale
       from the authors, it needs no reverse engineering, and it should inform
       our own stock tracks before they are built.
 
-- [ ] **There is no HUD.** A race now has laps, positions and a finish, and none
+- [ ] **There is no HUD.** *(Now Phase 13.)* A race now has laps, positions and a finish, and none
       of it is on screen while you are driving — you find out what happened on
       the results table afterwards. Everything needed is in the simulation
       already; this is a rendering job.
-- [ ] **Online races assume everybody already has the same track.** The
+- [ ] **Online races assume everybody already has the same track.** *(Now Phase 11.)* The
       handshake exchanges player slots and addresses but not the track itself,
       so two people racing must be on the same build. A track is a few hundred
       compressed bytes and the hash is already checked everywhere else — it
       belongs in the handshake.
-- [ ] **Sound has only been listened to on Linux.** The synthesiser is
+- [ ] **Sound has only been listened to on Linux.** *(Now Phase 13.)* The synthesiser is
       platform-independent and the device path is not. Windows and macOS need a
       human with speakers.
-- [ ] **The store is one file with no migration path.** Profiles and records are
+- [ ] **The store is one file with no migration path.** *(Now Phase 13.)* Profiles and records are
       versioned and refuse to load anything they do not recognise, which is
       right, but "refuses to load" means somebody's history is quietly gone the
       first time the format changes. It needs an upgrade path before there is a
