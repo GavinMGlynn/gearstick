@@ -19,20 +19,27 @@
 #define GS_ISO_TILE_H 32.0f
 #define GS_ISO_TILE_Z 32.0f
 
-// How far back the camera sits by default. One tile to 64 pixels at 1.0, so a
-// split-screen pane shows ten tiles - forty metres - of track.
+// How far back the camera sits by default.
 //
 // Arrived at from the other end than expected. The cars first read as specks,
-// and the reflex was to move the camera in; that was wrong, because zoom scales
-// the car and the ground together and leaves the car exactly as many tiles long
-// as it was. What was wrong was the *ratio*: an honest 2.7 m car is two thirds
-// of a tile, and the original's were never honest - they were chunky relative
-// to the view, because a two-car collision has to be legible at a glance.
+// and the reflex was to move the camera in; that was wrong on its own, because
+// zoom scales the car and the ground together and leaves the car exactly as many
+// tiles long as it was. What was wrong was the *ratio*: an honest 2.7 m car is
+// two thirds of a tile, and the original's were never honest - they were chunky
+// relative to the view, because a two-car collision has to be legible at a
+// glance. So the cars grew to about 1.3 tiles; see gs_render.c.
 //
-// So the cars grew to about 1.3 tiles (see gs_render.c) and the camera went
-// back out, which is more track in view *and* a car you can see. Moving the
-// camera alone would have bought the second at the cost of the first.
-#define GS_ISO_DEFAULT_ZOOM 1.0f
+// **The ratio was right and the distance was not.** Both halves matter, and for
+// a while only the first had been done: at 1.0 a full window showed nine hundred
+// tiles of ground and a car was three and a half percent of the screen's width,
+// against the seven and a half the original managed on a machine with a
+// fifteenth of the pixels. The comment here claimed a split pane showed ten
+// tiles while it actually showed twenty, which is the same mistake written down.
+//
+// So: **one tile edge is seventy-two pixels on screen, a car is ninety-four, and
+// a split-screen pane shows ten tiles of track** - forty metres, which is what
+// this was always meant to say.
+#define GS_ISO_DEFAULT_ZOOM 2.0f
 
 typedef struct gs_camera {
     float cx, cy, cz;   // the world point held at the centre of the viewport

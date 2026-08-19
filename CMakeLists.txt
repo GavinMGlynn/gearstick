@@ -245,6 +245,7 @@ set_target_properties(gearstick_ui PROPERTIES C_VISIBILITY_PRESET hidden)
 # ---------------------------------------------------------------------------
 add_library(gearstick_shell STATIC
     src/ui/gs_editor.c
+    src/ui/gs_hud.c
     src/ui/gs_menu.c
     src/ui/gs_style.c
     src/gfx/gs_iso.c

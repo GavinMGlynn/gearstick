@@ -541,10 +541,14 @@ hard-coded demo track that has been sitting in the frontend since Phase 3.
 
 Everything left on `FEATURES.md`, and every tail found along the way.
 
-- [ ] **A HUD.** Lap, position, times and damage while you are driving, rather
-      than on the results screen afterwards. *Verification: a two-lap race is
-      readable from the frame alone — position and lap change on screen when
-      they change in the simulation.*
+- [x] **A HUD.** Lap, position, times and damage while you are driving, rather
+      than on the results screen afterwards. *Verification: two frames of a race
+      captured with the ground and the cars in identical places — so the only
+      thing that can differ is the HUD — show a different lap after a lap is
+      driven, and a different position after the rival gains one. Also the
+      camera came in to twice the distance it was: a car was three and a half
+      percent of the screen's width against the original's seven and a half, and
+      the comment claiming a split pane showed ten tiles was describing twenty.*
 - [ ] **Wreckage that stays.** A destroyed car leaves debris that is real track
       geometry for the rest of the race. *Verification: a car driving the same
       line at the same speed is deflected by the wreck of an earlier one, and is

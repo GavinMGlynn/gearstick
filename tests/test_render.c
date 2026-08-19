@@ -23,11 +23,22 @@
 #include "ui/gs_editor.h"
 #include "platform/gs_paths.h"
 #include "ui/gs_menu.h"
+#include "ui/gs_hud.h"
+#include "ui/gs_style.h"
+#include "core/gs_ai.h"
+#include "dcimgui.h"
+#include "backends/dcimgui_impl_sdl3.h"
+#include "backends/dcimgui_impl_sdlrenderer3.h"
 
 #define GS_W 640
 #define GS_H 480
 
 static int gs_failures = 0;
+
+// The window, for the Dear ImGui backend, which wants one as well as a
+// renderer. The TEST macro passes only the renderer, because until the HUD
+// nothing here drew anything that needed to know about a window.
+static SDL_Window *gs_win = nullptr;
 static const char *gs_current = "";
 
 #define CHECK(cond)                                                            \
@@ -2380,6 +2391,198 @@ TEST(changed_controls_survive_being_written_and_read_back) {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The HUD
+// ---------------------------------------------------------------------------
+
+// Dear ImGui, started once for the tests that need it. The HUD is drawn through
+// it, so a test that measured the HUD without one would be measuring an empty
+// frame and passing.
+static bool gs_imgui_ready = false;
+
+static void gs_imgui_start(SDL_Window *win, SDL_Renderer *ren) {
+    if (gs_imgui_ready) return;
+    ImGui_CreateContext(nullptr);
+    gs_style_menu();
+    ImGui_GetIO()->IniFilename = nullptr;
+    gs_imgui_ready = cImGui_ImplSDL3_InitForSDLRenderer(win, ren) &&
+                     cImGui_ImplSDLRenderer3_Init(ren);
+}
+
+// One frame: the race, then the HUD over it, captured.
+static void gs_hud_frame(SDL_Renderer *ren, const gs_track *t, const gs_world *w,
+                         const gs_view *v, gs_frame *out) {
+    cImGui_ImplSDLRenderer3_NewFrame();
+    cImGui_ImplSDL3_NewFrame();
+    ImGui_NewFrame();
+
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    gs_render_view(ren, t, w, w, 1.0f, v);
+    gs_hud_draw(w, t, v, (uint32_t)w->tick);
+
+    ImGui_Render();
+    cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), ren);
+
+    SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
+    *out = (gs_frame){ 0 };
+    if (raw != nullptr) {
+        out->own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(raw);
+        if (out->own != nullptr) out->px = (uint8_t *)out->own->pixels;
+    }
+}
+
+// How many pixels differ inside the corner the HUD occupies. Only that corner,
+// because the cars move between the frames being compared and the whole-frame
+// difference would then be true whatever the HUD did.
+#define GS_HUD_BOX_W 170
+#define GS_HUD_BOX_H 340
+
+static int gs_hud_pixels_differing(const gs_frame *a, const gs_frame *b) {
+    if (a->px == nullptr || b->px == nullptr) return -1;
+    int n = 0;
+    for (int y = 0; y < GS_HUD_BOX_H && y < GS_H; y++) {
+        for (int x = 0; x < GS_HUD_BOX_W && x < GS_W; x++) {
+            size_t at = ((size_t)y * (size_t)GS_W + (size_t)x) * 4;
+            if (a->px[at] != b->px[at] || a->px[at + 1] != b->px[at + 1] ||
+                a->px[at + 2] != b->px[at + 2]) {
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
+TEST(the_hud_says_what_lap_it_is_and_changes_when_the_lap_does) {
+    // **The fact the HUD exists for.** A race whose state you can only learn
+    // afterwards is a scoreboard, not a race - so what the simulation knows has
+    // to be on the screen while it is still worth knowing.
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    static gs_track t;
+    gs_routed_pavement(&t);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_laps(&w, 3);
+
+    gs_fix sx, sy; gs_angle facing;
+    gs_track_grid(&t, 0, &sx, &sy, &facing);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
+
+    gs_view view = { 0 };
+    view.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    view.cam.vw = GS_W; view.cam.vh = GS_H;
+    view.cam.cx = gs_to_f(w.car[0].x); view.cam.cy = gs_to_f(w.car[0].y);
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+
+    // The HUD is *there*: the same frame without it differs in that corner.
+    gs_frame with = { 0 }, without = { 0 };
+    gs_hud_frame(ren, &t, &w, &view, &with);
+
+    cImGui_ImplSDLRenderer3_NewFrame();
+    cImGui_ImplSDL3_NewFrame();
+    ImGui_NewFrame();
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    gs_render_view(ren, &t, &w, &w, 1.0f, &view);
+    ImGui_Render();
+    cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), ren);
+    SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
+    if (raw != nullptr) {
+        without.own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(raw);
+        if (without.own != nullptr) without.px = (uint8_t *)without.own->pixels;
+    }
+
+    // Thousands, not "some": a panel with five numbers on it is a lot of pixels,
+    // and a handful would mean an artefact rather than a HUD.
+    CHECK(gs_hud_pixels_differing(&with, &without) > 2000);
+    gs_frame_free(&without);
+
+    // Drive until the lap counter really moves - the HUD has to be showing a
+    // lap the simulation counted, not a number a test wrote in.
+    uint16_t was = w.car[0].laps;
+    gs_car parked = w.car[0];
+    for (int i = 0; i < GS_TICK_HZ * 60 && w.car[0].laps == was; i++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &t, 0), 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].laps > was);
+
+    // **Put the car back where it was drawn before.** Otherwise the two frames
+    // differ because the car moved across the corner the HUD sits in, and the
+    // comparison passes whatever the HUD says - which is a test that does not
+    // test its rule. Everything the HUD reads is left alone.
+    gs_fix ax = w.car[0].x, ay = w.car[0].y, az = w.car[0].z;
+    gs_angle ah = w.car[0].heading;
+    w.car[0].x = parked.x; w.car[0].y = parked.y; w.car[0].z = parked.z;
+    w.car[0].heading = parked.heading;
+
+    gs_frame later = { 0 };
+    gs_hud_frame(ren, &t, &w, &view, &later);
+    w.car[0].x = ax; w.car[0].y = ay; w.car[0].z = az; w.car[0].heading = ah;
+
+    // The corner changed, and the only thing that could have changed it is the
+    // numbers on the HUD.
+    CHECK(gs_hud_pixels_differing(&with, &later) > 100);
+
+    gs_frame_free(&with);
+    gs_frame_free(&later);
+}
+
+TEST(the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed) {
+    gs_imgui_start(gs_win, ren);
+    if (!gs_imgui_ready) return;
+
+    static gs_track t;
+    gs_routed_pavement(&t);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_laps(&w, 3);
+
+    gs_fix sx, sy; gs_angle facing;
+    gs_track_grid(&t, 0, &sx, &sy, &facing);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
+
+    // **The rival is parked off the far end of the track**, thirty tiles away
+    // and well outside the view. What moves it up and down the order is its lap
+    // count, which is not drawn anywhere - so the only thing that can differ
+    // between the two frames below is the position on the HUD.
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_DUNE_BUGGY,
+                     GS_INT(t.w - 3), GS_INT(2), facing);
+
+    gs_view view = { 0 };
+    view.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    view.cam.vw = GS_W; view.cam.vh = GS_H;
+    view.cam.cx = gs_to_f(w.car[0].x); view.cam.cy = gs_to_f(w.car[0].y);
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+
+    // Built rather than raced into position: a test that waited for an overtake
+    // would be a test that sometimes checked nothing.
+    CHECK(gs_world_place(&w, &t, 0) == 1);
+
+    gs_frame leading = { 0 };
+    gs_hud_frame(ren, &t, &w, &view, &leading);
+
+    // A lap up on everybody puts the rival in front, wherever it is standing.
+    w.car[1].laps = 1;
+    CHECK(gs_world_place(&w, &t, 0) == 2);
+    CHECK(gs_world_place(&w, &t, 1) == 1);
+
+    gs_frame passed = { 0 };
+    gs_hud_frame(ren, &t, &w, &view, &passed);
+
+    CHECK(gs_hud_pixels_differing(&leading, &passed) > 50);
+
+    gs_frame_free(&leading);
+    gs_frame_free(&passed);
+}
+
 int main(void) {
     printf("gearstick renderer tests\n");
 
@@ -2400,6 +2603,8 @@ int main(void) {
         SDL_Quit();
         return 1;
     }
+
+    gs_win = win;
 
     run_a_car_behind_a_rise_is_hidden_by_it(ren);
     run_the_view_does_not_jump_as_a_car_crosses_a_tile_boundary(ren);
@@ -2442,6 +2647,8 @@ int main(void) {
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
+    run_the_hud_says_what_lap_it_is_and_changes_when_the_lap_does(ren);
+    run_the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
 
     SDL_DestroyRenderer(ren);

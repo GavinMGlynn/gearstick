@@ -657,6 +657,68 @@ static void gs_hash_i32(uint64_t *h, int32_t v) {
     gs_hash_u64(h, (uint64_t)(uint32_t)v);
 }
 
+// How far round the route a car has got, as one number that only ever grows:
+// laps, then gates within the lap, then the fraction of the way to the next one.
+//
+// The fraction is 1 minus (distance remaining / distance the leg started at),
+// clamped - so a car that has covered nine tenths of a leg is ahead of one that
+// has covered a tenth, whichever gate they are both aiming at.
+static int64_t gs_progress(const gs_world *w, const gs_track *t, uint8_t i) {
+    const gs_car *c = &w->car[i];
+    if (t->gate_count == 0) return 0;
+
+    int64_t whole = (int64_t)c->laps * t->gate_count + c->next_gate;
+
+    const gs_gate *to = &t->gate[c->next_gate % t->gate_count];
+    const gs_gate *from = &t->gate[(c->next_gate + t->gate_count - 1u) % t->gate_count];
+
+    gs_fix leg = gs_fix_len2(to->x - from->x, to->y - from->y);
+    gs_fix left = gs_fix_len2(to->x - c->x, to->y - c->y);
+
+    // A zero-length leg is two gates in the same place, which the validator
+    // refuses - but a track can be handed here without having been validated.
+    gs_fix part = 0;
+    if (leg > 0) {
+        part = GS_ONE - gs_fix_div(left, leg);
+        part = GS_CLAMP(part, 0, GS_ONE);
+    }
+
+    return whole * GS_ONE + part;
+}
+
+uint8_t gs_world_place(const gs_world *w, const gs_track *t, uint8_t car) {
+    if (car >= w->car_count || !w->car[car].active) return 0;
+
+    // A finished car keeps the place it finished in, whatever anybody still
+    // driving does afterwards: crossing the line is when a result stops moving.
+    uint32_t mine_finish = w->car[car].finish_tick;
+    int64_t mine = gs_progress(w, t, car);
+
+    uint8_t ahead = 0;
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        if (i == car || !w->car[i].active) continue;
+
+        uint32_t theirs_finish = w->car[i].finish_tick;
+        if (mine_finish != 0 || theirs_finish != 0) {
+            if (theirs_finish != 0 && mine_finish == 0) { ahead++; continue; }
+            if (theirs_finish != 0 && mine_finish != 0) {
+                // Both home: the earlier tick, and the lower index if a tie -
+                // so two cars finishing on the same tick still get two places.
+                if (theirs_finish < mine_finish ||
+                    (theirs_finish == mine_finish && i < car)) {
+                    ahead++;
+                }
+            }
+            continue;
+        }
+
+        int64_t theirs = gs_progress(w, t, i);
+        if (theirs > mine || (theirs == mine && i < car)) ahead++;
+    }
+
+    return (uint8_t)(ahead + 1);
+}
+
 uint64_t gs_world_hash(const gs_world *w) {
     uint64_t h = 0xcbf29ce484222325ULL;
 

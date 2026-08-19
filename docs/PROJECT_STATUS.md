@@ -1145,6 +1145,41 @@ leaving in the repository root turned out to be *committed*; they are gone and
 `.gitignore` now covers them, with an exception for the one database that really
 does ship.
 
+### The HUD, and a camera that was twice too far out
+
+Lap, position, the lap being driven, the best so far and what is left of the car
+— on screen while it is still worth knowing, rather than on the results table
+afterwards. `src/ui/gs_hud.c`, one panel per view, so split screen gets one per
+driver clipped to that driver's quarter of the window.
+
+Position is `gs_world_place` in the simulation rather than in the HUD that shows
+it, because it is a fact about the race and not about the drawing: laps first,
+then which gate you are heading for, then how far along that leg you are. The
+last part is what makes the number change when the racing changes rather than
+twice a lap when somebody crosses a line. A finished car keeps the place it
+finished in.
+
+The HUD is sized here rather than auto-fitted. An auto-resizing ImGui window is
+invisible for its first frame and a screenshot is one frame, so an auto-fitted
+HUD would be on screen for a player and absent from every capture — a bug
+nobody would notice and a verification that could not work. The same trap cost
+an afternoon on the editor's palette once already.
+
+**And the camera was twice as far out as its own comment claimed.** `gs_iso.h`
+said a split-screen pane showed ten tiles; it showed twenty. At the old default
+a full window held about nine hundred tiles of ground and a car was three and a
+half percent of the screen's width, against roughly seven and a half on a C64
+with a fifteenth of the pixels. The ratio argument in that comment was right and
+had been acted on — the meshes are 1.3 tiles — but the distance half never was.
+At 2.0 a tile edge is seventy-two pixels, a car is ninety-four, and a pane shows
+the ten tiles the comment always meant.
+
+Both HUD tests compare frames with the ground and the cars in *identical*
+positions, which took two attempts: the first version moved the car between
+captures, so the pixels in the HUD's corner differed whatever the HUD did, and
+pinning the position to a constant did not fail it. Perturbing all three of the
+numbers it draws now fails the test that names them.
+
 ---
 
 ## What does not exist

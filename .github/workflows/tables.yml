@@ -156,12 +156,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { submodules: recursive }
-      - name: Install ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      # gcc-14 for C23, as the main CI job does - the runner's default is 13.
+      - name: Install ninja and a compiler that speaks C23
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc-14 g++-14
 
+      # Neither tool needs a window, a sound device or a network, so the server
+      # and the game are not built: only the two things that write the content.
       - name: Configure and build the tools
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
           cmake --build build --target gearstick_make_tracks gearstick_make_store
 
       # The tracks are chosen by racing them, so this also re-runs the choosing.

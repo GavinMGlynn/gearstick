@@ -3940,6 +3940,111 @@ TEST(a_wrecked_car_stops_moving) {
 
 
 // ---------------------------------------------------------------------------
+// Where everybody is in the race
+// ---------------------------------------------------------------------------
+
+TEST(the_leader_is_whoever_is_furthest_round_the_route) {
+    static gs_track t;
+    gs_track_init(&t, 48, 16, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), 0, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(8), 0, GS_INT(5));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    for (int i = 0; i < 3; i++) {
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(6 + 2 * i), 0);
+    }
+
+    // All three on the first leg, spread along it. **Distance along the leg
+    // decides it**, which is what makes a position change when the racing does
+    // rather than twice a lap when somebody crosses a line.
+    for (int i = 0; i < 3; i++) w.car[i].next_gate = 1;
+    w.car[0].x = GS_INT(10);
+    w.car[1].x = GS_INT(30);
+    w.car[2].x = GS_INT(20);
+
+    CHECK(gs_world_place(&w, &t, 1) == 1);
+    CHECK(gs_world_place(&w, &t, 2) == 2);
+    CHECK(gs_world_place(&w, &t, 0) == 3);
+
+    // An overtake, and nothing else touched.
+    w.car[0].x = GS_INT(36);
+    CHECK(gs_world_place(&w, &t, 0) == 1);
+    CHECK(gs_world_place(&w, &t, 1) == 2);
+
+    // Round the far marker and heading back beats still crawling towards it,
+    // however close to it the other car is. On an out-and-back the far gate is
+    // where a lap is counted, so a car that has turned for home has one - which
+    // is why this sets both fields and not just the gate: the pair is the state
+    // the simulation produces, and testing one it never does proves nothing.
+    w.car[2].laps = 1;
+    w.car[2].next_gate = 0;
+    w.car[2].x = GS_INT(39);
+    CHECK(gs_world_place(&w, &t, 2) == 1);
+    CHECK(gs_world_place(&w, &t, 0) == 2);
+
+    // And a whole lap beats being most of the way round one.
+    w.car[1].laps = 1;
+    CHECK(gs_world_place(&w, &t, 1) == 1);
+    CHECK(gs_world_place(&w, &t, 2) == 2);
+}
+
+TEST(every_car_has_a_place_and_no_two_share_one) {
+    // Ties are the interesting case: three cars on the same spot still have a
+    // first, a second and a third, because "joint second" is not something a
+    // HUD can show and not something a race means.
+    static gs_track t;
+    gs_track_init(&t, 48, 16, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), 0, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(8), 0, GS_INT(5));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    for (int i = 0; i < 4; i++) {
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(8), 0);
+    }
+
+    bool seen[GS_MAX_CARS + 1] = { false };
+    for (uint8_t i = 0; i < 4; i++) {
+        uint8_t place = gs_world_place(&w, &t, i);
+        CHECK(place >= 1 && place <= 4);
+        CHECK(!seen[place]);
+        seen[place] = true;
+    }
+}
+
+TEST(a_car_that_has_finished_keeps_the_place_it_finished_in) {
+    // Crossing the line is when a result stops moving. Without this, a winner
+    // who parks is overtaken on the HUD by somebody still on their last lap,
+    // which is not what happened.
+    static gs_track t;
+    gs_track_init(&t, 48, 16, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(4), GS_INT(8), 0, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(8), 0, GS_INT(5));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(8), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
+
+    // One home, one still going and about to be further round than the winner
+    // ever was.
+    w.car[0].finish_tick = 1000;
+    w.car[0].laps = 2;
+    w.car[1].laps = 9;
+    w.car[1].next_gate = 1;
+    w.car[1].x = GS_INT(39);
+
+    CHECK(gs_world_place(&w, &t, 0) == 1);
+    CHECK(gs_world_place(&w, &t, 1) == 2);
+
+    // And two finishers are ordered by the clock, not by where they parked.
+    w.car[1].finish_tick = 900;
+    CHECK(gs_world_place(&w, &t, 1) == 1);
+    CHECK(gs_world_place(&w, &t, 0) == 2);
+}
+
+// ---------------------------------------------------------------------------
 // The track generator
 // ---------------------------------------------------------------------------
 
@@ -4198,6 +4303,9 @@ int main(void) {
     run_a_replay_re_races_to_the_same_world_it_recorded();
     run_a_replay_survives_the_round_trip_through_its_wire_format();
     run_a_wrecked_car_stops_moving();
+    run_the_leader_is_whoever_is_furthest_round_the_route();
+    run_every_car_has_a_place_and_no_two_share_one();
+    run_a_car_that_has_finished_keeps_the_place_it_finished_in();
     run_a_seed_always_generates_the_same_track();
     run_a_seed_always_generates_the_same_name();
     run_every_generated_track_has_terrain_on_it();

@@ -182,6 +182,21 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in);
 // exchanges to prove two machines still agree.
 uint64_t gs_world_hash(const gs_world *w);
 
+// **Where a car is in the race, right now.** 1 is leading; every active car has
+// a place and no two share one.
+//
+// Ordered by how far round the route somebody is: laps first, then which gate
+// they are heading for, then how close they are to reaching it. That last part
+// is what makes the number change when the racing changes rather than only when
+// somebody crosses a line - a position that updates twice a lap is a position
+// nobody believes.
+//
+// In the simulation rather than in the HUD that shows it, because it is a fact
+// about the race and not about the drawing: a results screen, a rear-view
+// mirror and an AI deciding whether to defend all need the same answer, and
+// three of them working it out separately is three chances to disagree.
+uint8_t gs_world_place(const gs_world *w, const gs_track *t, uint8_t car);
+
 // How big a car is when it hits something. A circle rather than the drawn box:
 // two rectangles need a separating-axis test and a contact point, and all of
 // that buys is corners catching corners - which is a source of surprise rather

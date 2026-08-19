@@ -24,6 +24,7 @@
 #include "platform/gs_wire.h"
 #include "core/gs_net.h"
 #include "ui/gs_editor.h"
+#include "ui/gs_hud.h"
 #include "ui/gs_menu.h"
 #include "ui/gs_style.h"
 #include "core/gs_ai.h"
@@ -1163,6 +1164,15 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             for (uint8_t i = 0; i < views; i++) {
                 gs_render_ghost_lerp(a->ren, &a->t, gp, gn, alpha, &a->view[i]);
             }
+        }
+    }
+
+    // The HUD, one per view, over the race and under nothing. Only while a race
+    // is what is on the screen: the editor has its own panels and the front end
+    // is not a race, and a lap counter over a title screen is furniture.
+    if (!a->editor.active && a->menu.screen == GS_SCREEN_RACE) {
+        for (uint8_t i = 0; i < views; i++) {
+            gs_hud_draw(&a->world, &a->t, &a->view[i], (uint32_t)a->world.tick);
         }
     }
 
