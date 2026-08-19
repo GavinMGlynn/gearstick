@@ -195,6 +195,23 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     ImGui_SameLine();
     ImGui_Text("%u back, %u forward", undo, redo);
 
+    ImGui_SeparatorText("Route");
+    // Continuously, rather than on demand. A check you have to ask for is a
+    // check you ask for once the track is finished, which is the worst moment
+    // to find out the start line hangs off the edge.
+    gs_track_issue issue = gs_track_validate(t);
+    if (issue.problem == GS_TRACK_OK) {
+        ImGui_Text("%u gates: %s", t->gate_count, gs_track_problem_text(issue.problem));
+    } else if (issue.other >= 0) {
+        ImGui_Text("PROBLEM: %s (gates %d and %d)",
+                   gs_track_problem_text(issue.problem), issue.gate, issue.other);
+    } else if (issue.gate >= 0) {
+        ImGui_Text("PROBLEM: %s (gate %d)",
+                   gs_track_problem_text(issue.problem), issue.gate);
+    } else {
+        ImGui_Text("PROBLEM: %s", gs_track_problem_text(issue.problem));
+    }
+
     ImGui_SeparatorText("Track");
     ImGui_Text("%u x %u tiles, %zu bytes", t->w, t->h, gs_track_size(t));
     // Identity by content: this number *is* the track, which is what lets two

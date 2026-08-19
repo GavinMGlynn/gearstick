@@ -345,3 +345,67 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
     t->gate_count = gates;
     return true;
 }
+
+// --- validation -----------------------------------------------------------
+
+const char *gs_track_problem_text(gs_track_problem p) {
+    switch (p) {
+    case GS_TRACK_OK:               return "the route is sound";
+    case GS_TRACK_NO_START:         return "the track has no start line";
+    case GS_TRACK_TOO_FEW_GATES:    return "a route needs a second gate to go to";
+    case GS_TRACK_GATE_OFF_TRACK:   return "a gate hangs off the edge of the track";
+    case GS_TRACK_GATE_TOO_NARROW:  return "a gate is too narrow to drive through";
+    case GS_TRACK_GATES_COINCIDE:   return "two gates are in the same place";
+    }
+    return "something is wrong with the route";
+}
+
+// Half a tile. Narrower than this and the car - which is two thirds of a tile
+// long - cannot be aimed at it, so it is a mistake rather than a challenge.
+#define GS_GATE_MIN_WIDTH (GS_ONE / 4)
+
+// Gates closer together than this are treated as the same place: the order
+// between them is then ambiguous, and an ambiguous order is a route that means
+// different things to the game and to the person who built it.
+#define GS_GATE_MIN_APART GS_ONE
+
+gs_track_issue gs_track_validate(const gs_track *t) {
+    gs_track_issue ok = { GS_TRACK_OK, -1, -1 };
+
+    if (t->gate_count == 0) return (gs_track_issue){ GS_TRACK_NO_START, -1, -1 };
+    if (t->gate_count < 2) return (gs_track_issue){ GS_TRACK_TOO_FEW_GATES, -1, -1 };
+
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        const gs_gate *g = &t->gate[i];
+
+        if (g->half_width < GS_GATE_MIN_WIDTH) {
+            return (gs_track_issue){ GS_TRACK_GATE_TOO_NARROW, (int)i, -1 };
+        }
+
+        // Both ends of the gate, not just its centre. A gate whose far end is
+        // off the world is one a car can drive round, which is worse than one
+        // that is obviously wrong.
+        gs_fix fx = gs_cos(g->heading);
+        gs_fix fy = gs_sin(g->heading);
+        gs_fix ax = g->x + gs_fix_mul(fy, g->half_width);
+        gs_fix ay = g->y - gs_fix_mul(fx, g->half_width);
+        gs_fix bx = g->x - gs_fix_mul(fy, g->half_width);
+        gs_fix by = g->y + gs_fix_mul(fx, g->half_width);
+
+        if (!gs_track_contains(t, g->x, g->y) ||
+            !gs_track_contains(t, ax, ay) ||
+            !gs_track_contains(t, bx, by)) {
+            return (gs_track_issue){ GS_TRACK_GATE_OFF_TRACK, (int)i, -1 };
+        }
+
+        for (uint8_t j = (uint8_t)(i + 1); j < t->gate_count; j++) {
+            gs_fix dx = t->gate[j].x - g->x;
+            gs_fix dy = t->gate[j].y - g->y;
+            if (gs_fix_len2(dx, dy) < GS_GATE_MIN_APART) {
+                return (gs_track_issue){ GS_TRACK_GATES_COINCIDE, (int)i, (int)j };
+            }
+        }
+    }
+
+    return ok;
+}

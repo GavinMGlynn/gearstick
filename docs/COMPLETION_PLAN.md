@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 31 of 61 items, every
+**Phases 0 to 3 are complete, and Phase 4 has started — 32 of 61 items, every
 one of them with its verification actually run.** Phase 4 is the editor and is
 about half the remaining work.
 
@@ -202,9 +202,14 @@ whatever the UI turns out to be — then the interface on top.
       order also beats inferred order on the one axis this game cares about
       most: a player can predict it.
 
-- [ ] **Track validation** — is there a start, are the gates in a closed order,
-      is every one of them reachable ground. *Verification: a deliberately
-      broken track is refused with a message naming the problem.*
+- [x] **Track validation** — is there a start, are the gates in a closed order,
+      is every one of them reachable ground. *Verification: `gearstick_cli
+      validate` builds a sound route and each way of breaking one, and exits
+      non-zero if a sound route is refused or a broken one accepted. Five
+      problems, each named and each pointing at the gate at fault: no start
+      line, a start with nowhere to go, a gate hanging off the edge, a gate too
+      narrow to drive through, and two gates in one place. The editor shows the
+      same verdict continuously rather than on demand.*
 
       *Completability — "can a car actually get round it" — is not here. It
       needs something that drives, so it belongs with the analyser in Phase 9,

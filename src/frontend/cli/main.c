@@ -212,6 +212,66 @@ static int cmd_track(const char *path) {
     return 0;
 }
 
+// Show that a sound route passes and that each way of breaking one is refused
+// by name. Exits non-zero if a sound route is refused or a broken one accepted,
+// so this is a check rather than a demonstration.
+static int cmd_validate(void) {
+    static gs_track t;
+    int failures = 0;
+
+    struct {
+        const char *what;
+        gs_track_problem want;
+    } cases[] = {
+        { "a sound route",             GS_TRACK_OK },
+        { "no gates at all",           GS_TRACK_NO_START },
+        { "a start and nowhere to go", GS_TRACK_TOO_FEW_GATES },
+        { "a gate off the edge",       GS_TRACK_GATE_OFF_TRACK },
+        { "a gate too narrow",         GS_TRACK_GATE_TOO_NARROW },
+        { "two gates in one place",    GS_TRACK_GATES_COINCIDE },
+    };
+
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        gs_track_init(&t, 32, 24, GS_SURF_PAVEMENT);
+
+        if (cases[i].want != GS_TRACK_NO_START) {
+            gs_track_add_gate(&t, GS_INT(6), GS_INT(12), 0, GS_INT(4));
+        }
+        if (cases[i].want != GS_TRACK_NO_START &&
+            cases[i].want != GS_TRACK_TOO_FEW_GATES) {
+            gs_track_add_gate(&t, GS_INT(16), GS_INT(12), 0, GS_INT(4));
+            gs_track_add_gate(&t, GS_INT(26), GS_INT(12), 0, GS_INT(4));
+        }
+
+        switch (cases[i].want) {
+        case GS_TRACK_GATE_OFF_TRACK:  t.gate[1].y = GS_INT(2); break;
+        case GS_TRACK_GATE_TOO_NARROW: t.gate[2].half_width = GS_ONE / 16; break;
+        case GS_TRACK_GATES_COINCIDE:  t.gate[2].x = t.gate[0].x;
+                                       t.gate[2].y = t.gate[0].y; break;
+        default: break;
+        }
+
+        gs_track_issue got = gs_track_validate(&t);
+        bool ok = got.problem == cases[i].want;
+        if (!ok) failures++;
+
+        printf("%-26s %-8s %s", cases[i].what, ok ? "ok" : "WRONG",
+               gs_track_problem_text(got.problem));
+        if (got.gate >= 0) printf(" (gate %d", got.gate);
+        if (got.other >= 0) printf(" and %d", got.other);
+        if (got.gate >= 0) printf(")");
+        printf("\n");
+    }
+
+    if (failures != 0) {
+        printf("\n%d case%s did not behave as stated\n", failures,
+               failures == 1 ? "" : "s");
+        return 1;
+    }
+    printf("\nOK     every broken route is refused, and named\n");
+    return 0;
+}
+
 static int cmd_vehicles(void) {
     printf("%-13s %7s %7s %6s %6s %8s %6s\n",
            "vehicle", "power", "brake", "top", "grip", "steer", "tough");
@@ -244,6 +304,7 @@ static int usage(void) {
            "  selftest [--verify]  race the fixed scenario and print its state "
            "hash\n"
            "  track FILE           write a track, read it back, check it survived\n"
+           "  validate             show what the route checker accepts and refuses\n"
            "  vehicles             the roster and its numbers\n"
            "  gravity              the presets\n\n"
            "This program links the simulation and nothing else - no SDL, no "
@@ -260,6 +321,7 @@ int main(int argc, char **argv) {
         return cmd_selftest(verify);
     }
     if (strcmp(argv[1], "track") == 0 && argc > 2) return cmd_track(argv[2]);
+    if (strcmp(argv[1], "validate") == 0) return cmd_validate();
     if (strcmp(argv[1], "vehicles") == 0) return cmd_vehicles();
     if (strcmp(argv[1], "gravity") == 0) return cmd_gravity();
 

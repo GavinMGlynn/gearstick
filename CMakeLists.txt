@@ -247,6 +247,10 @@ if(GEARSTICK_TESTS)
              COMMAND gearstick_cli track round_trip.gstrack)
     set_tests_properties(gearstick_track_file PROPERTIES TIMEOUT 60)
 
+    # Every way a route can be broken is refused, and named.
+    add_test(NAME gearstick_validate COMMAND gearstick_cli validate)
+    set_tests_properties(gearstick_validate PROPERTIES TIMEOUT 60)
+
     # The golden replay: an input log in, a state hash out. This is the test
     # that fails when a "harmless" change to the physics quietly rewrites every
     # ghost time and every shared replay in existence.

@@ -536,6 +536,89 @@ TEST(removing_a_gate_closes_the_gap_and_leaves_the_order_alone) {
     CHECK(t.gate_count == GS_TRACK_MAX_GATES);
 }
 
+// A route that has nothing wrong with it, to break in specific ways.
+static void gs_sound_route(gs_track *t) {
+    gs_track_init(t, 32, 24, GS_SURF_PAVEMENT);
+    gs_track_add_gate(t, GS_INT(6), GS_INT(12), 0, GS_INT(4));
+    gs_track_add_gate(t, GS_INT(16), GS_INT(12), 0, GS_INT(4));
+    gs_track_add_gate(t, GS_INT(26), GS_INT(12), 0, GS_INT(4));
+}
+
+TEST(a_sound_route_is_accepted_and_a_broken_one_names_its_problem) {
+    static gs_track t;
+    gs_sound_route(&t);
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+    // Nothing at all. This is the state every new track starts in, so the
+    // message has to be the one that tells a beginner what to do first.
+    gs_track_init(&t, 32, 24, GS_SURF_PAVEMENT);
+    gs_track_issue none = gs_track_validate(&t);
+    CHECK(none.problem == GS_TRACK_NO_START);
+    CHECK(none.gate == -1);
+
+    // A start line and nowhere to go.
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(12), 0, GS_INT(4));
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_TOO_FEW_GATES);
+
+    // Every problem says something, and says something different.
+    CHECK(gs_track_problem_text(GS_TRACK_NO_START)[0] != '\0');
+    CHECK(gs_track_problem_text(GS_TRACK_OK) !=
+          gs_track_problem_text(GS_TRACK_NO_START));
+}
+
+TEST(a_gate_hanging_off_the_track_is_refused_and_says_which_one) {
+    static gs_track t;
+    gs_sound_route(&t);
+
+    // The centre is comfortably on the track; one end of the span is not.
+    // Checked because a gate a car can drive round the end of is worse than one
+    // that is obviously wrong - it looks fine and quietly does nothing.
+    t.gate[1].y = GS_INT(2);
+    t.gate[1].half_width = GS_INT(4);
+
+    gs_track_issue bad = gs_track_validate(&t);
+    CHECK(bad.problem == GS_TRACK_GATE_OFF_TRACK);
+    CHECK(bad.gate == 1);
+
+    // And the centre being off is caught too.
+    gs_sound_route(&t);
+    t.gate[2].x = GS_INT(40);
+    bad = gs_track_validate(&t);
+    CHECK(bad.problem == GS_TRACK_GATE_OFF_TRACK);
+    CHECK(bad.gate == 2);
+}
+
+TEST(a_gate_nothing_can_fit_through_is_refused) {
+    static gs_track t;
+    gs_sound_route(&t);
+
+    t.gate[2].half_width = GS_ONE / 16;   // a slot, not a gate
+    gs_track_issue bad = gs_track_validate(&t);
+    CHECK(bad.problem == GS_TRACK_GATE_TOO_NARROW);
+    CHECK(bad.gate == 2);
+}
+
+TEST(two_gates_in_the_same_place_are_refused_as_an_ambiguous_order) {
+    static gs_track t;
+    gs_sound_route(&t);
+
+    // The route would then mean one thing to the game and another to whoever
+    // built it, which is worse than it plainly not working.
+    t.gate[2].x = t.gate[0].x;
+    t.gate[2].y = t.gate[0].y;
+
+    gs_track_issue bad = gs_track_validate(&t);
+    CHECK(bad.problem == GS_TRACK_GATES_COINCIDE);
+    CHECK(bad.gate == 0);
+    CHECK(bad.other == 2);
+
+    // Gates that are merely close are fine - a chicane is allowed to be tight.
+    gs_sound_route(&t);
+    t.gate[1].x = t.gate[0].x + GS_INT(2);
+    t.gate[1].y = t.gate[0].y;
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+}
+
 // ---------------------------------------------------------------------------
 // Driving
 // ---------------------------------------------------------------------------
@@ -1085,6 +1168,10 @@ int main(void) {
     run_a_full_log_refuses_the_edit_rather_than_applying_it();
     run_the_far_corners_of_a_track_can_be_edited();
     run_a_car_driving_through_a_gate_is_seen_to_cross_it();
+    run_a_sound_route_is_accepted_and_a_broken_one_names_its_problem();
+    run_a_gate_hanging_off_the_track_is_refused_and_says_which_one();
+    run_a_gate_nothing_can_fit_through_is_refused();
+    run_two_gates_in_the_same_place_are_refused_as_an_ambiguous_order();
     run_a_route_is_part_of_the_track_and_survives_being_saved();
     run_removing_a_gate_closes_the_gap_and_leaves_the_order_alone();
     run_a_car_accelerates_under_throttle_and_stops_under_the_brake();

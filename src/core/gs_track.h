@@ -133,6 +133,35 @@ bool gs_track_remove_gate(gs_track *t, uint8_t index);
 // makes a gate a gate rather than an infinite tripwire across the world.
 bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny);
 
+// --- validation -----------------------------------------------------------
+//
+// What can be checked about a route without driving it. **Completability is
+// not here**: "can a car actually get round this" needs something that drives,
+// so it belongs with the analyser, and calling it validation would be claiming
+// a check nothing performs.
+//
+// The problem is returned rather than a message, so `src/core/` needs no string
+// formatting and whoever displays it decides how. `gs_track_problem_text` gives
+// the plain English for callers that just want to say it.
+
+typedef enum gs_track_problem {
+    GS_TRACK_OK = 0,
+    GS_TRACK_NO_START,        // no gates at all: nowhere to start, nothing to finish
+    GS_TRACK_TOO_FEW_GATES,   // one gate is a line, not a route
+    GS_TRACK_GATE_OFF_TRACK,  // a gate, or an end of one, hangs off the world
+    GS_TRACK_GATE_TOO_NARROW, // a gate nothing can fit through
+    GS_TRACK_GATES_COINCIDE   // two gates in the same place: the order is ambiguous
+} gs_track_problem;
+
+typedef struct gs_track_issue {
+    gs_track_problem problem;
+    int gate;    // which gate is at fault, or -1 when it is the route as a whole
+    int other;   // the second gate, for problems about a pair; otherwise -1
+} gs_track_issue;
+
+gs_track_issue gs_track_validate(const gs_track *t);
+const char *gs_track_problem_text(gs_track_problem p);
+
 // A track's identity is its content. Two players who built the same track
 // independently have the same track, without a server deciding so, and a
 // one-tile edit cleanly produces a different one - which is what lets ghosts
