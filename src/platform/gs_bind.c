@@ -151,7 +151,12 @@ bool gs_bind_deserialize(gs_bindings *b, const uint8_t *buf, size_t len) {
 
     // Checked before anything is written, so a refused file leaves the player
     // with the controls they had rather than with half of somebody else's.
-    gs_bindings loaded;
+    //
+    // Zeroed rather than left to the loops below, which do fill every field:
+    // MSVC cannot see that they do and refuses to build it, and a struct that
+    // gains a field later would silently start carrying stack rubbish into a
+    // player's controls. Both reasons point the same way.
+    gs_bindings loaded = { 0 };
     for (uint8_t pl = 0; pl < GS_MAX_CARS; pl++) {
         for (int a = 0; a < GS_ACT_COUNT; a++) {
             loaded.key[pl][a] = (SDL_Scancode)gs_get_u32(p);
