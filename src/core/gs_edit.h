@@ -1,0 +1,78 @@
+// gs_edit.h - editing a track, and being able to take it back.
+//
+// **Undo is not a feature of the editor's interface; it is a property of the
+// track.** So it lives here, beside the track, in the layer that links nothing
+// — which means the same undo model serves a mouse, a pad, a script, and the
+// analyser trying edits to see what they do.
+//
+// The log stores what changed rather than what the track looked like. A track
+// is 22 KB and a corner move is six bytes, so "unlimited undo" is a matter of
+// how many edits fit in a buffer the caller sized, not of how much memory a
+// history of snapshots would need.
+//
+// Edits group into transactions, because a brush stroke is one thing a person
+// did even though it touched forty tiles, and undoing it a tile at a time would
+// be useless.
+#ifndef GS_EDIT_H
+#define GS_EDIT_H
+
+#include "core/gs_track.h"
+
+typedef enum gs_edit_kind {
+    GS_EDIT_CORNER = 0,
+    GS_EDIT_SURFACE,
+    GS_EDIT_GRAVITY
+} gs_edit_kind;
+
+typedef struct gs_edit {
+    uint32_t group;          // which transaction this belongs to
+    uint8_t  kind;           // gs_edit_kind
+    uint8_t  x, y;
+    uint8_t  pad;
+    int16_t  before, after;  // the stored representation, not the Q16.16 one
+} gs_edit;
+
+// A flexible array member, so the caller decides how deep the history goes and
+// `src/core/` still owns no allocator. `gs_edit_log_bytes` says how much to
+// provide.
+typedef struct gs_edit_log {
+    uint32_t cap;       // how many edits fit
+    uint32_t count;     // edits recorded; anything above `cursor` is the redo tail
+    uint32_t cursor;    // edits currently applied to the track
+    uint32_t group;     // the transaction being recorded, or the next one
+    bool     open;      // inside a begin/end pair
+    gs_edit  ops[];
+} gs_edit_log;
+
+size_t gs_edit_log_bytes(uint32_t capacity);
+void   gs_edit_log_init(gs_edit_log *l, uint32_t capacity);
+
+// Everything between begin and end undoes as one action. Nesting is not a
+// thing: a second begin without an end is the caller's bug and is ignored.
+void gs_edit_begin(gs_edit_log *l);
+void gs_edit_end(gs_edit_log *l);
+
+// Apply a change to the track and record how to take it back. An edit outside a
+// begin/end pair is its own transaction, which is what makes the single-tile
+// case need no ceremony.
+//
+// Return false only when the log is full — the change is then *not* applied,
+// because an edit that cannot be undone is worse than an edit that did not
+// happen. Changes that would alter nothing are silently skipped: they succeed,
+// and they do not put a step in the history that appears to do nothing.
+bool gs_edit_corner(gs_edit_log *l, gs_track *t, uint8_t x, uint8_t y, gs_fix height);
+bool gs_edit_surface(gs_edit_log *l, gs_track *t, uint8_t x, uint8_t y, gs_surface s);
+bool gs_edit_gravity(gs_edit_log *l, gs_track *t, uint8_t x, uint8_t y, gs_fix multiplier);
+
+bool gs_edit_can_undo(const gs_edit_log *l);
+bool gs_edit_can_redo(const gs_edit_log *l);
+
+// One transaction at a time. False when there is nothing left to take back.
+bool gs_edit_undo(gs_edit_log *l, gs_track *t);
+bool gs_edit_redo(gs_edit_log *l, gs_track *t);
+
+// How many transactions are behind and ahead of where the track currently is.
+uint32_t gs_edit_undo_depth(const gs_edit_log *l);
+uint32_t gs_edit_redo_depth(const gs_edit_log *l);
+
+#endif // GS_EDIT_H

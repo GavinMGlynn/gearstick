@@ -16,6 +16,7 @@
 #define GS_PI 3.14159265358979323846
 
 #include "core/gs_clock.h"
+#include "core/gs_edit.h"
 #include "core/gs_replay.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -266,6 +267,185 @@ TEST(two_tracks_built_the_same_way_share_an_identity_through_a_file) {
     // One tile moved is a different track.
     gs_track_set_corner(&b, 3, 4, GS_INT(2) + 256);
     CHECK(gs_track_hash(&b) != gs_track_hash(&back));
+}
+
+// ---------------------------------------------------------------------------
+// Editing
+// ---------------------------------------------------------------------------
+
+// A union rather than a struct with a trailing array: this guarantees the
+// storage is aligned for a gs_edit_log, which is what the flexible array member
+// needs and what a hand-rolled byte buffer would not promise.
+#define GS_TEST_EDITS 4096
+static union {
+    gs_edit_log log;
+    unsigned char raw[sizeof(gs_edit_log) + GS_TEST_EDITS * sizeof(gs_edit)];
+} gs_edit_storage;
+
+static gs_edit_log *gs_fresh_log(uint32_t cap) {
+    gs_edit_log *l = &gs_edit_storage.log;
+    gs_edit_log_init(l, cap);
+    return l;
+}
+
+// A spread of edits of all three kinds, deterministic and not aligned to
+// anything convenient.
+static void gs_make_edits(gs_edit_log *l, gs_track *t, uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t x = (uint8_t)((i * 7u) % t->w);
+        uint8_t y = (uint8_t)((i * 11u) % t->h);
+        switch (i % 3u) {
+        case 0:
+            gs_edit_corner(l, t, x, y, GS_INT((int32_t)(i % 5u)) + GS_HALF);
+            break;
+        case 1:
+            gs_edit_surface(l, t, x, y, (gs_surface)(i % GS_SURF_COUNT));
+            break;
+        default:
+            gs_edit_gravity(l, t, x, y, GS_RATIO(20 + (int32_t)(i % 200u), 100));
+            break;
+        }
+    }
+}
+
+TEST(any_sequence_of_edits_undone_completely_restores_the_track) {
+    static gs_track t;
+    gs_track_init(&t, 24, 16, GS_SURF_PAVEMENT);
+    uint64_t start = gs_track_hash(&t);
+
+    gs_edit_log *l = gs_fresh_log(GS_TEST_EDITS);
+    gs_make_edits(l, &t, 500);
+    CHECK(gs_track_hash(&t) != start);
+
+    uint32_t undone = 0;
+    while (gs_edit_undo(l, &t)) undone++;
+
+    CHECK(undone > 0);
+    CHECK(!gs_edit_can_undo(l));
+    // The whole claim, in one line: whatever was done, undoing it all leaves
+    // the track it started as - not merely one that looks similar.
+    CHECK(gs_track_hash(&t) == start);
+}
+
+TEST(redoing_everything_returns_the_track_to_where_it_was) {
+    static gs_track t;
+    gs_track_init(&t, 24, 16, GS_SURF_DIRT);
+
+    gs_edit_log *l = gs_fresh_log(GS_TEST_EDITS);
+    gs_make_edits(l, &t, 300);
+    uint64_t edited = gs_track_hash(&t);
+
+    while (gs_edit_undo(l, &t)) { }
+    while (gs_edit_redo(l, &t)) { }
+
+    CHECK(!gs_edit_can_redo(l));
+    CHECK(gs_track_hash(&t) == edited);
+}
+
+TEST(a_brush_stroke_undoes_as_one_action) {
+    static gs_track t;
+    gs_track_init(&t, 20, 20, GS_SURF_PAVEMENT);
+    uint64_t start = gs_track_hash(&t);
+
+    gs_edit_log *l = gs_fresh_log(GS_TEST_EDITS);
+
+    // Forty tiles painted in one drag. Undoing that a tile at a time would be
+    // useless, which is what transactions are for.
+    gs_edit_begin(l);
+    for (uint8_t x = 2; x < 12; x++)
+        for (uint8_t y = 2; y < 6; y++)
+            gs_edit_surface(l, &t, x, y, GS_SURF_ICE);
+    gs_edit_end(l);
+
+    CHECK(gs_edit_undo_depth(l) == 1);
+    CHECK(gs_track_hash(&t) != start);
+
+    CHECK(gs_edit_undo(l, &t));
+    CHECK(gs_track_hash(&t) == start);
+    CHECK(!gs_edit_can_undo(l));
+
+    CHECK(gs_edit_redo(l, &t));
+    CHECK(gs_edit_undo_depth(l) == 1);
+    CHECK(gs_track_surface(&t, GS_INT(5) + GS_HALF, GS_INT(3) + GS_HALF) == GS_SURF_ICE);
+}
+
+TEST(an_edit_after_an_undo_drops_what_was_ahead) {
+    static gs_track t;
+    gs_track_init(&t, 16, 16, GS_SURF_PAVEMENT);
+
+    gs_edit_log *l = gs_fresh_log(GS_TEST_EDITS);
+    gs_edit_corner(l, &t, 1, 1, GS_INT(1));
+    gs_edit_corner(l, &t, 2, 2, GS_INT(2));
+    gs_edit_corner(l, &t, 3, 3, GS_INT(3));
+
+    CHECK(gs_edit_undo(l, &t));
+    CHECK(gs_edit_undo(l, &t));
+    CHECK(gs_edit_redo_depth(l) == 2);
+
+    // History is a line, not a tree. Everyone expects this and nobody thanks
+    // you for the alternative.
+    gs_edit_corner(l, &t, 9, 9, GS_INT(4));
+    CHECK(gs_edit_redo_depth(l) == 0);
+    CHECK(!gs_edit_can_redo(l));
+
+    CHECK(gs_edit_undo_depth(l) == 2);
+}
+
+TEST(an_edit_that_changes_nothing_leaves_no_step_in_the_history) {
+    static gs_track t;
+    gs_track_init(&t, 16, 16, GS_SURF_PAVEMENT);
+
+    gs_edit_log *l = gs_fresh_log(GS_TEST_EDITS);
+    gs_edit_corner(l, &t, 4, 4, GS_INT(2));
+    CHECK(gs_edit_undo_depth(l) == 1);
+
+    // Painting the same value over itself is what a brush does constantly while
+    // the mouse sits still. None of it belongs in the history, or undo fills up
+    // with steps that visibly do nothing.
+    for (int i = 0; i < 50; i++) {
+        gs_edit_corner(l, &t, 4, 4, GS_INT(2));
+        gs_edit_surface(l, &t, 4, 4, GS_SURF_PAVEMENT);
+    }
+    CHECK(gs_edit_undo_depth(l) == 1);
+}
+
+TEST(a_full_log_refuses_the_edit_rather_than_applying_it) {
+    static gs_track t;
+    gs_track_init(&t, 16, 16, GS_SURF_PAVEMENT);
+
+    gs_edit_log *l = gs_fresh_log(3);
+    CHECK(gs_edit_corner(l, &t, 1, 1, GS_INT(1)));
+    CHECK(gs_edit_corner(l, &t, 2, 2, GS_INT(1)));
+    CHECK(gs_edit_corner(l, &t, 3, 3, GS_INT(1)));
+
+    uint64_t full = gs_track_hash(&t);
+
+    // An edit that cannot be undone is worse than an edit that did not happen.
+    CHECK(!gs_edit_corner(l, &t, 4, 4, GS_INT(1)));
+    CHECK(gs_track_hash(&t) == full);
+
+    // And the history is still coherent afterwards.
+    while (gs_edit_undo(l, &t)) { }
+    CHECK(!gs_edit_can_undo(l));
+}
+
+TEST(the_far_corners_of_a_track_can_be_edited) {
+    static gs_track t;
+    gs_track_init(&t, 8, 6, GS_SURF_PAVEMENT);
+
+    gs_edit_log *l = gs_fresh_log(GS_TEST_EDITS);
+
+    // A 8x6 track has 9x7 corners. Editing the last one is the off-by-one that
+    // would otherwise be discovered by a ramp that cannot reach the track edge.
+    CHECK(gs_edit_corner(l, &t, 8, 6, GS_INT(3)));
+    CHECK(gs_track_height(&t, GS_INT(8) - 1, GS_INT(6) - 1) > 0);
+
+    // Tiles stop one short of that, and an edit off the end is ignored rather
+    // than corrupting the neighbour.
+    uint64_t before = gs_track_hash(&t);
+    gs_edit_surface(l, &t, 8, 0, GS_SURF_ICE);
+    gs_edit_gravity(l, &t, 0, 6, GS_INT(2));
+    CHECK(gs_track_hash(&t) == before);
 }
 
 // ---------------------------------------------------------------------------
@@ -809,6 +989,13 @@ int main(void) {
     run_a_track_survives_the_round_trip_through_its_file_format();
     run_a_corrupt_track_file_is_refused_rather_than_half_loaded();
     run_two_tracks_built_the_same_way_share_an_identity_through_a_file();
+    run_any_sequence_of_edits_undone_completely_restores_the_track();
+    run_redoing_everything_returns_the_track_to_where_it_was();
+    run_a_brush_stroke_undoes_as_one_action();
+    run_an_edit_after_an_undo_drops_what_was_ahead();
+    run_an_edit_that_changes_nothing_leaves_no_step_in_the_history();
+    run_a_full_log_refuses_the_edit_rather_than_applying_it();
+    run_the_far_corners_of_a_track_can_be_edited();
     run_a_car_accelerates_under_throttle_and_stops_under_the_brake();
     run_a_car_left_on_a_slope_rolls_downhill_and_one_on_the_flat_does_not();
     run_a_car_turns_more_sharply_at_a_crawl_than_at_speed();

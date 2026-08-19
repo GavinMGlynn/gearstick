@@ -46,6 +46,7 @@ gs_check_layering()
 # ---------------------------------------------------------------------------
 add_library(gearstick_sim STATIC
     src/core/gs_clock.c
+    src/core/gs_edit.c
     src/core/gs_fixed.c
     src/core/gs_track.c
     src/core/gs_vehicle.c

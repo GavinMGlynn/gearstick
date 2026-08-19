@@ -16,7 +16,7 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
-**Phases 0 to 3 are complete, and Phase 4 has started — 26 of 60 items, every
+**Phases 0 to 3 are complete, and Phase 4 has started — 27 of 60 items, every
 one of them with its verification actually run.** Phase 4 is the editor and is
 about half the remaining work.
 
@@ -159,9 +159,12 @@ whatever the UI turns out to be — then the interface on top.
       produce the same identifier; a one-tile edit produces a different one; a
       short read, a truncated payload, a bad magic and a version from the future
       are each refused with the caller's track left untouched.*
-- [ ] **An edit model with undo and redo**, unlimited within a session.
-      *Verification: any sequence of edits undone completely returns the track to
-      its starting hash, and redone returns it to the edited one.*
+- [x] **An edit model with undo and redo**, unlimited within a session.
+      *Verification: five hundred mixed edits undone completely return the track
+      to its starting hash and redone return it to the edited one; a forty-tile
+      brush stroke undoes as one action; a new edit drops the redo tail; edits
+      that change nothing leave no step in the history; and a full log refuses
+      the edit rather than applying one it could not take back.*
 - [ ] **A grid cursor and a piece palette.** *Verification: a track built
       entirely through the editor saves, reloads and races.*
 - [ ] **Raise and lower elevation as a brush.** *Verification: an edited ramp

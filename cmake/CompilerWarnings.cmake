@@ -11,6 +11,13 @@ function(gs_configure target)
     target_compile_options(${target} PRIVATE ${GS_C_FLAGS})
 
     if(MSVC)
+        # MSVC deprecates fopen, snprintf and friends in favour of its own _s
+        # variants, and /WX turns that opinion into a build failure. Those
+        # functions are standard C; the _s ones are Annex K, which most
+        # implementations do not ship. Taking Microsoft's advice would mean
+        # writing a second I/O path for one compiler, so we decline it here
+        # rather than sprinkling pragmas through the frontends.
+        target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
         target_compile_options(${target} PRIVATE /W4 /utf-8)
         if(GEARSTICK_WERROR)
             target_compile_options(${target} PRIVATE /WX)
