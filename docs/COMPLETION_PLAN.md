@@ -910,12 +910,13 @@ front end entirely and drove straight onto the grid — so the one situation
 where it matters most whose lap time this is was the one situation that never
 asked.
 
-- [x] **A driver can be locked.** A password, and a six-digit code from a phone
-      for anybody who wants one. A driver with neither still works: one person
-      on one machine should not have to type anything to play.
-      *Verification: a roster saved before passwords existed still loads with
-      everybody unlocked, the right password gets in, and a wrong one, an empty
-      one and a nearly-right one do not.*
+- [x] **Every driver has a password**, and a six-digit code from a phone for
+      anybody who wants one on top. A driver carrying no password cannot sign in
+      at all — a roster from before passwords existed is not turned away, it is
+      offered one on the way in.
+      *Verification: a roster saved before passwords existed still loads, the
+      right password gets in, and a wrong one, an empty one and a nearly-right
+      one do not — nor does a right code with a wrong password.*
 - [x] **Nothing is reachable until somebody signs in.** The game opens on the
       door. The title screen, the track library, the settings and the records
       are all behind it, and the check is made in one place rather than by each
@@ -1091,4 +1092,15 @@ worth as much as what was decided about it.
       server and checks both halves — a client on the menu does not get pulled
       in, and one in the lobby still does, because the first check alone would
       pass if nothing ever raced.*
+- [x] **The forms fought whoever was typing in them.** *(Found by filling one
+      in.)* The game's hotkeys ran while a text box had the keyboard, so Tab —
+      the obvious way to get from the name box to the password box — opened the
+      construction set over the top of the half-filled form, and the letters in
+      a driver's name toggled the ghost and the gravity overlay on the way past.
+      Creating a driver also added them to the roster before checking the
+      password, so a form abandoned half way through left somebody behind who
+      was never finished being made.
+      *Verification: the hotkeys are skipped while Dear ImGui reports it wants
+      the keyboard, and nothing is added to the roster until every field is
+      right.*
 

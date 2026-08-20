@@ -2328,8 +2328,14 @@ There is a door now, and it is the screen the game starts on.
   now links. The two headers cannot disagree about the field sizes: a
   `static_assert` in `gs_auth.c` pins them, since core cannot include the header
   that knows.
-- **An unlocked driver is a supported state, not a hole.** One person on one
-  machine should not have to type anything. The gate still asks who they are.
+- **Every driver has a password.** A driver carrying none cannot be signed in —
+  not because the empty string fails the check, but because there is nothing to
+  check against, and a door that opens for anybody with no key is a picture of a
+  door. This replaces an earlier decision that an unlocked driver was fine; it
+  was not what was wanted, and "one person on one machine" is not the only
+  machine this runs on. A roster written before version 3 is not turned away:
+  its drivers are offered a password on the way in, since having played the game
+  before it had a door is not a thing to be punished for.
 - **The check is in one place.** `gs_menu_sign_in` is the whole rule, and the
   gate that forces the login screen sits at the top of `gs_menu_frame` rather
   than in each screen — a check every screen has to remember to make is a check

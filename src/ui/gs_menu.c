@@ -268,10 +268,18 @@ bool gs_menu_sign_in(gs_menu *m, int index, const char *password,
 
     gs_profile *p = &m->profiles.entry[index];
 
-    // An unlocked profile is a supported state, not an oversight: one person on
-    // one machine should not have to type anything to play. The gate is still a
-    // gate - somebody has to say who they are - it just has nothing to check.
-    if (p->password[0] != '\0') {
+    // **No password, no entry.** A driver from a roster written before
+    // passwords existed has none, and the answer is to give them one rather
+    // than to wave them through - a door that opens for anybody carrying no key
+    // is a picture of a door.
+    if (p->password[0] == '\0') {
+        SDL_strlcpy(m->login_error,
+                    "this driver has no password yet - set one to sign in",
+                    sizeof m->login_error);
+        return false;
+    }
+
+    {
         if (!gs_auth_check_password(p->password, password)) {
             // **The same words whichever half was wrong.** Saying "no such
             // driver" and "wrong password" differently tells somebody guessing
@@ -326,7 +334,13 @@ bool gs_menu_sign_in(gs_menu *m, int index, const char *password,
 
 static gs_screen gs_login_screen(gs_menu *m) {
     gs_screen next = GS_SCREEN_LOGIN;
-    gs_centre_window("login", 460.0f, 470.0f);
+    // Tall enough for the roster it actually has, plus the boxes underneath.
+    // The list itself is capped, so this is bounded however many drivers there
+    // are; a fixed height was fine for two and pushed Exit off the bottom at
+    // three.
+    float tallest = 400.0f + gs_row_height() * (float)m->profiles.count;
+    if (tallest > 620.0f) tallest = 620.0f;
+    gs_centre_window("login", 470.0f, tallest);
 
     if (ImGui_Begin("##login", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -349,6 +363,12 @@ static gs_screen gs_login_screen(gs_menu *m) {
 
         if (m->login_making) {
             // --- making somebody new ------------------------------------
+            // The caret starts in the name box, so the form is ready to type
+            // into rather than waiting for a click somebody has to guess at.
+            if (m->focus_form) {
+                ImGui_SetKeyboardFocusHere();
+                m->focus_form = false;
+            }
             ImGui_InputText("name", m->new_name, sizeof m->new_name, 0);
             ImGui_InputTextEx("password", m->login_password,
                               sizeof m->login_password,
@@ -358,13 +378,23 @@ static gs_screen gs_login_screen(gs_menu *m) {
 
             ImGui_PushStyleColorImVec4(ImGuiCol_Text,
                                        ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
-            ImGui_TextWrapped("Leave the password empty for a driver anybody at "
-                              "this keyboard can use.");
+            ImGui_TextWrapped("Tab moves between the boxes. Every driver has a "
+                              "password.");
             ImGui_PopStyleColor();
 
             ImGui_Dummy((ImVec2){ 0.0f, 8.0f });
             if (gs_go_button("CREATE", -1.0f, 40.0f)) {
-                if (SDL_strcmp(m->login_password, m->login_confirm) != 0) {
+                // **Nothing is created until everything is right.** The first
+                // version added the driver and then tried the password, so a
+                // form abandoned half way through left somebody on the roster
+                // who was never finished being made.
+                if (m->new_name[0] == '\0') {
+                    SDL_strlcpy(m->login_error, "a driver needs a name",
+                                sizeof m->login_error);
+                } else if (m->login_password[0] == '\0') {
+                    SDL_strlcpy(m->login_error, "a driver needs a password",
+                                sizeof m->login_error);
+                } else if (SDL_strcmp(m->login_password, m->login_confirm) != 0) {
                     SDL_strlcpy(m->login_error, "those two passwords are different",
                                 sizeof m->login_error);
                 } else {
@@ -374,17 +404,12 @@ static gs_screen gs_login_screen(gs_menu *m) {
                         SDL_strlcpy(m->login_error,
                                     "that name is taken, empty, or the roster is full",
                                     sizeof m->login_error);
-                    } else if (m->login_password[0] != '\0' &&
-                               !gs_auth_hash_password(
-                                   m->login_password,
-                                   m->profiles.entry[added].password,
-                                   sizeof m->profiles.entry[added].password)) {
-                        // **Refuse to make a driver whose password did not
-                        // take.** Keeping them without it would silently create
-                        // an unlocked profile somebody believes is locked.
+                    } else if (!gs_menu_set_password(m, added, m->login_password,
+                                                     m->login_confirm)) {
+                        // The password did not take, so neither does the
+                        // driver: leaving them would be leaving one with no way
+                        // in and no way to tell why.
                         gs_profile_remove(&m->profiles, (uint8_t)added);
-                        SDL_strlcpy(m->login_error, "could not set that password",
-                                    sizeof m->login_error);
                     } else {
                         m->login_pick = added;
                         m->login_making = false;
@@ -410,13 +435,17 @@ static gs_screen gs_login_screen(gs_menu *m) {
             if (gs_go_button("NEW DRIVER", -1.0f, 44.0f)) {
                 m->login_making = true;
                 m->login_error[0] = '\0';
+                m->focus_form = true;
             }
         } else {
             // --- picking one ---------------------------------------------
             // Preselect somebody, so the password box is showing rather than
             // waiting to be revealed by a click most people will not know is
             // needed. The first driver is as good a guess as exists here.
-            if (m->login_pick < 0 && m->profiles.count > 0) m->login_pick = 0;
+            if (m->login_pick < 0 && m->profiles.count > 0) {
+                m->login_pick = 0;
+                m->focus_form = true;
+            }
 
             float rows = (float)m->profiles.count;
             float tall = gs_row_height() * rows + 12.0f;
@@ -430,12 +459,13 @@ static gs_screen gs_login_screen(gs_menu *m) {
                 ImGui_SameLine();
                 char row[96];
                 SDL_snprintf(row, sizeof row, "%-14s %s%s", p->name,
-                             p->password[0] != '\0' ? "locked" : "open",
-                             p->totp_len > 0 ? " +code" : "");
+                             p->password[0] != '\0' ? "" : "needs a password",
+                             p->totp_len > 0 ? "  +code" : "");
                 if (ImGui_SelectableEx(row, m->login_pick == (int)i, 0,
                                        (ImVec2){ 0.0f, 0.0f })) {
                     m->login_pick = (int)i;
                     m->login_error[0] = '\0';
+                    m->focus_form = true;
                     gs_forget_typing(m);
                 }
                 ImGui_PopID();
@@ -447,35 +477,62 @@ static gs_screen gs_login_screen(gs_menu *m) {
                     ? &m->profiles.entry[m->login_pick]
                     : nullptr;
 
-            // Only ask for what this driver actually has. A password box on an
-            // unlocked profile is a question with no right answer.
-            if (sel != nullptr && sel->password[0] != '\0') {
+            // **A driver from an older roster is given a password, not turned
+            // away.** Rosters written before version three have none, and the
+            // person in front of the screen did nothing wrong by having played
+            // this game before it had a door.
+            bool needs_one = sel != nullptr && sel->password[0] == '\0';
+
+            if (needs_one) {
+                ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                           ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+                ImGui_TextWrapped("%s has no password yet. Choose one.",
+                                  sel->name);
+                ImGui_PopStyleColor();
+                if (m->focus_form) {
+                    ImGui_SetKeyboardFocusHere();
+                    m->focus_form = false;
+                }
                 ImGui_InputTextEx("password", m->login_password,
                                   sizeof m->login_password,
                                   ImGuiInputTextFlags_Password, nullptr, nullptr);
-            }
-            if (sel != nullptr && sel->totp_len > 0) {
-                ImGui_InputTextEx("code", m->login_code, sizeof m->login_code,
-                                  ImGuiInputTextFlags_CharsDecimal, nullptr,
-                                  nullptr);
-            }
-            if (sel != nullptr && sel->password[0] == '\0' && sel->totp_len == 0) {
-                ImGui_PushStyleColorImVec4(ImGuiCol_Text,
-                                           ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
-                ImGui_TextUnformatted("no password on this driver");
-                ImGui_PopStyleColor();
+                ImGui_InputTextEx("again", m->login_confirm,
+                                  sizeof m->login_confirm,
+                                  ImGuiInputTextFlags_Password, nullptr, nullptr);
+            } else if (sel != nullptr) {
+                if (m->focus_form) {
+                    ImGui_SetKeyboardFocusHere();
+                    m->focus_form = false;
+                }
+                ImGui_InputTextEx("password", m->login_password,
+                                  sizeof m->login_password,
+                                  ImGuiInputTextFlags_Password, nullptr, nullptr);
+                if (sel->totp_len > 0) {
+                    ImGui_InputTextEx("code", m->login_code,
+                                      sizeof m->login_code,
+                                      ImGuiInputTextFlags_CharsDecimal, nullptr,
+                                      nullptr);
+                }
             }
 
             ImGui_Dummy((ImVec2){ 0.0f, 10.0f });
-            if (gs_go_button("SIGN IN", -1.0f, 44.0f)) {
-                if (gs_menu_sign_in(m, m->login_pick, m->login_password,
-                                    m->login_code))
+            if (gs_go_button(needs_one ? "SET IT AND SIGN IN" : "SIGN IN",
+                             -1.0f, 44.0f)) {
+                bool ready = true;
+                if (needs_one) {
+                    ready = gs_menu_set_password(m, m->login_pick,
+                                                 m->login_password,
+                                                 m->login_confirm);
+                }
+                if (ready && gs_menu_sign_in(m, m->login_pick, m->login_password,
+                                             m->login_code))
                     next = GS_SCREEN_TITLE;
             }
             ImGui_Spacing();
             if (gs_wide_button("New driver", 32.0f)) {
                 m->login_making = true;
                 m->login_error[0] = '\0';
+                m->focus_form = true;
                 gs_forget_typing(m);
             }
         }
@@ -694,37 +751,17 @@ static gs_screen gs_profiles_screen(gs_menu *m) {
                               sizeof m->login_confirm,
                               ImGuiInputTextFlags_Password, nullptr, nullptr);
 
-            if (ImGui_Button(me->password[0] != '\0' ? "change" : "set")) {
-                if (m->login_password[0] == '\0') {
-                    SDL_snprintf(m->status, sizeof m->status,
-                                 "type a password, or use 'remove' to take it off");
-                } else if (SDL_strcmp(m->login_password, m->login_confirm) != 0) {
-                    SDL_snprintf(m->status, sizeof m->status,
-                                 "those two passwords are different");
-                } else if (!gs_auth_hash_password(m->login_password, me->password,
-                                                  sizeof me->password)) {
-                    SDL_snprintf(m->status, sizeof m->status,
-                                 "could not set that password");
+            // **Changed, never removed.** Every driver has a password, so
+            // there is no button here that takes one off - the way to stop
+            // using a driver is to remove the driver.
+            if (ImGui_Button("change")) {
+                if (gs_menu_set_password(m, m->signed_in, m->login_password,
+                                         m->login_confirm)) {
+                    SDL_snprintf(m->status, sizeof m->status, "password changed");
                 } else {
-                    m->store_dirty = true;
-                    SDL_snprintf(m->status, sizeof m->status, "password set");
+                    SDL_strlcpy(m->status, m->login_error, sizeof m->status);
                 }
                 gs_forget_typing(m);
-            }
-
-            if (me->password[0] != '\0') {
-                ImGui_SameLine();
-                if (ImGui_Button("remove")) {
-                    // An unlocked profile is a supported state, so taking the
-                    // password off is a real choice rather than a hole.
-                    SDL_memset(me->password, 0, sizeof me->password);
-                    SDL_memset(me->totp, 0, sizeof me->totp);
-                    me->totp_len = 0;
-                    m->store_dirty = true;
-                    SDL_snprintf(m->status, sizeof m->status,
-                                 "%s has no password now", me->name);
-                    gs_forget_typing(m);
-                }
             }
         }
 
@@ -1231,6 +1268,37 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
     }
     ImGui_End();
     return next;
+}
+
+bool gs_menu_set_password(gs_menu *m, int index, const char *password,
+                          const char *again) {
+    m->login_error[0] = '\0';
+    if (password == nullptr) password = "";
+    if (again == nullptr) again = "";
+
+    if (index < 0 || index >= (int)m->profiles.count) {
+        SDL_strlcpy(m->login_error, "pick a driver first", sizeof m->login_error);
+        return false;
+    }
+    if (password[0] == '\0') {
+        SDL_strlcpy(m->login_error, "a driver needs a password",
+                    sizeof m->login_error);
+        return false;
+    }
+    if (SDL_strcmp(password, again) != 0) {
+        SDL_strlcpy(m->login_error, "those two passwords are different",
+                    sizeof m->login_error);
+        return false;
+    }
+
+    gs_profile *p = &m->profiles.entry[index];
+    if (!gs_auth_hash_password(password, p->password, sizeof p->password)) {
+        SDL_strlcpy(m->login_error, "could not set that password",
+                    sizeof m->login_error);
+        return false;
+    }
+    m->store_dirty = true;
+    return true;
 }
 
 const char *gs_menu_driver(const gs_menu *m) {

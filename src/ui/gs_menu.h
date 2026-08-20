@@ -113,6 +113,7 @@ typedef struct gs_menu {
     char login_code[8];             // the six digits, when a second factor is set
     char login_error[112];
     bool login_making;              // the "new driver" fields are showing
+    bool focus_form;                // put the caret in the first box next frame
 
     // **Handed to the frontend exactly once, to prove the same name at a
     // server.** The server checks a password rather than a hash, so this is
@@ -167,14 +168,25 @@ void gs_menu_init(gs_menu *m);
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
 
 // **The gate's whole rule, in one callable place.** Sign `index` in if the
-// password and code are what that driver requires - an empty password is
-// correct for a driver who has none, which is a supported state rather than a
-// hole. Returns false and leaves `login_error` saying why otherwise.
+// password and code are what that driver requires. Returns false and leaves
+// `login_error` saying why otherwise.
+//
+// **Every driver has a password.** A driver carrying none cannot be signed in
+// at all - not because the empty string fails the check, but because there is
+// nothing to check against, and letting that through would make the door a
+// picture of a door. Rosters written before passwords existed do contain such
+// drivers, so the way through is to give them one: see gs_menu_set_password.
 //
 // Public so it can be tested without standing up an ImGui context: a rule that
 // can only be exercised by clicking is a rule nothing checks.
 bool gs_menu_sign_in(gs_menu *m, int index, const char *password,
                      const char *code);
+
+// Put a password on a driver. `again` must match, and neither may be empty.
+// This is how a driver from an older roster gets one, and how somebody changes
+// theirs. False leaves `login_error` saying what was wrong.
+bool gs_menu_set_password(gs_menu *m, int index, const char *password,
+                          const char *again);
 
 // Who is signed in, or "" when nobody is. The frontend needs the name to say
 // it at a server, and everything else needs it to put on a result.

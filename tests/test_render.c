@@ -2780,9 +2780,17 @@ TEST(the_front_end_is_shut_until_somebody_signs_in) {
     CHECK(gs_profile_add(&m.profiles, "gavin", GS_COLOUR_RED,
                          (uint8_t)GS_VEH_BAJA_BUG) == 0);
 
-    // A driver with no password is a supported state: one person on one machine
-    // should not have to type anything. The gate still asks who they are.
-    CHECK(gs_menu_sign_in(&m, 0, "", ""));
+    // **A driver carrying no password cannot sign in at all.** Not because the
+    // empty string fails the check - because there is nothing to check against,
+    // and a door that opens for anybody with no key is a picture of a door.
+    CHECK(!gs_menu_sign_in(&m, 0, "", ""));
+    CHECK(!gs_menu_sign_in(&m, 0, "anything", ""));
+    CHECK(m.signed_in == -1);
+
+    // The way through is to give them one, which is what an older roster's
+    // drivers are offered rather than being turned away.
+    CHECK(gs_menu_set_password(&m, 0, "a good one", "a good one"));
+    CHECK(gs_menu_sign_in(&m, 0, "a good one", ""));
     CHECK(m.signed_in == 0);
     CHECK(strcmp(gs_menu_driver(&m), "gavin") == 0);
 
@@ -2792,8 +2800,35 @@ TEST(the_front_end_is_shut_until_somebody_signs_in) {
 
     // Asking for somebody who is not on the roster is refused rather than
     // clamped to whoever happens to be at that index.
-    CHECK(!gs_menu_sign_in(&m, 4, "", ""));
-    CHECK(!gs_menu_sign_in(&m, -1, "", ""));
+    CHECK(!gs_menu_sign_in(&m, 4, "x", ""));
+    CHECK(!gs_menu_sign_in(&m, -1, "x", ""));
+}
+
+TEST(a_password_cannot_be_set_to_nothing) {
+    (void)ren;
+    static gs_menu m;
+    gs_menu_init(&m);
+    CHECK(gs_profile_add(&m.profiles, "gavin", GS_COLOUR_RED,
+                         (uint8_t)GS_VEH_BAJA_BUG) == 0);
+
+    // Empty, mismatched, and off the end of the roster are all refused, and
+    // none of them leaves the driver half-changed.
+    CHECK(!gs_menu_set_password(&m, 0, "", ""));
+    CHECK(m.profiles.entry[0].password[0] == '\0');
+    CHECK(!gs_menu_set_password(&m, 0, "one", "another"));
+    CHECK(m.profiles.entry[0].password[0] == '\0');
+    CHECK(!gs_menu_set_password(&m, 9, "fine", "fine"));
+
+    CHECK(gs_menu_set_password(&m, 0, "fine", "fine"));
+    CHECK(m.profiles.entry[0].password[0] == '$');
+
+    // Changing it takes the new one and refuses the old.
+    CHECK(gs_menu_set_password(&m, 0, "better", "better"));
+    CHECK(gs_menu_sign_in(&m, 0, "better", ""));
+    gs_menu_init(&m);
+    CHECK(gs_profile_add(&m.profiles, "gavin", GS_COLOUR_RED, 0) == 0);
+    CHECK(gs_menu_set_password(&m, 0, "better", "better"));
+    CHECK(!gs_menu_sign_in(&m, 0, "fine", ""));
 }
 
 TEST(a_password_on_a_profile_is_actually_required) {
@@ -2848,8 +2883,11 @@ TEST(a_second_factor_is_asked_for_when_the_profile_has_one) {
     for (uint8_t i = 0; i < GS_PROFILE_TOTP; i++) p->totp[i] = (uint8_t)(i + 1);
     p->totp_len = GS_PROFILE_TOTP;
 
-    // No password, but a second factor - so the factor is the whole gate and
-    // there is nowhere for it to hide behind a password check.
+    // Every driver has a password, so the second factor sits on top of one -
+    // and the right password with a wrong code must still be refused, or the
+    // factor is decoration.
+    CHECK(gs_menu_set_password(&m, 0, "known", "known"));
+
     SDL_Time now_ns = 0;
     CHECK(SDL_GetCurrentTime(&now_ns));
     int64_t now = (int64_t)(now_ns / 1000000000);
@@ -2858,13 +2896,17 @@ TEST(a_second_factor_is_asked_for_when_the_profile_has_one) {
     SDL_snprintf(right, sizeof right, "%06u",
                  gs_auth_code_at(p->totp, p->totp_len, gs_auth_step_of(now)));
 
-    CHECK(!gs_menu_sign_in(&m, 0, "", ""));           // nothing typed
-    CHECK(!gs_menu_sign_in(&m, 0, "", "000000"));     // wrong six digits
-    CHECK(!gs_menu_sign_in(&m, 0, "", "12345"));      // five is not six
-    CHECK(!gs_menu_sign_in(&m, 0, "", "12 456"));     // not all digits
+    CHECK(!gs_menu_sign_in(&m, 0, "known", ""));        // nothing typed
+    CHECK(!gs_menu_sign_in(&m, 0, "known", "000000"));  // wrong six digits
+    CHECK(!gs_menu_sign_in(&m, 0, "known", "12345"));   // five is not six
+    CHECK(!gs_menu_sign_in(&m, 0, "known", "12 456"));  // not all digits
     CHECK(m.signed_in == -1);
 
-    CHECK(gs_menu_sign_in(&m, 0, "", right));
+    // The right code does not rescue a wrong password either.
+    CHECK(!gs_menu_sign_in(&m, 0, "guessed", right));
+    CHECK(m.signed_in == -1);
+
+    CHECK(gs_menu_sign_in(&m, 0, "known", right));
     CHECK(m.signed_in == 0);
 }
 
@@ -2944,6 +2986,7 @@ int main(void) {
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_the_front_end_is_shut_until_somebody_signs_in(ren);
+    run_a_password_cannot_be_set_to_nothing(ren);
     run_a_password_on_a_profile_is_actually_required(ren);
     run_a_second_factor_is_asked_for_when_the_profile_has_one(ren);
     run_exit_is_something_the_menu_asks_for_rather_than_does(ren);

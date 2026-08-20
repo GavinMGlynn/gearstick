@@ -979,6 +979,14 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         gs_layout(a);
         break;
     case SDL_EVENT_KEY_DOWN:
+        // **Typing is not a shortcut.** Dear ImGui says when a text field has
+        // the keyboard, and while it does the game's hotkeys stay out of the
+        // way. Without this, typing a driver called "gavin" toggles the ghost
+        // on the g, restarts the race on the... there is no r in gavin, but
+        // there is in "harry", and Tab opens the construction set over the top
+        // of the form somebody is halfway through filling in.
+        if (ImGui_GetIO()->WantCaptureKeyboard) break;
+
         if (e->key.key == SDLK_ESCAPE) {
             // Back out one step rather than always quitting: quitting from a
             // race because you wanted the menu is the oldest bad habit in
