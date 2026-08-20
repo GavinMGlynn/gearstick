@@ -860,27 +860,28 @@ The releases are archives you unpack. On Linux that is normal and on macOS the
 disk image is the convention, but on Windows an application people actually
 install is an installer.
 
-- [ ] **An MSI for Windows, built by CI.** Installs the game, the headless
+- [x] **An MSI for Windows, built by CI.** Installs the game, the headless
       driver and the assets, puts it in the Start Menu, and uninstalls cleanly.
       *Verification: the MSI installs on a machine that has never had a
       toolchain on it, the game runs from the Start Menu, and uninstalling
       leaves nothing behind.*
-      **Built, and verified except for the machine.** CPack's WiX generator
-      makes it alongside the zip, with a fixed upgrade GUID so a new version
-      replaces the old one rather than installing beside it. The packaging job
-      installs it with `msiexec /qn`, finds where it landed rather than
-      assuming, checks the assets went too, runs the installed headless driver
-      against the golden replay, **resolves the Start Menu shortcut and launches
-      it**, then uninstalls and checks both the program and the shortcut are
-      gone.
-      *And the reason a clean machine would have differed is now removed rather
-      than hoped about: MSVC links the dynamic C runtime by default, so the game
-      needed the Visual C++ Redistributable — invisible on any machine with
-      Visual Studio, fatal on one without, and unfixable by a zip. The runtime
-      is linked statically and `dumpbin` checks the installed executable imports
-      no redistributable.*
-      **What is left is the machine itself**: the runner is the one that just
-      built the thing. Everything this side of that has been checked.
+      **Verified, including the machine.** CPack's WiX generator makes it
+      alongside the zip, with a fixed upgrade GUID so a new version replaces the
+      old one rather than installing beside it.
+      *On the runner: installed with `msiexec /qn`, the install location found
+      rather than assumed, the assets checked, the golden replay re-raced from
+      the installed copy, the Start Menu shortcut resolved and **launched**, and
+      then uninstalled with neither the program nor the shortcut left behind.*
+      *And on a machine that has never had a toolchain: a Windows Server Core
+      container, which refuses to proceed unless it first confirms there is no
+      compiler, no CMake and no Visual C++ redistributable on it. The MSI
+      installs there and the golden replay re-races.*
+      *That last part was only possible because of what it turned up on the way:
+      MSVC links the dynamic C runtime by default, so the game needed the
+      redistributable — invisible on every machine that had ever tested it,
+      fatal on a player's, and unfixable by a zip. The runtime is static now and
+      `dumpbin` checks the installed executable imports none.*
+
 - [ ] **The installer is in the release beside the archive.** Somebody who wants
       a zip still gets a zip. *Verification: a tagged release carries both, and
       both carry a provenance attestation.*

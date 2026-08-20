@@ -2250,7 +2250,21 @@ Only the game gets a Start Menu entry. The headless driver and the server are
 command-line programs, and a shortcut that opens a console window and closes it
 again is worse than no shortcut.
 
-#### What CI checks, and what it cannot
+#### What CI checks — including the machine
+
+**"A machine that has never had a toolchain" turned out not to need a person.**
+It was filed under things only a human could do, and the Linux job had been
+doing exactly this with a Debian container all along; nobody had asked whether
+the Windows side could. A Windows Server Core container has no Visual Studio, no
+CMake, no SDL and no redistributable, which is what a player's computer is.
+
+The container check refuses to trust itself first: finding `cl.exe`, `cmake` or
+`VCRUNTIME140.dll` fails the run rather than reporting a pass that means
+something weaker than it sounds. The image is chosen from the host's build
+number, because process isolation needs them to match and a pinned tag rots when
+the runner image moves.
+
+#### And on the runner
 
 The packaging job installs the MSI with `msiexec /qn`, **finds where it landed
 rather than assuming the path**, checks the assets went with it, runs the
@@ -2313,12 +2327,6 @@ updated because it is fun to write, and the "what does not" half rots.
   somebody who has never read `gs_noise.c` writing a client from it and
   completing a handshake, which is the only thing that proves a specification is
   one.
-- **The Windows installer has not been installed on a clean machine.** CI
-  installs it, launches the game from the Start Menu shortcut, runs the golden
-  replay from the installed copy, and uninstalls leaving nothing — on the
-  machine that just built it. The usual reason a clean machine differs is gone:
-  the C runtime is static and the installed executable is checked to import no
-  redistributable. What is left is somebody with a fresh Windows box.
 - **Nothing has been tagged or released.** The packaging workflow builds a
   tarball, a disk image, a zip and an installer, and attests all four; no
   version has come out of it.
