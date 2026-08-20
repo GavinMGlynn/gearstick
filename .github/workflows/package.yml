@@ -331,12 +331,30 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "the installed headless driver failed" }
           Pop-Location
 
-          # The Start Menu entry the plan asks for.
-          $menu = Get-ChildItem "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" `
-                  -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Name -like "*earstick*" }
-          if (-not $menu) { throw "no Start Menu shortcut was created" }
-          Write-Host "start menu: $($menu.FullName)"
+          # **The Start Menu entry, in either of the two places it can be.**
+          # A per-machine install puts it under ProgramData and a per-user one
+          # under the user's AppData, and which you get depends on how msiexec
+          # was invoked. Looking in only one of them is how this check failed
+          # the first time - a wrong assumption about a path, reported as a
+          # missing shortcut.
+          $menus = @(
+            "C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+            (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs")
+          )
+          $menu = $menus | Where-Object { Test-Path $_ } | ForEach-Object {
+              Get-ChildItem $_ -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue
+          } | Where-Object { $_.Name -like "*earstick*" }
+
+          if (-not $menu) {
+            Write-Host "no gearstick shortcut; here is what is there:"
+            $menus | Where-Object { Test-Path $_ } | ForEach-Object {
+                Write-Host "--- $_"
+                Get-ChildItem $_ -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
+                  ForEach-Object { Write-Host "    $($_.FullName)" }
+            }
+            throw "no Start Menu shortcut was created"
+          }
+          Write-Host "start menu: $($menu[0].FullName)"
 
           # And away again. **Uninstalling has to leave nothing** - an installer
           # that cannot be removed is one people are right to refuse.
@@ -349,9 +367,9 @@ jobs:
           if (Test-Path (Join-Path $root "gearstick_cli.exe")) {
             throw "uninstalling left the program behind"
           }
-          $left = Get-ChildItem "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" `
-                  -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Name -like "*earstick*" }
+          $left = $menus | Where-Object { Test-Path $_ } | ForEach-Object {
+              Get-ChildItem $_ -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue
+          } | Where-Object { $_.Name -like "*earstick*" }
           if ($left) { throw "uninstalling left a Start Menu shortcut behind" }
           Write-Host "installed, ran, and uninstalled cleanly"
 

@@ -21,11 +21,22 @@ than writing one. What is written here is everything gearstick adds on top -
 which is exactly the part a reader could not get from anywhere else.
 
     usage: transport_client.py <host> <port> <server public key, hex>
+           transport_client.py --serve <path to gearstick_server>
+
+The second form starts a server itself, on a fixed key and a spare port, so
+this can run as an ordinary test rather than as something somebody remembers to
+do by hand. A document that is only checked when somebody thinks of it is a
+document that drifts.
 """
 
+import os
+import signal
 import socket
 import struct
+import subprocess
 import sys
+import tempfile
+import time
 
 try:
     from noise.connection import NoiseConnection, Keypair
@@ -84,14 +95,44 @@ def seal(noise, counter, plaintext):
                     struct.pack("<Q", counter) + noise.encrypt(plaintext))
 
 
+# A fixed secret, so the test knows the public key without parsing a log.
+SERVE_SECRET = "4a3acbfdb163dec651dfa3194dece676d437029c62a408b4c5ea9114246e4893"
+SERVE_PUBLIC = "31e0303fd6418d2f8c0e78b91f22e8caed0fbe48656dcf4767e4834f701b8f62"
+SERVE_PORT = 47901
+
+
+def serve(server_path):
+    """Start a server, talk to it, and stop it again."""
+    db = os.path.join(tempfile.mkdtemp(), "spec.db")
+    proc = subprocess.Popen(
+        [server_path, "--port", str(SERVE_PORT), "--plain", "--seconds", "60",
+         "--store", db, "--key", SERVE_SECRET],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(1.5)
+        handshake("127.0.0.1", SERVE_PORT, bytes.fromhex(SERVE_PUBLIC))
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--serve":
+        serve(sys.argv[2])
+        return
     if len(sys.argv) != 4:
         raise SystemExit(__doc__)
     host, port, server_key_hex = sys.argv[1], int(sys.argv[2]), sys.argv[3]
     server_key = bytes.fromhex(server_key_hex)
     if len(server_key) != 32:
         raise SystemExit("the server key is 32 bytes as 64 hex characters")
+    handshake(host, port, server_key)
 
+
+def handshake(host, port, server_key):
     # §4.2: IK, so the initiator needs its own static key and the responder's.
     sk = X25519PrivateKey.generate()
     ours = sk.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())

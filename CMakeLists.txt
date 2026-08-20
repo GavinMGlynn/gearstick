@@ -476,6 +476,22 @@ if(GEARSTICK_TESTS)
     gs_configure(gearstick_noise_peer)
 
     find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND AND GEARSTICK_SERVER)
+        # **A client written from the document, not from the code.** Every
+        # constant and offset in tools/transport_client.py is quoted from
+        # docs/TRANSPORT.md by section. If a byte offset in that document is
+        # wrong, or the prologue, or the note about the protocol name being
+        # hashed rather than padded, this fails to complete a handshake with a
+        # real server - which is the only way a specification gets checked
+        # against something other than its author's memory.
+        add_test(NAME gearstick_transport_document
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/transport_client.py
+                         --serve $<TARGET_FILE:gearstick_server>)
+        set_tests_properties(gearstick_transport_document PROPERTIES
+                             TIMEOUT 120 SKIP_RETURN_CODE 77)
+    endif()
+
     if(Python3_FOUND)
         add_test(NAME gearstick_noise_interop
                  COMMAND ${Python3_EXECUTABLE}
