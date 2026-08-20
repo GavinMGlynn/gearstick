@@ -13,3 +13,6 @@
 [submodule "ext/imgui_styles"]
 	path = ext/imgui_styles
 	url = https://github.com/GraphicsProgramming/dear-imgui-styles.git
+[submodule "ext/libsodium"]
+	path = ext/libsodium
+	url = https://github.com/jedisct1/libsodium.git

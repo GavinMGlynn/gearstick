@@ -768,7 +768,8 @@ review, and it fails it for good reasons.
       *Found and fixed on the way: a chunk the reassembler refused still left
       its declared count behind, so one malformed datagram made that track
       permanently unreceivable.*
-- [ ] **Nothing on the wire in the clear.** `Noise_IK_25519_ChaChaPoly_BLAKE2s`
+- [ ] **In progress — the tunnel is built and tested; nothing uses it yet.**
+      **Nothing on the wire in the clear.** `Noise_IK_25519_ChaChaPoly_BLAKE2s`
       over libsodium as a submodule under `ext/`. A **named pattern from a
       specified, analysed framework** on **somebody else's audited primitives** —
       because a handshake this project invented is the thing that fails a review,
@@ -790,6 +791,9 @@ review, and it fails it for good reasons.
       *(e)* a relayed four-player race still agrees tick for tick with one
       datagram in twenty dropped and the rest reordered;
       *(f)* the handshake and the framing are fuzzed under ASan and UBSan.
+      *Where it stands: (a), (b), (c), (d) and (f) are done and are checked by
+      `ctest`. (e) is not — the game still sends everything in the clear, and
+      until the wire uses the tunnel this item is not finished.*
 - [ ] **The transport has a written specification.** Message formats, the state
       machine, the key schedule, the message limit before a rekey, and the
       properties claimed **and explicitly not claimed**. A design nobody wrote

@@ -437,6 +437,41 @@ if(GEARSTICK_TESTS)
     add_test(NAME gearstick_wire COMMAND gearstick_wire_tests)
     set_tests_properties(gearstick_wire PROPERTIES TIMEOUT 120)
 
+    # The tunnel. No sockets and no SDL: it turns bytes into bytes, so it is
+    # tested against the framework's published vectors rather than by watching
+    # two processes appear to talk.
+    add_executable(gearstick_noise_tests tests/test_noise.c src/net/gs_noise.c)
+    target_link_libraries(gearstick_noise_tests PRIVATE gearstick_sim gearstick_sodium)
+    target_compile_definitions(gearstick_noise_tests PRIVATE
+        GS_NOISE_VECTORS="${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/noise_ik_25519_chachapoly_blake2s.json")
+    gs_configure(gearstick_noise_tests)
+
+    add_test(NAME gearstick_noise COMMAND gearstick_noise_tests)
+    set_tests_properties(gearstick_noise PROPERTIES TIMEOUT 120)
+
+    # **A handshake against an implementation nobody here wrote.** The published
+    # vectors say our bytes match a recording; they cannot say we can hold a
+    # conversation, because both sides of a vector came from one implementation.
+    # This is the evidence that does not rest on our own opinion of our own
+    # code, and it is a separate program in a separate language for exactly
+    # that reason.
+    add_executable(gearstick_noise_peer tools/noise_peer.c src/net/gs_noise.c)
+    target_link_libraries(gearstick_noise_peer PRIVATE gearstick_sim gearstick_sodium)
+    gs_configure(gearstick_noise_peer)
+
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        add_test(NAME gearstick_noise_interop
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/noise_interop.py
+                         $<TARGET_FILE:gearstick_noise_peer>)
+        # 77 is ctest's "skipped": the script says so when the noiseprotocol
+        # package is absent, which is better than a green tick for a check that
+        # did not run.
+        set_tests_properties(gearstick_noise_interop PROPERTIES
+                             TIMEOUT 120 SKIP_RETURN_CODE 77)
+    endif()
+
     # The synthesiser, measured rather than listened to. A listening test is
     # the right verification and is not one CI can run; this checks the things a
     # listener would notice and a forgotten listening test would not - that the
@@ -502,6 +537,18 @@ if(GEARSTICK_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# The primitives behind the transport
+#
+# X25519 and ChaCha20-Poly1305, from somebody else's audited library rather than
+# from here. A handshake this project invented is the thing that fails a review,
+# and deservedly; so is a curve this project implemented. BLAKE2s is the one
+# exception and it is not an exception to the principle: libsodium ships BLAKE2b
+# and the suite names BLAKE2s, and the simulation cannot link libsodium anyway.
+
+include(cmake/Libsodium.cmake)
+gs_add_libsodium()
+
+# ---------------------------------------------------------------------------
 # Fuzzing the parsers
 #
 # **Every byte the server acts on came from somebody who may be hostile**, and
@@ -530,8 +577,9 @@ if(GEARSTICK_FUZZ)
     add_executable(gearstick_fuzz_seeds
         tools/fuzz_seeds.c
         src/net/gs_proto.c
-        src/net/gs_carrier.c)
-    target_link_libraries(gearstick_fuzz_seeds PRIVATE gearstick_sim)
+        src/net/gs_carrier.c
+        src/net/gs_noise.c)
+    target_link_libraries(gearstick_fuzz_seeds PRIVATE gearstick_sim gearstick_sodium)
     gs_configure(gearstick_fuzz_seeds)
 
     # ASan and UBSan alongside the fuzzer, because "it did not crash" is a much
@@ -540,12 +588,14 @@ if(GEARSTICK_FUZZ)
     set(GS_FUZZ_FLAGS -fsanitize=fuzzer,address,undefined
                       -fno-omit-frame-pointer -g)
 
-    foreach(_target proto carrier track replay)
+    foreach(_target proto carrier track replay noise)
         add_executable(gearstick_fuzz_${_target}
             tests/fuzz/fuzz_${_target}.c
             src/net/gs_proto.c
-            src/net/gs_carrier.c)
-        target_link_libraries(gearstick_fuzz_${_target} PRIVATE gearstick_sim)
+            src/net/gs_carrier.c
+            src/net/gs_noise.c)
+        target_link_libraries(gearstick_fuzz_${_target}
+                              PRIVATE gearstick_sim gearstick_sodium)
         gs_configure(gearstick_fuzz_${_target})
         target_compile_options(gearstick_fuzz_${_target} PRIVATE ${GS_FUZZ_FLAGS})
         target_link_options(gearstick_fuzz_${_target} PRIVATE ${GS_FUZZ_FLAGS})
@@ -558,7 +608,7 @@ if(GEARSTICK_FUZZ)
     # takes the same work on a slow machine as on a fast one and cannot go
     # flaky by being unlucky with a clock.
     if(GEARSTICK_TESTS)
-        foreach(_target proto carrier track replay)
+        foreach(_target proto carrier track replay noise)
             add_test(NAME gearstick_fuzz_${_target}
                      COMMAND ${CMAKE_COMMAND}
                              -DSEEDS=$<TARGET_FILE:gearstick_fuzz_seeds>

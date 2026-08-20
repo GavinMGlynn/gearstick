@@ -1777,6 +1777,106 @@ no-op by design, so state carried between cases and the refusal came from the
 wrong rule — the test passed with the bound removed. Each case now uses a
 different hash.
 
+### The tunnel — Noise_IK_25519_ChaChaPoly_BLAKE2s
+
+**Not finished: nothing uses it yet.** The tunnel exists, is tested, and
+interoperates; the game still sends everything in the clear. The wire
+integration is the remaining half of this item and the plan entry stays
+unticked until a race runs through it.
+
+What is built is `src/net/gs_noise.c`: the IK handshake pattern from the Noise
+Protocol Framework, revision 34, spelled as the specification spells it, over
+X25519 and ChaCha20-Poly1305 from libsodium and BLAKE2s from `src/core/`.
+
+**IK rather than NK** because the client already knows the server's static
+public key, so one round trip buys server authentication, client
+authentication, and a client identity a passive observer cannot read. **One
+suite and no negotiation**, because a protocol that cannot negotiate cannot be
+talked down to something weaker. The suite name goes into the handshake hash
+before anything else, so two endpoints that disagree about it cannot complete a
+handshake at all.
+
+#### A datagram channel, which Noise does not assume
+
+The framework's transport phase assumes messages arrive in order. Nothing this
+project sends does. So each datagram carries an explicit 64-bit counter and the
+receiver keeps a 64-wide sliding window: anything already seen inside it, or too
+far behind it to judge, is refused.
+
+**Out of order is not the same thing as replayed**, and a rule of "must be newer
+than the last one accepted" cannot tell them apart — it throws away the
+reordering every lossy link produces constantly and calls it an attack, which in
+a race means discarding inputs that will never be resent.
+
+Two decisions worth the words:
+
+- **The counter travels in front and is not passed as associated data.** It
+  looks like it should be, and it does not need to be: the counter *is* the
+  nonce, and the nonce is an input to the tag, so a counter changed in flight
+  produces a tag that does not verify. Passing it as AD as well would add
+  nothing and would make every sealed message differ from what the framework
+  specifies — which would cost the published vectors and the interoperability
+  check, because both cover the transport phase and not only the handshake.
+- **The window moves only for a datagram that turned out to be genuine.**
+  Recording the counter before the tag is checked would let anybody who can send
+  a packet mark a sequence number as seen and have the real one refused when it
+  arrived.
+
+#### The evidence, which is deliberately not our own opinion
+
+- **The framework's published test vectors pass.** From `cacophony.txt`, the
+  Noise Protocol Framework's own published set, trimmed to this suite and
+  committed as `tests/vectors/`. Every byte of both handshake messages, the
+  handshake hash both ends arrive at, and all four transport messages after it.
+- **A handshake completes against an implementation nobody here wrote.**
+  `tools/noise_interop.py` drives `gearstick_noise_peer` from the Python
+  `noiseprotocol` package, in both directions, and checks that both ends arrive
+  at the same handshake hash. It is a separate program in a separate language
+  because an independent implementation has to be independent. It reports itself
+  *skipped* rather than passed when the package is absent, and CI installs it —
+  a skipped check for the one piece of evidence that is not our own opinion is
+  worth nothing.
+- **A capture carries none of the plaintext it was given** — not the whole
+  string and not any eight bytes of it, the second being the check that would
+  catch a cipher that had quietly become a no-op for part of a message.
+- **Every single bit flipped, one at a time**, in a sealed datagram, is refused
+  — including the counter in front of it.
+- **A replay is refused and a reordering is not**, tested by jumping forward and
+  then delivering the skipped datagrams, each accepted exactly once, with one
+  from far enough back that the window cannot say and is refused for that.
+- **The handshake and the framing are fuzzed** under ASan and UBSan, seeded with
+  real handshakes and real sealed streams. This is the most exposed parser in the
+  program: a server has to look at a stranger's first datagram in order to find
+  out that it is a stranger.
+
+#### Two hours lost to a test, not to the tunnel
+
+The published vectors failed on the first run and the implementation was
+correct. `gs_field`, the little scanner that reads the vector file, returned a
+pointer to one static buffer — so reading a payload and then a ciphertext
+overwrote the payload, every message was compared against itself, and a
+byte-for-byte correct handshake looked broken. What settled it was driving the
+same vector through the Python library, which agreed with the vector, and then
+printing our own bytes, which also agreed with the vector.
+
+The Python driver had its own version of the same mistake first: it was handed
+`init_remote_static` — a public key — through the API that takes a private one,
+so the library disagreed with the vector too and briefly made the vector look
+wrong rather than the driver.
+
+#### libsodium, and the rule it bends
+
+`ext/README.md` says nothing there is modified in place, and libsodium ships no
+CMake — upstream builds with autotools and MSBuild. So `cmake/Libsodium.cmake`
+names its sources and compiles them here, and the submodule stays exactly what
+upstream tagged. Every source is compiled rather than the handful actually used
+being picked out: a subset that is wrong links cleanly and behaves subtly
+differently, which is the worst failure available in a cryptographic library.
+
+It is also the one place "prefer no dependency to a small one" is set aside on
+purpose, because the alternative to a large audited dependency here is our own
+elliptic curve arithmetic, and that trade is not close.
+
 ---
 
 ## What does not exist

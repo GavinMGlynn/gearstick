@@ -13,6 +13,7 @@ this repository — a clone gets URLs and commit SHAs, not sources.
 | `dear_bindings` | dearimgui/dear_bindings | `v0.21` | **Build-time only.** Generates the C API for the above; never linked | MIT |
 | `sdl_net` | libsdl-org/SDL_net | `release-3.2.0` | **Linked by the shell only.** The datagram socket the rollback netcode sends over | Zlib |
 | `imgui_styles` | GraphicsProgramming/dear-imgui-styles | `2684aea` | **Reference only.** A collection of Dear ImGui themes; the front end's layout numbers follow their shape. Never built, never linked | MIT |
+| `libsodium` | jedisct1/libsodium | `1.0.20-RELEASE` | **The transport's primitives.** X25519 and ChaCha20-Poly1305 for the Noise tunnel | ISC |
 
 `imgui_styles` is here because it was *consulted*, not because anything builds
 it. The front end's spacing, padding and rounding follow the shape those themes
@@ -20,6 +21,21 @@ settled on rather than numbers invented here; the colours do not, and are taken
 from the game's own palette. Pinning it means the reference cannot silently
 become a different reference — the same reason every other line in this table
 carries a commit.
+
+`libsodium` is here because a handshake this project invented is the thing that
+fails a review, and a curve this project implemented is worse. It is the one
+place the "prefer no dependency to a small one" rule is deliberately set aside:
+the alternative to a large audited dependency is not a small one, it is our own
+elliptic curve arithmetic, and that trade is not close. **It ships no CMake** -
+upstream builds with autotools and MSBuild - so `cmake/Libsodium.cmake` names
+its sources and compiles them here. That file lives outside `ext/` precisely so
+that the rule at the top of this document still holds: the submodule is exactly
+what upstream tagged.
+
+BLAKE2s is the exception, and it is not an exception to the principle. libsodium
+ships BLAKE2b and the chosen Noise suite names BLAKE2s, so `src/core/gs_blake2s.c`
+is RFC 7693 - checked against the RFC's published vector and against Python's
+`hashlib`. The simulation could not have linked libsodium anyway.
 
 `sdl_net` is a separate submodule rather than part of `sdl` because networking
 is a separate library from SDL, and it is a submodule rather than a system

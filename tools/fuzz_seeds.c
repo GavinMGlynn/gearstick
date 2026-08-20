@@ -12,6 +12,7 @@
 #include "core/gs_replay.h"
 #include "core/gs_track.h"
 #include "net/gs_carrier.h"
+#include "net/gs_noise.h"
 #include "net/gs_proto.h"
 
 #include <stdio.h>
@@ -257,10 +258,72 @@ static void gs_write_dict(const char *corpus) {
     printf("fuzz_seeds: dictionary for %s in %s.dict\n", corpus, gs_dir);
 }
 
+// Real handshake messages and real sealed datagrams. The handshake's first
+// message is the one a server has to look at from a stranger, so it is the seed
+// that matters most.
+static void gs_seeds_noise(void) {
+    gs_noise_keypair client, server;
+    uint8_t secret[32];
+    for (int i = 0; i < 32; i++) secret[i] = (uint8_t)(0x90u + (unsigned)i);
+    gs_noise_key_from_secret(&client, secret);
+    for (int i = 0; i < 32; i++) secret[i] = (uint8_t)(0x40u + (unsigned)i);
+    gs_noise_key_from_secret(&server, secret);
+
+    static gs_noise_handshake i, r;
+    gs_noise_init_initiator(&i, &client, server.pub, (const uint8_t *)"g", 1);
+    gs_noise_init_responder(&r, &server, (const uint8_t *)"g", 1);
+
+    uint8_t eph[32];
+    for (int k = 0; k < 32; k++) eph[k] = (uint8_t)(0x10u + (unsigned)k);
+    gs_noise_set_ephemeral(&i, eph);
+    for (int k = 0; k < 32; k++) eph[k] = (uint8_t)(0xd0u + (unsigned)k);
+    gs_noise_set_ephemeral(&r, eph);
+
+    static uint8_t m1[1024], m2[1024], payload[1024];
+    size_t got = 0;
+    size_t n1 = gs_noise_write_message(&i, (const uint8_t *)"hello", 5, m1, sizeof m1);
+
+    // The fuzzer reads one prologue byte before the handshake message, so the
+    // seed carries it too and a mutation of it is a mutation of the prologue.
+    static uint8_t framed[2048];
+    framed[0] = 'g';
+    memcpy(framed + 1, m1, n1);
+    gs_seed("handshake_1", framed, n1 + 1);
+
+    gs_noise_read_message(&r, m1, n1, payload, sizeof payload, &got);
+    size_t n2 = gs_noise_write_message(&r, (const uint8_t *)"welcome", 7, m2, sizeof m2);
+    framed[0] = 'g';
+    memcpy(framed + 1, m2, n2);
+    gs_seed("handshake_2", framed, n2 + 1);
+
+    gs_noise_read_message(&i, m2, n2, payload, sizeof payload, &got);
+
+    static gs_noise_session ci, se;
+    gs_noise_split(&i, &ci);
+    gs_noise_split(&r, &se);
+
+    // A run of sealed datagrams, length-prefixed the way the fuzzer reads them.
+    size_t at = 1;
+    framed[0] = 'g';
+    for (int k = 0; k < 12; k++) {
+        uint8_t body[32];
+        for (size_t b = 0; b < sizeof body; b++) body[b] = (uint8_t)((unsigned)(k * 32) + (unsigned)b);
+
+        uint8_t sealed[128];
+        size_t n = gs_noise_seal(&ci, body, sizeof body, sealed, sizeof sealed);
+        if (n == 0 || at + 2 + n > sizeof framed) break;
+        framed[at++] = (uint8_t)(n & 0xffu);
+        framed[at++] = (uint8_t)((n >> 8) & 0xffu);
+        memcpy(framed + at, sealed, n);
+        at += n;
+    }
+    gs_seed("sealed_stream", framed, at);
+}
+
 int main(int argc, char **argv) {
     if (argc != 3) {
         fprintf(stderr,
-                "usage: gearstick_fuzz_seeds <proto|track|replay|carrier> <dir>\n");
+                "usage: gearstick_fuzz_seeds <proto|track|replay|carrier|noise> <dir>\n");
         return 2;
     }
     snprintf(gs_dir, sizeof gs_dir, "%s", argv[2]);
@@ -269,6 +332,7 @@ int main(int argc, char **argv) {
     else if (strcmp(argv[1], "track") == 0)   gs_seeds_track();
     else if (strcmp(argv[1], "replay") == 0)  gs_seeds_replay();
     else if (strcmp(argv[1], "carrier") == 0) gs_seeds_carrier();
+    else if (strcmp(argv[1], "noise") == 0)   gs_seeds_noise();
     else {
         fprintf(stderr, "fuzz_seeds: no such corpus '%s'\n", argv[1]);
         return 2;
