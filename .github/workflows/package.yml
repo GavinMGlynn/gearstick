@@ -522,7 +522,13 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Publish the release
-    needs: [linux, macos, windows]
+    # **windows-clean-machine is in this list deliberately.** Without it a
+    # release could publish an installer that had just failed on a machine with
+    # no toolchain: the three build jobs would be green, the check that matters
+    # to a player would be red, and nothing would stop the upload. A gate that
+    # does not gate the thing it was written for is worse than none, because it
+    # reads as protection.
+    needs: [linux, macos, windows, windows-clean-machine]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
