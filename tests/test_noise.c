@@ -784,6 +784,61 @@ TEST(a_relayed_four_player_race_agrees_tick_for_tick_through_the_tunnel) {
     for (int i = 0; i < GS_RELAY_PEERS; i++) CHECK(net[i].rollbacks > 0);
 }
 
+TEST(the_handshake_is_the_size_the_specification_says) {
+    // **docs/TRANSPORT.md gives byte offsets so somebody can implement a client
+    // from it.** A document that drifts from the code is worse than no document
+    // - it is a wrong one that reads as authoritative - so the numbers in it are
+    // pinned here and a change to the format has to come past this test.
+    static gs_noise_handshake i, r;
+    gs_noise_keypair ck, sk;
+    static uint8_t m1[512], m2[512], out[512];
+    size_t got = 0;
+
+    gs_noise_keygen(&ck);
+    gs_noise_keygen(&sk);
+    gs_noise_init_initiator(&i, &ck, sk.pub, (const uint8_t *)"gearstick/1", 11);
+    gs_noise_init_responder(&r, &sk, (const uint8_t *)"gearstick/1", 11);
+
+    // Message one: ephemeral, encrypted static, encrypted payload.
+    size_t n1 = gs_noise_write_message(&i, nullptr, 0, m1, sizeof m1);
+    CHECK(n1 == GS_NOISE_KEY_BYTES +
+                (GS_NOISE_KEY_BYTES + GS_NOISE_TAG_BYTES) +
+                GS_NOISE_TAG_BYTES);
+    CHECK(n1 == 96);
+
+    CHECK(gs_noise_read_message(&r, m1, n1, out, sizeof out, &got));
+
+    // Message two: ephemeral and encrypted payload.
+    size_t n2 = gs_noise_write_message(&r, nullptr, 0, m2, sizeof m2);
+    CHECK(n2 == GS_NOISE_KEY_BYTES + GS_NOISE_TAG_BYTES);
+    CHECK(n2 == 48);
+
+    CHECK(gs_noise_read_message(&i, m2, n2, out, sizeof out, &got));
+
+    // A sealed datagram: eight bytes of counter, then the ciphertext and tag.
+    static gs_noise_session a, b;
+    CHECK(gs_noise_split(&i, &a));
+    CHECK(gs_noise_split(&r, &b));
+
+    static uint8_t sealed[512];
+    size_t n = gs_noise_seal(&a, (const uint8_t *)"0123456789", 10, sealed,
+                             sizeof sealed);
+    CHECK(n == 10 + 8 + GS_NOISE_TAG_BYTES);
+    CHECK(GS_NOISE_OVERHEAD == 24);
+
+    // The counter is little-endian and starts at zero, which is what a reader
+    // of the document would implement.
+    CHECK(sealed[0] == 0 && sealed[1] == 0 && sealed[7] == 0);
+    n = gs_noise_seal(&a, (const uint8_t *)"x", 1, sealed, sizeof sealed);
+    CHECK(sealed[0] == 1);
+
+    // And the protocol name is longer than the hash, so InitializeSymmetric
+    // hashes it rather than padding - the one place an implementer is most
+    // likely to go wrong, and the document says so.
+    CHECK(strlen(GS_NOISE_PROTOCOL) == 33);
+    CHECK(strlen(GS_NOISE_PROTOCOL) > GS_NOISE_HASH_BYTES);
+}
+
 int main(void) {
     printf("gearstick noise tests\n");
 
@@ -797,6 +852,7 @@ int main(void) {
     run_a_session_stops_sending_before_its_counter_could_repeat();
     run_rubbish_where_a_handshake_should_be_is_refused_without_reading_past_it();
     run_a_failed_handshake_stays_failed();
+    run_the_handshake_is_the_size_the_specification_says();
     run_a_relayed_four_player_race_agrees_tick_for_tick_through_the_tunnel();
 
     if (gs_failures == 0) {

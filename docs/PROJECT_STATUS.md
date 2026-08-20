@@ -2198,6 +2198,41 @@ file or directory" the whole time and nobody could see it, because
 dies is the entire report; it is captured and printed now, and that change paid
 for itself twice in one evening.
 
+### The transport, written down
+
+`docs/TRANSPORT.md` says what goes between a client and a server, byte for byte:
+the six-byte envelope, both handshake messages with offsets, the sealed
+datagram's counter and ciphertext, the key schedule, the nonce layout, the
+replay window, and the message limit.
+
+**The half that is worth more is section 11, which is what it does not claim.**
+No denial-of-service resistance — anybody who can send datagrams can make the
+server do X25519, and that trade was made knowingly for a game server. No
+post-compromise security, because there is no rekey and no ratchet. No
+protection of the server's key at rest. No traffic-analysis resistance. No
+formal proof of this implementation, only published vectors and an independent
+implementation, which is a weaker and different statement. A reviewer needs to
+find those out at once rather than by looking for them.
+
+Two things in it are the ones an implementer is most likely to get wrong, so
+they are called out rather than left in a table: the protocol name is 33 bytes
+and therefore **hashed** rather than padded when the symmetric state is
+initialised, and HKDF uses BLAKE2s's **64-byte block**, not its 32-byte digest.
+Either mistake produces a key schedule that is self-consistent and matches
+nobody.
+
+The byte sizes the document quotes are pinned by a test. A document that drifts
+from its code is worse than no document, because it reads as authoritative while
+being wrong.
+
+**Not finished, and the reason is not the document.** The item's verification is
+that somebody who has not read the code can implement a client from it and
+complete a handshake. The person who wrote the code cannot be that person, so it
+stays unticked. The nearest evidence that exists is `tools/noise_interop.py`,
+where an implementation nobody here wrote completes a handshake in both
+directions — but that is a library implementing the Noise framework, not
+somebody implementing *this document*.
+
 ---
 
 ## What does not exist

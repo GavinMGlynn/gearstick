@@ -812,6 +812,16 @@ review, and it fails it for good reasons.
       needs to see were decisions.
       *Verification: somebody who has not read the code can implement a client
       from the document alone and complete a handshake.*
+      **The document is written — `docs/TRANSPORT.md` — and this stays unticked
+      because the verification needs a reader, and the person who wrote the code
+      cannot be that reader.** It gives byte offsets for both handshake messages
+      and the sealed envelope, the key schedule, the nonce and replay-window
+      rules, the message limit and the absence of a rekey, and a section of
+      things it explicitly does not claim: no denial-of-service resistance, no
+      post-compromise security, no traffic-analysis resistance, no formal proof.
+      The byte sizes it quotes are pinned by a test, so the document cannot
+      drift from the code without something going red. What is missing is
+      somebody implementing a client from it who has not seen `gs_noise.c`.
 - [x] **A profile you can prove is yours.** A password, and a second factor for
       anybody who wants one. **This comes after the tunnel and is small because
       of it**: inside a sealed channel a password can simply be sent, and a
