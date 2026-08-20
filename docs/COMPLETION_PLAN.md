@@ -996,13 +996,16 @@ worth as much as what was decided about it.
       confirms tick for tick, a two-client race the server merely introduced
       does the same, and a well-formed datagram nobody sealed is refused while
       the real peer's traffic still arrives.*
-- [ ] **`PROJECT_STATUS.md`'s "What does not exist" section is years out of
+- [x] **`PROJECT_STATUS.md`'s "What does not exist" section is years out of
       date.** *(Found while writing up the session binding.)* It still says
       there is no race, no AI, no sound, no front end and no shipped tracks, all
       of which have been built and ticked here. A reader sent to that file to
       learn what works is being told the opposite by a section that is supposed
       to be its honest half. Two commits also landed their item without touching
       the file at all, which is how it got this far behind.
-      *Verification: every claim in the section is either true or gone, and
-      somebody who has not seen the code can still say what works from the file
-      alone.*
+      *Verification: every claim in the section is either true or gone. It now
+      names the things that genuinely are not done — sound on two platforms,
+      nobody having implemented a client from the transport document, the
+      installer never installed on a clean machine, no tag, no rekey, no delete
+      over the wire, no denial-of-service resistance — and says why the "what
+      does not exist" half of a status document is the half that rots.*

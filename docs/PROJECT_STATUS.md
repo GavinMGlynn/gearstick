@@ -2276,24 +2276,41 @@ gap as listening to the sound on three platforms.
 
 ## What does not exist
 
-- **A race.** Gates exist and can be crossed, but nothing counts laps, times a
-  run, decides a winner or shows any of it. There is no HUD.
-- **Collision between cars**, and every hazard, weapon and destruction-mode rule.
-- **AI.** No opponent of any kind.
-- **Ghosts, the track analyser, track sharing, rollback netcode.** All of them
-  are downstream of determinism, which is why determinism came first, but none
-  of them are started.
-- **Surface wear and persistent wreckage.**
-- **Art.** No meshes, no textures, no font — the cars are coloured boxes.
-  Where it will come from and how each source gets pinned is in `ASSETS.md`;
-  none of it is fetched yet.
-- **Sound and music.** Nothing plays.
-- **A front end.** No title, no race setup, no vehicle choice, no results.
-- **Shipped tracks.** The format, the editor and the route all work; nobody has
-  authored a track worth shipping with them. The demo track is hard-coded in
-  `main.c` and is a prototype.
-- **Any release.** CI and packaging work; nothing has been tagged or published.
-- **A player's guide.**
+**This section was years out of date and said the opposite of the truth** — no
+race, no AI, no sound, no front end, no shipped tracks, all of which have been
+built and ticked. A reader sent to this file to learn what works was being told
+by its honest half that almost nothing did. It is rewritten here and the lesson
+is in the tail that caught it: the "what works" half of a status document gets
+updated because it is fun to write, and the "what does not" half rots.
+
+- **Sound has only been listened to on Linux.** The synthesiser is
+  platform-independent and the device path is not. Windows and macOS need a
+  person with speakers, and no amount of measurement substitutes for that.
+- **Nobody has implemented a client from `docs/TRANSPORT.md`.** The document is
+  written and its byte sizes are pinned by a test; what has not happened is
+  somebody who has never read `gs_noise.c` writing a client from it and
+  completing a handshake, which is the only thing that proves a specification is
+  one.
+- **The Windows installer has not been installed on a clean machine.** CI
+  installs it, runs what it installed and uninstalls it, on the machine that
+  just built it. "Never had a toolchain on it" and "the game runs from the Start
+  Menu" both need a person.
+- **Nothing has been tagged or released.** The packaging workflow builds a
+  tarball, a disk image, a zip and an installer, and attests all four; no
+  version has come out of it.
+- **No rekey on the transport.** A session stops sending at 2^40 datagrams —
+  about 290 years at 120 a second — rather than rekeying. `docs/TRANSPORT.md`
+  says so in the section on what is not claimed.
+- **No delete over the wire.** A track's owner can make it private, but there is
+  no protocol message that removes one. The store's delete is owner-checked and
+  tested and nothing reaches it.
+- **No denial-of-service resistance anywhere.** No cookie, no puzzle, no rate
+  limit; anybody who can send datagrams can make the server do X25519. A
+  deliberate trade for a game server, written down in `docs/TRANSPORT.md` rather
+  than left to be discovered.
+- **The tails below the plan.** `docs/COMPLETION_PLAN.md` keeps the found-work
+  that has not been done, and it is the honest list of small things this
+  document would otherwise be tempted to leave out.
 
 ---
 
