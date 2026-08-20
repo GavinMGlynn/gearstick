@@ -253,6 +253,121 @@ jobs:
   # into a fact somebody checked. This job exists to say so out loud when they
   # all pass.
   # ---------------------------------------------------------------------------
+  # Every byte the server acts on came from somebody who may be hostile: the
+  # protocol decoder, the chunked reassembler, and the track and replay
+  # deserialisers behind them. They are the part of this program most likely to
+  # contain a memory-safety bug and they are reachable from the network by
+  # anybody, so they are fed rubbish here rather than only well-formed input.
+  #
+  # The corpus is generated rather than committed - by the same code the game
+  # builds its messages with - so a seed cannot quietly stop being a sample of
+  # the format it is supposed to be a sample of.
+  #
+  # The dependency install below is the Debian job's, repeated. It is duplicated
+  # rather than shared because clang is a different toolchain on the same image
+  # and factoring it out would mean editing a job that is green; the duplication
+  # is the cheaper of the two mistakes.
+  # ---------------------------------------------------------------------------
+  fuzz:
+    name: The parsers, fed rubbish (clang, ASan + UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: false }
+      - name: Check out build submodules
+        run: git submodule update --init --depth 1 $CI_SUBMODULES
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*google* \
+                     /etc/apt/sources.list.d/*microsoft* \
+                     /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer \
+                              unattended-upgrades.service 2>/dev/null || true
+
+          APT_OPTS="-o Acquire::Retries=3 \
+                    -o Acquire::http::Timeout=30 \
+                    -o Acquire::https::Timeout=30 \
+                    -o Acquire::ForceIPv4=true \
+                    -o DPkg::Lock::Timeout=60"
+
+          apt_run() {
+            for attempt in 1 2 3; do
+              if sudo timeout 240 apt-get $APT_OPTS "$@"; then return 0; fi
+              echo "::warning::apt attempt $attempt stalled; killing it and retrying"
+              sudo pkill -9 -f apt-get 2>/dev/null || true
+              sudo pkill -9 -f dpkg 2>/dev/null || true
+              sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock \
+                         /var/lib/dpkg/lock-frontend 2>/dev/null || true
+              sudo dpkg --configure -a 2>/dev/null || true
+              sleep 10
+            done
+            echo "::error::apt would not complete in three attempts"
+            return 1
+          }
+
+          apt_run update
+          apt_run install -y --no-install-recommends \
+            clang ninja-build \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libgl-dev libegl-dev libdrm-dev libgbm-dev \
+            libpulse-dev libasound2-dev \
+            libdbus-1-dev libudev-dev libusb-1.0-0-dev
+
+      - name: Configure
+        run: cmake -B build-fuzz -G Ninja -DCMAKE_C_COMPILER=clang
+                   -DCMAKE_BUILD_TYPE=Debug -DGEARSTICK_FUZZ=ON
+
+      # Only the fuzz targets. They link the simulation and the protocol and
+      # nothing else - no SDL, no window, no sockets - which is the same
+      # property gearstick_cli exists to prove, collected again.
+      - name: Build the fuzz targets
+        run: |
+          cmake --build build-fuzz -j --target \
+            gearstick_fuzz_seeds gearstick_fuzz_proto gearstick_fuzz_carrier \
+            gearstick_fuzz_track gearstick_fuzz_replay
+
+      # The regression half: every seed through every parser under the
+      # sanitizers, as a fixed amount of work. This is what must never go red.
+      - name: The seed corpus, through every parser
+        run: ctest --test-dir build-fuzz -R gearstick_fuzz --output-on-failure
+
+      # And the campaign. A time budget rather than a work budget, because this
+      # half is looking for something new rather than checking something known.
+      - name: A campaign per parser
+        run: |
+          set -e
+          for t in proto carrier track replay; do
+            dir="build-fuzz/campaign/$t"
+            rm -rf "$dir"; mkdir -p "$dir"
+            ./build-fuzz/gearstick_fuzz_seeds "$t" "$dir"
+            echo "::group::$t"
+            ./build-fuzz/"gearstick_fuzz_$t" "$dir" "-dict=$dir.dict" \
+              -max_total_time=120 -print_final_stats=1
+            echo "::endgroup::"
+          done
+
+      # A crash is a file libFuzzer drops in the working directory, and it is
+      # the input that caused it - which is the whole report, reproducible with
+      # one command.
+      - name: Keep anything that crashed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: |
+            crash-*
+            leak-*
+            timeout-*
+            oom-*
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
   determinism:
     name: The same race everywhere
     needs: [linux-debian, linux-rhel, macos, windows]

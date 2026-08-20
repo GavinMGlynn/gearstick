@@ -502,6 +502,76 @@ if(GEARSTICK_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# Fuzzing the parsers
+#
+# **Every byte the server acts on came from somebody who may be hostile**, and
+# until this existed those parsers had never been fed anything but well-formed
+# input. They are the part of this program most likely to contain a
+# memory-safety bug, and they are reachable from the network by anybody.
+#
+# Off by default and clang-only, because libFuzzer is a clang feature. The
+# targets link the simulation and the protocol and nothing else - no SDL, no
+# window, no sockets - which is what makes them cheap enough to run on every
+# push.
+
+option(GEARSTICK_FUZZ "Build the libFuzzer parser targets (clang only)" OFF)
+
+if(GEARSTICK_FUZZ)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR
+            "GEARSTICK_FUZZ needs clang: libFuzzer is a clang feature and "
+            "${CMAKE_C_COMPILER_ID} does not have it. Configure with "
+            "-DCMAKE_C_COMPILER=clang.")
+    endif()
+
+    # The seed writer is an ordinary program - it builds real messages with the
+    # same code the game builds them with, so a seed cannot drift out of step
+    # with the format it is a sample of. Not fuzzer-instrumented itself.
+    add_executable(gearstick_fuzz_seeds
+        tools/fuzz_seeds.c
+        src/net/gs_proto.c
+        src/net/gs_carrier.c)
+    target_link_libraries(gearstick_fuzz_seeds PRIVATE gearstick_sim)
+    gs_configure(gearstick_fuzz_seeds)
+
+    # ASan and UBSan alongside the fuzzer, because "it did not crash" is a much
+    # weaker statement than "it did not read out of bounds or shift by 32", and
+    # the second one is what these are for.
+    set(GS_FUZZ_FLAGS -fsanitize=fuzzer,address,undefined
+                      -fno-omit-frame-pointer -g)
+
+    foreach(_target proto carrier track replay)
+        add_executable(gearstick_fuzz_${_target}
+            tests/fuzz/fuzz_${_target}.c
+            src/net/gs_proto.c
+            src/net/gs_carrier.c)
+        target_link_libraries(gearstick_fuzz_${_target} PRIVATE gearstick_sim)
+        gs_configure(gearstick_fuzz_${_target})
+        target_compile_options(gearstick_fuzz_${_target} PRIVATE ${GS_FUZZ_FLAGS})
+        target_link_options(gearstick_fuzz_${_target} PRIVATE ${GS_FUZZ_FLAGS})
+    endforeach()
+
+    # A short run over the seed corpus, as a test. This is not a fuzzing
+    # campaign - it is the regression half: the seeds go through every parser
+    # under the sanitizers on every build, and CI runs the campaign properly
+    # with a time budget. `-runs` rather than `-max_total_time` so the test
+    # takes the same work on a slow machine as on a fast one and cannot go
+    # flaky by being unlucky with a clock.
+    if(GEARSTICK_TESTS)
+        foreach(_target proto carrier track replay)
+            add_test(NAME gearstick_fuzz_${_target}
+                     COMMAND ${CMAKE_COMMAND}
+                             -DSEEDS=$<TARGET_FILE:gearstick_fuzz_seeds>
+                             -DFUZZER=$<TARGET_FILE:gearstick_fuzz_${_target}>
+                             -DCORPUS=${_target}
+                             -DDIR=${CMAKE_CURRENT_BINARY_DIR}/fuzz/${_target}
+                             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunFuzzer.cmake)
+            set_tests_properties(gearstick_fuzz_${_target} PROPERTIES TIMEOUT 300)
+        endforeach()
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Installing, and packaging
 #
 # **A package is a folder somebody unpacks and runs**, so the layout is the one

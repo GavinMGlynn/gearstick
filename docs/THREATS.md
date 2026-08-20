@@ -265,8 +265,10 @@ transport work is larger and defends a channel nobody is currently attacking.
    recording carries the state every peer agreed the race ended in, and the
    server's re-race has to arrive there. The checks before it were about one car
    and one lap; a log altered anywhere else walked past all of them.
-5. **Fuzz the parsers.** Cheapest of all, and it defends the surface most likely
-   to contain something exploitable today.
+5. ~~**Fuzz the parsers.**~~ **Done.** Four libFuzzer targets under ASan and
+   UBSan, seeded from generated captures, run in CI. No crash found so far; the
+   targets are known to be capable of finding one because a planted bug was
+   found in seconds.
 6. **Seal the transport.** Everything about identity is meaningless without it.
 7. **Accounts, and a track's ownership.** Now that identity exists, "only the
    author may withdraw this" becomes true rather than decorative.

@@ -42,9 +42,26 @@ bool gs_carrier_take(gs_carrier *c, const uint8_t *buf, size_t len) {
     if (hash != c->hash) return false;
     if (chunks > GS_CARRIER_MAX_CHUNKS) return false;
 
+    // **The index into `have` is bounded here, by the size of `have`.**
+    //
+    // Said plainly: this is not currently reachable. `gs_proto_read_track_chunk`
+    // refuses a datagram whose chunk number is not below its chunk count, and
+    // the line above refuses a count larger than the array, so between them the
+    // index is already in range before this function sees it.
+    //
+    // It is here because that is an argument, not a bound. It runs through two
+    // checks in another file and the arithmetic between `GS_CARRIER_MAX_BYTES`,
+    // `GS_CHUNK_BYTES` and the rounding that relates them - and part of it holds
+    // only because `GS_CARRIER_MAX_BYTES` happens not to be a multiple of
+    // `GS_CHUNK_BYTES`. Round the replay length one day and a chunk index of
+    // exactly `GS_CARRIER_MAX_CHUNKS` starts passing the byte check below and
+    // writing one past the end of `have`. Nothing in either file says any of
+    // that, so the array that is indexed is the thing that bounds the index.
+    if (chunk >= GS_CARRIER_MAX_CHUNKS) return false;
+    if (chunk >= chunks) return false;
+
     // The count cannot change halfway through a transfer.
     if (c->chunks != 0 && c->chunks != chunks) return false;
-    c->chunks = chunks;
 
     size_t at = (size_t)chunk * GS_CHUNK_BYTES;
     if (at + data_len > GS_CARRIER_MAX_BYTES) return false;
@@ -52,6 +69,13 @@ bool gs_carrier_take(gs_carrier *c, const uint8_t *buf, size_t len) {
     // Every chunk but the last is full. A short one in the middle would mean
     // the pieces do not fit back together, however plausible each looks.
     if (chunk + 1 < chunks && data_len != GS_CHUNK_BYTES) return false;
+
+    // **Everything is checked before anything is kept.** The declared count
+    // used to be written down before the rest of the checks had run, so a
+    // datagram that was about to be refused still left its number behind - and
+    // every honest chunk that followed was then turned away for disagreeing
+    // with a count that came from the chunk nobody accepted.
+    c->chunks = chunks;
 
     memcpy(c->bytes + at, data, data_len);
 

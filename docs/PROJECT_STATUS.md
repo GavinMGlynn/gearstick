@@ -1699,6 +1699,84 @@ frontend drives — record each confirmed tick, stamp the agreed hash, verify �
 through the same functions, but the frontend's own wiring of it is checked by
 reading rather than by running.
 
+### The parsers, fed rubbish
+
+Every byte the server acts on came from somebody who may be hostile, and until
+this landed those parsers had never been fed anything but well-formed input.
+There are four libFuzzer targets — the protocol decoder, the chunked
+reassembler, the track deserialiser and the replay deserialiser — built with
+clang under ASan and UBSan, off by default and run in CI.
+
+Two of them go past parsing on purpose. A track that deserialises is then
+hashed, sampled at every corner and driven off the edge of, because a parser
+that lets an out-of-range dimension through does its damage in the code that
+trusts the result. A replay that deserialises is re-raced, because every field
+the parser accepted — the car count, the vehicle ids, the grid, the tick count —
+is an index or a loop bound in the playback.
+
+**The corpus is generated, not committed.** `gearstick_fuzz_seeds` builds real
+messages with the same code the game builds them with, so a seed cannot quietly
+stop being a sample of the format it is supposed to be a sample of. It writes a
+dictionary from the same constants, because each of these formats opens with a
+four-byte magic word and mutation reaches four specific bytes by luck alone.
+
+Two things run: a fixed amount of work over the seed corpus as an ordinary
+`ctest` test, which is the regression half and must never go red; and a timed
+campaign per parser in CI, which is the half looking for something new.
+
+#### What it found, and what it did not
+
+**No crashes.** Around 120 million executions across the four parsers under ASan
+and UBSan found nothing. That is the honest result and it is worth stating
+plainly rather than dressing up: these parsers were written carefully and the
+fuzzers agree so far.
+
+**The carrier harness was nearly useless, and planting a bug is what showed it.**
+An out-of-bounds write was introduced past the reassembler's length check and
+four and a half million runs sailed by without noticing. The reason was in the
+harness: it took the expected track hash from the front of the fuzzer's input,
+and every chunk carries the hash of the track it belongs to, so any mutation
+broke an eight-byte equality and the input was refused at that one comparison
+before reaching any reassembly at all. It now takes the hash from the first
+datagram that parses — which is also what the server does, from the claim — and
+a later chunk disagreeing is the stray-chunk case, still reached and now reached
+on purpose.
+
+**The track target does find planted bugs.** With the bound on `w` and `h`
+removed from `gs_track_deserialize`, ASan reported a SEGV with the file and line
+within seconds.
+
+#### The reassembler's own bound
+
+The item asked for the reassembler to bound its own array index rather than
+inherit the bound from a check in another file, and it now does. **Said plainly:
+this was not a live hole.** `gs_proto_read_track_chunk` refuses a datagram whose
+chunk number is not below its own count, and `gs_carrier_take` refuses a count
+larger than the array, so the index was already in range.
+
+The point is that this was an argument rather than a bound. It ran through two
+checks in another file and the arithmetic relating `GS_CARRIER_MAX_BYTES`,
+`GS_CHUNK_BYTES` and the rounding between them — and part of it held only
+because `GS_CARRIER_MAX_BYTES` happens not to be a multiple of `GS_CHUNK_BYTES`.
+Round the replay length one day and a chunk index of exactly
+`GS_CARRIER_MAX_CHUNKS` starts passing the byte check and writing one past the
+end of `have`. Nothing in either file said so.
+
+#### One live defect, found while writing the test
+
+**A refused chunk left its number behind.** The declared chunk count was written
+into the transfer before the remaining checks had run, so a datagram that was
+about to be rejected still poisoned the count — and every honest chunk that
+followed was then turned away for disagreeing with a number that came from the
+chunk nobody accepted. One malformed datagram and that track could never be
+received again. Everything is now checked before anything is kept.
+
+It also caught the first draft of its own test, which reused one track hash for
+every case. `gs_carrier_expect` with the hash it is already collecting is a
+no-op by design, so state carried between cases and the refusal came from the
+wrong rule — the test passed with the bound removed. Each case now uses a
+different hash.
+
 ---
 
 ## What does not exist

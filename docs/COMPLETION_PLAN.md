@@ -749,15 +749,25 @@ review, and it fails it for good reasons.
       *Found on the way and fixed here: an online race recorded no input log at
       all, so a networked time could never have been verified by anybody.*
 
-- [ ] **The parsers are fuzzed.** Every byte the server acts on came from
+- [x] **The parsers are fuzzed.** Every byte the server acts on came from
       somebody who may be hostile: the protocol decoder, the chunked
       reassembler, and the track and replay deserialisers behind them. They are
       the part of this program most likely to contain a memory-safety bug and
       they have never been fed anything but well-formed input.
-      *Verification: a libFuzzer target per parser, each seeded from real
-      captures, run in CI and under ASan and UBSan; and the reassembler bounds
-      its own array index rather than inheriting the bound from a check in
-      another file.*
+      *Verification: four libFuzzer targets, seeded from captures built by the
+      same code the game builds its messages with, run under ASan and UBSan both
+      as a fixed-work `ctest` test and as a timed campaign in CI. The
+      reassembler bounds its own array index. Around 120 million executions
+      found no crash — and a bug planted in the track parser was found in
+      seconds, which is how the targets are known to be capable of finding one.*
+      *Two things worth saying rather than glossing: the reassembler's index was
+      already in range before this, via checks in another file, so that part is
+      belt and braces rather than a hole closed. And the carrier's harness was
+      nearly useless when first written — planting a bug is what revealed it,
+      and it was fixed.*
+      *Found and fixed on the way: a chunk the reassembler refused still left
+      its declared count behind, so one malformed datagram made that track
+      permanently unreceivable.*
 - [ ] **Nothing on the wire in the clear.** `Noise_IK_25519_ChaChaPoly_BLAKE2s`
       over libsodium as a submodule under `ext/`. A **named pattern from a
       specified, analysed framework** on **somebody else's audited primitives** —

@@ -3871,6 +3871,104 @@ TEST(a_track_arrives_in_pieces_and_is_the_same_track) {
     }
 }
 
+TEST(a_chunk_the_reassembler_refuses_does_not_poison_the_transfer) {
+    // **Everything is checked before anything is kept.** The declared chunk
+    // count used to be written down before the remaining checks had run, so a
+    // datagram that was about to be refused still left its number behind - and
+    // every honest chunk that followed was turned away for disagreeing with a
+    // count that came from the chunk nobody accepted. One malformed datagram,
+    // and that track could never be received again.
+    static uint8_t bytes[4096];
+    for (size_t i = 0; i < sizeof bytes; i++) bytes[i] = (uint8_t)(i * 7u);
+
+    uint64_t hash = 0xfeed0001u;
+    gs_carrier_expect(&gs_carry, hash);
+
+    uint8_t dg[GS_PROTO_MTU];
+    uint8_t payload[GS_CHUNK_BYTES];
+    memcpy(payload, bytes, sizeof payload);
+
+    // The last chunk of the largest transfer that could exist, at full length -
+    // which puts its final byte past the end of the buffer. Well formed as far
+    // as the protocol reader is concerned, and refused here.
+    size_t n = gs_proto_track_chunk(dg, sizeof dg, hash,
+                                    (uint16_t)(GS_CARRIER_MAX_CHUNKS - 1),
+                                    (uint16_t)GS_CARRIER_MAX_CHUNKS, payload,
+                                    (uint16_t)GS_CHUNK_BYTES);
+    CHECK(n > 0);
+    CHECK(!gs_carrier_take(&gs_carry, dg, n));
+
+    // A count far past the array, which is refused for that reason alone.
+    n = gs_proto_track_chunk(dg, sizeof dg, hash, 3,
+                             (uint16_t)(GS_CARRIER_MAX_CHUNKS + 100), payload,
+                             (uint16_t)GS_CHUNK_BYTES);
+    CHECK(n > 0);
+    CHECK(!gs_carrier_take(&gs_carry, dg, n));
+
+    // And now the honest transfer of that same track, which has to work. This
+    // is the assertion: a refusal left nothing behind.
+    size_t len = (size_t)GS_CHUNK_BYTES * 3u + 17u;
+    for (uint16_t c = 0; c < 4; c++) {
+        n = gs_carrier_chunk(dg, sizeof dg, hash, bytes, len, c);
+        CHECK(n > 0);
+        CHECK(gs_carrier_take(&gs_carry, dg, n));
+    }
+    CHECK(gs_carrier_done(&gs_carry));
+    CHECK(gs_carry.len == len);
+    CHECK(memcmp(gs_carry.bytes, bytes, len) == 0);
+}
+
+TEST(the_chunk_reader_refuses_a_datagram_that_does_not_add_up) {
+    // **Where the reassembler's safety actually comes from today.** It indexes
+    // an array by a number off the network, and what keeps that number in range
+    // is this reader refusing a chunk that is not below its own count. The
+    // reassembler bounds the index itself as well, but that line is unreachable
+    // while these hold - so these are the ones worth pinning, because if one of
+    // them went the belt would be doing the work alone and nobody would know.
+    uint8_t dg[GS_PROTO_MTU];
+    uint8_t payload[GS_CHUNK_BYTES];
+    memset(payload, 0xab, sizeof payload);
+
+    uint64_t hash = 0;
+    uint16_t chunk = 0, chunks = 0, data_len = 0;
+    const uint8_t *data = nullptr;
+
+    // The well-formed one, so the refusals below mean something.
+    size_t n = gs_proto_track_chunk(dg, sizeof dg, 0x99u, 2, 5, payload, 64);
+    CHECK(n > 0);
+    CHECK(gs_proto_read_track_chunk(dg, n, &hash, &chunk, &chunks, &data, &data_len));
+    CHECK(hash == 0x99u && chunk == 2 && chunks == 5 && data_len == 64);
+
+    // A chunk number that is not below the count. This is the one the
+    // reassembler leans on.
+    n = gs_proto_track_chunk(dg, sizeof dg, 0x99u, 5, 5, payload, 64);
+    CHECK(n > 0);
+    CHECK(!gs_proto_read_track_chunk(dg, n, &hash, &chunk, &chunks, &data, &data_len));
+
+    n = gs_proto_track_chunk(dg, sizeof dg, 0x99u, 60000, 5, payload, 64);
+    CHECK(n > 0);
+    CHECK(!gs_proto_read_track_chunk(dg, n, &hash, &chunk, &chunks, &data, &data_len));
+
+    // A transfer of no chunks at all.
+    n = gs_proto_track_chunk(dg, sizeof dg, 0x99u, 0, 0, payload, 64);
+    CHECK(n > 0);
+    CHECK(!gs_proto_read_track_chunk(dg, n, &hash, &chunk, &chunks, &data, &data_len));
+
+    // A length longer than the datagram holding it - believing that is how a
+    // reader walks off the end of somebody else's packet.
+    n = gs_proto_track_chunk(dg, sizeof dg, 0x99u, 0, 5, payload, 64);
+    CHECK(n > 0);
+    CHECK(!gs_proto_read_track_chunk(dg, n - 32, &hash, &chunk, &chunks, &data, &data_len));
+
+    // A truncated datagram, one byte at a time. None of them is a chunk and
+    // none of them may be read as one.
+    n = gs_proto_track_chunk(dg, sizeof dg, 0x99u, 1, 5, payload, 200);
+    CHECK(n > 0);
+    for (size_t cut = 0; cut < n; cut++) {
+        CHECK(!gs_proto_read_track_chunk(dg, cut, &hash, &chunk, &chunks,
+                                         &data, &data_len));
+    }
+}
 TEST(a_track_that_arrives_damaged_is_refused_rather_than_raced) {
     static gs_track sent, got;
     gs_carried_track(&sent);
@@ -5936,6 +6034,8 @@ int main(void) {
     run_three_tracks_are_kept_and_all_three_survive_a_restart();
     run_editing_one_track_leaves_the_others_alone();
     run_a_library_that_is_full_says_so_rather_than_losing_something();
+    run_a_chunk_the_reassembler_refuses_does_not_poison_the_transfer();
+    run_the_chunk_reader_refuses_a_datagram_that_does_not_add_up();
     run_an_honest_time_is_verified_and_a_doctored_one_is_not();
     run_a_time_from_a_different_race_is_not_this_record();
     run_a_time_survives_the_wire_and_is_still_verifiable();
