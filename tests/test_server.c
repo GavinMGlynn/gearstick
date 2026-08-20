@@ -11,6 +11,8 @@
 #include "core/gs_records.h"
 #include "core/gs_net.h"
 #include "core/gs_replay.h"
+#include "net/gs_auth.h"
+#include "net/gs_store.h"
 #include "net/gs_noise.h"
 #include "net/gs_verify.h"
 #include "core/gs_track.h"
@@ -1935,21 +1937,142 @@ TEST(a_record_set_on_one_client_is_seen_by_another) {
     remove(track_path);
 }
 
-// Does the library this client is shown contain that track? Asked more than
-// once, because a datagram is allowed to vanish.
-static bool gs_listed(gs_wire *w, uint64_t hash) {
+// Does the library this client is shown contain that track, right now? One
+// question, asked once - `gs_wait_listed` is what does the waiting.
+static bool gs_listed_now(gs_wire *w, uint64_t hash) {
     const gs_wire_listing *rows = nullptr;
     uint16_t total = 0;
 
-    for (int k = 0; k < 40; k++) {
-        gs_wire_ask_published(w);
-        gs_pump(w, 10);
-        uint16_t n = gs_wire_published(w, &rows, &total);
-        for (uint16_t i = 0; i < n; i++) {
-            if (rows[i].track == hash) return true;
-        }
+    gs_wire_ask_published(w);
+    gs_pump(w, 10);
+    uint16_t n = gs_wire_published(w, &rows, &total);
+    for (uint16_t i = 0; i < n; i++) {
+        if (rows[i].track == hash) return true;
     }
     return false;
+}
+
+// **Wait for the answer to become what it should be, rather than pumping a
+// number of times somebody guessed.** The first version of this test pumped a
+// fixed count after each change and then asked; that is fast enough on a
+// developer's machine and not on a loaded macOS runner, where the share had not
+// been processed by the time the question was asked and the test failed for
+// being early rather than for being wrong.
+static bool gs_wait_listed(gs_wire *w, uint64_t hash, bool want) {
+    for (int k = 0; k < 80; k++) {
+        if (gs_listed_now(w, hash) == want) return true;
+        SDL_Delay(20);
+    }
+    return false;
+}
+
+// The name a client ended up racing under, from the lobby it was sent.
+static const char *gs_name_of(gs_wire *w, uint8_t slot) {
+    const gs_lobby *l = gs_wire_lobby(w);
+    if (l == nullptr || slot >= GS_PROTO_MAX_PLAYERS) return "";
+    return l->player[slot].name;
+}
+
+TEST(a_name_with_a_password_cannot_be_taken_by_typing_it) {
+    // **The point of a password is that a name survives being wanted by
+    // somebody else.** Ownership is already a key, but a key belongs to a
+    // machine: reinstall and it is gone. A password is what makes a name yours
+    // across machines, and it is small here only because the tunnel came first
+    // - inside a sealed channel it can simply be sent.
+    CHECK(gs_wire_init());
+
+    remove("profiles.db");
+    remove("profiles.db-wal");
+    remove("profiles.db-shm");
+
+    // Ada's password is set out of band, the way a real one would be at sign-up.
+    gs_store *seed = gs_store_open("profiles.db");
+    CHECK(seed != nullptr);
+    if (seed == nullptr) return;
+    char hash[GS_AUTH_HASH_BYTES];
+    CHECK(gs_auth_hash_password("correct horse battery", hash, sizeof hash));
+    CHECK(gs_store_set_password(seed, "ada", hash));
+    gs_store_close(seed);
+
+    if (!gs_server_start_with_store("47858", GS_SERVER_LIFETIME, "2",
+                                    "profiles.db")) {
+        gs_failures++;
+        return;
+    }
+
+    // Somebody who is not ada joins claiming to be. They are not thrown off -
+    // being kicked for picking a taken name is a worse experience than being
+    // told it is spoken for - but they do not get the name.
+    gs_wire *impostor = gs_wire_server("127.0.0.1", 47858, "ada",
+                                       gs_test_server_pub());
+    CHECK(impostor != nullptr);
+    for (int k = 0; k < 400 && !gs_wire_ready(impostor); k++) {
+        gs_wire_poll(impostor);
+        SDL_Delay(10);
+    }
+    gs_pump(impostor, 40);
+
+    uint8_t slot = gs_wire_local(impostor);
+    CHECK(slot < GS_PROTO_MAX_PLAYERS);
+    CHECK(SDL_strcmp(gs_name_of(impostor, slot), "ada") != 0);
+
+    // A wrong password does not get it either.
+    gs_wire_login(impostor, "ada", "correct horse staple", 0);
+    gs_pump(impostor, 60);
+    CHECK(SDL_strcmp(gs_name_of(impostor, slot), "ada") != 0);
+
+    // The right one does.
+    gs_wire_login(impostor, "ada", "correct horse battery", 0);
+    bool became = false;
+    for (int k = 0; k < 60 && !became; k++) {
+        gs_pump(impostor, 10);
+        became = SDL_strcmp(gs_name_of(impostor, slot), "ada") == 0;
+    }
+    CHECK(became);
+
+    gs_wire_close(impostor);
+    gs_wire_quit();
+    gs_server_stop();
+
+    remove("profiles.db");
+    remove("profiles.db-wal");
+    remove("profiles.db-shm");
+}
+
+TEST(a_name_with_no_password_still_just_works) {
+    // **The case that must never break.** A racing game that demands an account
+    // before anybody can drive has lost the argument, so a name nobody has
+    // claimed is used by typing it, exactly as before any of this existed.
+    CHECK(gs_wire_init());
+
+    remove("open.db");
+    remove("open.db-wal");
+    remove("open.db-shm");
+    if (!gs_server_start_with_store("47860", GS_SERVER_LIFETIME, "2",
+                                    "open.db")) {
+        gs_failures++;
+        return;
+    }
+
+    gs_wire *cy = gs_wire_server("127.0.0.1", 47860, "cy", gs_test_server_pub());
+    CHECK(cy != nullptr);
+    for (int k = 0; k < 400 && !gs_wire_ready(cy); k++) {
+        gs_wire_poll(cy);
+        SDL_Delay(10);
+    }
+    gs_pump(cy, 40);
+
+    uint8_t slot = gs_wire_local(cy);
+    CHECK(slot < GS_PROTO_MAX_PLAYERS);
+    CHECK(SDL_strcmp(gs_name_of(cy, slot), "cy") == 0);
+
+    gs_wire_close(cy);
+    gs_wire_quit();
+    gs_server_stop();
+
+    remove("open.db");
+    remove("open.db-wal");
+    remove("open.db-shm");
 }
 
 TEST(a_shared_track_reaches_exactly_the_person_it_was_handed_to) {
@@ -1991,11 +2114,15 @@ TEST(a_shared_track_reaches_exactly_the_person_it_was_handed_to) {
     }
     CHECK(gs_wire_lobby(ada) != nullptr && gs_wire_lobby(ada)->count == 3);
 
-    // ada uploads it and keeps it private - publishing is a separate decision.
+    // ada uploads it and puts it up, and the wait is for bez actually seeing
+    // it - which is what says the upload and the claim both landed, rather than
+    // a count of pumps that happens to be enough today.
     gs_wire_publish(ada, &mine, "the ice ring");
-    gs_pump(ada, 60);
+    CHECK(gs_wait_listed(bez, hash, true));
+
+    // Then takes it down again, so what follows starts from private.
     gs_wire_withdraw(ada, hash);
-    gs_pump(ada, 40);
+    CHECK(gs_wait_listed(bez, hash, false));
 
     // Whose key is whose, from the lobby. bez's slot is whichever one is not
     // ada's, found by name rather than assumed.
@@ -2014,19 +2141,17 @@ TEST(a_shared_track_reaches_exactly_the_person_it_was_handed_to) {
     CHECK(bez_key != nullptr);
 
     // Private: neither of them sees it.
-    CHECK(!gs_listed(bez, hash));
-    CHECK(!gs_listed(cy, hash));
+    CHECK(!gs_listed_now(bez, hash));
+    CHECK(!gs_listed_now(cy, hash));
 
     // Handed to bez, and to bez alone.
     gs_wire_share(ada, hash, bez_key, true);
-    gs_pump(ada, 40);
-    CHECK(gs_listed(bez, hash));
-    CHECK(!gs_listed(cy, hash));
+    CHECK(gs_wait_listed(bez, hash, true));
+    CHECK(!gs_listed_now(cy, hash));
 
     // And taken back again.
     gs_wire_share(ada, hash, bez_key, false);
-    gs_pump(ada, 40);
-    CHECK(!gs_listed(bez, hash));
+    CHECK(gs_wait_listed(bez, hash, false));
 
     gs_wire_close(ada);
     gs_wire_close(bez);
@@ -2279,6 +2404,8 @@ int main(void) {
     run_a_token_buys_one_submission_and_the_second_time_it_buys_nothing();
     run_a_spent_token_is_still_spent_after_the_server_restarts();
     run_a_record_set_on_one_client_is_seen_by_another();
+    run_a_name_with_a_password_cannot_be_taken_by_typing_it();
+    run_a_name_with_no_password_still_just_works();
     run_a_shared_track_reaches_exactly_the_person_it_was_handed_to();
     run_a_track_is_the_key_that_built_it_and_not_the_name_that_typed_it();
     run_a_published_track_is_browsable_from_another_client_and_can_be_taken_down();

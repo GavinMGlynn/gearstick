@@ -413,8 +413,13 @@ if(GEARSTICK_TESTS)
     # actually ships rather than a client written for the test.
     add_executable(gearstick_server_tests
         tests/test_server.c
+        src/net/gs_auth.c
+        src/net/gs_store.c
         src/net/gs_verify.c)
-    target_link_libraries(gearstick_server_tests PRIVATE gearstick_shell)
+    # The store and the password hasher, so a test can set up a profile the way
+    # a sign-up would rather than through a protocol that has no message for it.
+    target_link_libraries(gearstick_server_tests PRIVATE gearstick_shell
+                          gearstick_sqlite gearstick_sodium)
     gs_configure(gearstick_server_tests)
     add_dependencies(gearstick_server_tests gearstick_server)
 

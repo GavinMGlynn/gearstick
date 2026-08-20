@@ -346,9 +346,13 @@ jobs:
       # property gearstick_cli exists to prove, collected again.
       - name: Build the fuzz targets
         run: |
+          # **Every target, named.** A target added to CMake and forgotten here
+          # builds nothing, and the ctest entry then fails with "no such file"
+          # - which is what happened to the noise fuzzer and took a round trip
+          # to see, because the runner's output was being discarded.
           cmake --build build-fuzz -j --target \
             gearstick_fuzz_seeds gearstick_fuzz_proto gearstick_fuzz_carrier \
-            gearstick_fuzz_track gearstick_fuzz_replay
+            gearstick_fuzz_track gearstick_fuzz_replay gearstick_fuzz_noise
 
       # The regression half: every seed through every parser under the
       # sanitizers, as a fixed amount of work. This is what must never go red.
@@ -360,7 +364,7 @@ jobs:
       - name: A campaign per parser
         run: |
           set -e
-          for t in proto carrier track replay; do
+          for t in proto carrier track replay noise; do
             dir="build-fuzz/campaign/$t"
             rm -rf "$dir"; mkdir -p "$dir"
             ./build-fuzz/gearstick_fuzz_seeds "$t" "$dir"
