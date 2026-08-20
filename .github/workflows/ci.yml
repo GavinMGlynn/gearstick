@@ -109,12 +109,19 @@ jobs:
                    -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGEARSTICK_WERROR=ON
       - name: Build
         run: cmake --build build -j
-      # **The independent implementation.** `tools/noise_interop.py` skips
-      # itself when this is missing, and a skipped check for the one piece of
-      # evidence that does not rest on our own opinion of our own code is worth
-      # nothing - so it is installed here rather than hoped for.
-      - name: Install the independent Noise implementation
-        run: python3 -m pip install --break-system-packages noiseprotocol
+      # **The independent implementations.** `tools/noise_interop.py` and
+      # `tools/transport_client.py` skip themselves when `noiseprotocol` is
+      # missing, and a skipped check for the one piece of evidence that does not
+      # rest on our own opinion of our own code is worth nothing - so it is
+      # installed here rather than hoped for.
+      #
+      # `cryptography` is named even though it already arrives on the runner
+      # image, because `transport_client.py` imports it *unguarded* - it guards
+      # `noiseprotocol` and skips, but a missing `cryptography` is an ImportError
+      # and a red job. Depending on what a hosted image happens to preinstall is
+      # a dependency either way; this is the version of it that is written down.
+      - name: Install the independent implementations
+        run: python3 -m pip install --break-system-packages noiseprotocol cryptography
 
       - name: Unit tests
         run: ctest --test-dir build --output-on-failure
