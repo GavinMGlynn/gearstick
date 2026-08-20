@@ -2233,6 +2233,45 @@ where an implementation nobody here wrote completes a handshake in both
 directions — but that is a library implementing the Noise framework, not
 somebody implementing *this document*.
 
+### An installer for Windows
+
+CPack's WiX generator, alongside the zip rather than instead of it. On Windows
+an application people actually install is an installer; somebody who would
+rather have a folder still gets one, and the zip needs no administrator and
+leaves nothing behind by construction.
+
+**The upgrade GUID is fixed for ever.** It is how Windows knows that 0.2 is the
+same product as 0.1 rather than a second copy to install beside it. Generating
+one per build would leave somebody with every version they ever installed still
+on the machine, and there is no way to fix that afterwards for the people it
+happened to.
+
+Only the game gets a Start Menu entry. The headless driver and the server are
+command-line programs, and a shortcut that opens a console window and closes it
+again is worse than no shortcut.
+
+#### What CI checks, and what it cannot
+
+The packaging job installs the MSI with `msiexec /qn`, **finds where it landed
+rather than assuming the path**, checks the assets went with it, runs the
+installed headless driver against the golden replay, checks a Start Menu
+shortcut exists, uninstalls, and then checks that both the program and the
+shortcut are gone. An installer that cannot be removed is one people are right
+to refuse.
+
+**Two things it does not establish**, and the plan says so rather than counting
+them:
+
+- The runner is the machine that just built the thing, not one that has never
+  had a toolchain. What the check does cover is the part that is about the
+  installer — that it installs, that what it installed runs, that removing it
+  removes everything — rather than the part that is about the machine.
+- The shortcut is checked for existence, not launched. "The game runs from the
+  Start Menu" is verified as far as an unattended machine can and no further.
+
+Both of those need a person with a clean Windows box, which is the same shape of
+gap as listening to the sound on three platforms.
+
 ---
 
 ## What does not exist

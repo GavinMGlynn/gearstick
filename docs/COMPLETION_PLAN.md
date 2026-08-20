@@ -865,9 +865,26 @@ install is an installer.
       *Verification: the MSI installs on a machine that has never had a
       toolchain on it, the game runs from the Start Menu, and uninstalling
       leaves nothing behind.*
+      **Built, and verified in part.** CPack's WiX generator makes it alongside
+      the zip, with a fixed upgrade GUID so a new version replaces the old one
+      rather than installing beside it. The packaging job installs it with
+      `msiexec /qn`, finds where it landed rather than assuming, checks the
+      assets went too, runs the installed headless driver, checks a Start Menu
+      shortcut exists, uninstalls, and checks both the program and the shortcut
+      are gone.
+      **What that does not establish, stated rather than glossed:** the runner
+      is the machine that just built it, not one that has never had a toolchain;
+      and the shortcut is checked for existence rather than launched, so "the
+      game runs from the Start Menu" is verified as far as an unattended machine
+      can and no further. Both need a person with a clean Windows box.
 - [ ] **The installer is in the release beside the archive.** Somebody who wants
       a zip still gets a zip. *Verification: a tagged release carries both, and
       both carry a provenance attestation.*
+      **Wired, unverified.** The Windows job uploads the MSI beside the zip, the
+      attestation step covers `dist/*.msi`, and `docs/RELEASES.md` lists both
+      with a line on which to take. It stays unticked because the verification
+      is about a tagged release and nothing has been tagged — running the
+      workflow is not the same as watching a release come out of it.
 
 ## Tails
 

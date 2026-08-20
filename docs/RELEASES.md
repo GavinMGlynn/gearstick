@@ -128,7 +128,14 @@ sudo dnf install libX11 libXext libwayland-client alsa-lib pulseaudio-libs
 | Linux x86_64 | `gearstick-VERSION-linux-x86_64.tar.gz` | `gearstick`, `gearstick_server`, `gearstick_cli`, `assets/` |
 | macOS arm64 | `gearstick-VERSION-macos-arm64.dmg` | `Gearstick.app` |
 | macOS arm64 | `gearstick-VERSION-macos-arm64.tar.gz` | the same, as a folder |
-| Windows x64 | `gearstick-VERSION-windows-x64.zip` | `gearstick.exe`, `gearstick_server.exe`, `gearstick_cli.exe`, `assets\` |
+| Windows x64 | `gearstick-VERSION-windows-x64.msi` | an installer: the same three programs and `assets\`, plus a Start Menu entry |
+| Windows x64 | `gearstick-VERSION-windows-x64.zip` | the same, as a folder to unpack |
+
+**On Windows, take the `.msi` unless you have a reason not to.** It puts the
+game in the Start Menu and uninstalls from Settings like anything else. The zip
+is there for people who would rather not run an installer — it needs no
+administrator, goes wherever you unpack it, and leaves nothing behind when you
+delete the folder. Both contain exactly the same programs.
 
 `gearstick` is the game.
 

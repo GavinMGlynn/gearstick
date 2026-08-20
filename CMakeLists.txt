@@ -697,7 +697,37 @@ set(CPACK_VERBATIM_VARIABLES    ON)
 set(CPACK_PACKAGE_FILE_NAME "gearstick-${GEARSTICK_RELEASE}-${GS_PLATFORM}")
 
 if(WIN32)
-    set(CPACK_GENERATOR "ZIP")
+    # **Both, and the zip is not an afterthought.** On Windows an application
+    # people actually install is an installer; somebody who wants a folder to
+    # unpack still gets one, because a zip needs no administrator and leaves
+    # nothing behind by construction.
+    set(CPACK_GENERATOR "ZIP;WIX")
+
+    # **The upgrade GUID is fixed for ever.** It is how Windows knows that
+    # version 0.2 is the same product as version 0.1 rather than a second copy
+    # to install alongside it. Generating one per build would leave somebody
+    # with every version they ever installed still on the machine, and there is
+    # no way to fix that after the fact for the people it happened to.
+    set(CPACK_WIX_UPGRADE_GUID "6F3B8C21-9D4E-4A17-B0C5-2E7A1D8F4B93")
+    set(CPACK_WIX_PRODUCT_GUID "*")          # a new one per version, as WiX wants
+
+    set(CPACK_WIX_PROGRAM_MENU_FOLDER "Gearstick")
+    set(CPACK_WIX_UPGRADE_VERSION_MAX "255.0.0")
+    set(CPACK_WIX_ROOT_FEATURE_TITLE  "Gearstick")
+    set(CPACK_WIX_ROOT_FEATURE_DESCRIPTION
+        "${PROJECT_DESCRIPTION}")
+
+    # The Start Menu entry. Only the game: the headless driver and the server
+    # are command-line programs, and a shortcut that opens a console window and
+    # closes it again is worse than no shortcut.
+    set(CPACK_PACKAGE_EXECUTABLES "gearstick;Gearstick")
+    set(CPACK_CREATE_DESKTOP_LINKS "gearstick")
+
+    # WiX wants RTF and this project has none, so the licence is handed over as
+    # plain text and WiX wraps it. Pointing at the Markdown would produce an
+    # installer page of asterisks.
+    set(CPACK_WIX_LICENSE_RTF "")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 elseif(APPLE)
     set(CPACK_GENERATOR "TGZ;DragNDrop")
     set(CPACK_DMG_VOLUME_NAME "Gearstick ${PROJECT_VERSION}")

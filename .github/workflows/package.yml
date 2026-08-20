@@ -211,7 +211,7 @@ jobs:
             build/macos-release/gearstick-*.dmg*
 
   windows:
-    name: Windows x64 zip
+    name: Windows x64 zip and installer
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -254,10 +254,92 @@ jobs:
           if (-not (Test-Path packaged.bmp)) { throw "the packaged game drew nothing" }
           if ((Get-Item packaged.bmp).Length -eq 0) { throw "the frame is empty" }
 
+      # **The installer, installed.** A zip proves the layout is one the asset
+      # probe can find; it proves nothing about an MSI, which puts files
+      # somewhere else, writes a Start Menu entry and has to be able to take all
+      # of it away again.
+      #
+      # This runner is not the "machine that has never had a toolchain" the plan
+      # asks for - it is the machine that just built the thing. What it does
+      # establish is that the MSI installs, that what it installed runs, and
+      # that uninstalling leaves nothing: the parts that are about the installer
+      # rather than about the machine. Said plainly rather than counted as the
+      # whole verification.
+      - name: Install the MSI, run what it installed, and uninstall it
+        shell: pwsh
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+          SDL_AUDIO_DRIVER: dummy
+        run: |
+          $msi = Get-ChildItem build\windows-release\gearstick-*.msi | Select-Object -First 1
+          if (-not $msi) { throw "cpack produced no MSI" }
+          Write-Host "installer: $($msi.Name), $([math]::Round($msi.Length/1MB,1)) MB"
+
+          $target = "C:\gs-installed"
+          $log = "install.log"
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList `
+               "/i", "`"$($msi.FullName)`"", "/qn", "/norestart", `
+               "INSTALL_ROOT=$target", "/l*v", $log
+          if ($p.ExitCode -ne 0) {
+            Get-Content $log -Tail 40
+            throw "msiexec install failed with $($p.ExitCode)"
+          }
+
+          # Wherever it went. INSTALL_ROOT is honoured by CPack's WiX template,
+          # but finding the executable rather than assuming the path is what
+          # makes this a test of the installer instead of a test of my guess.
+          $exe = Get-ChildItem -Path C:\ -Recurse -Filter gearstick_cli.exe `
+                 -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -notlike "*\build\*" } |
+                 Select-Object -First 1
+          if (-not $exe) { throw "nothing called gearstick_cli.exe was installed" }
+          $root = $exe.Directory.FullName
+          Write-Host "installed into $root"
+
+          # **The assets went too.** An installer that lays down executables and
+          # forgets the data is one that fails on somebody else's machine and
+          # not here, because here the build tree is still lying about.
+          if (-not (Test-Path (Join-Path $root "assets"))) {
+            Get-ChildItem $root
+            throw "the installer left the assets behind"
+          }
+
+          Push-Location $root
+          & .\gearstick_cli.exe selftest --verify
+          if ($LASTEXITCODE -ne 0) { throw "the installed headless driver failed" }
+          Pop-Location
+
+          # The Start Menu entry the plan asks for.
+          $menu = Get-ChildItem "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" `
+                  -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -like "*earstick*" }
+          if (-not $menu) { throw "no Start Menu shortcut was created" }
+          Write-Host "start menu: $($menu.FullName)"
+
+          # And away again. **Uninstalling has to leave nothing** - an installer
+          # that cannot be removed is one people are right to refuse.
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList `
+               "/x", "`"$($msi.FullName)`"", "/qn", "/norestart", "/l*v", "uninstall.log"
+          if ($p.ExitCode -ne 0) {
+            Get-Content uninstall.log -Tail 40
+            throw "msiexec uninstall failed with $($p.ExitCode)"
+          }
+          if (Test-Path (Join-Path $root "gearstick_cli.exe")) {
+            throw "uninstalling left the program behind"
+          }
+          $left = Get-ChildItem "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" `
+                  -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -like "*earstick*" }
+          if ($left) { throw "uninstalling left a Start Menu shortcut behind" }
+          Write-Host "installed, ran, and uninstalled cleanly"
+
       - uses: actions/upload-artifact@v4
         with:
           name: gearstick-windows-x64
-          path: build/windows-release/gearstick-*.zip*
+          path: |
+            build/windows-release/gearstick-*.zip*
+            build/windows-release/gearstick-*.msi*
 
   # ---------------------------------------------------------------------------
   # Publishing
@@ -306,6 +388,7 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*.dmg
+            dist/*.msi
 
       - name: Release
         uses: softprops/action-gh-release@v2
