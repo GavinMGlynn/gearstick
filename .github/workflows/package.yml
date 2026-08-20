@@ -329,6 +329,22 @@ jobs:
           Push-Location $root
           & .\gearstick_cli.exe selftest --verify
           if ($LASTEXITCODE -ne 0) { throw "the installed headless driver failed" }
+
+          # **Nothing from a toolchain, which is the part of "a clean machine"
+          # that actually bites on Windows.** MSVC links the dynamic C runtime
+          # by default, and an executable that needs VCRUNTIME140.dll starts
+          # fine here - the runner has Visual Studio - and does not start at all
+          # for somebody who has never installed it. The zip cannot fix that
+          # even in principle, so the runtime is linked statically and this is
+          # the check that says it stayed that way.
+          $deps = & dumpbin /dependents .\gearstick.exe 2>$null
+          if ($LASTEXITCODE -ne 0) { throw "could not read gearstick.exe's imports" }
+          $redist = $deps | Select-String -Pattern "VCRUNTIME|MSVCP|api-ms-win-crt"
+          if ($redist) {
+            $deps | Select-String -Pattern "\.dll"
+            throw "the installed game wants the Visual C++ redistributable: $redist"
+          }
+          Write-Host "  imports no redistributable - it starts on a machine that has never had one"
           Pop-Location
 
           # **The Start Menu entry, in either of the two places it can be.**

@@ -9,6 +9,26 @@ project(gearstick
     # docs/PROJECT_STATUS.md for why the exception was worth making.
     LANGUAGES   C CXX)
 
+# ---------------------------------------------------------------------------
+# **The C runtime goes inside the executable on Windows.**
+#
+# MSVC links the dynamic runtime by default, which means gearstick.exe needs
+# VCRUNTIME140.dll and MSVCP140.dll from the Visual C++ Redistributable. On a
+# machine that has them - anything with Visual Studio, or a build runner - that
+# is invisible. On a machine that does not, the game does not start, and the zip
+# has no way to fix it because a zip cannot install a redistributable.
+#
+# Static linking makes both Windows artifacts self-contained. It costs a few
+# hundred kilobytes and removes the single most common reason a Windows game
+# fails to start on somebody else's computer. Set before anything is added so
+# that SDL, SQLite and libsodium are built the same way - two halves of one
+# program disagreeing about the runtime is a link error at best.
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING
+        "Static C runtime, so a release needs no redistributable")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # ---------------------------------------------------------------------------
