@@ -123,6 +123,13 @@ sudo dnf install libX11 libXext libwayland-client alsa-lib pulseaudio-libs
 
 ## What is in a release
 
+**Linux needs glibc 2.38 or newer** — Ubuntu 24.04, Debian 13, Fedora 39 and
+anything more recent. That is not an arbitrary floor: the simulation is written
+in C23, and C23's headers redirect `sscanf`, `strtol` and their relatives to
+symbols glibc only grew in 2.38. On an older distribution the game will start
+and immediately say `GLIBC_2.38 not found`, which is what that means. Building
+from source on such a system works if the compiler is new enough.
+
 | Platform | File | Contents |
 | --- | --- | --- |
 | Linux x86_64 | `gearstick-VERSION-linux-x86_64.tar.gz` | `gearstick`, `gearstick_server`, `gearstick_cli`, `assets/` |

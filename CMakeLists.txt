@@ -723,11 +723,14 @@ if(WIN32)
     set(CPACK_PACKAGE_EXECUTABLES "gearstick;Gearstick")
     set(CPACK_CREATE_DESKTOP_LINKS "gearstick")
 
-    # WiX wants RTF and this project has none, so the licence is handed over as
-    # plain text and WiX wraps it. Pointing at the Markdown would produce an
-    # installer page of asterisks.
-    set(CPACK_WIX_LICENSE_RTF "")
-    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+    # **WiX refuses a licence file it cannot recognise by extension**, and this
+    # project's is called `LICENSE` with no extension at all - which CPack's WIX
+    # generator rejects outright rather than guessing. So a copy with a `.txt`
+    # on it is made in the build tree and handed over; the file in the
+    # repository keeps the name every tool expects it to have.
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+                   "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt" COPYONLY)
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt")
 elseif(APPLE)
     set(CPACK_GENERATOR "TGZ;DragNDrop")
     set(CPACK_DMG_VOLUME_NAME "Gearstick ${PROJECT_VERSION}")

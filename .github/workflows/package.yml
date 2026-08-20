@@ -124,14 +124,23 @@ jobs:
       # **A machine that has never had a toolchain on it.** The runner has one,
       # so unpacking on the runner proves less than it looks: a package can
       # quietly depend on something only a build machine has and nobody finds
-      # out until a player does. A bare Debian container has no compiler, no
-      # CMake and no SDL, which is what a release is actually for.
+      # out until a player does. A bare container has no compiler, no CMake and
+      # no SDL, which is what a release is actually for.
+      #
+      # **Ubuntu 24.04 rather than Debian 12, and that is a decision.** This
+      # project is C23, and on a build machine with glibc 2.38 or newer the C23
+      # headers redirect `sscanf`, `strtol` and friends to `__isoc23_*` symbols
+      # that only exist from 2.38 onwards. So a binary built here cannot run on
+      # anything older, and Debian 12 - glibc 2.36 - is older. That is not a
+      # packaging fault to be worked around; it is the floor C23 sets, and the
+      # honest response is to say so in docs/RELEASES.md and test against the
+      # oldest image that actually meets it.
       - name: Run it on a machine with no toolchain
         run: |
           docker run --rm -v "$PWD/build:/pkg:ro" \
             -e SDL_VIDEODRIVER=dummy -e SDL_RENDER_DRIVER=software \
             -e SDL_AUDIO_DRIVER=dummy \
-            debian:12-slim bash -c '
+            ubuntu:24.04 bash -c '
               set -e
               for t in gcc cc cmake ninja make; do
                 if command -v $t >/dev/null; then
@@ -230,6 +239,18 @@ jobs:
           cmake --preset windows-release
           cmake --build --preset windows-release
           cd build\windows-release && cpack
+
+      # **What WiX said, when WiX is what failed.** CPack prints "check
+      # wix.log" and then the job ends and the file goes with the runner. The
+      # first MSI build failed exactly this way and the reason - a licence file
+      # with no extension - was in a log nobody could read.
+      - name: What WiX said
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path build\windows-release\_CPack_Packages -Recurse `
+                        -Filter wix.log -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "--- $($_.FullName)"; Get-Content $_.FullName }
 
       - name: Unpack somewhere else and run it
         shell: pwsh
