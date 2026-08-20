@@ -903,6 +903,59 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
         break;
     }
 
+    case GS_MSG_CLAIM: {
+        char who[GS_PROTO_NAME] = { 0 };
+        char password[GS_PROTO_SECRET] = { 0 };
+        uint8_t secret[GS_STORE_TOTP];
+        size_t secret_len = 0;
+        if (at < 0 || gs_srv.store == nullptr) break;
+        if (!gs_proto_read_claim(msg, len, who, sizeof who, password,
+                                 sizeof password, secret, sizeof secret,
+                                 &secret_len)) {
+            break;
+        }
+
+        gs_client *c = &gs_srv.client[at];
+
+        // **A name with a password already on it is only changed by whoever
+        // proved it.** A name with none is unclaimed and anybody may take it,
+        // which is what claiming means; without that rule there would be no way
+        // to get a first password at all.
+        bool taken = gs_store_has_password(gs_srv.store, who);
+        if (taken && !(c->proved && SDL_strcmp(c->name, who) == 0)) {
+            SDL_Log("%s tried to put a password on %s, which is spoken for",
+                    c->name, who);
+            gs_srv.refused++;
+            sodium_memzero(password, sizeof password);
+            break;
+        }
+        if (password[0] == '\0') {
+            sodium_memzero(password, sizeof password);
+            break;
+        }
+
+        char hash[GS_AUTH_HASH_BYTES];
+        if (!gs_auth_hash_password(password, hash, sizeof hash) ||
+            !gs_store_set_password(gs_srv.store, who, hash)) {
+            sodium_memzero(password, sizeof password);
+            break;
+        }
+        sodium_memzero(password, sizeof password);
+
+        // A second factor for anybody who wants one, and none for anybody who
+        // does not - an empty secret takes it off again.
+        gs_store_set_totp(gs_srv.store, who,
+                          secret_len > 0 ? secret : nullptr, secret_len);
+        sodium_memzero(secret, sizeof secret);
+
+        SDL_strlcpy(c->name, who, sizeof c->name);
+        c->proved = true;
+        SDL_Log("%s is now %s's, with%s a second factor", who, who,
+                secret_len > 0 ? "" : "out");
+        gs_broadcast_lobby();
+        break;
+    }
+
     case GS_MSG_SHARE: {
         uint64_t track = 0;
         uint8_t with[GS_NOISE_KEY_BYTES];

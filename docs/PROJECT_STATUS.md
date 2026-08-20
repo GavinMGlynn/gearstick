@@ -2110,6 +2110,94 @@ from source had diverged — which is exactly what that job exists to catch. It
 was regenerated with the pinned SQLite amalgamation, as CI does, and checked
 byte-identical across two runs.
 
+### A profile you can prove is yours
+
+Ownership is already a key, but a key belongs to a *machine*: reinstall and it
+is gone. A password is what makes a name yours across machines, and it is the
+first thing here that a person rather than a device can hold.
+
+**This is small only because the tunnel came first.** Inside a sealed channel a
+password can simply be sent and a code can simply be quoted. Before it, both
+would have needed a challenge-response construction built for the purpose —
+exactly the kind of thing this project refuses to invent — and the item would
+have been several times the size for no more security.
+
+The password hash is libsodium's `crypto_pwhash_str`: Argon2id, with the salt
+and the cost parameters inside the string it returns, so there is nothing to
+store alongside it and nothing to get wrong. Two hashes of the same password
+differ, which is what stops a stolen database saying which two people chose the
+same one. Verifying hands the whole comparison to the library that owns the
+format, because comparing strings leaks how much of a password was right.
+
+**The store holds; `gs_auth.c` decides.** What the database keeps is an opaque
+hash and an opaque secret; every question about whether a password is right or a
+code is current is answered elsewhere. That split is why the store still links
+no cryptography.
+
+#### The second factor
+
+RFC 6238 over RFC 4226, on libsodium's HMAC. **TOTP-SHA256, not SHA-1** — RFC
+6238 names all three of SHA-1, SHA-256 and SHA-512, and libsodium ships the
+second and third and not the first. Choosing the one the audited library
+actually has beats implementing SHA-1 here to match what most phone apps default
+to, and it is said out loud rather than discovered by somebody whose
+authenticator gives them six wrong digits.
+
+It is checked against the RFC's own published values — the SHA-256 column, at
+this project's six digits rather than the specification's eight, which is why
+they are the last six of the published numbers — and against Python's `hmac`,
+which is a different implementation by different people. Both agree.
+
+**A code works once.** The window exists because two clocks are never exactly
+together and a second factor that refuses a phone eleven seconds fast is one
+nobody can use; but a window without a spend is a window in which a code works
+more than once. The time step is retired in the same statement that checks it,
+for the same reason the session nonce is.
+
+Every candidate step is tried even after one matches, so how long the check
+takes does not depend on which step was right.
+
+#### What a player can actually do
+
+A name nobody has claimed can be claimed, with a second factor for anybody who
+wants one — the client generates that secret, because a second factor whose
+secret the server chose is one the server could use. A name already claimed can
+only be re-passworded by whoever has proved it.
+
+**A name with no password still just works.** This is the case that must never
+break: a racing game that demands an account before anybody can drive has lost
+the argument. And somebody who joins under a name that is spoken for lands under
+a name of their own rather than being thrown off — being kicked for picking a
+taken name is a worse experience than being told it is taken.
+
+#### Four CI failures, and what each was really about
+
+**Windows, twice, and the second time was my fault for fixing the first one too
+narrowly.** `gs_blake2s.h`, `gs_noise.h` and `gs_auth.h` each listed
+`<stdbool.h>`, `<stddef.h>` and `<stdint.h>` by hand, on the reasoning that they
+should depend on nothing of ours. MSVC's C23 is partial: `bool` needs the header
+and `nullptr` needs a shim, and `gs_common.h` is where this project already
+keeps both, with the shim switched on by a configure-time probe rather than
+guessed from a version number. Fixing `bool` in one file without asking whether
+the same class of problem applied elsewhere cost a whole round trip. There is
+now a local check — compiling with `-std=c11 -DGS_NO_NULLPTR` reproduces the
+condition without waiting for a Windows runner.
+
+**macOS timed out, then failed.** The timeout was honest: this phase added six
+server tests, each starting a real server and talking over real sockets, and
+ninety seconds here is over three minutes on a loaded runner. The failure
+underneath it was a test that pumped a fixed number of times and then asked
+whether a share had landed — fast enough here, early there. It waits for the
+answer to become what it should be now, which is the discipline the roster tests
+already learned.
+
+**The noise fuzzer was never built.** It was added to CMake and not to the list
+CI builds, so `ctest` ran a binary that did not exist. The error said "no such
+file or directory" the whole time and nobody could see it, because
+`RunFuzzer.cmake` discarded the runner's output. What a fuzzer prints when it
+dies is the entire report; it is captured and printed now, and that change paid
+for itself twice in one evening.
+
 ---
 
 ## What does not exist

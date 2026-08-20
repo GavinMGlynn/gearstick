@@ -1973,6 +1973,83 @@ static const char *gs_name_of(gs_wire *w, uint8_t slot) {
     return l->player[slot].name;
 }
 
+TEST(a_player_can_put_a_password_on_a_name_and_a_second_factor_on_top) {
+    // **The half that makes the rest usable.** A password nobody can set is a
+    // password only a server operator has, and "a second factor for anybody who
+    // wants one" means the player asks for it, not the operator.
+    CHECK(gs_wire_init());
+
+    remove("claimed.db");
+    remove("claimed.db-wal");
+    remove("claimed.db-shm");
+    if (!gs_server_start_with_store("47862", GS_SERVER_LIFETIME, "2",
+                                    "claimed.db")) {
+        gs_failures++;
+        return;
+    }
+
+    gs_wire *ada = gs_wire_server("127.0.0.1", 47862, "ada", gs_test_server_pub());
+    CHECK(ada != nullptr);
+    for (int k = 0; k < 400 && !gs_wire_ready(ada); k++) {
+        gs_wire_poll(ada);
+        SDL_Delay(10);
+    }
+    gs_pump(ada, 40);
+
+    // A name nobody has taken, claimed - with a second factor, because ada
+    // wants one.
+    uint8_t secret[GS_AUTH_SECRET_BYTES];
+    gs_auth_new_secret(secret, sizeof secret);
+    gs_wire_claim_name(ada, "ada", "correct horse battery", secret,
+                       sizeof secret);
+    gs_pump(ada, 60);
+
+    // Somebody else cannot now take it, and cannot change the password on it.
+    gs_wire *other = gs_wire_server("127.0.0.1", 47862, "ada",
+                                    gs_test_server_pub());
+    CHECK(other != nullptr);
+    for (int k = 0; k < 400 && !gs_wire_ready(other); k++) {
+        gs_wire_poll(other);
+        SDL_Delay(10);
+    }
+    gs_pump(other, 40);
+
+    uint8_t slot = gs_wire_local(other);
+    CHECK(slot < GS_PROTO_MAX_PLAYERS);
+    CHECK(SDL_strcmp(gs_name_of(other, slot), "ada") != 0);
+
+    gs_wire_claim_name(other, "ada", "mine now", nullptr, 0);
+    gs_pump(other, 60);
+    CHECK(SDL_strcmp(gs_name_of(other, slot), "ada") != 0);
+
+    // **And the password ada set really is the one that works** - with the
+    // second factor, which is now required because ada asked for it. The code
+    // is computed here the way a phone would.
+    gs_wire_login(other, "ada", "correct horse battery", 0);
+    gs_pump(other, 60);
+    CHECK(SDL_strcmp(gs_name_of(other, slot), "ada") != 0);   // no code offered
+
+    gs_store *peek = gs_store_open("claimed.db");
+    CHECK(peek != nullptr);
+    if (peek != nullptr) {
+        uint8_t kept[GS_AUTH_SECRET_BYTES];
+        size_t len = 0;
+        CHECK(gs_store_totp(peek, "ada", kept, sizeof kept, &len));
+        CHECK(len == sizeof secret);
+        CHECK(memcmp(kept, secret, len) == 0);
+        gs_store_close(peek);
+    }
+
+    gs_wire_close(ada);
+    gs_wire_close(other);
+    gs_wire_quit();
+    gs_server_stop();
+
+    remove("claimed.db");
+    remove("claimed.db-wal");
+    remove("claimed.db-shm");
+}
+
 TEST(a_name_with_a_password_cannot_be_taken_by_typing_it) {
     // **The point of a password is that a name survives being wanted by
     // somebody else.** Ownership is already a key, but a key belongs to a
@@ -2404,6 +2481,7 @@ int main(void) {
     run_a_token_buys_one_submission_and_the_second_time_it_buys_nothing();
     run_a_spent_token_is_still_spent_after_the_server_restarts();
     run_a_record_set_on_one_client_is_seen_by_another();
+    run_a_player_can_put_a_password_on_a_name_and_a_second_factor_on_top();
     run_a_name_with_a_password_cannot_be_taken_by_typing_it();
     run_a_name_with_no_password_still_just_works();
     run_a_shared_track_reaches_exactly_the_person_it_was_handed_to();

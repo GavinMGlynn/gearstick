@@ -534,6 +534,44 @@ bool gs_proto_read_login(const uint8_t *buf, size_t len, char *name,
     return true;
 }
 
+#define GS_CLAIM_SECRET 32
+
+size_t gs_proto_claim(uint8_t *buf, size_t cap, const char *name,
+                      const char *password, const uint8_t *secret,
+                      size_t secret_len) {
+    if (secret_len > GS_CLAIM_SECRET) return 0;
+    if (cap < GS_HEAD + GS_PROTO_NAME + GS_PROTO_SECRET + 1 + GS_CLAIM_SECRET) {
+        return 0;
+    }
+    size_t n = gs_head(buf, cap, GS_MSG_CLAIM);
+    n += gs_put_str(buf + n, name, GS_PROTO_NAME);
+    n += gs_put_str(buf + n, password, GS_PROTO_SECRET);
+
+    buf[n++] = (uint8_t)secret_len;
+    memset(buf + n, 0, GS_CLAIM_SECRET);
+    if (secret != nullptr && secret_len > 0) memcpy(buf + n, secret, secret_len);
+    n += GS_CLAIM_SECRET;
+    return n;
+}
+
+bool gs_proto_read_claim(const uint8_t *buf, size_t len, char *name,
+                         size_t name_cap, char *password, size_t pw_cap,
+                         uint8_t *secret, size_t secret_cap, size_t *secret_len) {
+    if (!gs_expect(buf, len, GS_MSG_CLAIM,
+                   GS_HEAD + GS_PROTO_NAME + GS_PROTO_SECRET + 1 + GS_CLAIM_SECRET)) {
+        return false;
+    }
+    size_t n = GS_HEAD;
+    gs_get_str(buf + n, GS_PROTO_NAME, name, name_cap);      n += GS_PROTO_NAME;
+    gs_get_str(buf + n, GS_PROTO_SECRET, password, pw_cap);  n += GS_PROTO_SECRET;
+
+    size_t got = buf[n++];
+    if (got > GS_CLAIM_SECRET || got > secret_cap) return false;
+    memcpy(secret, buf + n, got);
+    *secret_len = got;
+    return true;
+}
+
 size_t gs_proto_share(uint8_t *buf, size_t cap, uint64_t track,
                       const uint8_t *with, bool on) {
     if (with == nullptr || cap < GS_HEAD + 8 + GS_NOISE_KEY_BYTES + 1) return 0;

@@ -191,6 +191,13 @@ void gs_wire_share(gs_wire *w, uint64_t track, const uint8_t *with, bool on);
 void gs_wire_login(gs_wire *w, const char *name, const char *password,
                    uint32_t code);
 
+// Put a password on a name - claiming one nobody has taken, or changing your
+// own. `secret` is a shared secret for a one-time code, generated here because
+// a second factor whose secret the server chose is one the server could use;
+// null for none.
+void gs_wire_claim_name(gs_wire *w, const char *name, const char *password,
+                        const uint8_t *secret, size_t secret_len);
+
 // The public key the server says belongs to a slot, or null. This is what a
 // client shares a track *with*, and it is not something that player claimed
 // about themselves - the server watched them prove it.

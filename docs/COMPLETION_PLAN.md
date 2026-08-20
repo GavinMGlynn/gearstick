@@ -812,17 +812,22 @@ review, and it fails it for good reasons.
       needs to see were decisions.
       *Verification: somebody who has not read the code can implement a client
       from the document alone and complete a handshake.*
-- [ ] **A profile you can prove is yours.** A password, and a second factor for
+- [x] **A profile you can prove is yours.** A password, and a second factor for
       anybody who wants one. **This comes after the tunnel and is small because
       of it**: inside a sealed channel a password can simply be sent, and a
       one-time code is the arithmetic it should always have been. Before the
       tunnel it would have needed a challenge-response construction to avoid
       sending either in the clear.
-      *Verification: a profile with a password cannot be used without it; a
-      one-time code that has been used once does not work a second time inside
-      the window it is still valid for; and a profile with no password set still
-      works, because a racing game that demands an account before anybody can
-      drive has lost the argument.*
+      *Verification: a name with a password is not taken by typing it and not
+      taken by the wrong password, and is taken by the right one; a one-time
+      code that has been used once does not work a second time inside the window
+      it is still valid for; a name with no password still works by typing it;
+      and a claimed name can only be re-passworded by whoever proved it. Each
+      turns red on its own when its rule is removed.*
+      *The code is TOTP-SHA256 rather than SHA-1 — RFC 6238 names all three and
+      libsodium ships the two it is not — checked against the RFC's own
+      published values and against Python's `hmac`. Said here because a phone
+      app defaulting to SHA-1 will give six wrong digits.*
 - [x] **A track has an owner, and the ones that shipped have none.** Whoever
       built a track can change it, take it down, keep it private, hand it to a
       named few, or publish it to everybody. The stock tracks are outside all of

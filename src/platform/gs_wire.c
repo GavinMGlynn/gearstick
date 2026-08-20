@@ -341,6 +341,17 @@ void gs_wire_login(gs_wire *w, const char *name, const char *password,
     SDL_strlcpy(w->me, name, sizeof w->me);
 }
 
+void gs_wire_claim_name(gs_wire *w, const char *name, const char *password,
+                        const uint8_t *secret, size_t secret_len) {
+    if (w == nullptr || !w->via_server || name == nullptr) return;
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf,
+                 gs_proto_claim(buf, sizeof buf, name,
+                                password != nullptr ? password : "",
+                                secret, secret_len));
+    SDL_strlcpy(w->me, name, sizeof w->me);
+}
+
 void gs_wire_share(gs_wire *w, uint64_t track, const uint8_t *with, bool on) {
     if (w == nullptr || !w->via_server || with == nullptr) return;
     uint8_t buf[GS_PROTO_MTU];

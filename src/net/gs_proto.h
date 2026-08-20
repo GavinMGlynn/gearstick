@@ -58,6 +58,7 @@ typedef enum gs_msg {
     GS_MSG_WANT_LIST,  // "what is published?"
     GS_MSG_SHARE,      // "let this person have my track" - or stop letting them
     GS_MSG_LOGIN,      // "this name is mine, and here is why"
+    GS_MSG_CLAIM,      // "put a password on this name, and make it mine"
 
     // Server to client.
     GS_MSG_WELCOME,    // "you are player N of M, and here is everyone"
@@ -210,6 +211,19 @@ size_t gs_proto_login(uint8_t *buf, size_t cap, const char *name,
 bool   gs_proto_read_login(const uint8_t *buf, size_t len, char *name,
                            size_t name_cap, char *password, size_t pw_cap,
                            uint32_t *code);
+
+// **Putting a password on a name.** Allowed on a name that has none - which is
+// claiming it - and on one you have already proved is yours, which is changing
+// it. `secret` is a shared secret for a one-time code, or empty for none; the
+// client generates it, because a second factor whose secret the server chose is
+// one the server could use.
+size_t gs_proto_claim(uint8_t *buf, size_t cap, const char *name,
+                      const char *password, const uint8_t *secret,
+                      size_t secret_len);
+bool   gs_proto_read_claim(const uint8_t *buf, size_t len, char *name,
+                           size_t name_cap, char *password, size_t pw_cap,
+                           uint8_t *secret, size_t secret_cap,
+                           size_t *secret_len);
 
 size_t gs_proto_share(uint8_t *buf, size_t cap, uint64_t track,
                       const uint8_t *with, bool on);
