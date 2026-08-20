@@ -356,6 +356,32 @@ jobs:
           }
           Write-Host "start menu: $($menu[0].FullName)"
 
+          # **And the shortcut is launched, not merely counted.** The plan says
+          # "the game runs from the Start Menu"; a shortcut that exists and
+          # points at nothing satisfies a file-exists check and not a player.
+          # The game is a GUI-subsystem program, so it detaches and writes
+          # nothing to the console - the frame on disk is the only evidence
+          # either way, and the shortcut carries no arguments, so the working
+          # directory is where the frame lands.
+          $shell = New-Object -ComObject WScript.Shell
+          $link = $shell.CreateShortcut($menu[0].FullName)
+          Write-Host "  it points at: $($link.TargetPath)"
+          if (-not (Test-Path $link.TargetPath)) {
+            throw "the Start Menu shortcut points at nothing"
+          }
+
+          $before = Get-Date
+          Start-Process -FilePath $menu[0].FullName
+          Start-Sleep -Seconds 8
+          $running = Get-Process -Name gearstick -ErrorAction SilentlyContinue
+          if (-not $running) {
+            throw "launching the Start Menu shortcut started nothing that stayed up"
+          }
+          Write-Host "  launched from the shortcut, pid $($running.Id), " +
+                     "up for $([int]((Get-Date) - $before).TotalSeconds)s"
+          $running | Stop-Process -Force
+          Start-Sleep -Seconds 2
+
           # And away again. **Uninstalling has to leave nothing** - an installer
           # that cannot be removed is one people are right to refuse.
           $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList `
