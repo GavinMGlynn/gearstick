@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define GS_SCHEMA 2
+#define GS_SCHEMA 3
 
 struct gs_store {
     sqlite3 *db;
@@ -85,7 +85,26 @@ static bool gs_migrate(gs_store *s) {
         "  name    TEXT NOT NULL UNIQUE,"
         "  colour  INTEGER NOT NULL DEFAULT 0,"
         "  vehicle INTEGER NOT NULL DEFAULT 0,"
-        "  seen    INTEGER NOT NULL DEFAULT 0);"
+        "  seen    INTEGER NOT NULL DEFAULT 0,"
+
+        // **What makes a name yours rather than one you typed.**
+        //
+        // Null for a driver with no password, which is most of them and has to
+        // keep working: a racing game that demands an account before anybody
+        // can drive has lost the argument. Set, and the name cannot be used
+        // without it.
+        //
+        // The hash is libsodium's `crypto_pwhash_str` - Argon2id, with the
+        // salt and the parameters inside the string, so there is nothing here
+        // to get wrong and nothing to store alongside it.
+        "  password TEXT,"
+
+        // A shared secret for a one-time code, for anybody who wants one, and
+        // the last counter accepted under it. **The counter is why a code
+        // cannot be used twice** inside the thirty seconds it stays valid -
+        // without it, somebody who saw a code has that long to use it.
+        "  totp     BLOB,"
+        "  totp_at  INTEGER NOT NULL DEFAULT 0);"
 
         // A record is a time on a track under conditions over a distance, by
         // somebody. All five together are the key - that is not normalisation
@@ -169,7 +188,10 @@ static bool gs_migrate(gs_store *s) {
     // added with the default that makes an old row mean what it always meant: a
     // track nobody owns, that did not ship, and that is published if the old
     // `published` column said so - which is set below.
-    if (!gs_add_column(s, "track", "owner BLOB") ||
+    if (!gs_add_column(s, "driver", "password TEXT") ||
+        !gs_add_column(s, "driver", "totp BLOB") ||
+        !gs_add_column(s, "driver", "totp_at INTEGER NOT NULL DEFAULT 0") ||
+        !gs_add_column(s, "track", "owner BLOB") ||
         !gs_add_column(s, "track", "shipped INTEGER NOT NULL DEFAULT 0") ||
         !gs_add_column(s, "track", "visible INTEGER NOT NULL DEFAULT 0")) {
         return false;

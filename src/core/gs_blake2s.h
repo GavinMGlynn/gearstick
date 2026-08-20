@@ -20,6 +20,12 @@
 #ifndef GS_BLAKE2S_H
 #define GS_BLAKE2S_H
 
+// **`<stdbool.h>` explicitly.** In C23 `bool` is a keyword and this include is
+// a no-op; MSVC's C23 is partial and it is not, which is why `windows-clang`
+// exists as the documented fallback. Every other header in core picks this up
+// from `gs_common.h`; this one includes nothing of ours on purpose, so it says
+// so itself.
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 

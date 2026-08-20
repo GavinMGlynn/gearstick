@@ -324,8 +324,12 @@ jobs:
           # **clang-19, not clang.** The runner's default is 18, which is below
           # this project's C23 floor - and the configure says so and stops,
           # which is the gate doing its job and not a thing to work around.
+          # `libclang-rt-19-dev` is not optional here: libFuzzer, ASan and
+          # UBSan all live in clang's runtime library, and without it the
+          # targets compile and then fail at the link with three missing .a
+          # files - which reads as a build problem and is a missing package.
           apt_run install -y --no-install-recommends \
-            clang-19 ninja-build \
+            clang-19 libclang-rt-19-dev ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
             libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols libdecor-0-dev \

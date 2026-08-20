@@ -31,11 +31,11 @@ TEST(a_store_opens_and_knows_what_it_is) {
     CHECK(s != nullptr);
     if (s == nullptr) return;
 
-    // Two, since tracks gained an owner. The literal is deliberate: a schema
+    // Three, since drivers gained a password. The literal is deliberate: a schema
     // that changes without anybody meaning it to is a database somebody else
     // cannot open, so the number is written down and has to be edited on
     // purpose.
-    CHECK(gs_store_version(s) == 2);
+    CHECK(gs_store_version(s) == 3);
     CHECK(gs_store_driver_count(s) == 0);
     CHECK(gs_store_record_count(s) == 0);
     CHECK(gs_store_track_count(s) == 0);
@@ -270,7 +270,7 @@ TEST(what_is_written_is_still_there_after_a_reopen) {
     CHECK(again != nullptr);
     if (again == nullptr) return;
 
-    CHECK(gs_store_version(again) == 2);
+    CHECK(gs_store_version(again) == 3);
     CHECK(gs_store_driver_count(again) == 1);
     CHECK(gs_store_best_lap(again, 77, 88, nullptr, 0) == 4321);
     CHECK(gs_store_has_track(again, 99));
