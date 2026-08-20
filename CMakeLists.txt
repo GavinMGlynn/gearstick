@@ -759,6 +759,35 @@ if(WIN32)
     set(CPACK_PACKAGE_EXECUTABLES "gearstick;Gearstick")
     set(CPACK_CREATE_DESKTOP_LINKS "gearstick")
 
+    # **An MSI's product version must be `x.x.x.x` and nothing else.**
+    #
+    # Windows Installer will not take `0.1.0-beta1`: it wants four integers,
+    # and it uses that number - not the file name - to decide whether an
+    # install is an upgrade. So the version the package *calls itself* and the
+    # version inside the MSI have to be allowed to differ.
+    #
+    # The numeric part is taken as it stands, and a pre-release ending in
+    # digits contributes the fourth field: `0.1.0-beta1` becomes `0.1.0.1`.
+    # Without that last step every beta of 0.1.0 would carry the same product
+    # version, and installing beta2 over beta1 would not be seen as an upgrade
+    # at all - which is the kind of thing nobody notices until somebody is
+    # running two of them.
+    string(REGEX MATCH "^[0-9]+(\\.[0-9]+)*" GS_MSI_NUMBER "${GEARSTICK_RELEASE}")
+    if(NOT GS_MSI_NUMBER)
+        set(GS_MSI_NUMBER "0.0.0")
+    endif()
+    string(REGEX MATCH "[0-9]+$" GS_MSI_PRE "${GEARSTICK_RELEASE}")
+    if(NOT GEARSTICK_RELEASE STREQUAL GS_MSI_NUMBER AND GS_MSI_PRE)
+        set(GS_MSI_NUMBER "${GS_MSI_NUMBER}.${GS_MSI_PRE}")
+    endif()
+    set(CPACK_GS_MSI_VERSION "${GS_MSI_NUMBER}")
+    message(STATUS "gearstick: the MSI's product version is ${GS_MSI_NUMBER}")
+
+    # CPack reads this once per generator, which is the only place the version
+    # can be changed for the MSI without changing what every other package
+    # calls itself.
+    set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPackProject.cmake")
+
     # **WiX refuses a licence file it cannot recognise by extension**, and this
     # project's is called `LICENSE` with no extension at all - which CPack's WIX
     # generator rejects outright rather than guessing. So a copy with a `.txt`
