@@ -11,6 +11,7 @@
 #include "platform/gs_wire.h"
 
 #include <SDL3/SDL.h>
+#include <SDL3_net/SDL_net.h>
 
 #include <stdio.h>
 
@@ -69,7 +70,9 @@ static bool gs_meet(gs_wire **w, int count, uint16_t port) {
     if (w[0] == nullptr || gs_wire_error(w[0]) != nullptr) return false;
 
     for (int i = 1; i < count; i++) {
-        w[i] = gs_wire_join("127.0.0.1", port);
+        // The host's key, which in a real game a person passes on and here
+        // is simply asked for. A joiner given none refuses to connect.
+        w[i] = gs_wire_join("127.0.0.1", port, gs_wire_public_key(w[0]));
         if (w[i] == nullptr || gs_wire_error(w[i]) != nullptr) return false;
     }
 
@@ -249,6 +252,76 @@ TEST(four_machines_mesh_up_and_race_the_same_race) {
     gs_wire_quit();
 }
 
+TEST(a_datagram_nobody_sealed_is_not_taken_for_race_traffic) {
+    // **Before the mesh was sealed, this was an open door.** Anybody who knew a
+    // player's address and port could send a rollback datagram and have it
+    // handed straight to the race as somebody's inputs - there was nothing in
+    // the format that said who wrote it, because there was nothing to say it
+    // with.
+    CHECK(gs_wire_init());
+
+    static gs_wire *w[2];
+    CHECK(gs_meet(w, 2, 47829));
+    if (!gs_wire_ready(w[0])) {
+        for (int i = 0; i < 2; i++) gs_wire_close(w[i]);
+        gs_wire_quit();
+        return;
+    }
+
+    // A stranger with a socket and the host's port.
+    NET_DatagramSocket *sock = NET_CreateDatagramSocket(nullptr, 0, 0);
+    CHECK(sock != nullptr);
+    NET_Address *host = NET_ResolveHostname("127.0.0.1");
+    CHECK(host != nullptr);
+    CHECK(NET_WaitUntilResolved(host, 3000) == NET_SUCCESS);
+
+    // Shaped exactly like the real thing: the rollback magic, a player number,
+    // and a plausible amount of what looks like input.
+    uint8_t forged[128];
+    SDL_memset(forged, 0, sizeof forged);
+    forged[0] = (uint8_t)(GS_NET_MAGIC & 0xffu);
+    forged[1] = (uint8_t)((GS_NET_MAGIC >> 8) & 0xffu);
+    forged[2] = (uint8_t)((GS_NET_MAGIC >> 16) & 0xffu);
+    forged[3] = (uint8_t)((GS_NET_MAGIC >> 24) & 0xffu);
+    forged[4] = 1;                      // "I am player one"
+
+    for (int i = 0; i < 20; i++) {
+        CHECK(NET_SendDatagram(sock, host, 47829, forged, (int)sizeof forged));
+    }
+
+    // The host is given every chance to accept it and does not.
+    bool took = false;
+    for (int i = 0; i < 200; i++) {
+        uint8_t buf[GS_WIRE_MTU];
+        gs_wire_poll(w[0]);
+        if (gs_wire_recv(w[0], buf, sizeof buf) > 0) took = true;
+        SDL_Delay(1);
+    }
+    CHECK(!took);
+
+    // And the control: the real peer's traffic, sealed, still gets through.
+    // Without this the test would pass just as well if the host had stopped
+    // listening altogether.
+    uint8_t real[64];
+    SDL_memset(real, 0x5a, sizeof real);
+    CHECK(gs_wire_send(w[1], real, sizeof real));
+
+    bool heard = false;
+    for (int i = 0; i < 200 && !heard; i++) {
+        uint8_t buf[GS_WIRE_MTU];
+        gs_wire_poll(w[0]);
+        size_t got = gs_wire_recv(w[0], buf, sizeof buf);
+        if (got == sizeof real && SDL_memcmp(buf, real, got) == 0) heard = true;
+        SDL_Delay(1);
+    }
+    CHECK(heard);
+
+    NET_UnrefAddress(host);
+    NET_DestroyDatagramSocket(sock);
+    for (int i = 0; i < 2; i++) gs_wire_close(w[i]);
+    gs_wire_quit();
+}
+
 TEST(a_fifth_machine_is_not_let_into_a_four_player_race) {
     CHECK(gs_wire_init());
 
@@ -257,7 +330,8 @@ TEST(a_fifth_machine_is_not_let_into_a_four_player_race) {
 
     // One more knocks. There is no room, and it is given silence rather than a
     // reply telling it there is a game here.
-    gs_wire *gatecrasher = gs_wire_join("127.0.0.1", 47827);
+    gs_wire *gatecrasher = gs_wire_join("127.0.0.1", 47827,
+                                        gs_wire_public_key(w[0]));
     CHECK(gatecrasher != nullptr);
 
     for (int tick = 0; tick < 120; tick++) {
@@ -279,7 +353,10 @@ TEST(a_fifth_machine_is_not_let_into_a_four_player_race) {
 TEST(a_name_that_does_not_resolve_says_so_rather_than_hanging) {
     CHECK(gs_wire_init());
 
-    gs_wire *w = gs_wire_join("no-such-host.invalid", 47824);
+        // A key that is real, so the refusal below is about the name and not
+    // about a missing key.
+    static const uint8_t any_key[GS_NOISE_KEY_BYTES] = { 1 };
+    gs_wire *w = gs_wire_join("no-such-host.invalid", 47824, any_key);
     CHECK(w != nullptr);
     CHECK(gs_wire_error(w) != nullptr);
     CHECK(!gs_wire_ready(w));
@@ -297,6 +374,7 @@ int main(void) {
 
     run_two_processes_on_one_machine_race_over_real_sockets();
     run_four_machines_mesh_up_and_race_the_same_race();
+    run_a_datagram_nobody_sealed_is_not_taken_for_race_traffic();
     run_a_fifth_machine_is_not_let_into_a_four_player_race();
     run_a_name_that_does_not_resolve_says_so_rather_than_hanging();
 

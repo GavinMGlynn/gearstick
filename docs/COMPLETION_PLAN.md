@@ -768,9 +768,7 @@ review, and it fails it for good reasons.
       *Found and fixed on the way: a chunk the reassembler refused still left
       its declared count behind, so one malformed datagram made that track
       permanently unreceivable.*
-- [ ] **In progress — everything to the server is sealed; the direct peer mesh
-      is not.**
-      **Nothing on the wire in the clear.** `Noise_IK_25519_ChaChaPoly_BLAKE2s`
+- [x] **Nothing on the wire in the clear.** `Noise_IK_25519_ChaChaPoly_BLAKE2s`
       over libsodium as a submodule under `ext/`. A **named pattern from a
       specified, analysed framework** on **somebody else's audited primitives** —
       because a handshake this project invented is the thing that fails a review,
@@ -792,16 +790,21 @@ review, and it fails it for good reasons.
       *(e)* a relayed four-player race still agrees tick for tick with one
       datagram in twenty dropped and the rest reordered;
       *(f)* the handshake and the framing are fuzzed under ASan and UBSan.
-      *Where it stands: (a) to (f) are all done and checked by `ctest`. What is
-      left is not on that list and is the reason this stays unticked: a race
-      whose peers can reach each other directly still exchanges rollback
-      datagrams in the clear. Everything through the server — joining, the
-      lobby, tracks, results, proofs, and a relayed race — is sealed. Sealing
-      the mesh needs each peer to hold the others' static keys, which the lobby
-      can carry now that the lobby itself is authenticated.*
+      *(a) to (f) all pass under `ctest`. The direct peer mesh is sealed too:
+      every peer link is its own IK session, keyed from the static keys the
+      broker — the server's lobby or the host's roster — watched each player
+      prove. A forged datagram nobody sealed is refused, with a control that the
+      real peer's traffic still arrives. The only thing left in the clear is the
+      handshake itself, which cannot be encrypted under a key that does not
+      exist yet.*
       *Found by (e) and fixed: the last ticks of every race had exactly one
       admissible commitment each, because a flushing datagram reveals the ticks
       it commits. One lost packet and a finished race could never be confirmed.*
+      *Found while sealing the mesh, and older than it: an unsealed datagram was
+      taken for race traffic, so anybody who knew a port could inject inputs; a
+      server race without `--relay` had never sent anything at all; only the
+      welcome populated peers, so the first player could not see the second; and
+      readiness meant introduced rather than able to race.*
 - [ ] **The transport has a written specification.** Message formats, the state
       machine, the key schedule, the message limit before a rekey, and the
       properties claimed **and explicitly not claimed**. A design nobody wrote
@@ -948,15 +951,13 @@ worth as much as what was decided about it.
       looked exactly like crashing and cost everybody else the full silence
       timeout. The roster now rides along with the ping, and a client says
       goodbye on its way out.
-- [ ] **The direct peer-to-peer mesh is still in the clear.** *(Found while
-      sealing the client-to-server channel.)* Everything through the server is
-      sealed and a relayed race is sealed with it, but two peers that can reach
-      each other race directly, and that path has no handshake and no
-      authentication at all. Each peer needs the others' static keys, which the
-      lobby can now carry because the lobby itself is authenticated.
-      *Verification: a four-player mesh race is sealed end to end, a peer with
-      the wrong key is refused, and a captured mesh datagram contains none of
-      the inputs it carried.*
+- [x] **The direct peer-to-peer mesh is still in the clear.** *(Found while
+      sealing the client-to-server channel, closed in the same phase.)* Every
+      peer link is now its own IK session, keyed from what the broker watched
+      each player prove. *Verification: a four-player mesh race runs sealed and
+      confirms tick for tick, a two-client race the server merely introduced
+      does the same, and a well-formed datagram nobody sealed is refused while
+      the real peer's traffic still arrives.*
 - [ ] **`PROJECT_STATUS.md`'s "What does not exist" section is years out of
       date.** *(Found while writing up the session binding.)* It still says
       there is no race, no AI, no sound, no front end and no shipped tracks, all

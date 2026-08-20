@@ -33,6 +33,21 @@ typedef struct gs_peer {
     uint16_t     port;
     bool         known;
     char         text[GS_ADDR_MAX];   // how it was written down, for the roster
+
+    // **The sealed channel to this peer.** A race between two machines that can
+    // see each other goes straight between them, so the tunnel to the server
+    // protects none of it - the inputs, and with them everything a state hash
+    // is computed from, would cross in the clear.
+    //
+    // The key comes from whoever brokered the meeting: the server's lobby, or
+    // the host's roster, or the command line for the host itself. It is never
+    // taken from the peer's own say-so, because a key somebody hands you about
+    // themselves authenticates nothing.
+    uint8_t            key[GS_NOISE_KEY_BYTES];
+    bool               has_key;
+    bool               greeted;       // a handshake has been started with them
+    gs_noise_handshake hs;
+    gs_noise_session   tunnel;
 } gs_peer;
 
 struct gs_wire {
@@ -181,6 +196,11 @@ gs_wire *gs_wire_host(uint16_t port, uint8_t players) {
     w->local = 0;
     w->players = (uint8_t)SDL_clamp(players, 2, GS_WIRE_PLAYERS);
     w->peer[0].known = true;      // ourselves, trivially
+
+    // The host is the one everybody else has to already know, so it has an
+    // identity for the same reason the server does. `gs_wire_public_key` hands
+    // it out for a person to pass on.
+    gs_noise_keygen(&w->identity);
 
     // One player short of nobody: a host waiting for one other person is ready
     // the moment they arrive, and a host waiting for three waits for three.
@@ -360,9 +380,21 @@ const gs_lobby *gs_wire_lobby(const gs_wire *w) {
     return (w != nullptr && w->via_server) ? &w->lobby : nullptr;
 }
 
-gs_wire *gs_wire_join(const char *host, uint16_t port) {
+gs_wire *gs_wire_join(const char *host, uint16_t port, const uint8_t *host_key) {
     gs_wire *w = gs_wire_new(0);
     if (w == nullptr || w->sock == nullptr) return w;
+
+    // The same rule as the server: a client with no key for the far end is a
+    // client that would race whoever answered first.
+    if (host_key == nullptr) {
+        SDL_snprintf(w->error, sizeof w->error,
+                     "no host key: this client cannot tell %s from anybody "
+                     "else claiming to be it", host);
+        return w;
+    }
+    gs_noise_keygen(&w->identity);
+    SDL_memcpy(w->peer[0].key, host_key, GS_NOISE_KEY_BYTES);
+    w->peer[0].has_key = true;
 
     w->peer[0].addr = NET_ResolveHostname(host);
     if (w->peer[0].addr == nullptr ||
@@ -407,6 +439,10 @@ void gs_wire_close(gs_wire *w) {
 }
 
 bool gs_wire_ready(const gs_wire *w) { return w != nullptr && w->ready; }
+
+const uint8_t *gs_wire_public_key(const gs_wire *w) {
+    return w != nullptr ? w->identity.pub : nullptr;
+}
 uint64_t gs_wire_session(const gs_wire *w) { return w != nullptr ? w->session : 0; }
 uint8_t gs_wire_local(const gs_wire *w) { return w != nullptr ? w->local : 0; }
 uint8_t gs_wire_players(const gs_wire *w) { return w != nullptr ? w->players : 0; }
@@ -427,11 +463,22 @@ static void gs_send_to(gs_wire *w, const gs_peer *p, const uint8_t *buf, size_t 
     NET_SendDatagram(w->sock, p->addr, p->port, buf, (int)n);
 }
 
-static void gs_send_hello(gs_wire *w) {
-    uint8_t buf[5];
-    gs_put32(buf, GS_CTRL_MAGIC);
-    buf[4] = (uint8_t)GS_MSG_HELLO;
-    gs_send_to(w, &w->peer[0], buf, sizeof buf);
+// Sealed, to a peer whose tunnel is up. Nothing is sent to one whose is not:
+// there is no plaintext path here either.
+static bool gs_seal_to(gs_wire *w, uint8_t i, const uint8_t *buf, size_t n) {
+    gs_peer *p = &w->peer[i];
+    if (!p->known || p->addr == nullptr || !p->tunnel.established || n == 0) {
+        return false;
+    }
+
+    uint8_t sealed[GS_PROTO_MTU], out[GS_PROTO_MTU];
+    size_t k = gs_noise_seal(&p->tunnel, buf, n, sealed, sizeof sealed);
+    if (k == 0) return false;
+    k = gs_proto_sealed(out, sizeof out, sealed, k);
+    if (k == 0) return false;
+
+    gs_send_to(w, p, out, k);
+    return true;
 }
 
 // The roster, personalised: everybody needs to be told which player they are.
@@ -452,14 +499,22 @@ static void gs_send_roster(gs_wire *w, uint8_t to) {
     for (uint8_t i = 0; i < w->players; i++) {
         const char *text = (i == 0) ? "" : w->peer[i].text;
         size_t len = SDL_strlen(text);
-        if (n + 1 + len + 2 > sizeof buf) return;
+        if (n + 1 + len + 2 + GS_NOISE_KEY_BYTES > sizeof buf) return;
 
         buf[n++] = (uint8_t)len;
         SDL_memcpy(buf + n, text, len); n += len;
         gs_put16(buf + n, w->peer[i].port); n += 2;
+
+        // **And whose key that slot is.** This is the whole reason the roster
+        // is worth sealing: it is how everybody learns who everybody else is,
+        // and a roster anybody could rewrite would let them put their own key
+        // in somebody else's slot. Slot zero is the host's own.
+        const uint8_t *key = (i == 0) ? w->identity.pub : w->peer[i].key;
+        SDL_memcpy(buf + n, key, GS_NOISE_KEY_BYTES);
+        n += GS_NOISE_KEY_BYTES;
     }
 
-    gs_send_to(w, &w->peer[to], buf, n);
+    gs_seal_to(w, to, buf, n);
 }
 
 static void gs_take_roster(gs_wire *w, const uint8_t *buf, size_t len) {
@@ -473,7 +528,7 @@ static void gs_take_roster(gs_wire *w, const uint8_t *buf, size_t len) {
     for (uint8_t i = 0; i < players; i++) {
         if (n >= len) return;
         size_t tlen = buf[n++];
-        if (n + tlen + 2 > len || tlen >= GS_ADDR_MAX) return;
+        if (n + tlen + 2 + GS_NOISE_KEY_BYTES > len || tlen >= GS_ADDR_MAX) return;
 
         char text[GS_ADDR_MAX];
         SDL_memcpy(text, buf + n, tlen);
@@ -481,12 +536,33 @@ static void gs_take_roster(gs_wire *w, const uint8_t *buf, size_t len) {
         n += tlen;
         uint16_t port = gs_get16(buf + n); n += 2;
 
+        uint8_t key[GS_NOISE_KEY_BYTES];
+        SDL_memcpy(key, buf + n, GS_NOISE_KEY_BYTES);
+        n += GS_NOISE_KEY_BYTES;
+
         if (i == slot) continue;                 // no need to reach ourselves
 
         // Slot zero arrives empty on purpose - see gs_send_roster.
         const char *want = (i == 0) ? w->host_text : text;
         if (i == 0) port = w->host_port;
+
+        // **An empty slot is somebody who has not arrived, not somebody with no
+        // key.** The host sends the roster again every time anybody joins, so
+        // the early ones carry blank entries for the seats still to be filled -
+        // and taking a key from one of those meant remembering thirty-two zero
+        // bytes as that player's identity for ever, because a key already known
+        // is deliberately not replaced. Every later handshake with them then
+        // failed the check, silently, and the race started with three machines
+        // that could only hear the host.
         if (want[0] == '\0') continue;
+
+        // The key, before the address: it is what the handshake with them is
+        // checked against. Peer zero's is already ours from the command line
+        // and must not be quietly replaced by whatever arrived.
+        if (!w->peer[i].has_key) {
+            SDL_memcpy(w->peer[i].key, key, GS_NOISE_KEY_BYTES);
+            w->peer[i].has_key = true;
+        }
 
         if (w->peer[i].known && w->peer[i].addr != nullptr) continue;
 
@@ -515,45 +591,56 @@ static void gs_take_roster(gs_wire *w, const uint8_t *buf, size_t len) {
     w->ready = have == players;
 }
 
-// A joiner the host has not seen before, taken from the datagram it sent.
-static void gs_take_hello(gs_wire *w, NET_Address *from, uint16_t port) {
-    if (!w->hosting) return;
-
-    const char *text = NET_GetAddressString(from);
-    if (text == nullptr) return;
-
-    for (uint8_t i = 1; i < w->players; i++) {
-        if (w->peer[i].known && w->peer[i].port == port &&
-            SDL_strcmp(w->peer[i].text, text) == 0) {
-            // Already known - their hello was lost or ours was. Say it again.
-            gs_send_roster(w, i);
-            return;
-        }
-    }
-
-    for (uint8_t i = 1; i < w->players; i++) {
-        if (w->peer[i].known) continue;
-
-        w->peer[i].addr = from;
-        NET_RefAddress(from);
-        w->peer[i].port = port;
-        w->peer[i].known = true;
-        SDL_strlcpy(w->peer[i].text, text, sizeof w->peer[i].text);
-
-        // Everybody who is already here gets told again, because the roster
-        // they were sent was the roster before this person arrived.
-        w->ready = gs_wire_present(w) == w->players;
-        for (uint8_t k = 1; k < w->players; k++) {
-            if (w->peer[k].known) gs_send_roster(w, k);
-        }
-        return;
-    }
-    // Full. Nothing is sent back: an uninvited machine gets silence rather than
-    // a reply telling it there is a game here.
-}
 
 // What the server said. Handled here rather than by the caller, for the same
 // reason the peer handshake is: the layer above wants players, not datagrams.
+// **Everybody the server named, turned into somebody who can be reached.**
+//
+// Run for every lobby and not only the first. A client that is welcomed before
+// anybody else has arrived is told about nobody, and the lobbies that follow are
+// how it learns who turned up - so populating peers only on the welcome left
+// the first player in every race unable to see the second.
+static void gs_peers_from_lobby(gs_wire *w) {
+    if (w->local >= GS_WIRE_PLAYERS) return;
+
+    for (uint8_t i = 0; i < GS_WIRE_PLAYERS; i++) {
+        const gs_lobby_player *p = &w->lobby.player[i];
+        if (i == w->local || !p->present) continue;
+
+        SDL_strlcpy(w->peer[i].text, p->addr, sizeof w->peer[i].text);
+        w->peer[i].port = p->port;
+
+        // The key the server watched them prove during their own
+        // handshake. Without it there is nothing to check a peer against
+        // and no mesh can be sealed - which is the only reason the lobby
+        // carries one.
+        if (!w->peer[i].has_key) {
+            SDL_memcpy(w->peer[i].key, p->key, GS_NOISE_KEY_BYTES);
+            w->peer[i].has_key = true;
+        }
+
+        // **And an address that can actually be sent to.**
+        //
+        // This used to stop at writing down the text. Nothing resolved it
+        // and nothing set `known`, so `gs_wire_send` walked a list of peers
+        // it considered unknown and sent to none of them: a server race
+        // without `--relay` produced no traffic whatsoever, silently, and
+        // was never noticed because every test of a server race asked for
+        // the relay.
+        if (w->peer[i].known && w->peer[i].addr != nullptr) continue;
+        if (p->addr[0] == '\0') continue;
+
+        NET_Address *a = NET_ResolveHostname(p->addr);
+        if (a == nullptr || NET_WaitUntilResolved(a, 3000) != NET_SUCCESS) {
+            if (a != nullptr) NET_UnrefAddress(a);
+            continue;
+        }
+        if (w->peer[i].addr != nullptr) NET_UnrefAddress(w->peer[i].addr);
+        w->peer[i].addr = a;
+        w->peer[i].known = true;
+    }
+}
+
 static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
     switch (gs_proto_kind(buf, len)) {
     case GS_MSG_WELCOME: {
@@ -569,12 +656,7 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
         // server's own address is kept separately in host_text.
         // Where everybody is, for meshing with them directly later. Safe to
         // write over slot zero now: the server keeps its own address.
-        for (uint8_t i = 0; i < GS_WIRE_PLAYERS; i++) {
-            const gs_lobby_player *p = &w->lobby.player[i];
-            if (i == slot || !p->present) continue;
-            SDL_strlcpy(w->peer[i].text, p->addr, sizeof w->peer[i].text);
-            w->peer[i].port = p->port;
-        }
+        gs_peers_from_lobby(w);
 
         // Ready when the lobby is full *and* the ground is agreed. Racing
         // before the track has arrived would be racing on whatever was loaded
@@ -592,6 +674,7 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
     case GS_MSG_LOBBY:
         if (gs_proto_read_lobby(buf, len, &w->lobby)) {
             w->players = w->lobby.capacity;
+            gs_peers_from_lobby(w);
             w->ready = w->local < GS_WIRE_PLAYERS &&
                        w->lobby.count >= w->lobby.capacity &&
                        gs_wire_settled(w);
@@ -733,10 +816,253 @@ static size_t gs_unseal(gs_wire *w, const uint8_t *in, size_t len,
     return got;
 }
 
-// The same prologue the server uses. Authenticated and never sent, so two ends
-// that disagree about what they are speaking fail the handshake rather than a
-// race - which is where a version number lives.
+// Authenticated and never sent, so two ends that disagree about what they are
+// speaking fail the handshake rather than a race - which is where a version
+// number lives. The same string the server uses, because it is the same
+// protocol whichever end of it you are.
 #define GS_WIRE_PROLOGUE "gearstick/1"
+
+// --- the peer tunnels -------------------------------------------------------
+//
+// **Who initiates is decided by slot number, and the higher one does.**
+//
+// It has to be settled without a negotiation, because a negotiation is a round
+// trip and something to get wrong. Higher-initiates is the rule that works
+// everywhere this is used: a joiner reaching the host it typed the address of
+// has the host's key and a slot above zero, so it initiates; a peer meeting
+// another peer has both keys from the roster or the lobby, and the rule breaks
+// the tie. The responder needs no key in advance, which is exactly the property
+// IK has and the reason the host never needs to know a joiner before it knocks.
+static bool gs_we_initiate(const gs_wire *w, uint8_t peer) {
+    return w->local > peer;
+}
+
+static int gs_peer_at(const gs_wire *w, NET_Address *addr, uint16_t port) {
+    const char *text = NET_GetAddressString(addr);
+    if (text == nullptr) return -1;
+
+    for (uint8_t i = 0; i < GS_WIRE_PLAYERS; i++) {
+        const gs_peer *p = &w->peer[i];
+        if (!p->known || p->addr == nullptr || p->port != port) continue;
+        const char *theirs = NET_GetAddressString(p->addr);
+        if (theirs != nullptr && SDL_strcmp(theirs, text) == 0) return (int)i;
+    }
+    return -1;
+}
+
+static bool gs_from_server(const gs_wire *w, NET_Address *addr, uint16_t port) {
+    if (!w->via_server || w->server_addr == nullptr || port != w->server_port) {
+        return false;
+    }
+    const char *text = NET_GetAddressString(addr);
+    const char *ours = NET_GetAddressString(w->server_addr);
+    return text != nullptr && ours != nullptr && SDL_strcmp(text, ours) == 0;
+}
+
+// **Ready means able to race, not merely introduced.**
+//
+// It used to mean everybody's address was known, which was the same thing while
+// the mesh was in the clear and is not any more: a peer whose tunnel is not up
+// cannot be sent to at all, so a race that started on addresses alone would
+// begin with players who can hear nothing.
+//
+// **Decided in one place, and last.** The first version worked this out in the
+// middle of the poll, and then the roster arrived later in the same poll and
+// wrote the old address-only answer over the top. Every joiner then declared
+// itself ready with only the host reachable, raced for four seconds hearing one
+// machine out of three, and confirmed nothing.
+// The server has placed this client and the ground is agreed. Everything the
+// server has a say in, and nothing the peers do.
+static bool gs_placed(const gs_wire *w) {
+    return w->local < GS_WIRE_PLAYERS &&
+           w->lobby.count >= w->lobby.capacity &&
+           gs_wire_settled(w);
+}
+
+static void gs_settle_ready(gs_wire *w) {
+    if (w->players == 0 || w->local >= w->players) return;
+
+    if (w->via_server) {
+        // Relaying: the path is the tunnel to the server, and it is up long
+        // before anything else happens.
+        if (w->relay) { w->ready = gs_placed(w); return; }
+        if (!gs_placed(w)) { w->ready = false; return; }
+    }
+
+    // **And a sealed channel to every one of them.**
+    //
+    // A race that started on addresses alone began before the peer tunnels
+    // existed, so the first ticks of input were never sent to anybody - and
+    // they cannot be recovered, because the redundancy in each datagram only
+    // reaches back thirty-two ticks. The race then ran to the end and confirmed
+    // nothing, which reads as a desync and is a race that started too early.
+    for (uint8_t i = 0; i < w->players; i++) {
+        if (i == w->local) continue;
+        if (!w->peer[i].known || !w->peer[i].tunnel.established) {
+            w->ready = false;
+            return;
+        }
+    }
+    w->ready = true;
+}
+
+// Start, or restart, the handshake with a peer we are supposed to initiate to.
+// Repeated on the same cadence as everything else here, because the first
+// datagram of a handshake can be lost like any other.
+static void gs_greet_peer(gs_wire *w, uint8_t i) {
+    gs_peer *p = &w->peer[i];
+    if (!p->known || p->addr == nullptr || !p->has_key) return;
+    if (p->tunnel.established) return;
+    if (!gs_we_initiate(w, i)) return;
+
+    gs_noise_init_initiator(&p->hs, &w->identity, p->key,
+                            (const uint8_t *)GS_WIRE_PROLOGUE,
+                            sizeof GS_WIRE_PROLOGUE - 1);
+    p->greeted = true;
+
+    uint8_t msg[GS_PROTO_MTU], out[GS_PROTO_MTU];
+    size_t n = gs_noise_write_message(&p->hs, nullptr, 0, msg, sizeof msg);
+    if (n == 0) return;
+    n = gs_proto_handshake(out, sizeof out, msg, n);
+    if (n == 0) return;
+    gs_send_to(w, p, out, n);
+}
+
+// **Knocking is now a handshake.** It used to be five bytes of "hello" that
+// anybody could send and anybody could forge; it is the first message of an IK
+// handshake, which tells the host who is knocking and cannot be produced by
+// somebody who is not them.
+static void gs_send_hello(gs_wire *w) {
+    gs_greet_peer(w, 0);
+}
+
+// One handshake message from a peer, in whichever direction we are going.
+static void gs_take_peer_handshake(gs_wire *w, uint8_t i, const uint8_t *in,
+                                   size_t len) {
+    gs_peer *p = &w->peer[i];
+    if (p->tunnel.established) return;
+
+    const uint8_t *msg = nullptr;
+    size_t msg_len = 0;
+    if (!gs_proto_read_handshake(in, len, &msg, &msg_len)) return;
+
+    uint8_t payload[GS_PROTO_MTU];
+    size_t got = 0;
+
+    if (gs_we_initiate(w, i)) {
+        if (!p->greeted) return;                 // an answer to nothing
+        if (!gs_noise_read_message(&p->hs, msg, msg_len, payload, sizeof payload,
+                                   &got)) {
+            p->greeted = false;                  // a fresh one next time round
+            return;
+        }
+        if (gs_noise_done(&p->hs)) gs_noise_split(&p->hs, &p->tunnel);
+        return;
+    }
+
+    // Answering. A responder needs no key in advance - it learns the far end's
+    // from the message itself - but it still checks it against the one the
+    // broker said to expect, because otherwise anybody could take the slot.
+    gs_noise_init_responder(&p->hs, &w->identity,
+                            (const uint8_t *)GS_WIRE_PROLOGUE,
+                            sizeof GS_WIRE_PROLOGUE - 1);
+    if (!gs_noise_read_message(&p->hs, msg, msg_len, payload, sizeof payload,
+                               &got)) {
+        return;
+    }
+
+    const uint8_t *theirs = gs_noise_remote_static(&p->hs);
+    if (p->has_key &&
+        (theirs == nullptr || SDL_memcmp(theirs, p->key, GS_NOISE_KEY_BYTES) != 0)) {
+        // **Somebody else answering to this slot.** The handshake completed, so
+        // they hold *a* key; it is not the one the broker said this player has.
+        return;
+    }
+
+    uint8_t reply[GS_PROTO_MTU], out[GS_PROTO_MTU];
+    size_t n = gs_noise_write_message(&p->hs, nullptr, 0, reply, sizeof reply);
+    if (n == 0) return;
+    n = gs_proto_handshake(out, sizeof out, reply, n);
+    if (n == 0) return;
+
+    gs_send_to(w, p, out, n);
+    if (gs_noise_done(&p->hs)) gs_noise_split(&p->hs, &p->tunnel);
+}
+
+// A joiner the host has not seen before. Their first message is a handshake, so
+// **the host learns who they are from the message rather than from a claim** -
+// which is what makes the roster it then publishes worth anything to everybody
+// else in the race.
+static void gs_take_knock(gs_wire *w, NET_Address *from, uint16_t port,
+                          const uint8_t *in, size_t len) {
+    if (!w->hosting) return;
+
+    const char *text = NET_GetAddressString(from);
+    if (text == nullptr) return;
+
+    // Already here: their knock or our answer was lost. Say the roster again
+    // rather than tearing down a tunnel that works - a replayed knock would
+    // otherwise throw a racing player out, which is the same trick the server
+    // refuses.
+    for (uint8_t i = 1; i < w->players; i++) {
+        if (w->peer[i].known && w->peer[i].port == port &&
+            SDL_strcmp(w->peer[i].text, text) == 0) {
+            if (w->peer[i].tunnel.established) gs_send_roster(w, i);
+            return;
+        }
+    }
+
+    for (uint8_t i = 1; i < w->players; i++) {
+        gs_peer *p = &w->peer[i];
+        if (p->known) continue;
+
+        const uint8_t *msg = nullptr;
+        size_t msg_len = 0;
+        if (!gs_proto_read_handshake(in, len, &msg, &msg_len)) return;
+
+        uint8_t payload[GS_PROTO_MTU];
+        size_t got = 0;
+        gs_noise_init_responder(&p->hs, &w->identity,
+                                (const uint8_t *)GS_WIRE_PROLOGUE,
+                                sizeof GS_WIRE_PROLOGUE - 1);
+        if (!gs_noise_read_message(&p->hs, msg, msg_len, payload, sizeof payload,
+                                   &got)) {
+            return;
+        }
+
+        const uint8_t *theirs = gs_noise_remote_static(&p->hs);
+        if (theirs == nullptr) return;
+        SDL_memcpy(p->key, theirs, GS_NOISE_KEY_BYTES);
+        p->has_key = true;
+
+        p->addr = from;
+        NET_RefAddress(from);
+        p->port = port;
+        p->known = true;
+        SDL_strlcpy(p->text, text, sizeof p->text);
+
+        uint8_t reply[GS_PROTO_MTU], out[GS_PROTO_MTU];
+        size_t n = gs_noise_write_message(&p->hs, nullptr, 0, reply, sizeof reply);
+        if (n > 0) {
+            n = gs_proto_handshake(out, sizeof out, reply, n);
+            if (n > 0) gs_send_to(w, p, out, n);
+        }
+        if (!gs_noise_done(&p->hs) || !gs_noise_split(&p->hs, &p->tunnel)) {
+            return;
+        }
+
+        // Everybody who is already here gets told again, because the roster
+        // they were sent was the roster before this person arrived - and it is
+        // the roster that carries the keys they need to reach each other.
+        w->ready = gs_wire_present(w) == w->players;
+        for (uint8_t k = 1; k < w->players; k++) {
+            if (w->peer[k].tunnel.established) gs_send_roster(w, k);
+        }
+        return;
+    }
+    // Full. Nothing is sent back: an uninvited machine gets silence rather than
+    // a reply telling it there is a game here.
+}
 
 // To the server, which is not a peer - and sealed, always.
 //
@@ -848,6 +1174,19 @@ void gs_wire_poll(gs_wire *w) {
         gs_send_hello(w);
     }
 
+    // **Every peer link, until it is up.** A race cannot start before these
+    // finish, and they cannot finish before the broker has said who everybody
+    // is - so this runs on the same retry clock as everything else and settles
+    // as the roster or the lobby fills in.
+    if (w->retry % GS_RETRY_TICKS == 0) {
+        for (uint8_t i = 0; i < GS_WIRE_PLAYERS; i++) {
+            if (i == w->local) continue;
+            gs_greet_peer(w, i);
+        }
+    }
+
+
+
     // **Only while still finding everybody.** Once a race is running the
     // caller's own receive loop is the pump: draining here would swallow race
     // traffic and drop it on the floor, which is exactly what it did the first
@@ -863,6 +1202,10 @@ void gs_wire_poll(gs_wire *w) {
         // Data arriving before the handshake finished is dropped: there is
         // nothing to hand it to yet.
     }
+
+    // Last, so that nothing later in this poll can write an older answer over
+    // the top of it.
+    gs_settle_ready(w);
 }
 
 // --- carrying the race ------------------------------------------------------
@@ -884,19 +1227,21 @@ bool gs_wire_send(gs_wire *w, const uint8_t *buf, size_t len) {
         return true;
     }
 
-    // To everybody else, directly. The rollback packet is identical for every
-    // peer - it is this machine's own inputs - so this is one call rather than
-    // one per peer, and it is a mesh rather than a relay because a relay would
-    // put the host's latency between two clients who can see each other.
+    // To everybody else, directly. It is a mesh rather than a relay because a
+    // relay would put the host's latency between two clients who can see each
+    // other.
     bool any = false;
     for (uint8_t i = 0; i < w->players; i++) {
         if (i == w->local || !w->peer[i].known || w->peer[i].addr == nullptr) {
             continue;
         }
-        if (NET_SendDatagram(w->sock, w->peer[i].addr, w->peer[i].port, buf,
-                             (int)len)) {
+        // **Sealed to each of them separately.** One datagram per peer rather
+        // than one for everybody, which is what a tunnel costs on a mesh: the
+        // plaintext is identical and every ciphertext is different, because
+        // each peer has its own key and its own counter.
+        if (gs_seal_to(w, i, buf, len)) {
             any = true;
-        } else {
+        } else if (w->peer[i].tunnel.established) {
             SDL_snprintf(w->error, sizeof w->error, "send failed: %s",
                          SDL_GetError());
         }
@@ -914,7 +1259,14 @@ size_t gs_wire_recv(gs_wire *w, uint8_t *buf, size_t cap) {
 
         size_t n = (size_t)d->buflen;
 
-        if (w->via_server) {
+        // **Routed by where it came from, not by what it looks like.**
+        //
+        // The server and every peer share one socket, so "is this the server
+        // talking" is a question about the sender's address and nothing else.
+        // Deciding it by the message type instead worked right up until a peer
+        // sent a rollback datagram, which is not a protocol message at all and
+        // was quietly thrown away.
+        if (w->via_server && gs_from_server(w, d->addr, d->port)) {
             gs_msg kind = gs_proto_kind(d->buf, n);
 
             // The handshake, which is the only thing from the server that is
@@ -960,22 +1312,63 @@ size_t gs_wire_recv(gs_wire *w, uint8_t *buf, size_t cap) {
             continue;
         }
 
-        // The handshake's own traffic never reaches the caller.
-        if (n >= 5 && gs_get32(d->buf) == GS_CTRL_MAGIC) {
-            if (d->buf[4] == GS_MSG_HELLO) {
-                gs_take_hello(w, d->addr, d->port);
-            } else if (d->buf[4] == GS_MSG_ROSTER) {
-                gs_take_roster(w, d->buf, n);
+        // --- a peer, on the direct path.
+        int from = gs_peer_at(w, d->addr, d->port);
+        if (from >= 0) {
+            gs_peer *p = &w->peer[from];
+            gs_msg kind = gs_proto_kind(d->buf, n);
+
+            if (kind == GS_MSG_HANDSHAKE) {
+                gs_take_peer_handshake(w, (uint8_t)from, d->buf, n);
+                NET_DestroyDatagram(d);
+                continue;
             }
+
+            // **Nothing from a peer is read unsealed.** A race between two
+            // machines that can see each other is the traffic a tunnel to the
+            // server does nothing for, so it gets its own.
+            if (kind != GS_MSG_SEALED || !p->tunnel.established) {
+                NET_DestroyDatagram(d);
+                continue;
+            }
+
+            const uint8_t *body = nullptr;
+            size_t body_len = 0;
+            uint8_t plain[GS_PROTO_MTU];
+            size_t got = 0;
+            bool ok = gs_proto_read_sealed(d->buf, n, &body, &body_len) &&
+                      gs_noise_open(&p->tunnel, body, body_len, plain,
+                                    sizeof plain, &got);
+            NET_DestroyDatagram(d);
+            if (!ok) continue;
+
+            // The roster is the host telling everybody who is here; everything
+            // else a peer says is race traffic and belongs to the caller.
+            if (got >= 5 && gs_get32(plain) == GS_CTRL_MAGIC) {
+                if (plain[4] == GS_MSG_ROSTER) gs_take_roster(w, plain, got);
+                continue;
+            }
+            if (got > cap) got = cap;
+            SDL_memcpy(buf, plain, got);
+            w->received++;
+            return got;
+        }
+
+        // Somebody who is not a peer yet. A joiner knocking is the only thing
+        // that can legitimately be in this position, and the knock is a
+        // handshake message: the host learns who they are from it, which is
+        // what IK's responder gets for free.
+        if (w->hosting && gs_proto_kind(d->buf, n) == GS_MSG_HANDSHAKE) {
+            gs_take_knock(w, d->addr, d->port, d->buf, n);
             NET_DestroyDatagram(d);
             continue;
         }
 
-        if (n > cap) n = cap;
-        SDL_memcpy(buf, d->buf, n);
+        // Anything else is from somebody this client has no business hearing
+        // from. Before the tunnel it would have been handed to the caller as
+        // race traffic, which is to say anybody who knew the port could inject
+        // inputs into somebody else's race.
         NET_DestroyDatagram(d);
-        w->received++;
-        return n;
     }
 }
 

@@ -1957,6 +1957,87 @@ the tunnel changed nothing about the driving rather than merely that the four
 of them are consistent. About five hundred datagrams are dropped along the way,
 so none of it passes by having nothing to survive.
 
+### The mesh is sealed too, and nothing on the wire is in the clear
+
+A race between two machines that can see each other goes straight between them,
+so the tunnel to the server protects none of it. That path is now sealed as
+well, and with it the last thing this game sent in the open.
+
+**Every peer link is its own Noise IK session.** Which end initiates is settled
+by slot number — the higher one does — because it has to be settled without a
+negotiation, and that rule works everywhere this is used: a joiner reaching the
+host whose address it typed has the host's key and a slot above zero; two peers
+meeting through a broker have both keys and the rule breaks the tie. The
+responder needs no key in advance, which is the property IK has and the reason a
+host never needs to know a joiner before it knocks.
+
+**Knocking is a handshake now.** It used to be five bytes of "hello" that
+anybody could send and anybody could forge. It is the first message of an IK
+handshake, so the host learns who is knocking from something they had to prove
+rather than from something they claimed — which is what makes the roster it then
+publishes worth anything to everybody else.
+
+**The broker says who everybody is.** The server's lobby and the host's roster
+now carry each player's static key, taken from the handshake that player
+completed. A key somebody hands you about themselves authenticates nothing; a
+key the broker watched them prove is what two peers meeting for the first time
+check each other against. Both the lobby and the roster are themselves sealed,
+so the list cannot be rewritten in flight.
+
+#### Four bugs, three of them older than this work
+
+**A datagram nobody sealed was taken for race traffic.** Anybody who knew a
+player's address and port could send a rollback datagram and have it handed
+straight to the race as somebody's inputs. There was nothing in the format that
+said who wrote it, because there was nothing to say it with. Now nothing
+unsealed is accepted from anybody, and there is a test that injects a
+well-formed forgery and watches it be ignored — with a control that the real
+peer's traffic still gets through, so it cannot pass by the client having gone
+deaf.
+
+**A server race without `--relay` had never sent anything at all.** The lobby's
+addresses were written down and never resolved, and nothing marked a peer known,
+so `gs_wire_send` walked a list of peers it considered unknown and sent to none
+of them. Silently. Every existing test of a server race had asked for the relay,
+so nothing said so. There is now a test that races two clients the server
+introduced, directly, and it fails without the fix.
+
+**Only the welcome populated peers.** A client welcomed before anybody else
+arrived is told about nobody, and the lobbies that follow are how it learns who
+turned up — so the first player in every race could not see the second. Peers
+are now taken from every lobby.
+
+**Readiness meant introduced, not able to race.** That was the same thing while
+the mesh was in the clear. It is not any more: a race that started on addresses
+alone began before the peer tunnels existed, so the first ticks of input went
+nowhere — and they cannot be recovered, because the redundancy in each datagram
+only reaches back thirty-two ticks. The race then ran to the end and confirmed
+nothing, which reads as a desync and is a race that started too early. Readiness
+is now decided in one place, last in the poll, and includes a sealed channel to
+every player.
+
+That "in one place, last" is itself the fix for a bug: the first version worked
+it out in the middle of the poll and the roster arrived later in the same poll
+and wrote the old answer over the top.
+
+#### And one in the key distribution
+
+The host sends the roster again every time anybody joins, so the early ones
+carry blank entries for the seats still to be filled. Taking a key from one of
+those meant remembering thirty-two zero bytes as that player's identity for
+ever — a key already known is deliberately not replaced — and every later
+handshake with them then failed its check, silently. Three machines out of four
+raced hearing only the host. An empty slot is somebody who has not arrived, not
+somebody with no key.
+
+#### What is left in the clear, and why it has to be
+
+The handshake messages themselves. A key exchange cannot be encrypted under a
+key that does not exist yet; that is what a key exchange is for. IK is chosen
+partly because it encrypts the *client's* identity inside its first message, so
+what a passive observer learns is that somebody spoke to this server, and not
+who.
+
 ---
 
 ## What does not exist

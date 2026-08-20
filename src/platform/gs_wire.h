@@ -55,7 +55,14 @@ gs_wire *gs_wire_host(uint16_t port, uint8_t players);
 // Join somebody who is waiting. `host` is a name or an address. Which player
 // this machine turns out to be is decided by the host and arrives with the
 // roster.
-gs_wire *gs_wire_join(const char *host, uint16_t port);
+// **The host's public key is not optional either**, for the same reason the
+// server's is not: without it a joiner cannot tell the machine it meant to race
+// from anybody else who answers. The host prints it; a person passes it on.
+gs_wire *gs_wire_join(const char *host, uint16_t port, const uint8_t *host_key);
+
+// This machine's own public key. Meaningful for a host, which is the end
+// everybody else has to already know.
+const uint8_t *gs_wire_public_key(const gs_wire *w);
 
 // Meet everybody at a server instead. **Which player you are is the server's
 // decision**, not the decision of whoever happened to start the game first -

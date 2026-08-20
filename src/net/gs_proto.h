@@ -16,6 +16,7 @@
 #define GS_PROTO_H
 
 #include "core/gs_common.h"
+#include "net/gs_noise.h"
 
 // Not the netcode's magic and not the peer handshake's, so a rollback session
 // that ever saw one of these would reject it rather than read it as input.
@@ -78,6 +79,15 @@ typedef struct gs_lobby_player {
     uint8_t  slot;
     bool     present;
     bool     ready;
+
+    // **And which key that slot belongs to.** The mesh is peer to peer, so
+    // nothing the server does protects it; what the server can do is say who
+    // everybody is, having watched each of them prove it during their own
+    // handshake. That is what makes a sealed mesh possible at all - without it
+    // two clients meeting for the first time have nothing to check each other
+    // against, and a key somebody hands you about themselves authenticates
+    // nothing.
+    uint8_t  key[GS_NOISE_KEY_BYTES];
 } gs_lobby_player;
 
 typedef struct gs_lobby {

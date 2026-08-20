@@ -718,8 +718,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --host PORT [N]   wait for N players in total (2-4, default 2)");
             SDL_Log("  --join HOST PORT  join somebody who is waiting");
             SDL_Log("  --server HOST PORT  meet everybody at a server");
-            SDL_Log("  --server-key HEX    that server's public key, which it "
-                    "prints when it starts");
+            SDL_Log("  --server-key HEX    the public key of the server or "
+                    "host being joined, which it prints when it starts");
             SDL_Log("  --name NAME     who to appear as online");
             SDL_Log("  --relay         send through the server, if peers cannot connect");
             SDL_Log("  J toggles the landing arc while airborne.");
@@ -814,8 +814,25 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                       ? gs_wire_server(a->server_host, a->port, me,
                                        a->has_server_key ? a->server_key : nullptr)
                   : a->join_host != nullptr
-                      ? gs_wire_join(a->join_host, a->port)
+                      ? gs_wire_join(a->join_host, a->port,
+                                     a->has_server_key ? a->server_key : nullptr)
                       : gs_wire_host(a->port, want);
+
+        if (a->wire != nullptr && a->server_host == nullptr &&
+            a->join_host == nullptr && gs_wire_error(a->wire) == nullptr) {
+            // Hosting. Everybody who joins has to already know this key, so it
+            // is printed where a person can copy it.
+            const uint8_t *key = gs_wire_public_key(a->wire);
+            char hex[2 * GS_NOISE_KEY_BYTES + 1];
+            for (int i = 0; i < GS_NOISE_KEY_BYTES; i++) {
+                static const char *digits = "0123456789abcdef";
+                hex[i * 2] = digits[key[i] >> 4];
+                hex[i * 2 + 1] = digits[key[i] & 0xfu];
+            }
+            hex[2 * GS_NOISE_KEY_BYTES] = '\0';
+            SDL_Log("net: hosting on port %u; the key to give people is %s",
+                    a->port, hex);
+        }
 
         const char *err = gs_wire_error(a->wire);
         if (a->wire == nullptr || err != nullptr) {

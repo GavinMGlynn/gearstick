@@ -146,7 +146,8 @@ bool gs_proto_read_full(const uint8_t *buf, size_t len, char *why, size_t cap) {
 
 // --- the roster ------------------------------------------------------------
 
-#define GS_PLAYER_BYTES (GS_PROTO_NAME + GS_PROTO_ADDR + 2 + 1 + 1 + 1)
+#define GS_PLAYER_BYTES \
+    (GS_PROTO_NAME + GS_PROTO_ADDR + 2 + 1 + 1 + 1 + GS_NOISE_KEY_BYTES)
 #define GS_LOBBY_BYTES  (2 + GS_PROTO_MAX_PLAYERS * GS_PLAYER_BYTES)
 
 static size_t gs_put_lobby(uint8_t *p, const gs_lobby *l) {
@@ -162,6 +163,7 @@ static size_t gs_put_lobby(uint8_t *p, const gs_lobby *l) {
         p[n++] = pl->slot;
         p[n++] = pl->present ? 1u : 0u;
         p[n++] = pl->ready ? 1u : 0u;
+        memcpy(p + n, pl->key, GS_NOISE_KEY_BYTES); n += GS_NOISE_KEY_BYTES;
     }
     return n;
 }
@@ -185,6 +187,7 @@ static bool gs_get_lobby(const uint8_t *p, gs_lobby *l) {
         pl->slot = p[n++];
         pl->present = p[n++] != 0u;
         pl->ready = p[n++] != 0u;
+        memcpy(pl->key, p + n, GS_NOISE_KEY_BYTES); n += GS_NOISE_KEY_BYTES;
 
         if (pl->slot >= GS_PROTO_MAX_PLAYERS) return false;
     }

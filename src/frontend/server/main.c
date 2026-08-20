@@ -71,6 +71,12 @@ typedef struct gs_tunnel {
     uint16_t         port;
     uint64_t         last_ms;
     gs_noise_session session;
+
+    // **Who they proved they were.** Not a claim: the handshake does not
+    // complete unless they hold the secret for this key. It goes into the
+    // lobby so that two clients meeting on the mesh have something to check
+    // each other against.
+    uint8_t          key[GS_NOISE_KEY_BYTES];
 } gs_tunnel;
 
 typedef struct gs_client {
@@ -167,6 +173,8 @@ static int gs_find(NET_Address *addr, uint16_t port) {
     return -1;
 }
 
+static gs_tunnel *gs_tunnel_find(const char *text, uint16_t port);
+
 static void gs_build_lobby(gs_lobby *l) {
     SDL_zerop(l);
     l->capacity = gs_srv.capacity;
@@ -182,6 +190,9 @@ static void gs_build_lobby(gs_lobby *l) {
         SDL_strlcpy(p->name, c->name, sizeof p->name);
         SDL_strlcpy(p->addr, c->text, sizeof p->addr);
         p->port = c->port;
+
+        const gs_tunnel *t = gs_tunnel_find(c->text, c->port);
+        if (t != nullptr) SDL_memcpy(p->key, t->key, GS_NOISE_KEY_BYTES);
     }
 }
 
@@ -921,10 +932,14 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
             return;
         }
 
+        const uint8_t *theirs = gs_noise_remote_static(&hs);
+        if (theirs == nullptr) return;
+
         gs_tunnel *t = gs_tunnel_slot(text, d->port, now);
         if (t == nullptr) return;
 
         SDL_zerop(t);
+        SDL_memcpy(t->key, theirs, GS_NOISE_KEY_BYTES);
         t->used = true;
         t->port = d->port;
         SDL_strlcpy(t->text, text, sizeof t->text);

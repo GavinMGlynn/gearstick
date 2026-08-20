@@ -1023,6 +1023,116 @@ static const uint8_t *gs_test_secret(uint8_t who) {
     return s[who];
 }
 
+TEST(two_clients_the_server_introduced_race_each_other_directly_and_sealed) {
+    // **A server race that does not use the relay.** The server brokers the
+    // meeting - it says who is here, where they are, and which key each of them
+    // proved they hold - and then the two race straight at each other.
+    //
+    // This had never worked. The lobby's addresses were written down and never
+    // resolved, and nothing marked a peer known, so `gs_wire_send` walked a
+    // list of peers it considered unknown and sent to none of them: a server
+    // race without `--relay` produced no traffic at all, silently. Every test
+    // of a server race had asked for the relay, so nothing said so.
+    CHECK(gs_wire_init());
+
+    if (!gs_server_start_for("47852", GS_SERVER_LIFETIME, "2")) {
+        gs_failures++;
+        return;
+    }
+
+    gs_wire *a = gs_wire_server("127.0.0.1", 47852, "ada", gs_test_server_pub());
+    gs_wire *b = gs_wire_server("127.0.0.1", 47852, "bez", gs_test_server_pub());
+    CHECK(a != nullptr && b != nullptr);
+
+    // Deliberately not relaying: the mesh is the thing under test.
+    CHECK(!gs_wire_relaying(a));
+    CHECK(!gs_wire_relaying(b));
+
+    for (int k = 0; k < 600 && !(gs_wire_ready(a) && gs_wire_ready(b)); k++) {
+        gs_wire_poll(a);
+        gs_wire_poll(b);
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_ready(a));
+    CHECK(gs_wire_ready(b));
+
+    static gs_track t;
+    static gs_net n[2];
+    gs_world start;
+
+    gs_track_init(&t, 48, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_track_set_corner(&t, x, y, x > 20 && x < 26 ? GS_INT(1) : 0);
+        }
+    }
+    gs_world_init(&start, GS_ONE);
+    gs_world_add_car(&start, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(9), 0);
+    gs_world_add_car(&start, &t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(4), GS_INT(11), 0);
+
+    gs_net_begin(&n[0], &start, 2, gs_wire_local(a), gs_test_secret(gs_wire_local(a)));
+    gs_net_begin(&n[1], &start, 2, gs_wire_local(b), gs_test_secret(gs_wire_local(b)));
+
+    gs_wire *wires[2] = { a, b };
+    const uint32_t ticks = GS_TICK_HZ * 2;
+
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        uint8_t buf[GS_WIRE_MTU];
+        size_t got;
+
+        for (int i = 0; i < 2; i++) {
+            gs_wire_poll(wires[i]);
+            while ((got = gs_wire_recv(wires[i], buf, sizeof buf)) > 0) {
+                gs_net_receive(&n[i], &t, buf, got);
+            }
+        }
+        for (int i = 0; i < 2; i++) {
+            gs_net_local_input(&n[i], gs_drive(gs_wire_local(wires[i]), tick));
+            size_t len = gs_net_packet(&n[i], buf, sizeof buf);
+            gs_wire_send(wires[i], buf, len);
+            gs_net_step(&n[i], &t);
+        }
+        SDL_Delay(2);
+    }
+
+    for (int i = 0; i < 2; i++) gs_net_finish(&n[i]);
+    for (int i = 0; i < 400; i++) {
+        uint8_t buf[GS_WIRE_MTU];
+        size_t got;
+        for (int k = 0; k < 2; k++) {
+            gs_wire_poll(wires[k]);
+            while ((got = gs_wire_recv(wires[k], buf, sizeof buf)) > 0) {
+                gs_net_receive(&n[k], &t, buf, got);
+            }
+        }
+        if (i < 200) {
+            for (int k = 0; k < 2; k++) {
+                size_t len = gs_net_packet(&n[k], buf, sizeof buf);
+                gs_wire_send(wires[k], buf, len);
+            }
+        }
+        SDL_Delay(2);
+    }
+
+    // The same race on both machines, over a path the server never carried.
+    CHECK(n[0].confirmed_tick == ticks);
+    CHECK(n[1].confirmed_tick == ticks);
+    CHECK(gs_world_hash(&n[0].confirmed) == gs_world_hash(&n[1].confirmed));
+    CHECK(!n[0].desynced);
+    CHECK(!n[1].desynced);
+
+    // And they really did talk to each other rather than through the server.
+    uint32_t sent = 0, got = 0;
+    gs_wire_stats(a, &sent, &got);
+    CHECK(sent >= ticks);
+    CHECK(got >= ticks);
+
+    gs_wire_close(a);
+    gs_wire_close(b);
+    gs_wire_quit();
+    gs_server_stop();
+}
+
 TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
     // **The verification this item exists for.** The two wires below are given
     // no way to reach each other: the roster's addresses are never used,
@@ -1956,6 +2066,7 @@ int main(void) {
     run_a_client_that_quits_says_so_instead_of_being_waited_out();
     run_a_placed_client_is_not_dropped_for_going_quiet();
     run_a_client_with_a_different_track_is_given_the_right_one();
+    run_two_clients_the_server_introduced_race_each_other_directly_and_sealed();
     run_two_clients_that_cannot_see_each_other_race_through_the_server();
     run_a_time_is_kept_only_if_re_racing_it_produces_it();
     run_a_time_offered_without_the_servers_token_is_refused();

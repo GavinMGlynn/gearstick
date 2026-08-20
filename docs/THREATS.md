@@ -269,10 +269,10 @@ transport work is larger and defends a channel nobody is currently attacking.
    UBSan, seeded from generated captures, run in CI. No crash found so far; the
    targets are known to be capable of finding one because a planted bug was
    found in seconds.
-6. **Seal the transport.** *Mostly done:* everything between a client and the
-   server is sealed with `Noise_IK_25519_ChaChaPoly_BLAKE2s`, including a
-   relayed race. The direct peer-to-peer mesh is not, and until it is, a race
-   between two peers who can see each other is still in the clear.
+6. ~~**Seal the transport.**~~ **Done.** `Noise_IK_25519_ChaChaPoly_BLAKE2s`
+   between a client and the server, and again between every pair of peers on the
+   mesh — keyed from the static keys the broker watched each of them prove. Only
+   the handshake itself is in the clear, which is what a handshake is.
 7. **Accounts, and a track's ownership.** Now that identity exists, "only the
    author may withdraw this" becomes true rather than decorative.
 
