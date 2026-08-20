@@ -2345,10 +2345,11 @@ There is a door now, and it is the screen the game starts on.
   first and the settings after, the way *Racing Destruction Set* did. Exit is a
   flag the menu raises and the frontend acts on, because the menu does not own
   the loop.
-- **Online signs in and then waits.** A client with a server goes to the lobby
-  rather than the title, since the track, the roster and the moment the race
-  starts are all the server's to decide. The race cannot start while nobody is
-  signed in, or the grid would carry a car whose lap times belong to no one.
+- **Signing in lands on the menu, and only the lobby joins a race.** Online,
+  **Play** is what puts you in the queue — the track, the roster and the moment
+  it starts are the server's to decide, so Play goes to the lobby rather than
+  offering a local track chooser. Until then an online player can read the
+  records or go and build something with the race waiting.
 
 The tests name the facts: `a_password_on_a_profile_is_actually_required`,
 `a_second_factor_is_asked_for_when_the_profile_has_one`,
@@ -2360,6 +2361,26 @@ evidence.
 
 The golden replay is untouched, as it must be: none of this is simulation. A
 colour cannot change where a car ends up and neither can a password.
+
+**The first version of this shipped a bug into the very thing it was building.**
+Signing in sent an online client to the lobby, and a one-player server is ready
+the moment it is asked — so pressing SIGN IN started a race instead of showing
+the menu. It was found by playing it, one commit later, which is the only way it
+was going to be found: every test passed, because the rule lives in the
+frontend's main loop and the frontend links a window system that no test
+executable stands up.
+
+So the check is the real programs. `tools/front_door_check.py` starts a real
+server, points a real client at it, and checks **both** directions — a client
+left on the menu must still be there, and a client left in the lobby must get
+in, because "the menu did not start a race" would pass just as well if nothing
+ever raced. It runs as `gearstick_front_door`, redirects the store into a
+temporary directory so it cannot touch the profile somebody plays with, and was
+confirmed by putting the bug back and watching it go red.
+
+The lesson worth keeping is about where the gap was: the rule that decides
+whether somebody is in a race was in the one file the test suite structurally
+cannot link, and nothing noticed until a person pressed the button.
 
 ---
 

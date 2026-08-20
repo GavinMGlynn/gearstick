@@ -927,11 +927,16 @@ asked.
       for looking after the library, Profile is for the driver signed in
       including setting or removing their password, and Exit leaves.
       *Verification: the screens are drawn and photographed by `--screen`.*
-- [x] **A client pointed at a server shows the front end.** It signs in first
-      and waits in the lobby, instead of joining the race as whoever the command
-      line said. Nobody is pulled onto the grid while still at the door.
+- [x] **A client pointed at a server shows the front end.** It signs in first,
+      instead of joining the race as whoever the command line said.
       *Verification: a client launched at a running server sits at the login
       screen rather than reporting that it is driving.*
+- [x] **Signing in lands on the menu, and only the lobby joins a race.** Play is
+      what puts an online player in the queue; until then they can look at the
+      records or build something with the race waiting.
+      *Verification: a client left on the menu with a server ready and waiting
+      does not start racing, and one left in the lobby does — both checked
+      against a real server, and the check fails if the rule is removed.*
 
 ## Tails
 
@@ -1077,3 +1082,13 @@ worth as much as what was decided about it.
       installer never installed on a clean machine, no tag, no rekey, no delete
       over the wire, no denial-of-service resistance — and says why the "what
       does not exist" half of a status document is the half that rots.*
+- [x] **Signing in dropped an online player straight into a race.** *(Found by
+      playing it, one commit after the door was built.)* Signing in sent an
+      online client to the lobby, and a one-player server is ready the moment it
+      is asked — so pressing SIGN IN started a race instead of showing the menu
+      that had just been built. The menu is the thing you sign in *to*.
+      *Verification: `gearstick_front_door` runs a real client against a real
+      server and checks both halves — a client on the menu does not get pulled
+      in, and one in the lobby still does, because the first check alone would
+      pass if nothing ever raced.*
+

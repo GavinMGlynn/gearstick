@@ -1177,11 +1177,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                                                  : 1.0f;
             if (a->menu.screen == GS_SCREEN_RACE) a->menu.screen = GS_SCREEN_LOBBY;
         }
-        // **Nobody is dragged into a race from the login screen.** The server
-        // deciding the grid is full says the race can start, not that this
-        // machine has anybody sitting at it - and starting anyway would put an
-        // unnamed car on the grid whose lap times belong to no one.
-        if (gs_wire_ready(a->wire) && a->menu.signed_in >= 0) {
+        // **Nobody is dragged into a race from anywhere but the lobby.** The
+        // server saying the grid is full means the race *can* start, not that
+        // whoever is at this machine has asked to be in it - and they may well
+        // be signed in and reading the records. Waiting in the lobby is how
+        // somebody says yes, so waiting in the lobby is what this waits for.
+        if (gs_wire_ready(a->wire) && a->menu.screen == GS_SCREEN_LOBBY) {
             // **The server's track, not ours.** Whatever was loaded locally is
             // set aside: everybody has to be racing the same ground, and the
             // hash was checked on the way in, so this is the one moment the

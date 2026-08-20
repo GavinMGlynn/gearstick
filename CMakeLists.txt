@@ -513,6 +513,25 @@ if(GEARSTICK_TESTS)
                              TIMEOUT 120 SKIP_RETURN_CODE 77)
     endif()
 
+    # **The rule that lives in the main loop, checked on the real programs.**
+    # A client that has signed in and is reading the records must not be pulled
+    # onto the grid because a one-player server decided the race could start;
+    # waiting in the lobby is how somebody says yes. That rule is in the
+    # frontend, which links a window system, so no test executable can reach it
+    # - it takes a real server and a real client, which is what this is.
+    #
+    # It checks both directions. "The menu did not start a race" would pass
+    # just as well if nothing ever raced, so the lobby must still get in.
+    if(Python3_FOUND AND GEARSTICK_SERVER AND TARGET gearstick)
+        add_test(NAME gearstick_front_door
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/front_door_check.py
+                         $<TARGET_FILE:gearstick_server>
+                         $<TARGET_FILE:gearstick>)
+        set_tests_properties(gearstick_front_door PROPERTIES
+                             TIMEOUT 180 SKIP_RETURN_CODE 77)
+    endif()
+
     if(Python3_FOUND)
         add_test(NAME gearstick_noise_interop
                  COMMAND ${Python3_EXECUTABLE}

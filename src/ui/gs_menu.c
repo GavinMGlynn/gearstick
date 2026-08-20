@@ -470,7 +470,7 @@ static gs_screen gs_login_screen(gs_menu *m) {
             if (gs_go_button("SIGN IN", -1.0f, 44.0f)) {
                 if (gs_menu_sign_in(m, m->login_pick, m->login_password,
                                     m->login_code))
-                    next = m->online ? GS_SCREEN_LOBBY : GS_SCREEN_TITLE;
+                    next = GS_SCREEN_TITLE;
             }
             ImGui_Spacing();
             if (gs_wide_button("New driver", 32.0f)) {
@@ -531,8 +531,15 @@ static gs_screen gs_title(gs_menu *m) {
         // to race on is the first decision, not something buried behind the
         // settings - and the settings screen is where it lands afterwards.
         if (gs_go_button("PLAY", -1.0f, 44.0f)) {
-            m->tracks_for_race = true;
-            next = GS_SCREEN_TRACKS;
+            if (m->online) {
+                // **Joining, not choosing.** The track, the grid and the moment
+                // it starts all belong to the server, so offering a local track
+                // chooser here would be offering a choice that is not there.
+                next = GS_SCREEN_LOBBY;
+            } else {
+                m->tracks_for_race = true;
+                next = GS_SCREEN_TRACKS;
+            }
         }
         ImGui_Spacing();
         if (gs_wide_button("Tracks", 34.0f)) {
