@@ -896,10 +896,14 @@ plan item is a commitment to fix it with a verification attached. They are left
 here with a pointer rather than deleted, because where a problem was found is
 worth as much as what was decided about it.
 
-- [ ] **What surrounds a track is undecided.** *(Now Phase 13.)* There is no wall at the edge — a
-      car that drives off continues onto a plain that carries on at the height
-      and surface of the nearest edge tile, so leaving the track currently costs
-      nothing at all. It should probably cost something.
+- [x] **What surrounds a track is undecided.** *(Closed in Phase 13: a few tiles
+      of loose run-off, and then the ground falls away.)* Leaving the track now
+      costs grip first and then everything.
+      *Verification: `the_run_off_is_a_thing_that_stops_you` and
+      `a_car_that_keeps_going_over_the_edge_is_finished`. One thing the
+      perturbation turned up and is worth keeping in mind: a wall across a
+      corridor no longer makes a track uncompletable, because a car can go round
+      through the run-off.*
 - [x] **A hard-coded demo track is in the game frontend.** *(Closed in Phase 12:
       four stock tracks ship as data in `assets/tracks/`, written by
       `tools/make_tracks.c`, and the frontend states no geometry at all.)* It is a prototype and
@@ -918,29 +922,36 @@ worth as much as what was decided about it.
       `ATTRIBUTION.md`, written by the same script that generates the art. The
       smell was real and the answer turned out to be that the directory has
       almost nothing to do.*
-- [ ] **Placing a gate is not in the undo history.** *(Now Phase 13.)* The undo model records a
-      cell changing from one value to another, and a gate is a list entry rather
-      than a cell. Removing a misplaced gate is easy, so this is an
-      inconsistency rather than a hole — but it is one, and undo that covers
-      most of what you did is a promise with a footnote.
-- [ ] **Import a corpus of real tracks to test against.** *(Now Phase 13.)* Our own tracks will
-      all have been built by whoever wrote the editor, which is the worst
-      possible sample. The *Stunts* corpus is the target — documented format,
-      grid-based with elevation and three surfaces, hundreds of community
-      tracks — and it belongs with the analyser in Phase 9, where "is this
-      completable" is the question being asked. Its repository's licence is
+- [x] **Placing a gate is not in the undo history.** *(Closed in Phase 13:
+      `GS_EDIT_GATE_ADD` and `GS_EDIT_GATE_REMOVE` join the same history the
+      terrain uses.)* The one edit that changes what a track *is* for scoring was
+      the one you could not take back.
+      *Verification: `placing_a_gate_can_be_undone_like_anything_else` and
+      `a_gate_placed_inside_a_stroke_undoes_with_the_stroke` — the second
+      because a gate placed mid-stroke has to come back out with the stroke and
+      not on its own.*
+- [x] **Import a corpus of real tracks to test against.** *(Closed in Phase 13:
+      `src/core/gs_stunts.c` reads the format.)* Tracks built by people who had
+      never seen this editor, which is the whole point of a corpus.
+      *Verification: `a_track_from_stunts_reads_as_a_track`,
+      `bytes_that_are_not_a_stunts_track_are_refused`, and
+      `a_track_written_in_the_stunts_layout_reads_back_as_itself`.*
+      *The original text, kept because the licence question it raises is still
+      the reason no corpus is redistributed here: its repository's licence is
       unclear and must be checked first. Reference only; nothing imported ships.
-- [ ] **Read the original's manual for its designers' notes on the 50 stock
-      tracks.** *(Now Phase 13.)* They say what each track was *for* — one built to aim both
-      drivers at each other on pavement, another the shortest buildable track so
-      you do not have to go far to find someone to hit. That is design rationale
-      from the authors, it needs no reverse engineering, and it should inform
-      our own stock tracks before they are built.
+- [x] **Read the original's manual for its designers' notes on the 50 stock
+      tracks.** *(Closed in Phase 13.)* The lesson taken was not which tracks to
+      build but that **every one of them had a reason somebody could say in a
+      line** — a set that cannot do that is a set of variations.
+      *Verification: twenty-two tracks ship, and `docs/GUIDE.md` prints each
+      one's reason where a player will see it.*
 
-- [ ] **There is no HUD.** *(Now Phase 13.)* A race now has laps, positions and a finish, and none
-      of it is on screen while you are driving — you find out what happened on
-      the results table afterwards. Everything needed is in the simulation
-      already; this is a rendering job.
+- [x] **There is no HUD.** *(Closed in Phase 13: `src/ui/gs_hud.c`.)*
+      *Verification: `the_hud_says_what_lap_it_is_and_changes_when_the_lap_does`
+      and `the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed` —
+      both written as "it changes when the thing changes" rather than "something
+      is drawn", because a HUD that shows a constant is a HUD that passes a
+      screenshot test.*
 - [x] **Online races assume everybody already has the same track.** *(Closed in
       Phase 11: the server hands the track out, in chunks, and a client is not
       ready to race until the rebuilt track hashes to what it was promised.)* The
@@ -948,14 +959,24 @@ worth as much as what was decided about it.
       so two people racing must be on the same build. A track is a few hundred
       compressed bytes and the hash is already checked everywhere else — it
       belongs in the handshake.
-- [ ] **Sound has only been listened to on Linux.** *(Now Phase 13.)* The synthesiser is
-      platform-independent and the device path is not. Windows and macOS need a
-      human with speakers.
-- [ ] **The store is one file with no migration path.** *(Now Phase 13.)* Profiles and records are
-      versioned and refuse to load anything they do not recognise, which is
-      right, but "refuses to load" means somebody's history is quietly gone the
-      first time the format changes. It needs an upgrade path before there is a
-      format worth upgrading from.
+- [ ] **Sound has only been listened to on Linux.** *(Now Phase 13, and the same
+      item as "Sound listened to on Windows and macOS" above — one thing, listed
+      twice.)* The synthesiser is platform-independent and the device path is
+      not. Windows and macOS need a human with speakers, and nothing in this
+      repository can substitute for that. It is the only tail left, and it is
+      left for the same reason the phase item is.
+- [x] **The store is one file with no migration path.** *(Closed in Phase 13,
+      and exercised for real in Phase 14.)* There is now a schema version and an
+      upgrade path: new tables appear by `CREATE TABLE IF NOT EXISTS`, new
+      *columns* by `ALTER TABLE` with a default that makes an old row mean what
+      it always meant, and old data is translated — the track table's `published`
+      flag became the new visibility that way.
+      *Verification: the schema has gone from 1 to 3 while the library committed
+      under `assets/` kept opening and working, which is what
+      `the_shipped_library_is_a_database_this_code_can_still_use` checks. That
+      one is not hypothetical: adding an owner column with only a CREATE
+      statement would have left every query naming it failing on the one
+      database that ships and passing on every test that made its own.*
 
 - [x] **The game never asked SDL for sound, so it never made any.** *(Found and
       closed while building the generator.)* `SDL_Init` was given video and
