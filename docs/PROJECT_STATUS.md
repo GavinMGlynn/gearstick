@@ -2272,6 +2272,28 @@ them:
 Both of those need a person with a clean Windows box, which is the same shape of
 gap as listening to the sound on three platforms.
 
+### The Windows build wanted a redistributable nobody was going to have
+
+Not on the plan, and it would have shipped.
+
+MSVC links the dynamic C runtime by default, so `gearstick.exe` needed
+`VCRUNTIME140.dll` and `MSVCP140.dll` from the Visual C++ Redistributable. Every
+machine that has ever tested the zip has Visual Studio on it — that is what a
+build runner is — so it always worked. A player without it gets a missing-DLL
+box and no game, and **a zip cannot fix that even in principle**, because a zip
+cannot install a redistributable.
+
+The runtime is linked statically now, set before anything is added so SDL,
+SQLite and libsodium are built the same way; two halves of one program
+disagreeing about the runtime is a link error at best. The packaging job runs
+`dumpbin` against the *installed* executable and refuses anything importing
+`VCRUNTIME`, `MSVCP` or `api-ms-win-crt`.
+
+It was found by asking what the plan's "a machine that has never had a
+toolchain" clause was actually about, rather than filing it under things only a
+person can check. Most of what that clause is worried about on Windows is
+exactly this, and exactly this is checkable from here.
+
 ---
 
 ## What does not exist
@@ -2292,9 +2314,11 @@ updated because it is fun to write, and the "what does not" half rots.
   completing a handshake, which is the only thing that proves a specification is
   one.
 - **The Windows installer has not been installed on a clean machine.** CI
-  installs it, runs what it installed and uninstalls it, on the machine that
-  just built it. "Never had a toolchain on it" and "the game runs from the Start
-  Menu" both need a person.
+  installs it, launches the game from the Start Menu shortcut, runs the golden
+  replay from the installed copy, and uninstalls leaving nothing — on the
+  machine that just built it. The usual reason a clean machine differs is gone:
+  the C runtime is static and the installed executable is checked to import no
+  redistributable. What is left is somebody with a fresh Windows box.
 - **Nothing has been tagged or released.** The packaging workflow builds a
   tarball, a disk image, a zip and an installer, and attests all four; no
   version has come out of it.

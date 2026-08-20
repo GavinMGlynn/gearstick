@@ -865,18 +865,22 @@ install is an installer.
       *Verification: the MSI installs on a machine that has never had a
       toolchain on it, the game runs from the Start Menu, and uninstalling
       leaves nothing behind.*
-      **Built, and verified in part.** CPack's WiX generator makes it alongside
-      the zip, with a fixed upgrade GUID so a new version replaces the old one
-      rather than installing beside it. The packaging job installs it with
-      `msiexec /qn`, finds where it landed rather than assuming, checks the
-      assets went too, runs the installed headless driver, checks a Start Menu
-      shortcut exists, uninstalls, and checks both the program and the shortcut
-      are gone.
-      **What that does not establish, stated rather than glossed:** the runner
-      is the machine that just built it, not one that has never had a toolchain;
-      and the shortcut is checked for existence rather than launched, so "the
-      game runs from the Start Menu" is verified as far as an unattended machine
-      can and no further. Both need a person with a clean Windows box.
+      **Built, and verified except for the machine.** CPack's WiX generator
+      makes it alongside the zip, with a fixed upgrade GUID so a new version
+      replaces the old one rather than installing beside it. The packaging job
+      installs it with `msiexec /qn`, finds where it landed rather than
+      assuming, checks the assets went too, runs the installed headless driver
+      against the golden replay, **resolves the Start Menu shortcut and launches
+      it**, then uninstalls and checks both the program and the shortcut are
+      gone.
+      *And the reason a clean machine would have differed is now removed rather
+      than hoped about: MSVC links the dynamic C runtime by default, so the game
+      needed the Visual C++ Redistributable — invisible on any machine with
+      Visual Studio, fatal on one without, and unfixable by a zip. The runtime
+      is linked statically and `dumpbin` checks the installed executable imports
+      no redistributable.*
+      **What is left is the machine itself**: the runner is the one that just
+      built the thing. Everything this side of that has been checked.
 - [ ] **The installer is in the release beside the archive.** Somebody who wants
       a zip still gets a zip. *Verification: a tagged release carries both, and
       both carry a provenance attestation.*
