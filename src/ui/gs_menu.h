@@ -26,7 +26,11 @@
 #include "core/gs_track.h"
 
 typedef enum gs_screen {
-    GS_SCREEN_TITLE = 0,
+    // **First, because it is the door.** Nothing else in the front end is
+    // reachable until somebody has signed in, so this is both the screen the
+    // game starts on and the value a zeroed gs_menu already holds.
+    GS_SCREEN_LOGIN = 0,
+    GS_SCREEN_TITLE,
     GS_SCREEN_PROFILES,
     GS_SCREEN_SETUP,
     GS_SCREEN_RACE,
@@ -91,6 +95,52 @@ typedef struct gs_menu {
 
     char status[160];
 
+    // --- who is signed in ---------------------------------------------------
+    //
+    // **An index into the roster, or -1 for nobody, and while it is -1 the only
+    // screen that draws is the login one.** That is enforced in one place, at
+    // the top of gs_menu_frame, rather than by every screen remembering to
+    // check - a gate each caller has to opt into is a gate somebody forgets.
+    int  signed_in;
+
+    // The login screen's scratch. The typed password lives here for as long as
+    // it takes to check it and is wiped immediately afterwards, because a
+    // password sitting in a struct that gets memcpy'd around is a password in
+    // more places than anybody intended.
+    int  login_pick;                // which driver is highlighted, or -1
+    char login_password[64];
+    char login_confirm[64];
+    char login_code[8];             // the six digits, when a second factor is set
+    char login_error[112];
+    bool login_making;              // the "new driver" fields are showing
+
+    // **Handed to the frontend exactly once, to prove the same name at a
+    // server.** The server checks a password rather than a hash, so this is
+    // the typed text and not what is stored - which is why it is taken and
+    // wiped in one movement by gs_menu_take_server_login rather than read.
+    // Only set when a server is configured; offline this stays empty.
+    char     server_password[64];
+    uint32_t server_code;
+    bool     server_login_pending;
+
+    // **Set by the frontend when this game was pointed at other people.**
+    // Signing in then leads to the lobby rather than the title, because the
+    // track, the roster and the moment the race starts are all the server's to
+    // decide - offering a local setup screen would be offering a choice that
+    // is not there.
+    bool online;
+
+    // Whether the library screen was opened to choose a race or to tidy up.
+    // The same screen either way - the difference is what the big button says
+    // and where Back goes, which is the whole difference between "pick one" and
+    // "look after these".
+    bool tracks_for_race;
+
+    // **Exit, which only the frontend can actually do.** The menu cannot end
+    // the loop - it does not own it - so it raises this and the frontend reads
+    // it, the same way the race setup is handed over rather than acted on here.
+    bool quit;
+
     // Waiting at a server. The menu owns none of the networking - it is handed
     // what the wire last heard and draws it, so a lobby screen cannot be a
     // reason the connection behaves differently.
@@ -115,6 +165,27 @@ void gs_menu_init(gs_menu *m);
 // same one unless something was clicked. `t` is the track a race would be on,
 // for showing its records and its name.
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
+
+// **The gate's whole rule, in one callable place.** Sign `index` in if the
+// password and code are what that driver requires - an empty password is
+// correct for a driver who has none, which is a supported state rather than a
+// hole. Returns false and leaves `login_error` saying why otherwise.
+//
+// Public so it can be tested without standing up an ImGui context: a rule that
+// can only be exercised by clicking is a rule nothing checks.
+bool gs_menu_sign_in(gs_menu *m, int index, const char *password,
+                     const char *code);
+
+// Who is signed in, or "" when nobody is. The frontend needs the name to say
+// it at a server, and everything else needs it to put on a result.
+const char *gs_menu_driver(const gs_menu *m);
+
+// Take the credentials for a server login, if one is waiting, and wipe them on
+// the way out. Returns false when there is nothing to send. The password goes
+// to the wire as itself because that is what the server verifies against its
+// own stored hash - see docs/THREATS.md on what the tunnel is doing about that.
+bool gs_menu_take_server_login(gs_menu *m, char *password, size_t cap,
+                               uint32_t *code);
 
 // Which track the library screen wants raced next, or -1. Cleared by reading
 // it, so a choice is acted on once rather than every frame.

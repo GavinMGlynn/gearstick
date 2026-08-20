@@ -13,15 +13,20 @@ somebody else can run.
 
 ## The first ten minutes
 
-**1. Start it.** Run `gearstick`. You land on the title screen with a track
-already turning behind it — that is a real track, not a picture of one.
+**1. Start it.** Run `gearstick`. You land on the door, with a track already
+turning behind it — that is a real track, not a picture of one.
 
-**2. Say who you are.** Press **Drivers**. Type a name, pick a colour, pick a
-machine, press **add**. This matters more than it looks: every lap time you set
-from now on has your name on it, and the game remembers you between runs.
+**2. Say who you are.** The first time there is nobody here, so press **NEW
+DRIVER**, type a name and press **CREATE**. You can give yourself a password or
+leave it empty; empty is fine on a machine only you use, and you can add one
+later. Then press **SIGN IN**.
 
-**3. Race.** Back out with **Back**, then **RACE**. The setup screen has the
-whole race on it:
+This matters more than it looks: every lap time you set from now on has your
+name on it, the game remembers you between runs, and on a machine several people
+share it is how the records stay theirs rather than everybody's.
+
+**3. Race.** Press **PLAY**. You pick the track first — **Race this one** — and
+the setup screen has the rest of the race on it:
 
 - *mode* — **first past the flag** or **last one driving**. The second is the
   same track, the same cars and the same physics; only the winning condition
@@ -43,9 +48,14 @@ which is exactly how it worked on a C64.
 **5. Look at the results.** Times for everybody, best laps, and whether anybody
 took a record. **Records** shows what stands on this track.
 
+**5a. Your password, if you want one.** **Profile** on the main menu sets or
+removes the password on whoever is signed in — your own only, which is what
+stops the door being decorative. **sign out** at the bottom of the main menu
+hands the machine to somebody else.
+
 **6. Now build something.** Press **Tab**. This is the point of the game.
 
-**7. Keep it.** Back at the title, **Tracks** is everything you have built.
+**7. Keep it.** Back at the menu, **Tracks** is everything you have built.
 **Keep this one** puts whatever is loaded into the library, and **Load** brings
 one back. A track is known by what it is rather than by its name, so renaming
 one does not make it a different track and saving the same track twice keeps

@@ -58,10 +58,12 @@ void gs_profile_raced(gs_profiles *p, uint8_t index, bool won, bool podium,
 // --- the wire format -------------------------------------------------------
 
 // What one profile takes on disk, per version. Version two appended eight bytes
-// for the date; everything before it is where it was, which is what lets one
-// reader handle both.
+// for the date and version three the lock; everything before each addition is
+// where it was, which is what lets one reader handle all three.
 #define GS_PROFILE_BYTES_V1 (GS_PROFILE_NAME + 1 + 1 + 4 + 4 + 4 + 4 + 8)
-#define GS_PROFILE_BYTES    (GS_PROFILE_BYTES_V1 + 8)
+#define GS_PROFILE_BYTES_V2 (GS_PROFILE_BYTES_V1 + 8)
+#define GS_PROFILE_BYTES    (GS_PROFILE_BYTES_V2 + GS_PROFILE_PASSWORD + \
+                             GS_PROFILE_TOTP + 1)
 #define GS_PROFILES_HEADER (4 + 4 + 4)
 
 static void gs_put32(uint8_t *p, uint32_t v) {
@@ -108,6 +110,13 @@ size_t gs_profiles_serialize(const gs_profiles *p, uint8_t *buf, size_t cap) {
         gs_put32(q, e->wrecks);  q += 4;
         gs_put64(q, e->tiles);   q += 8;
         gs_put64(q, e->last_raced); q += 8;      // version 2
+
+        // Version 3. The hash is written whole rather than as a string so the
+        // row stays a fixed width, which is what makes the reader arithmetic
+        // above rather than a scan.
+        memcpy(q, e->password, GS_PROFILE_PASSWORD); q += GS_PROFILE_PASSWORD;
+        memcpy(q, e->totp, GS_PROFILE_TOTP);         q += GS_PROFILE_TOTP;
+        *q++ = e->totp_len;
     }
     return need;
 }
@@ -121,7 +130,9 @@ bool gs_profiles_deserialize(gs_profiles *p, const uint8_t *buf, size_t len) {
     uint32_t version = gs_get32(q); q += 4;
     if (version < GS_PROFILE_OLDEST || version > GS_PROFILE_VERSION) return false;
 
-    size_t row = version >= 2 ? GS_PROFILE_BYTES : GS_PROFILE_BYTES_V1;
+    size_t row = version >= 3 ? GS_PROFILE_BYTES
+               : version >= 2 ? GS_PROFILE_BYTES_V2
+                              : GS_PROFILE_BYTES_V1;
 
     uint32_t count = gs_get32(q); q += 4;
     if (count > GS_PROFILES_MAX) return false;
@@ -148,6 +159,18 @@ bool gs_profiles_deserialize(gs_profiles *p, const uint8_t *buf, size_t len) {
         // and why zero means that rather than the epoch.
         if (version >= 2) { e->last_raced = gs_get64(q); q += 8; }
         else              { e->last_raced = 0; }
+
+        // A roster from before version three has no lock on it, and an empty
+        // password is exactly how "no password" is spelled - so the older file
+        // is not a special case downstream, it is just an unlocked profile.
+        if (version >= 3) {
+            memcpy(e->password, q, GS_PROFILE_PASSWORD);
+            e->password[GS_PROFILE_PASSWORD - 1] = '\0';
+            q += GS_PROFILE_PASSWORD;
+            memcpy(e->totp, q, GS_PROFILE_TOTP); q += GS_PROFILE_TOTP;
+            e->totp_len = *q++;
+            if (e->totp_len > GS_PROFILE_TOTP) e->totp_len = 0;
+        }
     }
     return true;
 }

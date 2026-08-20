@@ -1,7 +1,22 @@
 #include "net/gs_auth.h"
 
+#include "core/gs_profile.h"
+
 #include <sodium.h>
 #include <string.h>
+
+// **The two places these sizes are written must agree.** `src/core/gs_profile.h`
+// carries a password hash and a TOTP secret as opaque bytes, and it cannot
+// include this header to learn how big they are - core links nothing and
+// including src/net/ from src/core/ is the layering violation the build checks
+// for. So the numbers are written out there and pinned here, where both
+// headers are in scope. A silent disagreement would truncate a hash on save.
+static_assert(GS_PROFILE_PASSWORD == GS_AUTH_HASH_BYTES,
+              "a profile's password field must hold a whole Argon2id hash");
+static_assert(GS_PROFILE_TOTP == GS_AUTH_SECRET_BYTES,
+              "a profile's TOTP field must hold a whole shared secret");
+static_assert(GS_AUTH_HASH_BYTES >= crypto_pwhash_STRBYTES,
+              "libsodium wants more room for an encoded hash than we reserved");
 
 bool gs_auth_hash_password(const char *password, char *out, size_t cap) {
     if (password == nullptr || out == nullptr) return false;

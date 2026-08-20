@@ -38,6 +38,17 @@
 static int gs_failures = 0;
 static const char *gs_current = "";
 
+// Little-endian writers, so a test can lay out a saved file by hand. Building
+// the bytes explicitly is the point: a fixture produced by today's writer would
+// agree with today's reader even when both are wrong about a length.
+static void gs_test_put32(uint8_t *p, uint32_t v) {
+    for (int i = 0; i < 4; i++) p[i] = (uint8_t)((v >> (8 * i)) & 0xffu);
+}
+
+static void gs_test_put64(uint8_t *p, uint64_t v) {
+    for (int i = 0; i < 8; i++) p[i] = (uint8_t)((v >> (8 * i)) & 0xffu);
+}
+
 #define CHECK(cond)                                                            \
     do {                                                                       \
         if (!(cond)) {                                                         \
@@ -3731,6 +3742,91 @@ TEST(a_profile_is_a_person_rather_than_a_settings_entry) {
     CHECK(!gs_profile_remove(&p, 7));
 }
 
+TEST(a_roster_written_before_passwords_existed_still_loads) {
+    // **Built by hand rather than by an older binary**, because the point is
+    // the bytes: a version-two row is 50 of them and ends at the date. If the
+    // reader ever gets that length wrong it will read the next row's name as
+    // this row's lock, and a test that generated the file with today's writer
+    // could not tell, having got the length wrong in both directions at once.
+    enum { V2_ROW = GS_PROFILE_NAME + 1 + 1 + 4 + 4 + 4 + 4 + 8 + 8 };
+    static uint8_t buf[12 + V2_ROW * 2];
+    memset(buf, 0, sizeof buf);
+
+    uint8_t *q = buf;
+    gs_test_put32(q, 0x50525347u); q += 4;      // magic
+    gs_test_put32(q, 2u);          q += 4;      // the version before the lock
+    gs_test_put32(q, 2u);          q += 4;      // two people
+
+    const char *names[2] = { "ada", "bez" };
+    for (int i = 0; i < 2; i++) {
+        memcpy(q, names[i], strlen(names[i])); q += GS_PROFILE_NAME;
+        *q++ = (uint8_t)GS_COLOUR_GREEN;
+        *q++ = (uint8_t)GS_VEH_DUNE_BUGGY;
+        gs_test_put32(q, 7u);  q += 4;          // races
+        gs_test_put32(q, 3u);  q += 4;          // wins
+        gs_test_put32(q, 5u);  q += 4;          // podiums
+        gs_test_put32(q, 1u);  q += 4;          // wrecks
+        gs_test_put64(q, 1234u); q += 8;        // tiles
+        gs_test_put64(q, 1700000000ull); q += 8;// last raced
+    }
+    CHECK((size_t)(q - buf) == sizeof buf);
+
+    static gs_profiles old;
+    CHECK(gs_profiles_deserialize(&old, buf, sizeof buf));
+    CHECK(old.count == 2);
+    CHECK(strcmp(old.entry[0].name, "ada") == 0);
+    CHECK(strcmp(old.entry[1].name, "bez") == 0);
+    CHECK(old.entry[1].wins == 3);
+    CHECK(old.entry[1].tiles == 1234);
+
+    // **Unlocked, and that is the truth about the file rather than a default.**
+    // Somebody who has been playing since before there were passwords is not
+    // locked out by the upgrade.
+    CHECK(old.entry[0].password[0] == '\0');
+    CHECK(old.entry[0].totp_len == 0);
+    CHECK(old.entry[1].password[0] == '\0');
+}
+
+TEST(a_lock_survives_being_written_out_and_read_back) {
+    static gs_profiles p;
+    gs_profiles_clear(&p);
+    CHECK(gs_profile_add(&p, "gavin", GS_COLOUR_RED, (uint8_t)GS_VEH_BAJA_BUG) == 0);
+    CHECK(gs_profile_add(&p, "ada", GS_COLOUR_BLUE, (uint8_t)GS_VEH_SPRINT_CAR) == 1);
+
+    // A profile starts unlocked, which is a supported state: one person on one
+    // machine should not have to type anything to play.
+    CHECK(p.entry[0].password[0] == '\0');
+
+    // Not a real Argon2id hash - core cannot make one, it links nothing. What
+    // is pinned here is that the field survives the round trip whole, which is
+    // the only part of this core is responsible for. That the string verifies
+    // is gs_auth's business and is tested where sodium is linked.
+    static const char stand_in[] =
+        "$argon2id$v=19$m=65536,t=2,p=1$abcdefghijklmnop$"
+        "0123456789012345678901234567890123456789012";
+    memcpy(p.entry[0].password, stand_in, sizeof stand_in);
+    for (uint8_t i = 0; i < GS_PROFILE_TOTP; i++) p.entry[0].totp[i] = (uint8_t)(i + 1);
+    p.entry[0].totp_len = GS_PROFILE_TOTP;
+
+    static uint8_t buf[sizeof(gs_profiles) + 1024];
+    size_t n = gs_profiles_serialize(&p, buf, sizeof buf);
+    CHECK(n > 0);
+
+    static gs_profiles back;
+    CHECK(gs_profiles_deserialize(&back, buf, n));
+    CHECK(back.count == 2);
+    CHECK(strcmp(back.entry[0].password, stand_in) == 0);
+    CHECK(back.entry[0].totp_len == GS_PROFILE_TOTP);
+    for (uint8_t i = 0; i < GS_PROFILE_TOTP; i++)
+        CHECK(back.entry[0].totp[i] == (uint8_t)(i + 1));
+
+    // The second profile is still unlocked, so one person setting a password
+    // does not quietly lock everybody on the machine.
+    CHECK(back.entry[1].password[0] == '\0');
+    CHECK(back.entry[1].totp_len == 0);
+    CHECK(strcmp(back.entry[1].name, "ada") == 0);
+}
+
 TEST(the_race_that_sets_a_record_is_the_race_that_reports_it) {
     // End to end: a real race, its times taken from the simulation, submitted,
     // and a second slower race that does not beat it. This is the join between
@@ -6056,6 +6152,8 @@ int main(void) {
     run_beating_a_record_is_reported_and_not_beating_one_is_not();
     run_records_survive_being_written_and_read_back();
     run_a_profile_is_a_person_rather_than_a_settings_entry();
+    run_a_roster_written_before_passwords_existed_still_loads();
+    run_a_lock_survives_being_written_out_and_read_back();
     run_the_race_that_sets_a_record_is_the_race_that_reports_it();
     run_a_race_ends_when_everybody_has_finished_and_the_first_one_wins();
     run_a_race_with_no_lap_target_never_ends();

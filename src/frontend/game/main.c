@@ -678,7 +678,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             // than numbered, because a screenshot script that says "results" is
             // a screenshot script somebody can read.
             const char *name = argv[++i];
-            a->shot_screen = SDL_strcmp(name, "title") == 0     ? GS_SCREEN_TITLE
+            a->shot_screen = SDL_strcmp(name, "login") == 0     ? GS_SCREEN_LOGIN
+                           : SDL_strcmp(name, "title") == 0     ? GS_SCREEN_TITLE
                            : SDL_strcmp(name, "drivers") == 0   ? GS_SCREEN_PROFILES
                            : SDL_strcmp(name, "setup") == 0     ? GS_SCREEN_SETUP
                            : SDL_strcmp(name, "results") == 0   ? GS_SCREEN_RESULTS
@@ -704,7 +705,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --editor        open in the construction set");
             SDL_Log("  --heatmap       open the editor with the analyser already run");
             SDL_Log("  --showroom      line up every vehicle, to look at the art");
-            SDL_Log("  --screen NAME   title/drivers/setup/tracks/results/records/lobby");
+            SDL_Log("  --screen NAME   login/title/drivers/setup/tracks/"
+                    "results/records/lobby");
             SDL_Log("  --session       run a whole race by itself and stop on the results");
             SDL_Log("  --audio-out F   with --shot: write the race as a .wav to listen to");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
@@ -904,14 +906,31 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // A shot, a showroom or an online race is a machine being told exactly what
     // to do, so it goes straight there. Anything else is a person, and a person
     // gets the front end.
+    // **Online is a person, so online gets the front end.** It used to be in
+    // this list, which is why a client pointed at a server went straight into a
+    // race and never showed a menu: the one case where knowing who you are
+    // matters most was the one case that never asked.
     a->skip_menu = (a->shot_path != nullptr && !a->want_screen && !a->session) ||
-                   a->showroom || a->online || a->start_in_editor;
+                   a->showroom || a->start_in_editor;
     if (a->skip_menu) {
         a->menu.screen = GS_SCREEN_RACE;
     } else {
         gs_store_load(a);
+        a->menu.online = a->online;
         a->menu.screen = a->want_screen ? (gs_screen)a->shot_screen
-                                        : GS_SCREEN_TITLE;
+                                        : GS_SCREEN_LOGIN;
+
+        // **A screenshot is a machine being told exactly what to draw.** Asked
+        // for a screen behind the door, it is signed in so the screen it wants
+        // is the screen it gets; asked for the door itself, it is not. A person
+        // is never in either branch - `--screen` is not something you can press.
+        if (a->want_screen && a->shot_screen != GS_SCREEN_LOGIN) {
+            if (a->menu.profiles.count == 0) {
+                gs_profile_add(&a->menu.profiles, "player", GS_COLOUR_RED,
+                               (uint8_t)GS_VEH_BAJA_BUG);
+            }
+            a->menu.signed_in = 0;
+        }
 
         if (a->demo_library) {
             // The stock tracks are already in the library; this only picks one
@@ -933,6 +952,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             }
             a->menu.setup.players = 2;
             a->menu.setup.laps = 2;
+            // The session drives itself and never sees the door, but it does
+            // reach the results screen afterwards - which is behind the gate.
+            a->menu.signed_in = 0;
             a->menu.screen = GS_SCREEN_RACE;
             gs_start_race(a);
             gs_layout(a);
@@ -1155,7 +1177,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                                                  : 1.0f;
             if (a->menu.screen == GS_SCREEN_RACE) a->menu.screen = GS_SCREEN_LOBBY;
         }
-        if (gs_wire_ready(a->wire)) {
+        // **Nobody is dragged into a race from the login screen.** The server
+        // deciding the grid is full says the race can start, not that this
+        // machine has anybody sitting at it - and starting anyway would put an
+        // unnamed car on the grid whose lap times belong to no one.
+        if (gs_wire_ready(a->wire) && a->menu.signed_in >= 0) {
             // **The server's track, not ours.** Whatever was loaded locally is
             // set aside: everybody has to be racing the same ground, and the
             // hash was checked on the way in, so this is the one moment the
@@ -1398,6 +1424,25 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // pressed anything.
     if (!a->editor.active && a->menu.screen != GS_SCREEN_RACE) {
         gs_screen next = gs_menu_frame(&a->menu, &a->t);
+
+        // **Exit means exit.** Only the frontend owns the loop, so the menu
+        // raises a flag and this is where it is acted on.
+        if (a->menu.quit) return SDL_APP_SUCCESS;
+
+        // Signing in locally says who is at this keyboard. Saying the same
+        // thing to a server is a separate claim it checks for itself, so the
+        // credentials go across the moment there is somewhere to send them.
+        // Taken rather than read, so they are sent once and then gone.
+        if (a->wire != nullptr) {
+            char password[64];
+            uint32_t code = 0;
+            if (gs_menu_take_server_login(&a->menu, password, sizeof password,
+                                          &code)) {
+                gs_wire_login(a->wire, gs_menu_driver(&a->menu), password,
+                              code);
+                SDL_memset(password, 0, sizeof password);
+            }
+        }
 
         // A track chosen from the library becomes the track. Taken rather than
         // read, so a choice is acted on once instead of every frame.

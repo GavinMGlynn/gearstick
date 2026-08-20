@@ -2308,6 +2308,59 @@ toolchain" clause was actually about, rather than filing it under things only a
 person can check. Most of what that clause is worried about on Windows is
 exactly this, and exactly this is checkable from here.
 
+### The front end had no idea who was playing
+
+The game opened on a title screen and started racing. Records were attributed to
+whichever roster slot the setup screen happened to be pointing at, and **a client
+started with `--server` never showed a front end at all** — `--online` was in the
+list of things that skip the menu, alongside `--shot` and `--showroom`, which are
+machines being told exactly what to draw. So the one case where several people
+share a server and it matters whose lap time this is was the one case that never
+asked a question.
+
+There is a door now, and it is the screen the game starts on.
+
+- **A driver can carry a password and a second factor.** `gs_profile` gained an
+  Argon2id encoded hash and a TOTP secret, taking the format to version 3;
+  versions 1 and 2 still load, with everybody in them unlocked. Core stores them
+  as opaque bytes and understands neither, because `src/core/` links nothing and
+  libsodium is a something — the hashing is `src/net/gs_auth.c`, which the game
+  now links. The two headers cannot disagree about the field sizes: a
+  `static_assert` in `gs_auth.c` pins them, since core cannot include the header
+  that knows.
+- **An unlocked driver is a supported state, not a hole.** One person on one
+  machine should not have to type anything. The gate still asks who they are.
+- **The check is in one place.** `gs_menu_sign_in` is the whole rule, and the
+  gate that forces the login screen sits at the top of `gs_menu_frame` rather
+  than in each screen — a check every screen has to remember to make is a check
+  one of them eventually will not. It is public so it can be tested without an
+  ImGui context, because a rule that can only be exercised by clicking is a rule
+  nothing checks.
+- **What was typed does not linger.** The password is wiped the moment it has
+  been checked. It survives only as a copy the frontend takes exactly once, to
+  prove the same name to a server over `GS_MSG_LOGIN` — which the wire has been
+  able to send since the server was written and which the game had never called.
+  Taking it is what wipes it.
+- **The menu is play, tracks, profile and exit.** Play goes to the track chooser
+  first and the settings after, the way *Racing Destruction Set* did. Exit is a
+  flag the menu raises and the frontend acts on, because the menu does not own
+  the loop.
+- **Online signs in and then waits.** A client with a server goes to the lobby
+  rather than the title, since the track, the roster and the moment the race
+  starts are all the server's to decide. The race cannot start while nobody is
+  signed in, or the grid would carry a car whose lap times belong to no one.
+
+The tests name the facts: `a_password_on_a_profile_is_actually_required`,
+`a_second_factor_is_asked_for_when_the_profile_has_one`,
+`the_front_end_is_shut_until_somebody_signs_in`, and, in the simulation tests
+where the format lives, `a_roster_written_before_passwords_existed_still_loads`.
+The password test was checked by defeating the password check and watching it go
+red, because a test that passes when the thing it guards is removed is not
+evidence.
+
+The golden replay is untouched, as it must be: none of this is simulation. A
+colour cannot change where a car ends up and neither can a password.
+
 ---
 
 ## What does not exist

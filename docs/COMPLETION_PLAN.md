@@ -902,6 +902,37 @@ install is an installer.
       the fourth field coming from the pre-release number, which is what makes
       beta2 install over beta1 as an upgrade instead of beside it.*
 
+## Phase 16 — The front door
+
+The game had a front end and no way to say who you were. It opened on a title
+screen anybody could walk past, and a client pointed at a server skipped the
+front end entirely and drove straight onto the grid — so the one situation
+where it matters most whose lap time this is was the one situation that never
+asked.
+
+- [x] **A driver can be locked.** A password, and a six-digit code from a phone
+      for anybody who wants one. A driver with neither still works: one person
+      on one machine should not have to type anything to play.
+      *Verification: a roster saved before passwords existed still loads with
+      everybody unlocked, the right password gets in, and a wrong one, an empty
+      one and a nearly-right one do not.*
+- [x] **Nothing is reachable until somebody signs in.** The game opens on the
+      door. The title screen, the track library, the settings and the records
+      are all behind it, and the check is made in one place rather than by each
+      screen remembering to make it.
+      *Verification: defeating the password check makes the test fail, which is
+      how we know the test is testing it.*
+- [x] **The menu is play, tracks, profile and exit.** Play starts by choosing a
+      track and goes on to the settings, the way the 1985 game did. Tracks is
+      for looking after the library, Profile is for the driver signed in
+      including setting or removing their password, and Exit leaves.
+      *Verification: the screens are drawn and photographed by `--screen`.*
+- [x] **A client pointed at a server shows the front end.** It signs in first
+      and waits in the lobby, instead of joining the race as whoever the command
+      line said. Nobody is pulled onto the grid while still at the door.
+      *Verification: a client launched at a running server sits at the login
+      screen rather than reporting that it is driving.*
+
 ## Tails
 
 Found while implementing something else. Added when found, not when remembered.

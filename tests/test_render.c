@@ -22,6 +22,7 @@
 #include "platform/gs_bind.h"
 #include "ui/gs_editor.h"
 #include "platform/gs_paths.h"
+#include "net/gs_auth.h"
 #include "ui/gs_menu.h"
 #include "ui/gs_hud.h"
 #include "ui/gs_style.h"
@@ -2765,6 +2766,120 @@ TEST(the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed) {
     gs_frame_free(&passed);
 }
 
+TEST(the_front_end_is_shut_until_somebody_signs_in) {
+    (void)ren;
+    static gs_menu m;
+    gs_menu_init(&m);
+
+    // **The door is where the game starts**, and a zeroed menu already says so
+    // rather than relying on somebody remembering to set it.
+    CHECK(m.screen == GS_SCREEN_LOGIN);
+    CHECK(m.signed_in == -1);
+    CHECK(strcmp(gs_menu_driver(&m), "") == 0);
+
+    CHECK(gs_profile_add(&m.profiles, "gavin", GS_COLOUR_RED,
+                         (uint8_t)GS_VEH_BAJA_BUG) == 0);
+
+    // A driver with no password is a supported state: one person on one machine
+    // should not have to type anything. The gate still asks who they are.
+    CHECK(gs_menu_sign_in(&m, 0, "", ""));
+    CHECK(m.signed_in == 0);
+    CHECK(strcmp(gs_menu_driver(&m), "gavin") == 0);
+
+    // Signing in puts that driver in the first seat, so the race they start is
+    // raced by the person who just proved they were there.
+    CHECK(m.setup.profile[0] == 0);
+
+    // Asking for somebody who is not on the roster is refused rather than
+    // clamped to whoever happens to be at that index.
+    CHECK(!gs_menu_sign_in(&m, 4, "", ""));
+    CHECK(!gs_menu_sign_in(&m, -1, "", ""));
+}
+
+TEST(a_password_on_a_profile_is_actually_required) {
+    (void)ren;
+    static gs_menu m;
+    gs_menu_init(&m);
+    CHECK(gs_profile_add(&m.profiles, "gavin", GS_COLOUR_RED,
+                         (uint8_t)GS_VEH_BAJA_BUG) == 0);
+
+    // A real Argon2id hash, made the way the game makes one - not a stand-in.
+    // The point of this test is that the check is wired to the real thing.
+    gs_profile *p = &m.profiles.entry[0];
+    CHECK(gs_auth_hash_password("correct horse", p->password, sizeof p->password));
+    CHECK(p->password[0] == '$');
+
+    // Wrong, empty, and nearly-right are all refused.
+    CHECK(!gs_menu_sign_in(&m, 0, "", ""));
+    CHECK(m.signed_in == -1);
+    CHECK(!gs_menu_sign_in(&m, 0, "wrong", ""));
+    CHECK(m.signed_in == -1);
+    CHECK(!gs_menu_sign_in(&m, 0, "correct hors", ""));
+    CHECK(m.signed_in == -1);
+    CHECK(m.login_error[0] != '\0');
+
+    // And the right one gets in.
+    CHECK(gs_menu_sign_in(&m, 0, "correct horse", ""));
+    CHECK(m.signed_in == 0);
+    CHECK(m.login_error[0] == '\0');
+
+    // **What was typed does not stay in the struct.** gs_menu is saved, copied
+    // and passed around; a password left in it is a password in more places
+    // than anybody intended. It is kept only until the frontend has taken it
+    // for a server, and taking it is what wipes it.
+    char taken[64] = { 0 };
+    uint32_t code = 0;
+    CHECK(gs_menu_take_server_login(&m, taken, sizeof taken, &code));
+    CHECK(strcmp(taken, "correct horse") == 0);
+    CHECK(m.server_password[0] == '\0');
+    CHECK(!gs_menu_take_server_login(&m, taken, sizeof taken, &code));
+}
+
+TEST(a_second_factor_is_asked_for_when_the_profile_has_one) {
+    (void)ren;
+    static gs_menu m;
+    gs_menu_init(&m);
+    CHECK(gs_profile_add(&m.profiles, "gavin", GS_COLOUR_RED,
+                         (uint8_t)GS_VEH_BAJA_BUG) == 0);
+    gs_profile *p = &m.profiles.entry[0];
+
+    // A known secret rather than a generated one, so the code below is the code
+    // this test means and not whatever a generator produced.
+    for (uint8_t i = 0; i < GS_PROFILE_TOTP; i++) p->totp[i] = (uint8_t)(i + 1);
+    p->totp_len = GS_PROFILE_TOTP;
+
+    // No password, but a second factor - so the factor is the whole gate and
+    // there is nowhere for it to hide behind a password check.
+    SDL_Time now_ns = 0;
+    CHECK(SDL_GetCurrentTime(&now_ns));
+    int64_t now = (int64_t)(now_ns / 1000000000);
+
+    char right[16];
+    SDL_snprintf(right, sizeof right, "%06u",
+                 gs_auth_code_at(p->totp, p->totp_len, gs_auth_step_of(now)));
+
+    CHECK(!gs_menu_sign_in(&m, 0, "", ""));           // nothing typed
+    CHECK(!gs_menu_sign_in(&m, 0, "", "000000"));     // wrong six digits
+    CHECK(!gs_menu_sign_in(&m, 0, "", "12345"));      // five is not six
+    CHECK(!gs_menu_sign_in(&m, 0, "", "12 456"));     // not all digits
+    CHECK(m.signed_in == -1);
+
+    CHECK(gs_menu_sign_in(&m, 0, "", right));
+    CHECK(m.signed_in == 0);
+}
+
+TEST(exit_is_something_the_menu_asks_for_rather_than_does) {
+    (void)ren;
+    static gs_menu m;
+    gs_menu_init(&m);
+
+    // The menu does not own the loop, so it cannot end it. It raises a flag
+    // and the frontend acts - the same shape as handing over a race setup.
+    CHECK(!m.quit);
+    m.quit = true;
+    CHECK(m.quit);
+}
+
 int main(void) {
     printf("gearstick renderer tests\n");
 
@@ -2828,6 +2943,10 @@ int main(void) {
     run_the_store_carries_the_library_too(ren);
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
+    run_the_front_end_is_shut_until_somebody_signs_in(ren);
+    run_a_password_on_a_profile_is_actually_required(ren);
+    run_a_second_factor_is_asked_for_when_the_profile_has_one(ren);
+    run_exit_is_something_the_menu_asks_for_rather_than_does(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
     run_the_landing_arc_is_off_until_it_is_asked_for(ren);
     run_there_is_no_arc_drawn_for_a_car_on_the_ground(ren);

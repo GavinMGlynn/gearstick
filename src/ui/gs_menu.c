@@ -2,6 +2,7 @@
 
 #include "dcimgui.h"
 #include "gfx/gs_render.h"
+#include "net/gs_auth.h"
 #include "ui/gs_style.h"
 
 #include <SDL3/SDL.h>
@@ -42,7 +43,9 @@ void gs_menu_init(gs_menu *m) {
     gs_profiles_clear(&m->profiles);
     gs_records_clear(&m->records);
 
-    m->screen = GS_SCREEN_TITLE;
+    m->screen = GS_SCREEN_LOGIN;
+    m->signed_in = -1;
+    m->login_pick = -1;
     m->chosen = -1;
     m->picked = -1;
     m->take = -1;
@@ -236,9 +239,264 @@ static const char *gs_profile_name_of(const gs_menu *m, int index) {
 
 // --- the screens ------------------------------------------------------------
 
+// --- the door ---------------------------------------------------------------
+
+static uint64_t gs_now(void);
+
+// Forget what was typed. Called the moment a password has been checked, right
+// or wrong: gs_menu is a big struct that gets saved, copied and passed around,
+// and a password left in it is a password in more places than anybody meant.
+static void gs_forget_typing(gs_menu *m) {
+    SDL_memset(m->login_password, 0, sizeof m->login_password);
+    SDL_memset(m->login_confirm, 0, sizeof m->login_confirm);
+    SDL_memset(m->login_code, 0, sizeof m->login_code);
+}
+
+// **The whole rule, in one function.** Whether somebody gets in is decided
+// here and nowhere else, so there is one thing to read when asking what the
+// gate actually checks.
+bool gs_menu_sign_in(gs_menu *m, int index, const char *password,
+                     const char *code) {
+    m->login_error[0] = '\0';
+    if (password == nullptr) password = "";
+    if (code == nullptr) code = "";
+
+    if (index < 0 || index >= (int)m->profiles.count) {
+        SDL_strlcpy(m->login_error, "pick a driver first", sizeof m->login_error);
+        return false;
+    }
+
+    gs_profile *p = &m->profiles.entry[index];
+
+    // An unlocked profile is a supported state, not an oversight: one person on
+    // one machine should not have to type anything to play. The gate is still a
+    // gate - somebody has to say who they are - it just has nothing to check.
+    if (p->password[0] != '\0') {
+        if (!gs_auth_check_password(p->password, password)) {
+            // **The same words whichever half was wrong.** Saying "no such
+            // driver" and "wrong password" differently tells somebody guessing
+            // which half to keep.
+            SDL_strlcpy(m->login_error, "that is not the right password",
+                        sizeof m->login_error);
+            gs_forget_typing(m);
+            return false;
+        }
+    }
+
+    if (p->totp_len > 0) {
+        // Six digits, and nothing else. strtoul on "12 34" would happily read
+        // 12 and leave the rest, which is a code that half-works.
+        uint32_t typed = 0;
+        int digits = 0;
+        for (const char *c = code; *c != '\0'; c++) {
+            if (*c < '0' || *c > '9') { digits = -1; break; }
+            typed = typed * 10u + (uint32_t)(*c - '0');
+            digits++;
+        }
+        int64_t step = 0;
+        if (digits != GS_AUTH_DIGITS ||
+            !gs_auth_check_code(p->totp, p->totp_len, typed,
+                                (int64_t)gs_now(), 1, &step)) {
+            SDL_strlcpy(m->login_error, "that code is not right, or has expired",
+                        sizeof m->login_error);
+            gs_forget_typing(m);
+            return false;
+        }
+    }
+
+    m->signed_in = index;
+
+    // Keep what was typed just long enough for the frontend to prove the same
+    // name at a server, if there is one. gs_menu_take_server_login wipes it.
+    SDL_strlcpy(m->server_password, password, sizeof m->server_password);
+    m->server_code = 0;
+    for (const char *c = code; *c >= '0' && *c <= '9'; c++)
+        m->server_code = m->server_code * 10u + (uint32_t)(*c - '0');
+    m->server_login_pending = true;
+
+    gs_forget_typing(m);
+
+    // The driver who signed in is the one who races, so the first player slot
+    // is theirs. Anything else means signing in and then being asked again.
+    m->setup.profile[0] = (int8_t)m->signed_in;
+    m->setup.vehicle[0] = p->vehicle;
+    m->setup.colour[0] = p->colour;
+    return true;
+}
+
+static gs_screen gs_login_screen(gs_menu *m) {
+    gs_screen next = GS_SCREEN_LOGIN;
+    gs_centre_window("login", 460.0f, 470.0f);
+
+    if (ImGui_Begin("##login", nullptr,
+                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar)) {
+        ImGui_SetWindowFontScale(2.6f);
+        float w = ImGui_CalcTextSize("GEARSTICK").x;
+        ImGui_SetCursorPosX((ImGui_GetWindowWidth() - w) * 0.5f);
+        ImGui_TextUnformatted("GEARSTICK");
+        ImGui_SetWindowFontScale(1.0f);
+
+        ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                   ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+        const char *sub = m->login_making ? "a new driver" : "who is driving?";
+        w = ImGui_CalcTextSize(sub).x;
+        ImGui_SetCursorPosX((ImGui_GetWindowWidth() - w) * 0.5f);
+        ImGui_TextUnformatted(sub);
+        ImGui_PopStyleColor();
+
+        ImGui_Dummy((ImVec2){ 0.0f, 12.0f });
+
+        if (m->login_making) {
+            // --- making somebody new ------------------------------------
+            ImGui_InputText("name", m->new_name, sizeof m->new_name, 0);
+            ImGui_InputTextEx("password", m->login_password,
+                              sizeof m->login_password,
+                              ImGuiInputTextFlags_Password, nullptr, nullptr);
+            ImGui_InputTextEx("again", m->login_confirm, sizeof m->login_confirm,
+                              ImGuiInputTextFlags_Password, nullptr, nullptr);
+
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+            ImGui_TextWrapped("Leave the password empty for a driver anybody at "
+                              "this keyboard can use.");
+            ImGui_PopStyleColor();
+
+            ImGui_Dummy((ImVec2){ 0.0f, 8.0f });
+            if (gs_go_button("CREATE", -1.0f, 40.0f)) {
+                if (SDL_strcmp(m->login_password, m->login_confirm) != 0) {
+                    SDL_strlcpy(m->login_error, "those two passwords are different",
+                                sizeof m->login_error);
+                } else {
+                    int added = gs_profile_add(&m->profiles, m->new_name,
+                                               m->new_colour, m->new_vehicle);
+                    if (added < 0) {
+                        SDL_strlcpy(m->login_error,
+                                    "that name is taken, empty, or the roster is full",
+                                    sizeof m->login_error);
+                    } else if (m->login_password[0] != '\0' &&
+                               !gs_auth_hash_password(
+                                   m->login_password,
+                                   m->profiles.entry[added].password,
+                                   sizeof m->profiles.entry[added].password)) {
+                        // **Refuse to make a driver whose password did not
+                        // take.** Keeping them without it would silently create
+                        // an unlocked profile somebody believes is locked.
+                        gs_profile_remove(&m->profiles, (uint8_t)added);
+                        SDL_strlcpy(m->login_error, "could not set that password",
+                                    sizeof m->login_error);
+                    } else {
+                        m->login_pick = added;
+                        m->login_making = false;
+                        m->new_name[0] = '\0';
+                        m->store_dirty = true;
+                        m->login_error[0] = '\0';
+                        // They just typed it; make them use it. Signing in is
+                        // the thing being demonstrated.
+                        gs_forget_typing(m);
+                    }
+                }
+            }
+            if (gs_wide_button("Back", 32.0f)) {
+                m->login_making = false;
+                m->new_name[0] = '\0';
+                m->login_error[0] = '\0';
+                gs_forget_typing(m);
+            }
+        } else if (m->profiles.count == 0) {
+            // --- nobody exists yet --------------------------------------
+            ImGui_TextWrapped("There are no drivers on this machine yet.");
+            ImGui_Dummy((ImVec2){ 0.0f, 8.0f });
+            if (gs_go_button("NEW DRIVER", -1.0f, 44.0f)) {
+                m->login_making = true;
+                m->login_error[0] = '\0';
+            }
+        } else {
+            // --- picking one ---------------------------------------------
+            // Preselect somebody, so the password box is showing rather than
+            // waiting to be revealed by a click most people will not know is
+            // needed. The first driver is as good a guess as exists here.
+            if (m->login_pick < 0 && m->profiles.count > 0) m->login_pick = 0;
+
+            float rows = (float)m->profiles.count;
+            float tall = gs_row_height() * rows + 12.0f;
+            if (tall > 190.0f) tall = 190.0f;
+            ImGui_BeginChild("who", (ImVec2){ 0.0f, tall },
+                             ImGuiChildFlags_Borders, 0);
+            for (uint8_t i = 0; i < m->profiles.count; i++) {
+                const gs_profile *p = &m->profiles.entry[i];
+                ImGui_PushIDInt((int)i);
+                gs_swatch(p->colour);
+                ImGui_SameLine();
+                char row[96];
+                SDL_snprintf(row, sizeof row, "%-14s %s%s", p->name,
+                             p->password[0] != '\0' ? "locked" : "open",
+                             p->totp_len > 0 ? " +code" : "");
+                if (ImGui_SelectableEx(row, m->login_pick == (int)i, 0,
+                                       (ImVec2){ 0.0f, 0.0f })) {
+                    m->login_pick = (int)i;
+                    m->login_error[0] = '\0';
+                    gs_forget_typing(m);
+                }
+                ImGui_PopID();
+            }
+            ImGui_EndChild();
+
+            const gs_profile *sel =
+                (m->login_pick >= 0 && m->login_pick < (int)m->profiles.count)
+                    ? &m->profiles.entry[m->login_pick]
+                    : nullptr;
+
+            // Only ask for what this driver actually has. A password box on an
+            // unlocked profile is a question with no right answer.
+            if (sel != nullptr && sel->password[0] != '\0') {
+                ImGui_InputTextEx("password", m->login_password,
+                                  sizeof m->login_password,
+                                  ImGuiInputTextFlags_Password, nullptr, nullptr);
+            }
+            if (sel != nullptr && sel->totp_len > 0) {
+                ImGui_InputTextEx("code", m->login_code, sizeof m->login_code,
+                                  ImGuiInputTextFlags_CharsDecimal, nullptr,
+                                  nullptr);
+            }
+            if (sel != nullptr && sel->password[0] == '\0' && sel->totp_len == 0) {
+                ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                           ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+                ImGui_TextUnformatted("no password on this driver");
+                ImGui_PopStyleColor();
+            }
+
+            ImGui_Dummy((ImVec2){ 0.0f, 10.0f });
+            if (gs_go_button("SIGN IN", -1.0f, 44.0f)) {
+                if (gs_menu_sign_in(m, m->login_pick, m->login_password,
+                                    m->login_code))
+                    next = m->online ? GS_SCREEN_LOBBY : GS_SCREEN_TITLE;
+            }
+            ImGui_Spacing();
+            if (gs_wide_button("New driver", 32.0f)) {
+                m->login_making = true;
+                m->login_error[0] = '\0';
+                gs_forget_typing(m);
+            }
+        }
+
+        if (gs_wide_button("Exit", 32.0f)) m->quit = true;
+
+        if (m->login_error[0] != '\0') {
+            ImGui_Dummy((ImVec2){ 0.0f, 6.0f });
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       (ImVec4){ 0.95f, 0.45f, 0.40f, 1.0f });
+            ImGui_TextWrapped("%s", m->login_error);
+            ImGui_PopStyleColor();
+        }
+    }
+    ImGui_End();
+    return next;
+}
+
 static gs_screen gs_title(gs_menu *m) {
     gs_screen next = GS_SCREEN_TITLE;
-    gs_centre_window("title", 460.0f, 400.0f);
+    gs_centre_window("title", 460.0f, 490.0f);
 
     if (ImGui_Begin("##title", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -256,15 +514,34 @@ static gs_screen gs_title(gs_menu *m) {
         w = ImGui_CalcTextSize("a construction racer").x;
         ImGui_SetCursorPosX((ImGui_GetWindowWidth() - w) * 0.5f);
         ImGui_TextUnformatted("a construction racer");
+
+        // Who is at the keyboard, said plainly. A machine several people share
+        // should never leave somebody guessing whose records they are about to
+        // add to.
+        char who[64];
+        SDL_snprintf(who, sizeof who, "driving as %s", gs_menu_driver(m));
+        w = ImGui_CalcTextSize(who).x;
+        ImGui_SetCursorPosX((ImGui_GetWindowWidth() - w) * 0.5f);
+        ImGui_TextUnformatted(who);
         ImGui_PopStyleColor();
 
         ImGui_Dummy((ImVec2){ 0.0f, 18.0f });
 
-        if (gs_go_button("RACE", -1.0f, 44.0f)) next = GS_SCREEN_SETUP;
+        // **Play starts at the track, the way it did in 1985.** Choosing what
+        // to race on is the first decision, not something buried behind the
+        // settings - and the settings screen is where it lands afterwards.
+        if (gs_go_button("PLAY", -1.0f, 44.0f)) {
+            m->tracks_for_race = true;
+            next = GS_SCREEN_TRACKS;
+        }
         ImGui_Spacing();
-        if (gs_wide_button("Drivers", 34.0f)) next = GS_SCREEN_PROFILES;
-        if (gs_wide_button("Tracks", 34.0f)) next = GS_SCREEN_TRACKS;
+        if (gs_wide_button("Tracks", 34.0f)) {
+            m->tracks_for_race = false;
+            next = GS_SCREEN_TRACKS;
+        }
+        if (gs_wide_button("Profile", 34.0f)) next = GS_SCREEN_PROFILES;
         if (gs_wide_button("Records", 34.0f)) next = GS_SCREEN_RECORDS;
+        if (gs_wide_button("Exit", 34.0f)) m->quit = true;
 
         ImGui_Dummy((ImVec2){ 0.0f, 14.0f });
         ImGui_Separator();
@@ -274,14 +551,18 @@ static gs_screen gs_title(gs_menu *m) {
                                    ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
         ImGui_TextUnformatted("Tab      the construction set");
         ImGui_TextUnformatted("Escape   quit");
-        if (m->profiles.count == 0) {
-            ImGui_TextUnformatted("No drivers yet - start with Drivers.");
-        } else {
-            ImGui_Text("%u driver%s, %u track%s", m->profiles.count,
-                       m->profiles.count == 1 ? "" : "s", m->library.count,
-                       m->library.count == 1 ? "" : "s");
-        }
+        ImGui_Text("%u driver%s, %u track%s", m->profiles.count,
+                   m->profiles.count == 1 ? "" : "s", m->library.count,
+                   m->library.count == 1 ? "" : "s");
         ImGui_PopStyleColor();
+
+        // Signing out returns to the door. The gate at the top of
+        // gs_menu_frame does the rest, which is why this only has to forget.
+        if (ImGui_SmallButton("sign out")) {
+            m->signed_in = -1;
+            m->login_pick = -1;
+            m->login_error[0] = '\0';
+        }
 
         if (m->status[0] != '\0') ImGui_TextUnformatted(m->status);
     }
@@ -387,6 +668,55 @@ static gs_screen gs_profiles_screen(gs_menu *m) {
                     m->new_name[0] = '\0';
                     m->store_dirty = true;
                     m->status[0] = '\0';
+                }
+            }
+        }
+
+        // --- the lock on the driver who is signed in ------------------------
+        //
+        // **Only your own.** Changing somebody else's password from a screen
+        // they are not standing at would make the gate decorative.
+        if (m->signed_in >= 0 && m->signed_in < (int)m->profiles.count) {
+            gs_profile *me = &m->profiles.entry[m->signed_in];
+            ImGui_Separator();
+            ImGui_Text("%s's password", me->name);
+
+            ImGui_InputTextEx("new", m->login_password, sizeof m->login_password,
+                              ImGuiInputTextFlags_Password, nullptr, nullptr);
+            ImGui_InputTextEx("confirm", m->login_confirm,
+                              sizeof m->login_confirm,
+                              ImGuiInputTextFlags_Password, nullptr, nullptr);
+
+            if (ImGui_Button(me->password[0] != '\0' ? "change" : "set")) {
+                if (m->login_password[0] == '\0') {
+                    SDL_snprintf(m->status, sizeof m->status,
+                                 "type a password, or use 'remove' to take it off");
+                } else if (SDL_strcmp(m->login_password, m->login_confirm) != 0) {
+                    SDL_snprintf(m->status, sizeof m->status,
+                                 "those two passwords are different");
+                } else if (!gs_auth_hash_password(m->login_password, me->password,
+                                                  sizeof me->password)) {
+                    SDL_snprintf(m->status, sizeof m->status,
+                                 "could not set that password");
+                } else {
+                    m->store_dirty = true;
+                    SDL_snprintf(m->status, sizeof m->status, "password set");
+                }
+                gs_forget_typing(m);
+            }
+
+            if (me->password[0] != '\0') {
+                ImGui_SameLine();
+                if (ImGui_Button("remove")) {
+                    // An unlocked profile is a supported state, so taking the
+                    // password off is a real choice rather than a hole.
+                    SDL_memset(me->password, 0, sizeof me->password);
+                    SDL_memset(me->totp, 0, sizeof me->totp);
+                    me->totp_len = 0;
+                    m->store_dirty = true;
+                    SDL_snprintf(m->status, sizeof m->status,
+                                 "%s has no password now", me->name);
+                    gs_forget_typing(m);
                 }
             }
         }
@@ -896,6 +1226,24 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
     return next;
 }
 
+const char *gs_menu_driver(const gs_menu *m) {
+    if (m->signed_in < 0 || m->signed_in >= (int)m->profiles.count) return "";
+    return m->profiles.entry[m->signed_in].name;
+}
+
+bool gs_menu_take_server_login(gs_menu *m, char *password, size_t cap,
+                               uint32_t *code) {
+    if (!m->server_login_pending) return false;
+    if (password != nullptr && cap > 0)
+        SDL_strlcpy(password, m->server_password, cap);
+    if (code != nullptr) *code = m->server_code;
+
+    SDL_memset(m->server_password, 0, sizeof m->server_password);
+    m->server_code = 0;
+    m->server_login_pending = false;
+    return true;
+}
+
 int gs_menu_take_choice(gs_menu *m) {
     int take = m->take;
     m->take = -1;
@@ -995,7 +1343,8 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
         ImGui_Spacing();
 
         ImGui_BeginDisabled(picked == nullptr);
-        if (gs_go_button("Load", 130.0f, 38.0f)) {
+        if (gs_go_button(m->tracks_for_race ? "Race this one" : "Load",
+                         m->tracks_for_race ? 160.0f : 130.0f, 38.0f)) {
             m->take = m->picked;
             next = GS_SCREEN_SETUP;
         }
@@ -1031,7 +1380,18 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
 }
 
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {
+    // **The gate, enforced once.** Every other screen is unreachable until
+    // somebody has signed in, and this is the only place that is decided - a
+    // check each screen had to remember to make is a check one of them
+    // eventually will not. It also catches a screen arrived at from outside,
+    // which is how --shot asks for one by name.
+    if (m->signed_in < 0 || m->signed_in >= (int)m->profiles.count) {
+        m->signed_in = -1;
+        m->screen = GS_SCREEN_LOGIN;
+    }
+
     switch (m->screen) {
+    case GS_SCREEN_LOGIN:    return gs_login_screen(m);
     case GS_SCREEN_TITLE:    return gs_title(m);
     case GS_SCREEN_PROFILES: return gs_profiles_screen(m);
     case GS_SCREEN_SETUP:    return gs_setup_screen(m, t);
