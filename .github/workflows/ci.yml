@@ -161,8 +161,28 @@ jobs:
           # the Debian side that had been told not to. `nodocs` drops manuals
           # nothing in a container will ever read.
           dnf_opts="--setopt=install_weak_deps=False --setopt=tsflags=nodocs -y"
-          dnf $dnf_opts install epel-release
-          dnf $dnf_opts --enablerepo=crb install git gcc gcc-c++ cmake ninja-build \
+
+          # **Rocky's mirrors go away sometimes.** "No URLs in mirrorlist" is a
+          # mirror outage rather than anything about this project, and it turns
+          # a green tree red for a quarter of an hour at a time. The Debian job
+          # has had retry handling for apt since a similar afternoon; this one
+          # had none, so a transient failure here looked exactly like a real
+          # one. Retried with a growing pause, and the metadata cache is
+          # dropped first because a stale mirrorlist is the usual reason the
+          # second attempt fails the same way as the first.
+          dnf_run() {
+            for attempt in 1 2 3 4; do
+              if dnf $dnf_opts "$@"; then return 0; fi
+              echo "::warning::dnf attempt $attempt failed; clearing the cache and retrying"
+              dnf clean all || true
+              sleep $((attempt * 15))
+            done
+            echo "::error::dnf would not complete in four attempts"
+            return 1
+          }
+
+          dnf_run install epel-release
+          dnf_run --enablerepo=crb install git gcc gcc-c++ cmake ninja-build \
             libX11-devel libXext-devel libXrandr-devel libXi-devel \
             libXcursor-devel libXfixes-devel libXScrnSaver-devel libXtst-devel \
             libxkbcommon-devel \
