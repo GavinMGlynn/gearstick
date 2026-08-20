@@ -423,6 +423,60 @@ jobs:
             build/windows-release/gearstick-*.msi*
 
   # ---------------------------------------------------------------------------
+  # **A Windows machine that has never had a toolchain on it.**
+  #
+  # The job above installs the MSI on the runner that just built it, which
+  # covers everything about the installer and nothing about the machine. A
+  # Windows Server Core container has no Visual Studio, no CMake, no SDL and no
+  # Visual C++ redistributable - which is what a player's computer is, and is
+  # the last thing between this item and being finished.
+  #
+  # Its own job rather than a step in the one above, so that if this runner
+  # cannot host Windows containers the artifacts are still built and the failure
+  # says which of the two things went wrong.
+  # ---------------------------------------------------------------------------
+  windows-clean-machine:
+    name: The installer on a machine with no toolchain
+    needs: windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: false }
+      - uses: actions/download-artifact@v4
+        with:
+          name: gearstick-windows-x64
+          path: dist
+
+      - name: Install and run it where nothing has ever been built
+        shell: pwsh
+        run: |
+          $build = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
+          Write-Host "host build $build"
+
+          # The container image has to match the host for process isolation, so
+          # it is chosen from what the host actually is rather than pinned to a
+          # guess that rots when the runner image moves.
+          $tag = if ($build -ge 26100) { "ltsc2025" }
+                 elseif ($build -ge 20348) { "ltsc2022" }
+                 else { "ltsc2019" }
+          $image = "mcr.microsoft.com/windows/servercore:$tag"
+          Write-Host "using $image"
+
+          docker pull $image
+          if ($LASTEXITCODE -ne 0) { throw "could not pull $image" }
+
+          docker run --rm `
+            -v "${PWD}\dist:C:\dist" `
+            -v "${PWD}\tools:C:\tools" `
+            -e SDL_VIDEODRIVER=dummy -e SDL_AUDIO_DRIVER=dummy `
+            $image powershell -ExecutionPolicy Bypass `
+            -File C:\tools\clean_machine_check.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "the installer did not work on a machine with no toolchain"
+          }
+
+  # ---------------------------------------------------------------------------
   # Publishing
   #
   # **Unsigned, and provably built here.** Code signing means paying Microsoft's
