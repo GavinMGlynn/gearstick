@@ -108,6 +108,11 @@ typedef struct gs_client {
     uint64_t   session;
     uint64_t   nonce;
 
+    // **The key this client proved it holds**, copied from its tunnel when it
+    // joined. The name beside it is whatever they typed; this is not.
+    uint8_t    key[GS_NOISE_KEY_BYTES];
+    bool       has_key;
+
     // A track on its way up, for publishing. Separate from the proof carrier
     // because somebody can perfectly well be submitting a time on one track
     // while uploading another.
@@ -407,6 +412,15 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
     }
     SDL_strlcpy(c->name, (name != nullptr && name[0] != '\0') ? name : "driver",
                 sizeof c->name);
+
+    // **And who they actually are**, from the tunnel they had to complete
+    // before this message could arrive at all. The name above is typed; this is
+    // proved, and it is what every question of ownership is answered against.
+    const gs_tunnel *t = gs_tunnel_find(c->text, c->port);
+    if (t != nullptr) {
+        SDL_memcpy(c->key, t->key, GS_NOISE_KEY_BYTES);
+        c->has_key = true;
+    }
     c->last_seen_ms = now;
 
     gs_lobby l;
@@ -755,6 +769,14 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
 
         gs_store_put_track(gs_srv.store, hash, "", up->name,
                            up->upload.bytes, up->upload.len);
+
+        // **Uploading it is claiming it**, and the first claim wins. A track is
+        // content-addressed, so somebody uploading a copy of a track already
+        // here has uploaded the same track and does not take it from whoever
+        // got there first - and a track that shipped with the game refuses the
+        // claim outright.
+        if (up->has_key) gs_store_claim_track(gs_srv.store, hash, up->key);
+
         SDL_Log("%s uploaded %016llx", up->name, (unsigned long long)hash);
         break;
     }
@@ -773,9 +795,20 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
                     gs_srv.client[at].name);
             break;
         }
-        if (gs_store_publish(gs_srv.store, track, name,
-                             gs_srv.client[at].name)) {
-            SDL_Log("%s published %016llx (%s)", gs_srv.client[at].name,
+        // **Publishing is something an owner does**, so the first thing that
+        // happens is the claim - which the server can only grant to a key the
+        // client proved it holds. A track that shipped with the game refuses
+        // both, whoever is asking.
+        gs_client *pub = &gs_srv.client[at];
+        if (!pub->has_key) break;
+
+        if (!gs_store_claim_track(gs_srv.store, track, pub->key)) {
+            SDL_Log("%s tried to publish a track that is not theirs", pub->name);
+            break;
+        }
+        gs_store_name_track(gs_srv.store, track, pub->key, name);
+        if (gs_store_set_visible(gs_srv.store, track, pub->key, GS_TRACK_PUBLIC)) {
+            SDL_Log("%s published %016llx (%s)", pub->name,
                     (unsigned long long)track, name);
         }
         break;
@@ -786,18 +819,54 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
         if (at < 0 || gs_srv.store == nullptr) break;
         if (!gs_proto_read_withdraw(msg, len, &track)) break;
 
-        if (gs_store_withdraw(gs_srv.store, track, gs_srv.client[at].name)) {
-            SDL_Log("%s withdrew %016llx", gs_srv.client[at].name,
+        gs_client *own = &gs_srv.client[at];
+        if (!own->has_key) break;
+
+        if (gs_store_set_visible(gs_srv.store, track, own->key, GS_TRACK_PRIVATE)) {
+            SDL_Log("%s withdrew %016llx", own->name,
                     (unsigned long long)track);
+        } else {
+            SDL_Log("%s tried to withdraw a track that is not theirs", own->name);
         }
+        break;
+    }
+
+    case GS_MSG_SHARE: {
+        uint64_t track = 0;
+        uint8_t with[GS_NOISE_KEY_BYTES];
+        bool on = false;
+        if (at < 0 || gs_srv.store == nullptr) break;
+        if (!gs_proto_read_share(msg, len, &track, with, &on)) break;
+
+        gs_client *sharer = &gs_srv.client[at];
+        if (!sharer->has_key) break;
+
+        // Sharing implies the track is shared rather than private, and the
+        // store refuses all of it for a track that is not theirs.
+        bool ok = on ? (gs_store_set_visible(gs_srv.store, track, sharer->key,
+                                             GS_TRACK_SHARED) &&
+                        gs_store_share_track(gs_srv.store, track, sharer->key,
+                                             with))
+                     : gs_store_unshare_track(gs_srv.store, track, sharer->key,
+                                              with);
+        SDL_Log("%s %s %016llx %s somebody", sharer->name,
+                ok ? (on ? "shared" : "unshared") : "could not share",
+                (unsigned long long)track, on ? "with" : "from");
         break;
     }
 
     case GS_MSG_WANT_LIST: {
         if (at < 0 || gs_srv.store == nullptr) break;
 
+        // **What this client may see**, which is the shipped and the public
+        // plus their own and whatever was shared with them by name. Listing
+        // what is published would show everybody the same library and make
+        // "handed to a named few" a label rather than a rule.
+        const gs_client *asker = &gs_srv.client[at];
         static gs_track_row rows[64];
-        int n = gs_store_list_published(gs_srv.store, rows, 64);
+        int n = gs_store_list_visible(gs_srv.store,
+                                      asker->has_key ? asker->key : nullptr,
+                                      rows, 64);
 
         // One per datagram, each saying how many there are, so a client knows
         // when it has them all without anybody counting acknowledgements.

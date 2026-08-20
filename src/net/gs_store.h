@@ -137,6 +137,62 @@ int gs_store_session_count(gs_store *s);
 bool gs_store_identity(gs_store *s, uint8_t *secret);
 bool gs_store_set_identity(gs_store *s, const uint8_t *secret);
 
+// --- who a track belongs to -------------------------------------------------
+//
+// **Ownership is a key, not a name.** It used to be the author string, which is
+// whatever the uploader typed, so "only the person who put it up may take it
+// down" meant "only somebody willing to type the same word". The owner is the
+// static public key a client proved it holds when it handshaked, which is a
+// thing nobody else can present.
+//
+// **A track that shipped with the game has no owner and is outside all of
+// this.** Not "an owner nobody set" - outside it: every write path refuses a
+// shipped track whoever is asking, including somebody whose profile happens to
+// be called the same thing as its author.
+
+#define GS_STORE_KEY_BYTES 32
+
+typedef enum gs_visible {
+    GS_TRACK_PRIVATE = 0,   // only the owner
+    GS_TRACK_SHARED  = 1,   // the owner and the people it was handed to
+    GS_TRACK_PUBLIC  = 2    // everybody
+} gs_visible;
+
+// Claim a track for whoever built it. **The first claim wins**: a track is
+// content-addressed, so two people who built the same thing built the same
+// thing, and the second one to upload it does not take it from the first.
+// False if it is already somebody else's, or shipped, or not there.
+bool gs_store_claim_track(gs_store *s, uint64_t hash, const uint8_t *owner);
+
+// Whose it is. False when nobody's, which is what a shipped track is.
+bool gs_store_track_owner(gs_store *s, uint64_t hash, uint8_t *owner);
+bool gs_store_track_is_shipped(gs_store *s, uint64_t hash);
+bool gs_store_mark_shipped(gs_store *s, uint64_t hash);
+
+// Give a track a name. The owner's to set, like everything else about it - and
+// refused for a shipped track, whose name came with the game.
+bool gs_store_name_track(gs_store *s, uint64_t hash, const uint8_t *who,
+                         const char *name);
+
+// Every one of these takes the key of whoever is asking and refuses anybody
+// else - and refuses everybody for a shipped track.
+bool gs_store_set_visible(gs_store *s, uint64_t hash, const uint8_t *who,
+                          gs_visible how);
+bool gs_store_share_track(gs_store *s, uint64_t hash, const uint8_t *who,
+                          const uint8_t *with);
+bool gs_store_unshare_track(gs_store *s, uint64_t hash, const uint8_t *who,
+                            const uint8_t *with);
+bool gs_store_delete_track(gs_store *s, uint64_t hash, const uint8_t *who);
+
+// Can this person see it at all? True for a shipped track, for a public one,
+// for one's own, and for one shared with them. `who` may be null, which is
+// somebody asserting no identity and sees only what everybody sees.
+bool gs_store_can_see(gs_store *s, uint64_t hash, const uint8_t *who);
+
+// The library as this person is allowed to see it.
+int gs_store_list_visible(gs_store *s, const uint8_t *who, gs_track_row *out,
+                          int cap);
+
 // --- publishing ------------------------------------------------------------
 //
 // **Published is a separate thing from stored.** The server holds every track

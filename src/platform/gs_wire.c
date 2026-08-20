@@ -328,6 +328,18 @@ void gs_wire_withdraw(gs_wire *w, uint64_t track) {
     gs_to_server(w, buf, gs_proto_withdraw(buf, sizeof buf, track));
 }
 
+void gs_wire_share(gs_wire *w, uint64_t track, const uint8_t *with, bool on) {
+    if (w == nullptr || !w->via_server || with == nullptr) return;
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf, gs_proto_share(buf, sizeof buf, track, with, on));
+}
+
+const uint8_t *gs_wire_peer_key(const gs_wire *w, uint8_t slot) {
+    if (w == nullptr || slot >= GS_PROTO_MAX_PLAYERS) return nullptr;
+    const gs_lobby_player *p = &w->lobby.player[slot];
+    return p->present ? p->key : nullptr;
+}
+
 void gs_wire_ask_published(gs_wire *w) {
     if (w == nullptr || !w->via_server) return;
     uint8_t buf[GS_PROTO_MTU];

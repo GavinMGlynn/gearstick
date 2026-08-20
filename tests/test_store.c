@@ -31,7 +31,11 @@ TEST(a_store_opens_and_knows_what_it_is) {
     CHECK(s != nullptr);
     if (s == nullptr) return;
 
-    CHECK(gs_store_version(s) == 1);
+    // Two, since tracks gained an owner. The literal is deliberate: a schema
+    // that changes without anybody meaning it to is a database somebody else
+    // cannot open, so the number is written down and has to be edited on
+    // purpose.
+    CHECK(gs_store_version(s) == 2);
     CHECK(gs_store_driver_count(s) == 0);
     CHECK(gs_store_record_count(s) == 0);
     CHECK(gs_store_track_count(s) == 0);
@@ -266,7 +270,7 @@ TEST(what_is_written_is_still_there_after_a_reopen) {
     CHECK(again != nullptr);
     if (again == nullptr) return;
 
-    CHECK(gs_store_version(again) == 1);
+    CHECK(gs_store_version(again) == 2);
     CHECK(gs_store_driver_count(again) == 1);
     CHECK(gs_store_best_lap(again, 77, 88, nullptr, 0) == 4321);
     CHECK(gs_store_has_track(again, 99));
@@ -383,6 +387,150 @@ TEST(the_shipped_library_holds_the_stock_tracks_and_they_are_tracks) {
     remove(path);
 }
 
+// Two people, as keys rather than names - which is the whole change.
+static const uint8_t *gs_key(uint8_t who) {
+    static uint8_t k[4][GS_STORE_KEY_BYTES];
+    for (unsigned i = 0; i < GS_STORE_KEY_BYTES; i++) {
+        k[who][i] = (uint8_t)((who * 61u + i * 7u + 3u) & 0xffu);
+    }
+    return k[who];
+}
+
+static bool gs_put_a_track(gs_store *s, uint64_t hash, const char *name) {
+    uint8_t bytes[64];
+    for (size_t i = 0; i < sizeof bytes; i++) bytes[i] = (uint8_t)(hash + i);
+    return gs_store_put_track(s, hash, name, "", bytes, sizeof bytes);
+}
+
+TEST(a_track_belongs_to_whoever_built_it_and_to_nobody_else) {
+    gs_store *s = gs_store_open(":memory:");
+    CHECK(s != nullptr);
+    if (s == nullptr) return;
+
+    const uint8_t *ada = gs_key(0), *bez = gs_key(1);
+
+    CHECK(gs_put_a_track(s, 0x1001, "ada's oval"));
+    CHECK(gs_store_claim_track(s, 0x1001, ada));
+
+    // **The first claim wins.** A track is content-addressed, so two people who
+    // built the same thing built the same thing - and the second to upload it
+    // does not take it off the first.
+    CHECK(!gs_store_claim_track(s, 0x1001, bez));
+    CHECK(gs_store_claim_track(s, 0x1001, ada));     // and it is idempotent
+
+    uint8_t owner[GS_STORE_KEY_BYTES];
+    CHECK(gs_store_track_owner(s, 0x1001, owner));
+    CHECK(memcmp(owner, ada, GS_STORE_KEY_BYTES) == 0);
+
+    // Nobody else can change it, take it down, or delete it.
+    CHECK(!gs_store_set_visible(s, 0x1001, bez, GS_TRACK_PUBLIC));
+    CHECK(!gs_store_share_track(s, 0x1001, bez, bez));
+    CHECK(!gs_store_delete_track(s, 0x1001, bez));
+
+    // And the owner can do all three.
+    CHECK(gs_store_set_visible(s, 0x1001, ada, GS_TRACK_PUBLIC));
+    CHECK(gs_store_is_published(s, 0x1001));
+    CHECK(gs_store_set_visible(s, 0x1001, ada, GS_TRACK_PRIVATE));
+    CHECK(!gs_store_is_published(s, 0x1001));
+    CHECK(gs_store_delete_track(s, 0x1001, ada));
+    CHECK(!gs_store_has_track(s, 0x1001));
+
+    gs_store_close(s);
+}
+
+TEST(a_shared_track_is_visible_to_exactly_who_it_was_shared_with) {
+    gs_store *s = gs_store_open(":memory:");
+    CHECK(s != nullptr);
+    if (s == nullptr) return;
+
+    const uint8_t *ada = gs_key(0), *bez = gs_key(1), *cy = gs_key(2);
+
+    CHECK(gs_put_a_track(s, 0x2001, "the long way round"));
+    CHECK(gs_store_claim_track(s, 0x2001, ada));
+
+    // Private: the owner and nobody else, including somebody with no identity
+    // at all.
+    CHECK(gs_store_can_see(s, 0x2001, ada));
+    CHECK(!gs_store_can_see(s, 0x2001, bez));
+    CHECK(!gs_store_can_see(s, 0x2001, cy));
+    CHECK(!gs_store_can_see(s, 0x2001, nullptr));
+
+    // Shared with bez, and *only* bez. Sharing without saying so is the failure
+    // this is guarding: a "shared" flag with no list means shared with anybody
+    // who asks.
+    CHECK(gs_store_set_visible(s, 0x2001, ada, GS_TRACK_SHARED));
+    CHECK(gs_store_share_track(s, 0x2001, ada, bez));
+    CHECK(gs_store_can_see(s, 0x2001, ada));
+    CHECK(gs_store_can_see(s, 0x2001, bez));
+    CHECK(!gs_store_can_see(s, 0x2001, cy));
+    CHECK(!gs_store_can_see(s, 0x2001, nullptr));
+
+    // Taken back.
+    CHECK(gs_store_unshare_track(s, 0x2001, ada, bez));
+    CHECK(!gs_store_can_see(s, 0x2001, bez));
+
+    // Public: everybody, and nobody needs to be anybody.
+    CHECK(gs_store_set_visible(s, 0x2001, ada, GS_TRACK_PUBLIC));
+    CHECK(gs_store_can_see(s, 0x2001, cy));
+    CHECK(gs_store_can_see(s, 0x2001, nullptr));
+
+    // And the listing agrees with the question, which is the part that would
+    // otherwise drift: two different pieces of SQL answering "who may see this"
+    // differently is how a private track ends up in somebody's list.
+    CHECK(gs_store_set_visible(s, 0x2001, ada, GS_TRACK_SHARED));
+    CHECK(gs_store_share_track(s, 0x2001, ada, bez));
+
+    gs_track_row rows[8];
+    CHECK(gs_store_list_visible(s, bez, rows, 8) == 1);
+    CHECK(gs_store_list_visible(s, cy, rows, 8) == 0);
+    CHECK(gs_store_list_visible(s, ada, rows, 8) == 1);
+    CHECK(gs_store_list_visible(s, nullptr, rows, 8) == 0);
+
+    gs_store_close(s);
+}
+
+TEST(a_track_that_shipped_with_the_game_is_outside_all_of_it) {
+    gs_store *s = gs_store_open(":memory:");
+    CHECK(s != nullptr);
+    if (s == nullptr) return;
+
+    const uint8_t *ada = gs_key(0);
+
+    // Exactly as the library builder does it: stored, published, then put
+    // outside ownership. Published matters - a track that was never up cannot
+    // be withdrawn for that reason alone, and the check below would then pass
+    // without the rule it is testing existing at all.
+    CHECK(gs_put_a_track(s, 0x3001, "head on"));
+    CHECK(gs_store_publish(s, 0x3001, "head on", "gearstick"));
+    CHECK(gs_store_mark_shipped(s, 0x3001));
+    CHECK(gs_store_track_is_shipped(s, 0x3001));
+    CHECK(gs_store_is_published(s, 0x3001));
+
+    // **Nobody owns it**, and that is not an owner nobody got round to setting.
+    CHECK(!gs_store_track_owner(s, 0x3001, nullptr));
+
+    // Every write path refuses it, whoever is asking - including the profile
+    // that happens to be called the same thing as its author, because the check
+    // is not about a name at all.
+    CHECK(!gs_store_claim_track(s, 0x3001, ada));
+    CHECK(!gs_store_set_visible(s, 0x3001, ada, GS_TRACK_PRIVATE));
+    CHECK(!gs_store_share_track(s, 0x3001, ada, ada));
+    CHECK(!gs_store_unshare_track(s, 0x3001, ada, ada));
+    CHECK(!gs_store_delete_track(s, 0x3001, ada));
+    // Literally the author string the stock library carries. This is the case
+    // the plan names: somebody whose profile happens to be called the same
+    // thing as a stock track's author still cannot touch it, because the check
+    // was never about the name.
+    CHECK(!gs_store_withdraw(s, 0x3001, "gearstick"));
+
+    // It is still there, and everybody can still see it.
+    CHECK(gs_store_has_track(s, 0x3001));
+    CHECK(gs_store_can_see(s, 0x3001, ada));
+    CHECK(gs_store_can_see(s, 0x3001, nullptr));
+
+    gs_store_close(s);
+}
+
 TEST(a_session_token_is_good_once_and_only_for_who_it_was_issued_to) {
     gs_store *s = gs_store_open(":memory:");
     CHECK(s != nullptr);
@@ -464,6 +612,9 @@ int main(void) {
     run_publishing_is_a_separate_thing_from_storing();
     run_a_name_with_a_quote_in_it_is_a_name_and_not_an_instruction();
     run_what_is_written_is_still_there_after_a_reopen();
+    run_a_track_belongs_to_whoever_built_it_and_to_nobody_else();
+    run_a_shared_track_is_visible_to_exactly_who_it_was_shared_with();
+    run_a_track_that_shipped_with_the_game_is_outside_all_of_it();
     run_a_session_token_is_good_once_and_only_for_who_it_was_issued_to();
     run_a_session_outlives_the_process_that_issued_it();
     run_the_shipped_library_is_a_database_this_code_can_still_use();

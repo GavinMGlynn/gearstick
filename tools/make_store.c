@@ -95,6 +95,10 @@ int main(int argc, char **argv) {
 
         if (!gs_store_put_track(s, hash, name, GS_STOCK_AUTHOR, gs_bytes, len) ||
             !gs_store_publish(s, hash, name, GS_STOCK_AUTHOR) ||
+            // **And outside ownership for good.** A stock track with an owner
+            // is a stock track somebody can take down; one merely published is
+            // one that a profile called "gearstick" could withdraw.
+            !gs_store_mark_shipped(s, hash) ||
             // **Dated at the epoch, because a committed file has to be the same
             // file every time it is built.** The store stamps `added` with the
             // time of day, which is the one thing in the schema that changes on

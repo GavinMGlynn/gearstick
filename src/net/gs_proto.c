@@ -510,6 +510,29 @@ bool gs_proto_read_withdraw(const uint8_t *buf, size_t len, uint64_t *track) {
     return true;
 }
 
+size_t gs_proto_share(uint8_t *buf, size_t cap, uint64_t track,
+                      const uint8_t *with, bool on) {
+    if (with == nullptr || cap < GS_HEAD + 8 + GS_NOISE_KEY_BYTES + 1) return 0;
+    size_t n = gs_head(buf, cap, GS_MSG_SHARE);
+    gs_put64(buf + n, track); n += 8;
+    memcpy(buf + n, with, GS_NOISE_KEY_BYTES); n += GS_NOISE_KEY_BYTES;
+    buf[n++] = on ? 1u : 0u;
+    return n;
+}
+
+bool gs_proto_read_share(const uint8_t *buf, size_t len, uint64_t *track,
+                         uint8_t *with, bool *on) {
+    if (!gs_expect(buf, len, GS_MSG_SHARE,
+                   GS_HEAD + 8 + GS_NOISE_KEY_BYTES + 1)) {
+        return false;
+    }
+    size_t n = GS_HEAD;
+    *track = gs_get64(buf + n); n += 8;
+    memcpy(with, buf + n, GS_NOISE_KEY_BYTES); n += GS_NOISE_KEY_BYTES;
+    *on = buf[n] != 0u;
+    return true;
+}
+
 size_t gs_proto_want_list(uint8_t *buf, size_t cap) {
     return gs_head(buf, cap, GS_MSG_WANT_LIST);
 }

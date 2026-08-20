@@ -56,6 +56,7 @@ typedef enum gs_msg {
     GS_MSG_PUBLISH,    // "keep this track, and let people have it"
     GS_MSG_WITHDRAW,   // "take mine down again"
     GS_MSG_WANT_LIST,  // "what is published?"
+    GS_MSG_SHARE,      // "let this person have my track" - or stop letting them
 
     // Server to client.
     GS_MSG_WELCOME,    // "you are player N of M, and here is everyone"
@@ -192,6 +193,15 @@ bool gs_proto_read_publish(const uint8_t *buf, size_t len, uint64_t *track,
                            char *name, size_t cap);
 
 size_t gs_proto_withdraw(uint8_t *buf, size_t cap, uint64_t track);
+
+// **Handing a track to a named few.** The person is named by their public key,
+// which is how everybody is named once there is a tunnel - a client learns the
+// others' keys from the lobby, and the server checks the asker owns the track
+// before it writes anything down.
+size_t gs_proto_share(uint8_t *buf, size_t cap, uint64_t track,
+                      const uint8_t *with, bool on);
+bool   gs_proto_read_share(const uint8_t *buf, size_t len, uint64_t *track,
+                           uint8_t *with, bool *on);
 bool gs_proto_read_withdraw(const uint8_t *buf, size_t len, uint64_t *track);
 
 size_t gs_proto_want_list(uint8_t *buf, size_t cap);

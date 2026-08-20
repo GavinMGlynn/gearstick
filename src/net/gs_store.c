@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define GS_SCHEMA 1
+#define GS_SCHEMA 2
 
 struct gs_store {
     sqlite3 *db;
@@ -36,11 +36,42 @@ static bool gs_exec(gs_store *s, const char *sql) {
     return true;
 }
 
+// **Add a column to a table that may already have it.**
+//
+// A fresh database gets the newest shape from the CREATE statements below and
+// needs none of this. A database that already exists - the library committed
+// under assets/, or a server that has been running for a month - has the old
+// shape, and `CREATE TABLE IF NOT EXISTS` does exactly nothing to it. That is
+// the whole failure mode this exists for: every query naming a new column would
+// fail on the one database that matters and pass on every test that made its
+// own.
+//
+// SQLite says "duplicate column name" when it is already there, which is the
+// expected answer on a fresh database and is not an error.
+static bool gs_add_column(gs_store *s, const char *table, const char *column) {
+    char sql[256];
+    snprintf(sql, sizeof sql, "ALTER TABLE %s ADD COLUMN %s", table, column);
+
+    char *err = nullptr;
+    if (sqlite3_exec(s->db, sql, nullptr, nullptr, &err) == SQLITE_OK) {
+        sqlite3_free(err);
+        return true;
+    }
+    bool already = err != nullptr && strstr(err, "duplicate column name") != nullptr;
+    if (!already) {
+        // The statement, then whatever SQLite said about it. Truncated rather
+        // than assembled with a format the compiler has to prove fits.
+        snprintf(s->error, sizeof s->error, "could not alter %s: %s", table,
+                 err != nullptr ? err : "?");
+    }
+    sqlite3_free(err);
+    return already;
+}
+
 static bool gs_migrate(gs_store *s) {
-    // The schema, and the version it is. Written once here rather than grown by
-    // hand later: an upgrade path is a thing to add when there is a version to
-    // upgrade *from*, and pretending otherwise produces migration code nobody
-    // has ever run.
+    // The schema, and the version it is. A fresh database is created at the
+    // newest shape; an older one is brought up to it by the alterations after
+    // the creates.
     if (!gs_exec(s,
         "PRAGMA journal_mode=WAL;"
         "PRAGMA synchronous=NORMAL;"
@@ -82,7 +113,31 @@ static bool gs_migrate(gs_store *s) {
         // track it has been handed - it needs them to verify times - and shows
         // only the ones somebody chose to put up.
         "  published INTEGER NOT NULL DEFAULT 0,"
+
+        // **Whose track this is, as a key rather than a name.**
+        //
+        // It used to be the author string, which is whatever the uploader
+        // typed - so "only the person who put it up may take it down" meant
+        // "only somebody willing to type the same word". The owner is now the
+        // static public key the client proved it holds during its handshake,
+        // which is a thing nobody else can present.
+        //
+        // Null for a track that shipped with the game. That is not an owner
+        // nobody has got round to setting: a stock track is outside ownership
+        // altogether and no request may touch it, which `shipped` says out loud
+        // rather than leaving to be inferred from a null.
+        "  owner     BLOB,"
+        "  shipped   INTEGER NOT NULL DEFAULT 0,"
+
+        // 0 private, 1 shared with named people, 2 published to everybody.
+        "  visible   INTEGER NOT NULL DEFAULT 0,"
         "  bytes     BLOB NOT NULL);"
+
+        // Who a shared track is shared with, one row each.
+        "CREATE TABLE IF NOT EXISTS track_share ("
+        "  hash   INTEGER NOT NULL,"
+        "  viewer BLOB NOT NULL,"
+        "  PRIMARY KEY (hash, viewer));"
 
         // **A session is a nonce the server issued to somebody, once.**
         //
@@ -110,10 +165,27 @@ static bool gs_migrate(gs_store *s) {
         return false;
     }
 
+    // Anything a database made before these columns existed is missing. Each is
+    // added with the default that makes an old row mean what it always meant: a
+    // track nobody owns, that did not ship, and that is published if the old
+    // `published` column said so - which is set below.
+    if (!gs_add_column(s, "track", "owner BLOB") ||
+        !gs_add_column(s, "track", "shipped INTEGER NOT NULL DEFAULT 0") ||
+        !gs_add_column(s, "track", "visible INTEGER NOT NULL DEFAULT 0")) {
+        return false;
+    }
+
+    // **The old `published` flag is the new visibility.** A track that was up
+    // before this change stays up; one that was not stays private. Doing it here
+    // rather than leaving the two to disagree is the point of a migration.
+    if (!gs_exec(s, "UPDATE track SET visible = 2 WHERE published != 0 AND visible = 0;")) {
+        return false;
+    }
+
     sqlite3_stmt *st = nullptr;
     if (sqlite3_prepare_v2(s->db,
             "INSERT INTO meta (key, value) VALUES ('schema', ?1)"
-            "  ON CONFLICT(key) DO NOTHING",
+            "  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             -1, &st, nullptr) != SQLITE_OK) {
         gs_fail(s, "schema");
         return false;
@@ -551,8 +623,300 @@ int gs_store_track_count(gs_store *s) {
     return gs_count(s, "SELECT COUNT(*) FROM track");
 }
 
+// --- who a track belongs to -------------------------------------------------
+
+// The one question every write path asks first: is this person allowed to
+// change this track? Answered in SQL so that the check and the change can be
+// the same statement, and there is no gap between them.
+//
+// The condition reads: the track exists, it did not ship with the game, and its
+// owner is exactly this key. A shipped track fails the second clause whoever is
+// asking, which is the rule stated once here instead of in five places.
+#define GS_OWNED_BY \
+    " WHERE hash = ?1 AND shipped = 0 AND owner IS NOT NULL AND owner = ?2"
+
+bool gs_store_claim_track(gs_store *s, uint64_t hash, const uint8_t *owner) {
+    if (s == nullptr || owner == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "UPDATE track SET owner = ?2"
+            "  WHERE hash = ?1 AND shipped = 0 AND (owner IS NULL OR owner = ?2)",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "claim track");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_blob(st, 2, owner, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_track_owner(gs_store *s, uint64_t hash, uint8_t *owner) {
+    if (s == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "SELECT owner FROM track WHERE hash = ?1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "track owner");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+
+    bool got = false;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const void *blob = sqlite3_column_blob(st, 0);
+        int n = sqlite3_column_bytes(st, 0);
+        if (blob != nullptr && n == GS_STORE_KEY_BYTES) {
+            if (owner != nullptr) memcpy(owner, blob, GS_STORE_KEY_BYTES);
+            got = true;
+        }
+    }
+    sqlite3_finalize(st);
+    return got;
+}
+
+bool gs_store_track_is_shipped(gs_store *s, uint64_t hash) {
+    if (s == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "SELECT shipped FROM track WHERE hash = ?1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "shipped");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    bool yes = sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) != 0;
+    sqlite3_finalize(st);
+    return yes;
+}
+
+bool gs_store_mark_shipped(gs_store *s, uint64_t hash) {
+    if (s == nullptr) return false;
+
+    // Shipped and ownerless in one statement: a stock track with an owner would
+    // be a stock track somebody could take down.
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            // Published as well as visible: a track that shipped with the
+            // game is up by definition, and leaving the two to disagree would
+            // mean a stock track that is listed by one query and not the other.
+            "UPDATE track SET shipped = 1, owner = NULL, visible = 2,"
+            "                 published = 1"
+            "  WHERE hash = ?1",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "mark shipped");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_name_track(gs_store *s, uint64_t hash, const uint8_t *who,
+                         const char *name) {
+    if (s == nullptr || who == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "UPDATE track SET name = ?3" GS_OWNED_BY,
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "name track");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_blob(st, 2, who, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, name != nullptr ? name : "", -1, SQLITE_TRANSIENT);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_set_visible(gs_store *s, uint64_t hash, const uint8_t *who,
+                          gs_visible how) {
+    if (s == nullptr || who == nullptr) return false;
+    if (how != GS_TRACK_PRIVATE && how != GS_TRACK_SHARED &&
+        how != GS_TRACK_PUBLIC) {
+        return false;
+    }
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "UPDATE track SET visible = ?3, published = (?3 = 2)" GS_OWNED_BY,
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "set visibility");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_blob(st, 2, who, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 3, (int)how);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+// Sharing is two statements that must not come apart: the owner check, and the
+// row. Wrapped so that a share never lands against a track the asker does not
+// own even if the two race.
+static bool gs_owns(gs_store *s, uint64_t hash, const uint8_t *who) {
+    if (who == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "SELECT 1 FROM track" GS_OWNED_BY,
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "owner check");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_blob(st, 2, who, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+    bool yes = sqlite3_step(st) == SQLITE_ROW;
+    sqlite3_finalize(st);
+    return yes;
+}
+
+bool gs_store_share_track(gs_store *s, uint64_t hash, const uint8_t *who,
+                          const uint8_t *with) {
+    if (s == nullptr || with == nullptr || !gs_owns(s, hash, who)) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "INSERT INTO track_share (hash, viewer) VALUES (?1, ?2)"
+            "  ON CONFLICT(hash, viewer) DO NOTHING",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "share track");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_blob(st, 2, with, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_unshare_track(gs_store *s, uint64_t hash, const uint8_t *who,
+                            const uint8_t *with) {
+    if (s == nullptr || with == nullptr || !gs_owns(s, hash, who)) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "DELETE FROM track_share WHERE hash = ?1 AND viewer = ?2",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "unshare track");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_blob(st, 2, with, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_delete_track(gs_store *s, uint64_t hash, const uint8_t *who) {
+    if (s == nullptr || who == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "DELETE FROM track" GS_OWNED_BY,
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "delete track");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    sqlite3_bind_blob(st, 2, who, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    if (!ok) return false;
+
+    // The shares go with it. Leaving them would mean somebody re-uploading the
+    // same track inherited an audience they never chose.
+    sqlite3_stmt *tidy = nullptr;
+    if (sqlite3_prepare_v2(s->db, "DELETE FROM track_share WHERE hash = ?1",
+                           -1, &tidy, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(tidy, 1, (sqlite3_int64)hash);
+        sqlite3_step(tidy);
+        sqlite3_finalize(tidy);
+    }
+    return true;
+}
+
+// The one condition that decides who may see what, written once. A null viewer
+// binds as SQL NULL, which never equals anything - so somebody asserting no
+// identity sees the shipped and the public and nothing else.
+#define GS_VISIBLE_TO \
+    " (t.shipped != 0 OR t.visible = 2"                                        \
+    "  OR t.owner = ?2"                                                        \
+    "  OR (t.visible = 1 AND EXISTS ("                                         \
+    "        SELECT 1 FROM track_share sh"                                     \
+    "         WHERE sh.hash = t.hash AND sh.viewer = ?2))) "
+
+bool gs_store_can_see(gs_store *s, uint64_t hash, const uint8_t *who) {
+    if (s == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "SELECT 1 FROM track t WHERE t.hash = ?1 AND" GS_VISIBLE_TO,
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "can see");
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)hash);
+    if (who != nullptr) {
+        sqlite3_bind_blob(st, 2, who, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(st, 2);
+    }
+    bool yes = sqlite3_step(st) == SQLITE_ROW;
+    sqlite3_finalize(st);
+    return yes;
+}
+
+int gs_store_list_visible(gs_store *s, const uint8_t *who, gs_track_row *out,
+                          int cap) {
+    if (s == nullptr || out == nullptr || cap <= 0) return 0;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "SELECT t.hash, t.name, t.author, LENGTH(t.bytes) FROM track t"
+            " WHERE" GS_VISIBLE_TO
+            " ORDER BY t.added DESC, t.hash DESC LIMIT ?1",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "list visible");
+        return 0;
+    }
+    sqlite3_bind_int(st, 1, cap);
+    if (who != nullptr) {
+        sqlite3_bind_blob(st, 2, who, GS_STORE_KEY_BYTES, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(st, 2);
+    }
+
+    int n = 0;
+    while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
+        gs_track_row *r = &out[n++];
+        memset(r, 0, sizeof *r);
+        r->hash = (uint64_t)sqlite3_column_int64(st, 0);
+        const unsigned char *name = sqlite3_column_text(st, 1);
+        const unsigned char *author = sqlite3_column_text(st, 2);
+        snprintf(r->name, sizeof r->name, "%s",
+                 name != nullptr ? (const char *)name : "");
+        snprintf(r->author, sizeof r->author, "%s",
+                 author != nullptr ? (const char *)author : "");
+        r->bytes = (uint32_t)sqlite3_column_int64(st, 3);
+    }
+    sqlite3_finalize(st);
+    return n;
+}
+
 bool gs_store_publish(gs_store *s, uint64_t hash, const char *name,
                       const char *author) {
+    // Kept for the tool that builds the shipped library, which has no keys and
+    // no clients - see gs_store_mark_shipped, which is what makes those tracks
+    // untouchable afterwards. A client never reaches this: everything it can do
+    // to a track goes through the owner check.
     if (s == nullptr) return false;
 
     sqlite3_stmt *st = nullptr;
@@ -584,8 +948,13 @@ bool gs_store_withdraw(gs_store *s, uint64_t hash, const char *author) {
             // `published <> 0` matters: SQLite counts writing a value that is
             // already there as a change, so without it withdrawing something
             // already down reports success.
-            "UPDATE track SET published = 0"
-            " WHERE hash = ?1 AND author = ?2 AND published <> 0",
+            // **And never a track that shipped with the game.** The author
+            // string is whatever somebody typed, and the stock library's says
+            // "gearstick" - so without `shipped = 0` a profile called that
+            // could take down the tracks the game came with. That is exactly
+            // the case this rule exists for.
+            "UPDATE track SET published = 0, visible = 0"
+            " WHERE hash = ?1 AND author = ?2 AND published <> 0 AND shipped = 0",
             -1, &st, nullptr) != SQLITE_OK) {
         gs_fail(s, "withdraw");
         return false;

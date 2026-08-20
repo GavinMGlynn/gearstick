@@ -1935,6 +1935,210 @@ TEST(a_record_set_on_one_client_is_seen_by_another) {
     remove(track_path);
 }
 
+// Does the library this client is shown contain that track? Asked more than
+// once, because a datagram is allowed to vanish.
+static bool gs_listed(gs_wire *w, uint64_t hash) {
+    const gs_wire_listing *rows = nullptr;
+    uint16_t total = 0;
+
+    for (int k = 0; k < 40; k++) {
+        gs_wire_ask_published(w);
+        gs_pump(w, 10);
+        uint16_t n = gs_wire_published(w, &rows, &total);
+        for (uint16_t i = 0; i < n; i++) {
+            if (rows[i].track == hash) return true;
+        }
+    }
+    return false;
+}
+
+TEST(a_shared_track_reaches_exactly_the_person_it_was_handed_to) {
+    // **"Hand it to a named few" has to mean named.** A shared flag with no
+    // list is shared with anybody who asks; the person is named by the public
+    // key the server watched them prove, which is in the lobby, so sharing is
+    // with somebody you are in a room with rather than with a string you typed.
+    CHECK(gs_wire_init());
+
+    remove("shared.db");
+    remove("shared.db-wal");
+    remove("shared.db-shm");
+    if (!gs_server_start_with_store("47856", GS_SERVER_LIFETIME, "3",
+                                    "shared.db")) {
+        gs_failures++;
+        return;
+    }
+
+    static gs_track mine;
+    gs_track_init(&mine, 20, 10, GS_SURF_ICE);
+    for (uint8_t y = 0; y <= mine.h; y++) {
+        for (uint8_t x = 0; x <= mine.w; x++) gs_track_set_corner(&mine, x, y, 0);
+    }
+    gs_track_add_gate(&mine, GS_INT(3), GS_INT(5), 0, GS_INT(4));
+    gs_track_add_gate(&mine, GS_INT(15), GS_INT(5), 0, GS_INT(4));
+    uint64_t hash = gs_track_hash(&mine);
+
+    gs_wire *ada = gs_wire_server("127.0.0.1", 47856, "ada", gs_test_server_pub());
+    gs_wire *bez = gs_wire_server("127.0.0.1", 47856, "bez", gs_test_server_pub());
+    gs_wire *cy  = gs_wire_server("127.0.0.1", 47856, "cy",  gs_test_server_pub());
+    CHECK(ada != nullptr && bez != nullptr && cy != nullptr);
+
+    for (int k = 0; k < 500; k++) {
+        gs_wire_poll(ada);
+        gs_wire_poll(bez);
+        gs_wire_poll(cy);
+        if (gs_wire_lobby(ada) != nullptr && gs_wire_lobby(ada)->count == 3) break;
+        SDL_Delay(10);
+    }
+    CHECK(gs_wire_lobby(ada) != nullptr && gs_wire_lobby(ada)->count == 3);
+
+    // ada uploads it and keeps it private - publishing is a separate decision.
+    gs_wire_publish(ada, &mine, "the ice ring");
+    gs_pump(ada, 60);
+    gs_wire_withdraw(ada, hash);
+    gs_pump(ada, 40);
+
+    // Whose key is whose, from the lobby. bez's slot is whichever one is not
+    // ada's, found by name rather than assumed.
+    const gs_lobby *l = gs_wire_lobby(ada);
+    uint8_t bez_slot = 0xffu, cy_slot = 0xffu;
+    for (uint8_t i = 0; i < GS_PROTO_MAX_PLAYERS; i++) {
+        if (!l->player[i].present) continue;
+        if (SDL_strcmp(l->player[i].name, "bez") == 0) bez_slot = i;
+        if (SDL_strcmp(l->player[i].name, "cy") == 0) cy_slot = i;
+    }
+    CHECK(bez_slot != 0xffu);
+    CHECK(cy_slot != 0xffu);
+    if (bez_slot == 0xffu || cy_slot == 0xffu) return;
+
+    const uint8_t *bez_key = gs_wire_peer_key(ada, bez_slot);
+    CHECK(bez_key != nullptr);
+
+    // Private: neither of them sees it.
+    CHECK(!gs_listed(bez, hash));
+    CHECK(!gs_listed(cy, hash));
+
+    // Handed to bez, and to bez alone.
+    gs_wire_share(ada, hash, bez_key, true);
+    gs_pump(ada, 40);
+    CHECK(gs_listed(bez, hash));
+    CHECK(!gs_listed(cy, hash));
+
+    // And taken back again.
+    gs_wire_share(ada, hash, bez_key, false);
+    gs_pump(ada, 40);
+    CHECK(!gs_listed(bez, hash));
+
+    gs_wire_close(ada);
+    gs_wire_close(bez);
+    gs_wire_close(cy);
+    gs_wire_quit();
+    gs_server_stop();
+
+    remove("shared.db");
+    remove("shared.db-wal");
+    remove("shared.db-shm");
+}
+
+TEST(a_track_is_the_key_that_built_it_and_not_the_name_that_typed_it) {
+    // **The case the old check could not tell apart.** Ownership used to be the
+    // author string, which is whatever somebody typed into a box - so "only the
+    // person who put it up may take it down" meant "only somebody willing to
+    // type the same word". Here two clients both call themselves ada, and only
+    // one of them built the track.
+    CHECK(gs_wire_init());
+
+    remove("owned.db");
+    remove("owned.db-wal");
+    remove("owned.db-shm");
+    if (!gs_server_start_with_store("47854", GS_SERVER_LIFETIME, "2",
+                                    "owned.db")) {
+        gs_failures++;
+        return;
+    }
+
+    static gs_track mine;
+    gs_track_init(&mine, 24, 12, GS_SURF_DIRT);
+    for (uint8_t y = 0; y <= mine.h; y++) {
+        for (uint8_t x = 0; x <= mine.w; x++) {
+            gs_track_set_corner(&mine, x, y, x > 8 && x < 12 ? GS_INT(1) : 0);
+        }
+    }
+    gs_track_add_gate(&mine, GS_INT(4), GS_INT(6), 0, GS_INT(5));
+    gs_track_add_gate(&mine, GS_INT(18), GS_INT(6), 0, GS_INT(5));
+    uint64_t hash = gs_track_hash(&mine);
+
+    // Both are called ada. One of them is a different machine with a different
+    // key, which is the only thing that distinguishes them and is now the only
+    // thing that counts.
+    gs_wire *builder = gs_wire_server("127.0.0.1", 47854, "ada",
+                                      gs_test_server_pub());
+    gs_wire *impostor = gs_wire_server("127.0.0.1", 47854, "ada",
+                                       gs_test_server_pub());
+    CHECK(builder != nullptr && impostor != nullptr);
+
+    for (int k = 0; k < 400; k++) {
+        gs_wire_poll(builder);
+        gs_wire_poll(impostor);
+        if (gs_wire_lobby(builder) != nullptr &&
+            gs_wire_lobby(builder)->count == 2) {
+            break;
+        }
+        SDL_Delay(10);
+    }
+
+    gs_wire_publish(builder, &mine, "the dirt loop");
+    gs_pump(builder, 60);
+
+    // It is up, and the impostor can see it - it is public, after all.
+    const gs_wire_listing *rows = nullptr;
+    uint16_t total = 0;
+    bool up = false;
+    for (int k = 0; k < 80 && !up; k++) {
+        gs_wire_ask_published(impostor);
+        gs_pump(impostor, 10);
+        uint16_t n = gs_wire_published(impostor, &rows, &total);
+        for (uint16_t i = 0; i < n; i++) if (rows[i].track == hash) up = true;
+    }
+    CHECK(up);
+
+    // **And cannot take it down, however it signs itself.**
+    gs_wire_withdraw(impostor, hash);
+    gs_pump(impostor, 60);
+
+    bool still_up = false;
+    for (int k = 0; k < 80 && !still_up; k++) {
+        gs_wire_ask_published(impostor);
+        gs_pump(impostor, 10);
+        uint16_t n = gs_wire_published(impostor, &rows, &total);
+        for (uint16_t i = 0; i < n; i++) if (rows[i].track == hash) still_up = true;
+    }
+    CHECK(still_up);
+
+    // The one that built it can. Without this the check above would pass just
+    // as well if withdrawing had stopped working altogether.
+    gs_wire_withdraw(builder, hash);
+    gs_pump(builder, 60);
+
+    bool gone = false;
+    for (int k = 0; k < 80 && !gone; k++) {
+        gs_wire_ask_published(impostor);
+        gs_pump(impostor, 10);
+        uint16_t n = gs_wire_published(impostor, &rows, &total);
+        gone = true;
+        for (uint16_t i = 0; i < n; i++) if (rows[i].track == hash) gone = false;
+    }
+    CHECK(gone);
+
+    gs_wire_close(builder);
+    gs_wire_close(impostor);
+    gs_wire_quit();
+    gs_server_stop();
+
+    remove("owned.db");
+    remove("owned.db-wal");
+    remove("owned.db-shm");
+}
+
 TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
     // **The verification this item exists for.** ada publishes; bez, who has
     // never seen it, finds it and can fetch it; ada takes it down and it stops
@@ -2075,6 +2279,8 @@ int main(void) {
     run_a_token_buys_one_submission_and_the_second_time_it_buys_nothing();
     run_a_spent_token_is_still_spent_after_the_server_restarts();
     run_a_record_set_on_one_client_is_seen_by_another();
+    run_a_shared_track_reaches_exactly_the_person_it_was_handed_to();
+    run_a_track_is_the_key_that_built_it_and_not_the_name_that_typed_it();
     run_a_published_track_is_browsable_from_another_client_and_can_be_taken_down();
 
     gs_server_stop();

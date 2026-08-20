@@ -217,7 +217,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { submodules: false }
-      - run: git submodule update --init --depth 1 ext/sdl ext/imgui ext/sdl_net
+      # Spelled out rather than $CI_SUBMODULES: this job runs under a shell that
+      # does not expand it. Add anything new here as well as above.
+      - run: git submodule update --init --depth 1 ext/sdl ext/imgui ext/sdl_net ext/libsodium
 
       - uses: ilammy/msvc-dev-cmd@v1
         with: { arch: x64 }

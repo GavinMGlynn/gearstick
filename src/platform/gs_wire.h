@@ -180,6 +180,16 @@ void gs_wire_publish(gs_wire *w, const gs_track *t, const char *name);
 // have to stay checkable - it simply stops being listed.
 void gs_wire_withdraw(gs_wire *w, uint64_t track);
 
+// Hand a track to one named person, or stop. They are named by their public
+// key, which the lobby carries - so sharing is with somebody you are actually
+// in a room with rather than with a string you typed.
+void gs_wire_share(gs_wire *w, uint64_t track, const uint8_t *with, bool on);
+
+// The public key the server says belongs to a slot, or null. This is what a
+// client shares a track *with*, and it is not something that player claimed
+// about themselves - the server watched them prove it.
+const uint8_t *gs_wire_peer_key(const gs_wire *w, uint8_t slot);
+
 // The one-shot token the server last issued to this client, or zero if none has
 // arrived. Exposed so a test can see whether a session exists at all; the claim
 // path spends it without being asked.
