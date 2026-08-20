@@ -122,6 +122,21 @@ bool gs_store_spend_session(gs_store *s, uint64_t nonce, const char *who,
 int gs_store_forget_sessions(gs_store *s, int64_t before);
 int gs_store_session_count(gs_store *s);
 
+// --- who this server is -----------------------------------------------------
+//
+// **The server's static secret key**, which is the thing every client's
+// handshake is aimed at. In the database with everything else the server knows,
+// for the same reason as the sessions: a server that generated a new identity
+// on every restart would be a different server every time, and every client
+// that had been told which server to trust would be right to refuse it.
+//
+// `gs_store_identity` returns false when there is none yet, which is how the
+// server knows to make one.
+#define GS_STORE_IDENTITY_BYTES 32
+
+bool gs_store_identity(gs_store *s, uint8_t *secret);
+bool gs_store_set_identity(gs_store *s, const uint8_t *secret);
+
 // --- publishing ------------------------------------------------------------
 //
 // **Published is a separate thing from stored.** The server holds every track

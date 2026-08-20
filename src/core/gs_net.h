@@ -141,9 +141,25 @@ typedef struct gs_net {
     // Set once the race is over locally, after which the remaining reveals go
     // out with no delay. Without it the last twelve ticks of every race are
     // promised and never shown, and the other machine can never confirm the
-    // finish. The promises for those ticks went out on time in earlier
-    // datagrams, so nothing is weakened by showing them at once.
+    // finish.
     bool     flushing;
+
+    // **Packets still to send before the flush actually starts.**
+    //
+    // A promise only counts when it arrives in a datagram that does not also
+    // prove it, so a flushing datagram's commitments are inadmissible - it
+    // reveals every tick it commits. That means the commitment for the last
+    // tick of a race gets exactly one admissible copy: the datagram sent on
+    // that tick. Lose it and the far end can never accept the reveal, and the
+    // race is never confirmed to its end.
+    //
+    // The rest of the protocol survives loss by repetition and this did not, so
+    // the flush waits: `gs_net_finish` asks for more ordinary datagrams first,
+    // which commit the final ticks without revealing them, and only then do the
+    // reveals go out. Found by a four-player race through the tunnel with one
+    // datagram in twenty dropped on each of two hops - at which point the last
+    // tick failed to confirm on three machines out of four.
+    uint32_t flush_wait;
 
     bool     desynced;
     uint32_t desync_tick;
@@ -190,7 +206,11 @@ void gs_net_finish(gs_net *n);
 
 // The datagram to send. Carries the local player's recent inputs and this
 // machine's claim about the confirmed state, so the other end can check it.
-size_t gs_net_packet(const gs_net *n, uint8_t *buf, size_t cap);
+//
+// Not const: a race that has finished spends its first several datagrams
+// committing the last ticks before it reveals them, and counting those is the
+// only state this keeps.
+size_t gs_net_packet(gs_net *n, uint8_t *buf, size_t cap);
 
 // Take one. Corrections are applied, the confirmed state is advanced as far as
 // the new truth allows, and the visible state is rewound and replayed if a

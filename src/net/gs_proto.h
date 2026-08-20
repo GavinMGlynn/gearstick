@@ -34,6 +34,14 @@
 typedef enum gs_msg {
     GS_MSG_NONE = 0,
 
+    // **The two that are not inside the tunnel, because they are the tunnel.**
+    // A handshake message cannot be sealed by a session that does not exist
+    // yet, and a sealed datagram is the envelope everything else travels in.
+    // Every other message below is what comes *out* of one of these, and is
+    // refused if it arrives any other way.
+    GS_MSG_HANDSHAKE,  // one Noise handshake message, necessarily in the clear
+    GS_MSG_SEALED,     // a counter and a sealed datagram: everything else
+
     // Client to server.
     GS_MSG_JOIN,       // "here I am, this is my name"
     GS_MSG_BYE,        // "I am leaving" - courtesy, not required
@@ -123,6 +131,21 @@ bool gs_proto_read_proof_chunk(const uint8_t *buf, size_t len, uint64_t *track,
 // being safe when the schema changes.
 size_t gs_proto_session(uint8_t *buf, size_t cap, uint64_t nonce);
 bool   gs_proto_read_session(const uint8_t *buf, size_t len, uint64_t *nonce);
+
+// --- the envelope -----------------------------------------------------------
+//
+// A handshake message and a sealed datagram, which are the only two things that
+// ever appear on the wire between a client and a server once this is switched
+// on. `gs_proto_read_sealed` and `gs_proto_read_handshake` hand back a pointer
+// into the caller's buffer rather than copying, because what follows is handed
+// straight to the tunnel.
+size_t gs_proto_handshake(uint8_t *buf, size_t cap, const uint8_t *msg, size_t len);
+bool   gs_proto_read_handshake(const uint8_t *buf, size_t len,
+                               const uint8_t **msg, size_t *msg_len);
+
+size_t gs_proto_sealed(uint8_t *buf, size_t cap, const uint8_t *body, size_t len);
+bool   gs_proto_read_sealed(const uint8_t *buf, size_t len,
+                            const uint8_t **body, size_t *body_len);
 
 size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
                        uint64_t conditions, uint16_t laps, uint8_t vehicle,

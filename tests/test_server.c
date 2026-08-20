@@ -11,6 +11,7 @@
 #include "core/gs_records.h"
 #include "core/gs_net.h"
 #include "core/gs_replay.h"
+#include "net/gs_noise.h"
 #include "net/gs_verify.h"
 #include "core/gs_track.h"
 #include "net/gs_carrier.h"
@@ -40,6 +41,35 @@ static const char *gs_current = "";
 
 // --- a client, as a test drives one ----------------------------------------
 
+// **The test server's identity, fixed.** A real server mints one and keeps it;
+// a test has to know it in advance, because IK means the client must already
+// hold the server's public key before it can say anything at all. Handed to the
+// server with --key, and the matching public key handed to every client.
+#define GS_TEST_KEY_HEX \
+    "4a3acbfdb163dec651dfa3194dece676d437029c62a408b4c5ea9114246e4893"
+#define GS_TEST_PROLOGUE "gearstick/1"
+
+static const uint8_t *gs_test_server_pub(void) {
+    static gs_noise_keypair k;
+    static bool built = false;
+    if (!built) {
+        uint8_t secret[GS_NOISE_KEY_BYTES];
+        for (int i = 0; i < GS_NOISE_KEY_BYTES; i++) {
+            unsigned byte = 0;
+            for (int half = 0; half < 2; half++) {
+                char ch = GS_TEST_KEY_HEX[i * 2 + half];
+                unsigned digit = (ch >= '0' && ch <= '9') ? (unsigned)(ch - '0')
+                                                          : (unsigned)(ch - 'a' + 10);
+                byte = byte * 16u + digit;
+            }
+            secret[i] = (uint8_t)byte;
+        }
+        gs_noise_key_from_secret(&k, secret);
+        built = true;
+    }
+    return k.pub;
+}
+
 typedef struct gs_test_client {
     NET_DatagramSocket *sock;
     NET_Address        *server;
@@ -57,7 +87,17 @@ typedef struct gs_test_client {
     uint64_t session;         // the one-shot token the server issued
     bool     heard_best;
     uint32_t best_lap, best_race;
+
+    // **This client speaks the protocol by hand, so it has to speak the tunnel
+    // by hand too.** Nothing reaches the server in the clear any more, which is
+    // the point of the tunnel and is also the reason a test that forges a
+    // datagram has to seal it first.
+    gs_noise_keypair   identity;
+    gs_noise_handshake hs;
+    gs_noise_session   tunnel;
 } gs_test_client;
+
+static void gs_client_pump(gs_test_client *c);
 
 static bool gs_client_open(gs_test_client *c, uint16_t server_port) {
     SDL_zerop(c);
@@ -70,7 +110,32 @@ static bool gs_client_open(gs_test_client *c, uint16_t server_port) {
         return false;
     }
     c->port = server_port;
-    return true;
+
+    // **The tunnel, before anything else.** Nothing reaches the server in the
+    // clear, so a test client that skipped this would send into silence and the
+    // test would fail as a timeout rather than as what it is.
+    gs_noise_keygen(&c->identity);
+    gs_noise_init_initiator(&c->hs, &c->identity, gs_test_server_pub(),
+                            (const uint8_t *)GS_TEST_PROLOGUE,
+                            sizeof GS_TEST_PROLOGUE - 1);
+
+    uint8_t msg[GS_PROTO_MTU], out[GS_PROTO_MTU];
+    size_t n = gs_noise_write_message(&c->hs, nullptr, 0, msg, sizeof msg);
+    if (n == 0) return false;
+    n = gs_proto_handshake(out, sizeof out, msg, n);
+    if (n == 0) return false;
+
+    // Repeated, because the first datagram of a handshake can be lost like any
+    // other and a test that gave up after one would fail on a bad afternoon.
+    uint64_t until = SDL_GetTicks() + 5000;
+    while (SDL_GetTicks() < until && !c->tunnel.established) {
+        NET_SendDatagram(c->sock, c->server, c->port, out, (int)n);
+        for (int i = 0; i < 20 && !c->tunnel.established; i++) {
+            gs_client_pump(c);
+            SDL_Delay(10);
+        }
+    }
+    return c->tunnel.established;
 }
 
 static void gs_client_close(gs_test_client *c) {
@@ -82,7 +147,15 @@ static void gs_client_close(gs_test_client *c) {
 static void gs_client_send(gs_test_client *c, const uint8_t *buf, size_t n);
 
 static void gs_client_send(gs_test_client *c, const uint8_t *buf, size_t n) {
-    NET_SendDatagram(c->sock, c->server, c->port, buf, (int)n);
+    if (n == 0 || !c->tunnel.established) return;
+
+    uint8_t sealed[GS_PROTO_MTU], out[GS_PROTO_MTU];
+    size_t k = gs_noise_seal(&c->tunnel, buf, n, sealed, sizeof sealed);
+    if (k == 0) return;
+    k = gs_proto_sealed(out, sizeof out, sealed, k);
+    if (k == 0) return;
+
+    NET_SendDatagram(c->sock, c->server, c->port, out, (int)k);
 }
 
 static void gs_client_say_hello(gs_test_client *c, const char *name) {
@@ -95,26 +168,54 @@ static void gs_client_say_hello(gs_test_client *c, const char *name) {
 static void gs_client_pump(gs_test_client *c) {
     NET_Datagram *d = nullptr;
     while (NET_ReceiveDatagram(c->sock, &d) && d != nullptr) {
-        size_t len = (size_t)d->buflen;
+        size_t raw = (size_t)d->buflen;
 
-        switch (gs_proto_kind(d->buf, len)) {
+        // The handshake is the only thing that arrives in the clear, because it
+        // is what makes the rest sealed.
+        if (gs_proto_kind(d->buf, raw) == GS_MSG_HANDSHAKE) {
+            const uint8_t *msg = nullptr;
+            size_t msg_len = 0;
+            uint8_t payload[GS_PROTO_MTU];
+            size_t got = 0;
+            if (!c->tunnel.established &&
+                gs_proto_read_handshake(d->buf, raw, &msg, &msg_len) &&
+                gs_noise_read_message(&c->hs, msg, msg_len, payload,
+                                      sizeof payload, &got) &&
+                gs_noise_done(&c->hs)) {
+                gs_noise_split(&c->hs, &c->tunnel);
+            }
+            NET_DestroyDatagram(d);
+            continue;
+        }
+
+        static uint8_t plain[GS_PROTO_MTU];
+        const uint8_t *body = nullptr;
+        size_t body_len = 0, len = 0;
+        if (!c->tunnel.established ||
+            !gs_proto_read_sealed(d->buf, raw, &body, &body_len) ||
+            !gs_noise_open(&c->tunnel, body, body_len, plain, sizeof plain, &len)) {
+            NET_DestroyDatagram(d);
+            continue;
+        }
+
+        switch (gs_proto_kind(plain, len)) {
         case GS_MSG_WELCOME:
-            if (gs_proto_read_welcome(d->buf, len, &c->slot, &c->lobby)) {
+            if (gs_proto_read_welcome(plain, len, &c->slot, &c->lobby)) {
                 c->welcomed = true;
             }
             break;
         case GS_MSG_LOBBY:
-            gs_proto_read_lobby(d->buf, len, &c->lobby);
+            gs_proto_read_lobby(plain, len, &c->lobby);
             c->lobbies++;
             break;
         case GS_MSG_SESSION:
-            gs_proto_read_session(d->buf, len, &c->session);
+            gs_proto_read_session(plain, len, &c->session);
             break;
         case GS_MSG_BEST: {
             uint64_t track = 0, cond = 0;
             uint16_t laps = 0;
             char lap_who[GS_PROTO_NAME], race_who[GS_PROTO_NAME];
-            if (gs_proto_read_best(d->buf, len, &track, &cond, &laps,
+            if (gs_proto_read_best(plain, len, &track, &cond, &laps,
                                    &c->best_lap, lap_who, sizeof lap_who,
                                    &c->best_race, race_who, sizeof race_who)) {
                 c->heard_best = true;
@@ -122,14 +223,14 @@ static void gs_client_pump(gs_test_client *c) {
             break;
         }
         case GS_MSG_FULL:
-            c->refused = gs_proto_read_full(d->buf, len, c->why, sizeof c->why);
+            c->refused = gs_proto_read_full(plain, len, c->why, sizeof c->why);
             break;
         case GS_MSG_PING: {
             // A real client answers, which is how the server measures the trip.
             // A test client that did not would make the server's ping column a
             // column of dashes, and the test would not notice.
             uint32_t stamp = 0;
-            if (gs_proto_read_stamp(d->buf, len, &stamp)) {
+            if (gs_proto_read_stamp(plain, len, &stamp)) {
                 uint8_t out[GS_PROTO_MTU];
                 gs_client_send(c, out, gs_proto_pong(out, sizeof out, stamp));
                 c->pinged = true;
@@ -192,7 +293,7 @@ static bool gs_server_start_full(const char *port, const char *seconds,
                  "");
 #endif
 
-    const char *args[20];
+    const char *args[24];
     int n = 0;
     args[n++] = exe;
     args[n++] = "--port";     args[n++] = port;
@@ -205,6 +306,8 @@ static bool gs_server_start_full(const char *port, const char *seconds,
     }
     args[n++] = "--store";
     args[n++] = gs_store_arg != nullptr ? gs_store_arg : ":memory:";
+    args[n++] = "--key";
+    args[n++] = GS_TEST_KEY_HEX;
     args[n] = nullptr;
 
     // Its output goes nowhere. The server redraws a live view four times a
@@ -494,7 +597,7 @@ TEST(the_games_own_client_gets_its_slot_from_the_server) {
     static const char *names[4] = { "ada", "bez", "cy", "dot" };
 
     for (int i = 0; i < 4; i++) {
-        w[i] = gs_wire_server("127.0.0.1", 47818, names[i]);
+        w[i] = gs_wire_server("127.0.0.1", 47818, names[i], gs_test_server_pub());
         CHECK(w[i] != nullptr);
         CHECK(gs_wire_error(w[i]) == nullptr);
     }
@@ -544,7 +647,7 @@ TEST(the_games_own_client_gets_its_slot_from_the_server) {
     }
 
     // A fifth is turned away, and can say why in words meant for a person.
-    gs_wire *fifth = gs_wire_server("127.0.0.1", 47818, "eve");
+    gs_wire *fifth = gs_wire_server("127.0.0.1", 47818, "eve", gs_test_server_pub());
     CHECK(fifth != nullptr);
     for (int k = 0; k < 200 && !gs_wire_refused(fifth); k++) {
         gs_wire_poll(fifth);
@@ -581,7 +684,7 @@ TEST(a_server_nobody_has_set_up_still_has_a_library_to_offer) {
     }
     CHECK(gs_wire_init());
 
-    gs_wire *w = gs_wire_server("127.0.0.1", 47840, "ada");
+    gs_wire *w = gs_wire_server("127.0.0.1", 47840, "ada", gs_test_server_pub());
     CHECK(w != nullptr);
 
     uint64_t until = SDL_GetTicks() + 8000;
@@ -674,8 +777,8 @@ TEST(a_client_that_quits_says_so_instead_of_being_waited_out) {
     }
     CHECK(gs_wire_init());
 
-    gs_wire *a = gs_wire_server("127.0.0.1", 47838, "ada");
-    gs_wire *b = gs_wire_server("127.0.0.1", 47838, "bez");
+    gs_wire *a = gs_wire_server("127.0.0.1", 47838, "ada", gs_test_server_pub());
+    gs_wire *b = gs_wire_server("127.0.0.1", 47838, "bez", gs_test_server_pub());
     CHECK(a != nullptr && b != nullptr);
 
     uint64_t until = SDL_GetTicks() + 8000;
@@ -734,8 +837,8 @@ TEST(a_placed_client_is_not_dropped_for_going_quiet) {
     if (!gs_server_start_full("47822", GS_SERVER_LIFETIME, "2", "2000")) { gs_failures++; return; }
     CHECK(gs_wire_init());
 
-    gs_wire *a = gs_wire_server("127.0.0.1", 47822, "ada");
-    gs_wire *b = gs_wire_server("127.0.0.1", 47822, "bez");
+    gs_wire *a = gs_wire_server("127.0.0.1", 47822, "ada", gs_test_server_pub());
+    gs_wire *b = gs_wire_server("127.0.0.1", 47822, "bez", gs_test_server_pub());
     CHECK(a != nullptr && b != nullptr);
 
     uint64_t until = SDL_GetTicks() + 8000;
@@ -803,7 +906,7 @@ TEST(a_client_waiting_for_others_is_not_ready_yet) {
     if (!gs_server_start("47820", GS_SERVER_LIFETIME)) { gs_failures++; return; }
     CHECK(gs_wire_init());
 
-    gs_wire *lonely = gs_wire_server("127.0.0.1", 47820, "ada");
+    gs_wire *lonely = gs_wire_server("127.0.0.1", 47820, "ada", gs_test_server_pub());
     CHECK(lonely != nullptr);
 
     const gs_lobby *l = nullptr;
@@ -868,7 +971,7 @@ TEST(a_client_with_a_different_track_is_given_the_right_one) {
         return;
     }
 
-    gs_wire *w = gs_wire_server("127.0.0.1", 47824, "ada");
+    gs_wire *w = gs_wire_server("127.0.0.1", 47824, "ada", gs_test_server_pub());
     CHECK(w != nullptr);
 
     // **Never ready while the ground is still arriving.** Waiting for the last
@@ -929,8 +1032,8 @@ TEST(two_clients_that_cannot_see_each_other_race_through_the_server) {
 
     if (!gs_server_start_for("47826", GS_SERVER_LIFETIME, "2")) { gs_failures++; return; }
 
-    gs_wire *a = gs_wire_server("127.0.0.1", 47826, "ada");
-    gs_wire *b = gs_wire_server("127.0.0.1", 47826, "bez");
+    gs_wire *a = gs_wire_server("127.0.0.1", 47826, "ada", gs_test_server_pub());
+    gs_wire *b = gs_wire_server("127.0.0.1", 47826, "bez", gs_test_server_pub());
     CHECK(a != nullptr && b != nullptr);
 
     gs_wire_use_relay(a, true);
@@ -1138,7 +1241,7 @@ TEST(a_time_is_kept_only_if_re_racing_it_produces_it) {
     size_t proof_len = gs_replay_serialize(&gs_run, proof, sizeof proof);
     CHECK(proof_len > 0);
 
-    gs_wire *a = gs_wire_server("127.0.0.1", 47830, "ada");
+    gs_wire *a = gs_wire_server("127.0.0.1", 47830, "ada", gs_test_server_pub());
     CHECK(a != nullptr);
     for (int k = 0; k < 400; k++) {
         gs_wire_poll(a);
@@ -1225,7 +1328,7 @@ TEST(a_time_offered_without_the_servers_token_is_refused) {
     size_t proof_len = gs_replay_serialize(&gs_run, proof, sizeof proof);
     CHECK(proof_len > 0);
 
-    gs_wire *a = gs_wire_server("127.0.0.1", 47842, "ada");
+    gs_wire *a = gs_wire_server("127.0.0.1", 47842, "ada", gs_test_server_pub());
     CHECK(a != nullptr);
 
     uint64_t until = SDL_GetTicks() + 8000;
@@ -1681,7 +1784,7 @@ TEST(a_record_set_on_one_client_is_seen_by_another) {
     static uint8_t proof[sizeof(gs_replay) + 4096];
     size_t proof_len = gs_replay_serialize(&gs_run, proof, sizeof proof);
 
-    gs_wire *a = gs_wire_server("127.0.0.1", 47832, "ada");
+    gs_wire *a = gs_wire_server("127.0.0.1", 47832, "ada", gs_test_server_pub());
     CHECK(a != nullptr);
     for (int k = 0; k < 400; k++) {
         gs_wire_poll(a);
@@ -1694,7 +1797,7 @@ TEST(a_record_set_on_one_client_is_seen_by_another) {
     gs_pump(a, 60);
 
     // bez arrives afterwards, having seen none of it.
-    gs_wire *b = gs_wire_server("127.0.0.1", 47832, "bez");
+    gs_wire *b = gs_wire_server("127.0.0.1", 47832, "bez", gs_test_server_pub());
     CHECK(b != nullptr);
     for (int k = 0; k < 400; k++) {
         gs_wire_poll(b);
@@ -1745,8 +1848,8 @@ TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
     gs_track_add_gate(&mine, GS_INT(30), GS_INT(10), 0, GS_INT(6));
     uint64_t hash = gs_track_hash(&mine);
 
-    gs_wire *a = gs_wire_server("127.0.0.1", 47834, "ada");
-    gs_wire *b = gs_wire_server("127.0.0.1", 47834, "bez");
+    gs_wire *a = gs_wire_server("127.0.0.1", 47834, "ada", gs_test_server_pub());
+    gs_wire *b = gs_wire_server("127.0.0.1", 47834, "bez", gs_test_server_pub());
     CHECK(a != nullptr && b != nullptr);
     for (int k = 0; k < 400; k++) {
         gs_wire_poll(a);

@@ -259,12 +259,13 @@ add_library(gearstick_shell STATIC
     src/platform/gs_paths.c
     src/platform/gs_input.c
     src/platform/gs_wire.c
+    src/net/gs_noise.c
     src/net/gs_proto.c
     src/net/gs_carrier.c)
 
 target_include_directories(gearstick_shell PUBLIC src)
 target_link_libraries(gearstick_shell PUBLIC gearstick_sim gearstick_ui ${GS_SDL}
-    ${GS_SDL_NET})
+    ${GS_SDL_NET} gearstick_sodium)
 
 # Where the art lives when running straight out of the build tree, so the
 # ordinary edit-build-run loop needs no install step. See src/platform/gs_paths.c.
@@ -332,6 +333,7 @@ gs_add_sqlite()
 
 add_executable(gearstick_server
     src/frontend/server/main.c
+    src/net/gs_noise.c
     src/net/gs_proto.c
     src/net/gs_carrier.c
     src/net/gs_store.c
@@ -348,7 +350,7 @@ target_include_directories(gearstick_server PRIVATE src)
 target_compile_definitions(gearstick_server PRIVATE
     GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 target_link_libraries(gearstick_server PRIVATE ${GS_SDL} ${GS_SDL_NET}
-    gearstick_sim gearstick_sqlite)
+    gearstick_sim gearstick_sqlite gearstick_sodium)
 gs_configure(gearstick_server)
 set_target_properties(gearstick_server PROPERTIES C_VISIBILITY_PRESET hidden)
 

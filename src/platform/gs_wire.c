@@ -1,5 +1,6 @@
 #include "platform/gs_wire.h"
 
+#include "net/gs_noise.h"
 #include "net/gs_proto.h"
 
 #include <SDL3/SDL.h>
@@ -89,6 +90,20 @@ struct gs_wire {
     // The one-shot token the server last issued, spent by the next claim. Zero
     // means none has arrived, and a claim carrying zero is refused.
     uint64_t session;
+
+    // **The sealed channel to the server, and this client's own identity.**
+    //
+    // The identity is generated per connection rather than kept: the server
+    // learns it during the handshake and nothing yet depends on it being the
+    // same next time. It becomes a profile's long-term key when there are
+    // accounts, which is a later item, and the handshake pattern does not
+    // change when it does.
+    gs_noise_keypair   identity;
+    uint8_t            server_key[GS_NOISE_KEY_BYTES];
+    bool               has_server_key;
+    gs_noise_handshake hs;
+    gs_noise_session   tunnel;
+    uint32_t           handshakes_sent;
     uint32_t sent, received;
     char     error[256];
 };
@@ -172,9 +187,24 @@ gs_wire *gs_wire_host(uint16_t port, uint8_t players) {
     return w;
 }
 
-gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name) {
+gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name,
+                        const uint8_t *server_key) {
     gs_wire *w = gs_wire_new(0);
     if (w == nullptr || w->sock == nullptr) return w;
+
+    // **Without the server's key there is no connection at all.** IK means the
+    // client already knows who it is talking to, and that is the whole reason
+    // nobody can answer in the server's place. A client that would carry on
+    // regardless would be a client that connects to whoever replies first.
+    if (server_key == nullptr) {
+        SDL_snprintf(w->error, sizeof w->error,
+                     "no server key: this client cannot tell %s from anybody "
+                     "else claiming to be it", host);
+        return w;
+    }
+    SDL_memcpy(w->server_key, server_key, GS_NOISE_KEY_BYTES);
+    w->has_server_key = true;
+    gs_noise_keygen(&w->identity);
 
     w->server_addr = NET_ResolveHostname(host);
     if (w->server_addr == nullptr ||
@@ -362,9 +392,11 @@ void gs_wire_close(gs_wire *w) {
     // one datagram and it is not required to arrive: the silence timeout is
     // still what catches a client that was unplugged rather than closed.
     if (w->server_addr != nullptr) {
+        // Sealed, like everything else. A goodbye in the clear would be one
+        // anybody on the path could forge, and forging one throws somebody out
+        // of their own race.
         uint8_t buf[GS_PROTO_MTU];
-        size_t n = gs_proto_bye(buf, sizeof buf);
-        NET_SendDatagram(w->sock, w->server_addr, w->server_port, buf, (int)n);
+        gs_to_server(w, buf, gs_proto_bye(buf, sizeof buf));
         NET_UnrefAddress(w->server_addr);
     }
     for (int i = 0; i < GS_WIRE_PLAYERS; i++) {
@@ -663,10 +695,90 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
     }
 }
 
-// To the server, which is not a peer.
+// The server's answer to the handshake. One message and the tunnel is up; IK
+// needs no more than that, which is why there is no state here to keep between
+// datagrams and nothing for anybody to fill up.
+static void gs_take_handshake(gs_wire *w, const uint8_t *in, size_t len) {
+    if (w->tunnel.established) return;      // already up; a late duplicate
+
+    const uint8_t *msg = nullptr;
+    size_t msg_len = 0;
+    if (!gs_proto_read_handshake(in, len, &msg, &msg_len)) return;
+
+    uint8_t payload[GS_PROTO_MTU];
+    size_t got = 0;
+    if (!gs_noise_read_message(&w->hs, msg, msg_len, payload, sizeof payload,
+                               &got)) {
+        // A failed handshake stays failed, so the next attempt starts a fresh
+        // one rather than grinding against this.
+        return;
+    }
+    if (!gs_noise_done(&w->hs)) return;
+    gs_noise_split(&w->hs, &w->tunnel);
+}
+
+// Everything else the server says arrives sealed. Returns the plaintext length,
+// or zero when the datagram was not sealed by the far end of this tunnel, has
+// been changed, or has been seen before.
+static size_t gs_unseal(gs_wire *w, const uint8_t *in, size_t len,
+                        uint8_t *out, size_t cap) {
+    if (!w->tunnel.established) return 0;
+
+    const uint8_t *body = nullptr;
+    size_t body_len = 0;
+    if (!gs_proto_read_sealed(in, len, &body, &body_len)) return 0;
+
+    size_t got = 0;
+    if (!gs_noise_open(&w->tunnel, body, body_len, out, cap, &got)) return 0;
+    return got;
+}
+
+// The same prologue the server uses. Authenticated and never sent, so two ends
+// that disagree about what they are speaking fail the handshake rather than a
+// race - which is where a version number lives.
+#define GS_WIRE_PROLOGUE "gearstick/1"
+
+// To the server, which is not a peer - and sealed, always.
+//
+// **There is no plaintext path.** A client whose tunnel is not up yet sends
+// nothing rather than sending it in the clear: a fallback to plaintext is a
+// fallback anybody on the path can force by dropping one datagram. Everything
+// here is retried anyway - the join, the track request, the heartbeat - so a
+// message dropped for want of a tunnel comes round again a moment later.
 static void gs_to_server(gs_wire *w, const uint8_t *buf, size_t n) {
     if (w->server_addr == nullptr || n == 0) return;
-    NET_SendDatagram(w->sock, w->server_addr, w->server_port, buf, (int)n);
+    if (!w->tunnel.established) return;
+
+    uint8_t sealed[GS_PROTO_MTU];
+    size_t k = gs_noise_seal(&w->tunnel, buf, n, sealed, sizeof sealed);
+    if (k == 0) return;
+
+    uint8_t out[GS_PROTO_MTU];
+    k = gs_proto_sealed(out, sizeof out, sealed, k);
+    if (k == 0) return;
+
+    NET_SendDatagram(w->sock, w->server_addr, w->server_port, out, (int)k);
+}
+
+// The first message of the handshake, which is the only thing this client ever
+// sends the server in the clear. Repeated until an answer comes back, the same
+// way everything else here recovers from loss.
+static void gs_send_handshake(gs_wire *w) {
+    if (w->server_addr == nullptr || !w->has_server_key) return;
+
+    gs_noise_init_initiator(&w->hs, &w->identity, w->server_key,
+                            (const uint8_t *)GS_WIRE_PROLOGUE,
+                            sizeof GS_WIRE_PROLOGUE - 1);
+
+    uint8_t msg[GS_PROTO_MTU], out[GS_PROTO_MTU];
+    size_t n = gs_noise_write_message(&w->hs, nullptr, 0, msg, sizeof msg);
+    if (n == 0) return;
+
+    n = gs_proto_handshake(out, sizeof out, msg, n);
+    if (n == 0) return;
+
+    NET_SendDatagram(w->sock, w->server_addr, w->server_port, out, (int)n);
+    w->handshakes_sent++;
 }
 
 static void gs_send_join(gs_wire *w) {
@@ -698,10 +810,18 @@ void gs_wire_poll(gs_wire *w) {
     if (w->via_server) {
         w->retry++;
 
-        // Knocking. A refused client stops asking: a full server does not
-        // become less full by being asked again, and a client that kept
-        // knocking would be a client nobody can turn away.
-        if (!w->ready && !w->refused && w->retry % GS_RETRY_TICKS == 0) {
+        // **The tunnel first, and nothing else until it is up.** Every message
+        // below this is sealed, so knocking before the handshake completes
+        // would send nothing at all. Repeated on the same cadence as the join,
+        // because the first datagram of a handshake can be lost like any other.
+        if (!w->tunnel.established) {
+            if (w->has_server_key && w->retry % GS_RETRY_TICKS == 0) {
+                gs_send_handshake(w);
+            }
+        } else if (!w->ready && !w->refused && w->retry % GS_RETRY_TICKS == 0) {
+            // Knocking. A refused client stops asking: a full server does not
+            // become less full by being asked again, and a client that kept
+            // knocking would be a client nobody can turn away.
             gs_send_join(w);
         }
 
@@ -794,28 +914,49 @@ size_t gs_wire_recv(gs_wire *w, uint8_t *buf, size_t cap) {
 
         size_t n = (size_t)d->buflen;
 
-        // A relayed datagram is somebody's race traffic in an envelope. The
-        // envelope is opened here, so nothing above this layer can tell a
-        // relayed race from a direct one.
-        if (w->via_server && gs_proto_kind(d->buf, n) == GS_MSG_FORWARD) {
-            uint8_t from = 0;
-            size_t payload_len = 0;
-            const uint8_t *payload = gs_proto_payload(d->buf, n, &from,
-                                                      &payload_len);
-            if (payload != nullptr && payload_len > 0 && payload_len <= cap) {
-                SDL_memcpy(buf, payload, payload_len);
-                NET_DestroyDatagram(d);
-                w->received++;
-                return payload_len;
-            }
-            NET_DestroyDatagram(d);
-            continue;
-        }
+        if (w->via_server) {
+            gs_msg kind = gs_proto_kind(d->buf, n);
 
-        // The server's traffic never reaches the caller either.
-        if (w->via_server && gs_proto_kind(d->buf, n) != GS_MSG_NONE) {
-            gs_take_server(w, d->buf, n);
+            // The handshake, which is the only thing from the server that is
+            // not sealed - because it is what makes sealing possible.
+            if (kind == GS_MSG_HANDSHAKE) {
+                gs_take_handshake(w, d->buf, n);
+                NET_DestroyDatagram(d);
+                continue;
+            }
+
+            // **Anything else in the clear is dropped without being read.**
+            // Not "read it anyway if the tunnel is not up yet": a client that
+            // would accept plaintext is a client anybody on the path can talk
+            // to by pretending the tunnel failed.
+            if (kind != GS_MSG_SEALED) {
+                NET_DestroyDatagram(d);
+                continue;
+            }
+
+            uint8_t plain[GS_PROTO_MTU];
+            size_t got = gs_unseal(w, d->buf, n, plain, sizeof plain);
             NET_DestroyDatagram(d);
+            if (got == 0) continue;
+
+            // A relayed datagram is somebody's race traffic in an envelope.
+            // The envelope is opened here, so nothing above this layer can
+            // tell a relayed race from a direct one.
+            if (gs_proto_kind(plain, got) == GS_MSG_FORWARD) {
+                uint8_t from = 0;
+                size_t payload_len = 0;
+                const uint8_t *payload = gs_proto_payload(plain, got, &from,
+                                                          &payload_len);
+                if (payload != nullptr && payload_len > 0 && payload_len <= cap) {
+                    SDL_memcpy(buf, payload, payload_len);
+                    w->received++;
+                    return payload_len;
+                }
+                continue;
+            }
+
+            // The rest of the server's traffic never reaches the caller.
+            gs_take_server(w, plain, got);
             continue;
         }
 

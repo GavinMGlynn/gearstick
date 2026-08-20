@@ -24,6 +24,7 @@
 // For `nullptr` on a toolchain that took -std=c23 without implementing it, as
 // well as the fixed-width types. MSVC is that toolchain today.
 #include "core/gs_common.h"
+#include "net/gs_noise.h"
 #include "core/gs_net.h"
 #include "core/gs_track.h"
 #include "net/gs_carrier.h"
@@ -64,7 +65,12 @@ gs_wire *gs_wire_join(const char *host, uint16_t port);
 // The same object either way: once ready, sending and receiving work the same,
 // so nothing above this layer knows or cares which way the players found each
 // other.
-gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name);
+// **The server's public key is not optional.** IK means the client already
+// knows who it is talking to, which is exactly what stops somebody in the
+// middle answering in the server's place; a client handed no key is a client
+// that would connect to whoever replied first, so it refuses instead.
+gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name,
+                        const uint8_t *server_key);
 
 void gs_wire_close(gs_wire *w);
 

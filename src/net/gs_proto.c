@@ -341,6 +341,42 @@ bool gs_proto_read_proof_chunk(const uint8_t *buf, size_t len, uint64_t *track,
     return true;
 }
 
+// --- the envelope -----------------------------------------------------------
+
+static size_t gs_proto_wrap(uint8_t *buf, size_t cap, gs_msg kind,
+                            const uint8_t *body, size_t len) {
+    if (len == 0 || cap < GS_HEAD + len) return 0;
+    size_t n = gs_head(buf, cap, kind);
+    memcpy(buf + n, body, len);
+    return n + len;
+}
+
+static bool gs_proto_unwrap(const uint8_t *buf, size_t len, gs_msg kind,
+                            const uint8_t **body, size_t *body_len) {
+    if (!gs_expect(buf, len, kind, GS_HEAD + 1)) return false;
+    *body = buf + GS_HEAD;
+    *body_len = len - GS_HEAD;
+    return true;
+}
+
+size_t gs_proto_handshake(uint8_t *buf, size_t cap, const uint8_t *msg, size_t len) {
+    return gs_proto_wrap(buf, cap, GS_MSG_HANDSHAKE, msg, len);
+}
+
+bool gs_proto_read_handshake(const uint8_t *buf, size_t len,
+                             const uint8_t **msg, size_t *msg_len) {
+    return gs_proto_unwrap(buf, len, GS_MSG_HANDSHAKE, msg, msg_len);
+}
+
+size_t gs_proto_sealed(uint8_t *buf, size_t cap, const uint8_t *body, size_t len) {
+    return gs_proto_wrap(buf, cap, GS_MSG_SEALED, body, len);
+}
+
+bool gs_proto_read_sealed(const uint8_t *buf, size_t len,
+                          const uint8_t **body, size_t *body_len) {
+    return gs_proto_unwrap(buf, len, GS_MSG_SEALED, body, body_len);
+}
+
 size_t gs_proto_session(uint8_t *buf, size_t cap, uint64_t nonce) {
     if (cap < GS_HEAD + 8) return 0;
     size_t n = gs_head(buf, cap, GS_MSG_SESSION);

@@ -91,7 +91,15 @@ void gs_net_local_input(gs_net *n, gs_input in) {
 
 bool gs_net_cheated(const gs_net *n) { return n->cheated; }
 
-void gs_net_finish(gs_net *n) { n->flushing = true; }
+// **The reveals wait for their promises to have been repeated.** Four times the
+// commitment window: forty-eight datagrams is forty-eight chances for each of
+// the last twelve ticks' promises to survive the network, which is the same
+// redundancy every other part of this protocol relies on.
+void gs_net_finish(gs_net *n) {
+    if (n->flushing) return;
+    n->flushing = true;
+    n->flush_wait = GS_NET_COMMITS * 4u;
+}
 
 bool gs_net_step(gs_net *n, const gs_track *t) {
     // Somebody has been caught breaking a promise. There is no honest reading
@@ -204,7 +212,7 @@ static uint64_t gs_commit_of(uint64_t salt, uint32_t tick, gs_input in) {
     return gs_blake2s_u64(msg, sizeof msg);
 }
 
-size_t gs_net_packet(const gs_net *n, uint8_t *buf, size_t cap) {
+size_t gs_net_packet(gs_net *n, uint8_t *buf, size_t cap) {
     // Up to and including the tick whose input has just been recorded but not
     // yet simulated. Stopping one short of it means the last input of a race is
     // never sent at all, and the other machine can never confirm the finish -
@@ -221,7 +229,13 @@ size_t gs_net_packet(const gs_net *n, uint8_t *buf, size_t cap) {
     // Reveals stop a fixed distance short of the commitments, which is the
     // whole mechanism. Once the race is over locally there is nothing left to
     // choose dishonestly, so what is still owed goes out together.
-    uint32_t reveal_end = n->flushing ? end
+    // The flush does not begin the moment the race ends - see `flush_wait`.
+    // Until it does, these are ordinary datagrams, and ordinary datagrams are
+    // what carry an admissible promise for the ticks about to be revealed.
+    bool flushing = n->flushing && n->flush_wait == 0;
+    if (n->flushing && n->flush_wait > 0) n->flush_wait--;
+
+    uint32_t reveal_end = flushing ? end
                         : (end > GS_NET_REVEAL_DELAY ? end - GS_NET_REVEAL_DELAY : 0);
     uint32_t reveals = reveal_end < GS_NET_REDUNDANCY ? reveal_end : GS_NET_REDUNDANCY;
     uint32_t reveal_base = reveal_end - reveals;

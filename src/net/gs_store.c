@@ -98,7 +98,15 @@ static bool gs_migrate(gs_store *s) {
         "  expires INTEGER NOT NULL,"
         "  spent   INTEGER NOT NULL DEFAULT 0);"
 
-        "CREATE INDEX IF NOT EXISTS session_by_driver ON session (driver);")) {
+        "CREATE INDEX IF NOT EXISTS session_by_driver ON session (driver);"
+
+        // **Who this server is.** One row, and the check constraint says so
+        // rather than leaving it to whoever writes the next insert. A server
+        // with two identities is a server that answers to whichever one it
+        // happened to read first.
+        "CREATE TABLE IF NOT EXISTS identity ("
+        "  id     INTEGER PRIMARY KEY CHECK (id = 1),"
+        "  secret BLOB NOT NULL);")) {
         return false;
     }
 
@@ -447,6 +455,53 @@ int gs_store_forget_sessions(gs_store *s, int64_t before) {
     int gone = sqlite3_step(st) == SQLITE_DONE ? sqlite3_changes(s->db) : 0;
     sqlite3_finalize(st);
     return gone;
+}
+
+// --- identity ---------------------------------------------------------------
+
+bool gs_store_identity(gs_store *s, uint8_t *secret) {
+    if (s == nullptr || secret == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "SELECT secret FROM identity WHERE id = 1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "read identity");
+        return false;
+    }
+
+    bool got = false;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const void *blob = sqlite3_column_blob(st, 0);
+        int n = sqlite3_column_bytes(st, 0);
+
+        // A key of the wrong length is not a key. Refusing it makes the server
+        // mint a new one, which is better than handing a truncated secret to a
+        // handshake and finding out later.
+        if (blob != nullptr && n == GS_STORE_IDENTITY_BYTES) {
+            memcpy(secret, blob, GS_STORE_IDENTITY_BYTES);
+            got = true;
+        }
+    }
+    sqlite3_finalize(st);
+    return got;
+}
+
+bool gs_store_set_identity(gs_store *s, const uint8_t *secret) {
+    if (s == nullptr || secret == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "INSERT INTO identity (id, secret) VALUES (1, ?1)"
+            "  ON CONFLICT(id) DO UPDATE SET secret = excluded.secret",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "write identity");
+        return false;
+    }
+    sqlite3_bind_blob(st, 1, secret, GS_STORE_IDENTITY_BYTES, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    if (!ok) gs_fail(s, "write identity");
+    sqlite3_finalize(st);
+    return ok;
 }
 
 int gs_store_session_count(gs_store *s) {

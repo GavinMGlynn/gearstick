@@ -541,6 +541,249 @@ TEST(a_failed_handshake_stays_failed) {
     CHECK(!gs_noise_done(&r));
 }
 
+
+// --- a whole race, relayed, through the tunnel ------------------------------
+//
+// **The claim this makes is not about the cipher.** It is that putting a tunnel
+// under rollback does not break rollback: the sealed channel has to tolerate
+// exactly what the game already tolerates - loss, reordering, and the fact that
+// a race sends a datagram every tick - and end with four machines that agree.
+//
+// The relayed shape is modelled faithfully, because it is the shape the tunnel
+// applies to. Every peer holds one tunnel to the server; a datagram is sealed
+// to the server, opened there, and re-sealed to each of the others. Two
+// encryptions per hop and two sessions per peer, which is what a relay costs.
+
+#include "core/gs_net.h"
+#include "core/gs_track.h"
+
+#define GS_RELAY_PEERS 4
+#define GS_RELAY_SLOTS 512
+
+// A link that loses and reorders, deterministically, so a failure is one
+// somebody else can reproduce rather than a bad afternoon.
+typedef struct gs_relay_link {
+    struct {
+        uint8_t  bytes[GS_NOISE_OVERHEAD + 1024];
+        size_t   len;
+        uint32_t due;
+        bool     live;
+    } slot[GS_RELAY_SLOTS];
+    uint32_t seed;
+    uint32_t latency, jitter, loss_pct;
+    uint32_t sent, dropped, delivered;
+} gs_relay_link;
+
+static uint32_t gs_relay_rand(gs_relay_link *l) {
+    l->seed = l->seed * 1103515245u + 12345u;
+    return (l->seed >> 16) & 0x7fffu;
+}
+
+static void gs_relay_send(gs_relay_link *l, uint32_t now, const uint8_t *b,
+                          size_t n) {
+    l->sent++;
+    if (n == 0 || n > sizeof l->slot[0].bytes) return;
+    if (l->loss_pct > 0 && gs_relay_rand(l) % 100u < l->loss_pct) {
+        l->dropped++;
+        return;
+    }
+    for (int i = 0; i < GS_RELAY_SLOTS; i++) {
+        if (l->slot[i].live) continue;
+        memcpy(l->slot[i].bytes, b, n);
+        l->slot[i].len = n;
+        // The jitter is what makes this a reordering link and not merely a
+        // late one: two datagrams sent in order can arrive the other way round.
+        l->slot[i].due = now + l->latency +
+                         (l->jitter ? gs_relay_rand(l) % (l->jitter + 1u) : 0u);
+        l->slot[i].live = true;
+        return;
+    }
+}
+
+
+// Four drivers on four rhythms, so no two ever change their minds together.
+static gs_input gs_relay_drive(uint8_t player, uint32_t tick) {
+    uint32_t turn = 23u + player * 14u;
+    uint32_t brake = 53u + player * 19u;
+
+    gs_input in = GS_IN_ACCEL;
+    if ((tick / turn) % 3u == 0u) in |= GS_IN_LEFT;
+    else if ((tick / turn) % 3u == 1u) in |= GS_IN_RIGHT;
+    if ((tick / brake) % 4u == 0u) in |= GS_IN_BRAKE;
+    return in;
+}
+
+TEST(a_relayed_four_player_race_agrees_tick_for_tick_through_the_tunnel) {
+    static gs_noise_session client[GS_RELAY_PEERS];   // each peer's end
+    static gs_noise_session server[GS_RELAY_PEERS];   // the server's end of each
+    static gs_relay_link up[GS_RELAY_PEERS];          // peer -> server
+    static gs_relay_link down[GS_RELAY_PEERS];        // server -> peer
+    static gs_net net[GS_RELAY_PEERS];
+    static gs_track t;
+
+    gs_noise_keypair server_key;
+    gs_noise_keygen(&server_key);
+
+    for (int i = 0; i < GS_RELAY_PEERS; i++) {
+        static gs_noise_handshake hs_c, hs_s;
+        gs_noise_keypair peer_key;
+        gs_noise_keygen(&peer_key);
+
+        static uint8_t m1[512], m2[512], payload[512];
+        size_t got = 0;
+
+        gs_noise_init_initiator(&hs_c, &peer_key, server_key.pub, nullptr, 0);
+        gs_noise_init_responder(&hs_s, &server_key, nullptr, 0);
+        size_t n1 = gs_noise_write_message(&hs_c, nullptr, 0, m1, sizeof m1);
+        CHECK(gs_noise_read_message(&hs_s, m1, n1, payload, sizeof payload, &got));
+        size_t n2 = gs_noise_write_message(&hs_s, nullptr, 0, m2, sizeof m2);
+        CHECK(gs_noise_read_message(&hs_c, m2, n2, payload, sizeof payload, &got));
+        CHECK(gs_noise_split(&hs_c, &client[i]));
+        CHECK(gs_noise_split(&hs_s, &server[i]));
+
+        up[i] = (gs_relay_link){ 0 };
+        down[i] = (gs_relay_link){ 0 };
+        up[i].seed = 0x1000u + (uint32_t)i * 7u;
+        down[i].seed = 0x5000u + (uint32_t)i * 11u;
+        up[i].latency = down[i].latency = 8u + (uint32_t)i;
+        up[i].jitter = down[i].jitter = 4;
+        // One in twenty, on every hop, which is two chances to lose each
+        // datagram rather than one.
+        up[i].loss_pct = down[i].loss_pct = 5;
+    }
+
+    // A track and a grid, the same on every machine.
+    gs_track_init(&t, 48, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_track_set_corner(&t, x, y, x > 20 && x < 26 ? GS_INT(1) : 0);
+        }
+    }
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    for (uint8_t i = 0; i < GS_RELAY_PEERS; i++) {
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR,
+                         GS_INT(4), GS_INT(5) + GS_INT(3) * i, 0);
+    }
+    for (int i = 0; i < GS_RELAY_PEERS; i++) {
+        uint8_t secret[GS_NET_SECRET_BYTES];
+        for (int k = 0; k < GS_NET_SECRET_BYTES; k++) {
+            secret[k] = (uint8_t)((0x33u + (unsigned)i * 29u + (unsigned)k) & 0xffu);
+        }
+        gs_net_begin(&net[i], &w, GS_RELAY_PEERS, (uint8_t)i, secret);
+    }
+
+    // Deliver everything due, opening it on the way in - which is the receiving
+    // half of the relay and the half where a tunnel would break a race if it
+    // were going to.
+    static uint8_t plain[2048];
+
+    const uint32_t ticks = GS_TICK_HZ * 6;
+    for (uint32_t tick = 0; tick < ticks + 400u; tick++) {
+        for (int i = 0; i < GS_RELAY_PEERS; i++) {
+            for (int k = 0; k < GS_RELAY_SLOTS; k++) {
+                if (!down[i].slot[k].live || down[i].slot[k].due > tick) continue;
+                size_t got = 0;
+                if (gs_noise_open(&client[i], down[i].slot[k].bytes,
+                                  down[i].slot[k].len, plain, sizeof plain, &got)) {
+                    gs_net_receive(&net[i], &t, plain, got);
+                    down[i].delivered++;
+                }
+                down[i].slot[k].live = false;
+            }
+        }
+
+        // The server: open what came up, and seal it back down to everybody
+        // else. Its own losses are on the way down.
+        for (int i = 0; i < GS_RELAY_PEERS; i++) {
+            for (int k = 0; k < GS_RELAY_SLOTS; k++) {
+                if (!up[i].slot[k].live || up[i].slot[k].due > tick) continue;
+                size_t got = 0;
+                if (gs_noise_open(&server[i], up[i].slot[k].bytes,
+                                  up[i].slot[k].len, plain, sizeof plain, &got)) {
+                    up[i].delivered++;
+                    for (int j = 0; j < GS_RELAY_PEERS; j++) {
+                        if (j == i) continue;
+                        uint8_t sealed[2048];
+                        size_t n = gs_noise_seal(&server[j], plain, got, sealed,
+                                                 sizeof sealed);
+                        gs_relay_send(&down[j], tick, sealed, n);
+                    }
+                }
+                up[i].slot[k].live = false;
+            }
+        }
+
+        if (tick < ticks) {
+            for (int i = 0; i < GS_RELAY_PEERS; i++) {
+                gs_net_local_input(&net[i], gs_relay_drive((uint8_t)i, tick));
+
+                uint8_t buf[GS_NET_MTU], sealed[2048];
+                size_t n = gs_net_packet(&net[i], buf, sizeof buf);
+                CHECK(n > 0);
+                size_t k = gs_noise_seal(&client[i], buf, n, sealed, sizeof sealed);
+                CHECK(k == n + GS_NOISE_OVERHEAD);
+                gs_relay_send(&up[i], tick, sealed, k);
+
+                gs_net_step(&net[i], &t);
+            }
+
+            // The last tick of the race: what is still owed goes out, the same
+            // as a real client reaching its results screen.
+            if (tick + 1 == ticks) {
+                for (int i = 0; i < GS_RELAY_PEERS; i++) gs_net_finish(&net[i]);
+            }
+            continue;
+        }
+
+        // **The tail is part of the race, not after it.** The reveals trail the
+        // commitments, so the last dozen ticks are still owed when the driving
+        // stops - and they have to cross two lossy hops like everything else.
+        // One loop rather than two, because two loops over overlapping
+        // simulated time deliver each other's datagrams into the past.
+        if (tick < ticks + 200u) {
+            for (int i = 0; i < GS_RELAY_PEERS; i++) {
+                uint8_t buf[GS_NET_MTU], sealed[2048];
+                size_t n = gs_net_packet(&net[i], buf, sizeof buf);
+                size_t k = gs_noise_seal(&client[i], buf, n, sealed, sizeof sealed);
+                gs_relay_send(&up[i], tick, sealed, k);
+            }
+        }
+    }
+
+    // **The claim.** Four machines, every datagram sealed, one in twenty lost on
+    // each of two hops and the rest reordered - and the same race at the end.
+    for (int i = 0; i < GS_RELAY_PEERS; i++) {
+        CHECK(!net[i].desynced);
+        CHECK(!net[i].cheated);
+        CHECK(net[i].confirmed_tick == ticks);
+        CHECK(gs_world_hash(&net[i].confirmed) == gs_world_hash(&net[0].confirmed));
+    }
+
+    // And it is the race one machine with no network at all would have run,
+    // which is the stronger statement and the one that says the tunnel changed
+    // nothing about the driving.
+    gs_world solo;
+    gs_world_init(&solo, GS_ONE);
+    for (uint8_t i = 0; i < GS_RELAY_PEERS; i++) {
+        gs_world_add_car(&solo, &t, (uint8_t)GS_VEH_SPRINT_CAR,
+                         GS_INT(4), GS_INT(5) + GS_INT(3) * i, 0);
+    }
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        for (uint8_t i = 0; i < GS_RELAY_PEERS; i++) in[i] = gs_relay_drive(i, tick);
+        gs_world_step(&solo, &t, in);
+    }
+    CHECK(gs_world_hash(&solo) == gs_world_hash(&net[0].confirmed));
+
+    // The links really were bad, so none of the above passed by having nothing
+    // to survive.
+    uint32_t lost = 0;
+    for (int i = 0; i < GS_RELAY_PEERS; i++) lost += up[i].dropped + down[i].dropped;
+    CHECK(lost > 100);
+    for (int i = 0; i < GS_RELAY_PEERS; i++) CHECK(net[i].rollbacks > 0);
+}
+
 int main(void) {
     printf("gearstick noise tests\n");
 
@@ -554,6 +797,7 @@ int main(void) {
     run_a_session_stops_sending_before_its_counter_could_repeat();
     run_rubbish_where_a_handshake_should_be_is_refused_without_reading_past_it();
     run_a_failed_handshake_stays_failed();
+    run_a_relayed_four_player_race_agrees_tick_for_tick_through_the_tunnel();
 
     if (gs_failures == 0) {
         printf("all %d noise checks passed\n", gs_checks);

@@ -15,6 +15,9 @@
 #include "net/gs_carrier.h"
 #include "net/gs_proto.h"
 #include "net/gs_store.h"
+#include "net/gs_noise.h"
+
+#include <sodium.h>
 #include "net/gs_verify.h"
 #include "platform/gs_paths.h"
 
@@ -45,6 +48,30 @@ static uint32_t gs_timeout_ms = GS_TIMEOUT_MS;
 // tell the server this - only the end that sent a ping can time its own reply -
 // so a server that wants to show a round trip has to ask for one.
 #define GS_PING_MS 2000
+
+// **A sealed channel to one address, which exists before a client does.**
+//
+// The handshake arrives before the join - it has to, because the join travels
+// inside it - so the tunnel cannot live in the client table. It is keyed by
+// address, and a second handshake from the same address replaces the first,
+// which is what a client that restarted looks like.
+//
+// Twice as many as there are player slots, so that somebody knocking cannot
+// evict the tunnel of somebody already racing simply by handshaking.
+#define GS_SRV_TUNNELS (GS_PROTO_MAX_PLAYERS * 2)
+
+// Authenticated and never sent, so two ends that disagree about what they are
+// speaking fail the handshake rather than a race. This is where a version
+// number lives.
+#define GS_SRV_PROLOGUE "gearstick/1"
+
+typedef struct gs_tunnel {
+    bool             used;
+    char             text[GS_PROTO_ADDR];
+    uint16_t         port;
+    uint64_t         last_ms;
+    gs_noise_session session;
+} gs_tunnel;
 
 typedef struct gs_client {
     bool         used;
@@ -87,6 +114,11 @@ static struct {
     uint8_t             capacity;
 
     gs_client client[GS_PROTO_MAX_PLAYERS];
+
+    // Who this server is, and the tunnels open to it.
+    gs_noise_keypair identity;
+    gs_tunnel        tunnel[GS_SRV_TUNNELS];
+    uint32_t         handshakes, refused_clear, refused_sealed;
 
     uint64_t started_ms;
     uint32_t total_in, total_out, relayed, refused;
@@ -153,9 +185,88 @@ static void gs_build_lobby(gs_lobby *l) {
     }
 }
 
+// --- the tunnel -------------------------------------------------------------
+
+static gs_tunnel *gs_tunnel_find(const char *text, uint16_t port) {
+    for (int i = 0; i < GS_SRV_TUNNELS; i++) {
+        gs_tunnel *t = &gs_srv.tunnel[i];
+        if (t->used && t->port == port && SDL_strcmp(t->text, text) == 0) return t;
+    }
+    return nullptr;
+}
+
+// A slot for a new tunnel: this address's own if it has one, then any free one,
+// then the one that has been quiet longest. **Never one belonging to a client
+// that is here**, because otherwise anybody who can send a datagram could
+// knock a racing player off by handshaking eight times.
+static gs_tunnel *gs_tunnel_slot(const char *text, uint16_t port, uint64_t now) {
+    gs_tunnel *mine = gs_tunnel_find(text, port);
+    if (mine != nullptr) return mine;
+
+    for (int i = 0; i < GS_SRV_TUNNELS; i++) {
+        if (!gs_srv.tunnel[i].used) return &gs_srv.tunnel[i];
+    }
+
+    gs_tunnel *oldest = nullptr;
+    for (int i = 0; i < GS_SRV_TUNNELS; i++) {
+        gs_tunnel *t = &gs_srv.tunnel[i];
+        bool racing = false;
+        for (int k = 0; k < GS_PROTO_MAX_PLAYERS; k++) {
+            const gs_client *c = &gs_srv.client[k];
+            if (c->used && c->port == t->port && SDL_strcmp(c->text, t->text) == 0) {
+                racing = true;
+                break;
+            }
+        }
+        if (racing) continue;
+        if (oldest == nullptr || t->last_ms < oldest->last_ms) oldest = t;
+    }
+    (void)now;
+    return oldest;
+}
+
+// To an address rather than to a client, for the messages that go to somebody
+// who has no slot - a refusal, most of all. Sealed just the same: the tunnel
+// exists before the client does, which is what makes this possible at all.
+static void gs_send_sealed(NET_Address *addr, uint16_t port,
+                           const uint8_t *buf, size_t len) {
+    const char *text = NET_GetAddressString(addr);
+    if (text == nullptr || len == 0) return;
+
+    gs_tunnel *t = gs_tunnel_find(text, port);
+    if (t == nullptr) return;
+
+    uint8_t sealed[GS_PROTO_MTU], out[GS_PROTO_MTU];
+    size_t n = gs_noise_seal(&t->session, buf, len, sealed, sizeof sealed);
+    if (n == 0) return;
+    n = gs_proto_sealed(out, sizeof out, sealed, n);
+    if (n == 0) return;
+
+    if (NET_SendDatagram(gs_srv.sock, addr, port, out, (int)n)) {
+        gs_srv.total_out++;
+        gs_srv.total_out_bytes += n;
+    }
+}
+
 static void gs_send(gs_client *c, const uint8_t *buf, size_t len) {
     if (!c->used || len == 0) return;
-    if (!NET_SendDatagram(gs_srv.sock, c->addr, c->port, buf, (int)len)) return;
+
+    // **Nothing leaves in the clear.** A client with no tunnel gets nothing
+    // rather than getting it unsealed, because a fallback to plaintext is a
+    // fallback anybody on the path can force.
+    gs_tunnel *t = gs_tunnel_find(c->text, c->port);
+    if (t == nullptr) return;
+
+    uint8_t sealed[GS_PROTO_MTU];
+    size_t n = gs_noise_seal(&t->session, buf, len, sealed, sizeof sealed);
+    if (n == 0) return;
+
+    uint8_t out[GS_PROTO_MTU];
+    n = gs_proto_sealed(out, sizeof out, sealed, n);
+    if (n == 0) return;
+
+    if (!NET_SendDatagram(gs_srv.sock, c->addr, c->port, out, (int)n)) return;
+    len = n;
 
     c->out++;
     c->out_bytes += len;
@@ -260,7 +371,11 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
         SDL_snprintf(why, sizeof why, "the server is full (%u of %u)",
                      gs_present(), gs_srv.capacity);
         size_t n = gs_proto_full(buf, sizeof buf, why);
-        NET_SendDatagram(gs_srv.sock, addr, port, buf, (int)n);
+
+        // **Through the tunnel, like everything else.** A refusal is still a
+        // message from this server, and a client that would read one in the
+        // clear is a client anybody can turn away by forging one.
+        gs_send_sealed(addr, port, buf, n);
 
         gs_srv.refused++;
         gs_srv.total_out++;
@@ -398,16 +513,15 @@ static void gs_draw(uint64_t now) {
 
 // --- one datagram -----------------------------------------------------------
 
-static void gs_handle(NET_Datagram *d, uint64_t now) {
-    size_t len = (size_t)d->buflen;
-
-    gs_srv.total_in++;
-    gs_srv.total_in_bytes += len;
-
-    gs_msg kind = gs_proto_kind(d->buf, len);
+// One message, already out of its envelope. Everything below this line has
+// been through the tunnel: it came from the address it says it came from, it
+// has not been changed, and it has not been seen before.
+static void gs_handle_plain(NET_Address *addr, uint16_t port,
+                            const uint8_t *msg, size_t len, uint64_t now) {
+    gs_msg kind = gs_proto_kind(msg, len);
     if (kind == GS_MSG_NONE) return;      // not ours; say nothing back
 
-    int at = gs_find(d->addr, d->port);
+    int at = gs_find(addr, port);
     if (at >= 0) {
         gs_client *c = &gs_srv.client[at];
         c->in++;
@@ -418,8 +532,8 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
     switch (kind) {
     case GS_MSG_JOIN: {
         char name[GS_PROTO_NAME];
-        if (gs_proto_read_join(d->buf, len, name, sizeof name)) {
-            gs_join(d->addr, d->port, name, now);
+        if (gs_proto_read_join(msg, len, name, sizeof name)) {
+            gs_join(addr, port, name, now);
         }
         break;
     }
@@ -432,7 +546,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         // Answered with the client's own stamp, so the client measures the
         // round trip rather than the server guessing at it.
         uint32_t stamp = 0;
-        if (at >= 0 && gs_proto_read_stamp(d->buf, len, &stamp)) {
+        if (at >= 0 && gs_proto_read_stamp(msg, len, &stamp)) {
             uint8_t buf[GS_PROTO_MTU];
             size_t n = gs_proto_pong(buf, sizeof buf, stamp);
             gs_send(&gs_srv.client[at], buf, n);
@@ -444,7 +558,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         // The other direction: a reply to something we asked, so the stamp is
         // ours and the difference is the round trip.
         uint32_t stamp = 0;
-        if (at >= 0 && gs_proto_read_stamp(d->buf, len, &stamp)) {
+        if (at >= 0 && gs_proto_read_stamp(msg, len, &stamp)) {
             gs_client *c = &gs_srv.client[at];
             uint32_t then = stamp;
             c->ping_ms = (uint32_t)(now & 0xffffffffu) - then;
@@ -460,7 +574,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         // server that could disagree with the race.
         uint8_t from = 0;
         size_t payload_len = 0;
-        const uint8_t *payload = gs_proto_payload(d->buf, len, &from,
+        const uint8_t *payload = gs_proto_payload(msg, len, &from,
                                                   &payload_len);
         if (at < 0 || payload == nullptr) break;
 
@@ -487,7 +601,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
 
         if (at < 0 || gs_srv.store == nullptr) break;
         uint64_t nonce = 0;
-        if (!gs_proto_read_result(d->buf, len, &track, &conditions, &laps,
+        if (!gs_proto_read_result(msg, len, &track, &conditions, &laps,
                                   &vehicle, &lap_ticks, &race_ticks, &nonce)) {
             break;
         }
@@ -533,7 +647,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         uint64_t hash = 0;
         uint16_t chunk = 0, chunks = 0, data_len = 0;
         const uint8_t *data = nullptr;
-        if (!gs_proto_read_proof_chunk(d->buf, len, &hash, &chunk, &chunks,
+        if (!gs_proto_read_proof_chunk(msg, len, &hash, &chunk, &chunks,
                                        &data, &data_len)) {
             break;
         }
@@ -613,13 +727,13 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         uint64_t hash = 0;
         uint16_t chunk = 0, chunks = 0, data_len = 0;
         const uint8_t *data = nullptr;
-        if (!gs_proto_read_track_chunk(d->buf, len, &hash, &chunk, &chunks,
+        if (!gs_proto_read_track_chunk(msg, len, &hash, &chunk, &chunks,
                                        &data, &data_len)) {
             break;
         }
 
         if (up->upload.hash != hash) gs_carrier_expect(&up->upload, hash);
-        if (!gs_carrier_take(&up->upload, d->buf, len)) break;
+        if (!gs_carrier_take(&up->upload, msg, len)) break;
         if (!gs_carrier_done(&up->upload)) break;
 
         static gs_track arrived;
@@ -638,7 +752,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         uint64_t track = 0;
         char name[48] = { 0 };
         if (at < 0 || gs_srv.store == nullptr) break;
-        if (!gs_proto_read_publish(d->buf, len, &track, name, sizeof name)) break;
+        if (!gs_proto_read_publish(msg, len, &track, name, sizeof name)) break;
 
         // **Only a track the server has.** Publishing is a claim about
         // something already here; the track itself arrives the way tracks
@@ -659,7 +773,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
     case GS_MSG_WITHDRAW: {
         uint64_t track = 0;
         if (at < 0 || gs_srv.store == nullptr) break;
-        if (!gs_proto_read_withdraw(d->buf, len, &track)) break;
+        if (!gs_proto_read_withdraw(msg, len, &track)) break;
 
         if (gs_store_withdraw(gs_srv.store, track, gs_srv.client[at].name)) {
             SDL_Log("%s withdrew %016llx", gs_srv.client[at].name,
@@ -698,7 +812,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         uint64_t track = 0, conditions = 0;
         uint16_t laps = 0;
         if (at < 0 || gs_srv.store == nullptr) break;
-        if (!gs_proto_read_want_best(d->buf, len, &track, &conditions, &laps)) {
+        if (!gs_proto_read_want_best(msg, len, &track, &conditions, &laps)) {
             break;
         }
 
@@ -721,7 +835,7 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         // track, and gets all of it. Resending a chunk somebody already has
         // costs one datagram and no bookkeeping at all.
         uint64_t want = 0;
-        if (at < 0 || !gs_proto_read_want_track(d->buf, len, &want)) break;
+        if (at < 0 || !gs_proto_read_want_track(msg, len, &want)) break;
 
         // Any track the server has, not only the one this lobby is racing: a
         // client browsing what is published wants to fetch one of those.
@@ -753,6 +867,112 @@ static void gs_handle(NET_Datagram *d, uint64_t now) {
         break;
     }
 }
+// --- the envelope, and the two things that come outside it ------------------
+
+static void gs_handle(NET_Datagram *d, uint64_t now) {
+    size_t len = (size_t)d->buflen;
+
+    gs_srv.total_in++;
+    gs_srv.total_in_bytes += len;
+
+    const char *text = NET_GetAddressString(d->addr);
+    if (text == nullptr) return;
+
+    gs_msg kind = gs_proto_kind(d->buf, len);
+
+    // **A handshake, which cannot be sealed because it is what makes sealing
+    // possible.** One datagram in, one out: IK's responder can answer
+    // immediately, so there is no half-finished handshake to keep anywhere and
+    // nothing for somebody to fill a table with.
+    if (kind == GS_MSG_HANDSHAKE) {
+        const uint8_t *msg = nullptr;
+        size_t msg_len = 0;
+        if (!gs_proto_read_handshake(d->buf, len, &msg, &msg_len)) return;
+
+        gs_noise_handshake hs;
+        uint8_t payload[GS_PROTO_MTU];
+        size_t got = 0;
+
+        gs_noise_init_responder(&hs, &gs_srv.identity,
+                                (const uint8_t *)GS_SRV_PROLOGUE,
+                                sizeof GS_SRV_PROLOGUE - 1);
+        if (!gs_noise_read_message(&hs, msg, msg_len, payload, sizeof payload,
+                                   &got)) {
+            gs_srv.refused_sealed++;
+            return;
+        }
+
+        uint8_t reply[GS_PROTO_MTU], out[GS_PROTO_MTU];
+        size_t n = gs_noise_write_message(&hs, nullptr, 0, reply, sizeof reply);
+        if (n == 0) return;
+
+        // **A handshake from an address that is already racing is refused.**
+        //
+        // Message one is replayable - anybody who captured one can send it
+        // again, and the responder cannot tell the difference, because telling
+        // the difference is what a session nonce is for and there is no session
+        // yet. Accepting it would install a tunnel whose keys the real client
+        // does not have, and knock a racing player off with a packet somebody
+        // recorded. So a client that genuinely restarted waits out the silence
+        // timeout and is dropped first, which costs it a few seconds and costs
+        // an attacker the whole trick.
+        if (gs_find(d->addr, d->port) >= 0) {
+            gs_srv.refused_sealed++;
+            return;
+        }
+
+        gs_tunnel *t = gs_tunnel_slot(text, d->port, now);
+        if (t == nullptr) return;
+
+        SDL_zerop(t);
+        t->used = true;
+        t->port = d->port;
+        SDL_strlcpy(t->text, text, sizeof t->text);
+        t->last_ms = now;
+        if (!gs_noise_split(&hs, &t->session)) {
+            t->used = false;
+            return;
+        }
+
+        size_t framed = gs_proto_handshake(out, sizeof out, reply, n);
+        if (framed > 0 &&
+            NET_SendDatagram(gs_srv.sock, d->addr, d->port, out, (int)framed)) {
+            gs_srv.total_out++;
+            gs_srv.total_out_bytes += framed;
+        }
+        gs_srv.handshakes++;
+        return;
+    }
+
+    // Everything else has to arrive sealed. A message in the clear once the
+    // tunnel exists is either somebody who has not handshaked or somebody
+    // hoping this end will accept plaintext if asked nicely; both get nothing.
+    if (kind != GS_MSG_SEALED) {
+        gs_srv.refused_clear++;
+        return;
+    }
+
+    const uint8_t *body = nullptr;
+    size_t body_len = 0;
+    if (!gs_proto_read_sealed(d->buf, len, &body, &body_len)) return;
+
+    gs_tunnel *t = gs_tunnel_find(text, d->port);
+    if (t == nullptr) {
+        gs_srv.refused_sealed++;
+        return;
+    }
+
+    uint8_t plain[GS_PROTO_MTU];
+    size_t got = 0;
+    if (!gs_noise_open(&t->session, body, body_len, plain, sizeof plain, &got)) {
+        gs_srv.refused_sealed++;
+        return;
+    }
+    t->last_ms = now;
+
+    gs_handle_plain(d->addr, d->port, plain, got, now);
+}
+
 
 // --- running ----------------------------------------------------------------
 
@@ -857,6 +1077,10 @@ static void gs_usage(void) {
     printf("  --plain        no cursor control, for a log file\n");
     printf("  --timeout N    drop a client after N ms of silence (default %u)\n",
            GS_TIMEOUT_MS);
+    printf("  --key HEX      this server's 32-byte secret, as 64 hex "
+           "characters.\n");
+    printf("                 Otherwise it is read from the store, or minted "
+           "once and kept.\n");
     printf("  --seconds N    stop after N seconds, for tests\n");
     printf("  --help\n");
 }
@@ -867,6 +1091,7 @@ int main(int argc, char **argv) {
     uint32_t seconds = 0;
     const char *track_path = nullptr;
     const char *store_path = "gearstick.db";
+    const char *key_hex = nullptr;
 
     for (int i = 1; i < argc; i++) {
         if (SDL_strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -878,6 +1103,8 @@ int main(int argc, char **argv) {
             store_path = argv[++i];
         } else if (SDL_strcmp(argv[i], "--track") == 0 && i + 1 < argc) {
             track_path = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--key") == 0 && i + 1 < argc) {
+            key_hex = argv[++i];
         } else if (SDL_strcmp(argv[i], "--plain") == 0) {
             gs_srv.plain = true;
         } else if (SDL_strcmp(argv[i], "--timeout") == 0 && i + 1 < argc) {
@@ -951,6 +1178,45 @@ int main(int argc, char **argv) {
             gs_store_driver_count(gs_srv.store),
             gs_store_record_count(gs_srv.store),
             gs_store_track_count(gs_srv.store));
+
+    // **Who this server is.** From the command line for a test that needs to
+    // know it in advance, otherwise from the store, otherwise minted once and
+    // kept - because a server that generated a new identity on every restart
+    // would be a different server every time, and every client that had been
+    // told which one to trust would be right to refuse it.
+    if (sodium_init() < 0) {
+        printf("could not start libsodium\n");
+        return 1;
+    }
+
+    uint8_t secret[GS_STORE_IDENTITY_BYTES];
+    if (key_hex != nullptr) {
+        if (SDL_strlen(key_hex) != 64 ||
+            sodium_hex2bin(secret, sizeof secret, key_hex, 64, nullptr, nullptr,
+                           nullptr) != 0) {
+            printf("--key wants 64 hex characters, which is a 32-byte secret\n");
+            return 2;
+        }
+        gs_noise_key_from_secret(&gs_srv.identity, secret);
+    } else if (gs_store_identity(gs_srv.store, secret)) {
+        gs_noise_key_from_secret(&gs_srv.identity, secret);
+    } else {
+        gs_noise_keygen(&gs_srv.identity);
+        if (!gs_store_set_identity(gs_srv.store, gs_srv.identity.sec)) {
+            printf("could not write this server's identity to the store\n");
+            return 1;
+        }
+        SDL_Log("a new identity was minted and kept");
+    }
+
+    // Printed every time, because a client cannot connect without it: IK means
+    // the client already knows the server's key, which is what stops somebody
+    // in the middle answering in its place.
+    char pub_hex[65];
+    sodium_bin2hex(pub_hex, sizeof pub_hex, gs_srv.identity.pub,
+                   GS_NOISE_KEY_BYTES);
+    SDL_Log("this server's public key is %s", pub_hex);
+    printf("  key %s\n", pub_hex);
 
     // The imported one goes in, and is published: somebody who ran a server with
     // a track meant that track to be raced.

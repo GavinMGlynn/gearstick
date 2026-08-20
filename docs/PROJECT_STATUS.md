@@ -1877,6 +1877,86 @@ It is also the one place "prefer no dependency to a small one" is set aside on
 purpose, because the alternative to a large audited dependency here is our own
 elliptic curve arithmetic, and that trade is not close.
 
+### The tunnel, now carrying the game
+
+**Still not finished, and the gap is named first: the direct peer-to-peer mesh
+is not sealed.** Everything between a client and the server is; a race whose
+peers can reach each other directly still exchanges rollback datagrams in the
+clear. The plan entry stays unticked until that is closed.
+
+What now goes through the tunnel is everything else — joining, the lobby, track
+transfers, publishing, results, proofs, records, the heartbeat, the goodbye, and
+a *relayed* race in full.
+
+#### Where the seams are
+
+Two chokepoints on each side, which is why this did not turn into a rewrite:
+`gs_to_server` and the receive loop on the client, `gs_send` and `gs_handle` on
+the server. The existing dispatch became `gs_handle_plain`, and above it sits a
+shell that opens the envelope. Nothing below that line changed: by the time a
+message reaches it, it came from the address it claims, has not been altered,
+and has not been seen before.
+
+**There is no plaintext path.** A client whose tunnel is not up sends nothing at
+all rather than sending in the clear, and drops anything unsealed that arrives.
+A fallback to plaintext is a fallback anybody on the path can force by dropping
+one datagram. Everything is retried anyway — the join, the track request, the
+heartbeat — so a message skipped for want of a tunnel comes round again.
+
+The handshake is one datagram each way. IK's responder can answer immediately,
+so the server keeps no half-finished handshake state and there is nothing for
+anybody to fill up.
+
+**A handshake from an address that is already racing is refused.** Message one
+is replayable — anybody who captured one can send it again and the responder
+cannot tell, because telling would need a session and there is no session yet.
+Accepting it would install a tunnel whose keys the real client does not have and
+knock a racing player off with a recorded packet. A client that genuinely
+restarted waits out the silence timeout first, which costs it seconds and costs
+an attacker the trick.
+
+**The server has an identity and keeps it**, in the store with everything else
+it knows, minted once on first run. It prints its public key at startup because
+a client cannot connect without it: `--server-key` on the game, `--key` on the
+server for a test that must know it in advance. A client handed no key refuses
+to connect rather than connecting to whoever answers.
+
+#### A real flaw the tunnel's own test found
+
+The four-player relayed race under loss failed the first time, and it was not
+the tunnel. **The last ticks of every race had exactly one admissible promise
+each.**
+
+A promise only counts when it arrives in a datagram that does not also prove it.
+Once a finished race starts flushing, every datagram reveals the ticks it
+commits — so those commitment copies are inadmissible. The commitment for the
+final tick therefore had one admissible copy in existence: the datagram sent on
+that tick. Lose it and the far end can never accept the reveal, and the race is
+never confirmed to its end. Every other part of this protocol survives loss by
+repetition and this part did not.
+
+With one datagram in twenty dropped on each of two hops, three machines out of
+four failed to confirm the last tick. In the real game that is a race that
+never gets submitted, on a link that is otherwise perfectly playable.
+
+The flush now waits: `gs_net_finish` asks for forty-eight more ordinary
+datagrams first, which commit the final ticks without revealing them, and only
+then do the reveals go out. Forty-eight chances is the same redundancy
+everything else here relies on.
+
+#### What the relayed race test actually claims
+
+Four peers, each with its own tunnel to the server, modelled as the relay
+really works: a datagram is sealed to the server, opened there, and re-sealed to
+each of the others. Two encryptions per hop, two sessions per peer. One datagram
+in twenty dropped on each hop and the rest reordered.
+
+All four confirm the whole race, agree with each other, and agree with the race
+one machine with no network would have run — which is the statement that says
+the tunnel changed nothing about the driving rather than merely that the four
+of them are consistent. About five hundred datagrams are dropped along the way,
+so none of it passes by having nothing to survive.
+
 ---
 
 ## What does not exist

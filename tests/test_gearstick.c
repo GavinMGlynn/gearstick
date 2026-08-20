@@ -2670,7 +2670,11 @@ static void gs_net_race(uint32_t ticks, uint32_t latency, uint32_t jitter,
     gs_net_finish(a);
     gs_net_finish(b);
 
-    uint32_t settle = ticks + latency + jitter + 8u;
+    // Long enough for the flush to actually start: a finished race spends its
+    // first several dozen datagrams repeating the promises for the last ticks
+    // before it reveals them, because a flushing datagram's own promises are
+    // inadmissible. A settle shorter than that ends before the reveals do.
+    uint32_t settle = ticks + 96u + latency + jitter;
     for (uint32_t tick = ticks; tick < settle; tick++) {
         gs_link_deliver(ab, tick, b, t);
         gs_link_deliver(ba, tick, a, t);
@@ -3113,7 +3117,14 @@ TEST(a_promise_shown_in_the_same_breath_as_its_proof_buys_nothing) {
     gs_net_begin(&b, &w, 2, 1, gs_test_secret(1));
 
     // b reveals everything the moment it commits to it, from the first tick.
+    //
+    // `flush_wait` is cleared by hand, which is the whole point of the test: a
+    // real client repeats its promises in ordinary datagrams before it reveals
+    // anything, and this one deliberately does not. Without that line b spends
+    // its first several dozen datagrams behaving honestly and the rule under
+    // test never comes up.
     gs_net_finish(&b);
+    b.flush_wait = 0;
 
     for (uint32_t tick = 0; tick < 300; tick++) {
         gs_net_local_input(&a, gs_net_drive(0, tick));

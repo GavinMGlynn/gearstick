@@ -93,6 +93,13 @@ typedef struct gs_app {
     bool        online;
     const char *join_host;
     const char *server_host;      // meeting at a server instead
+
+    // **Which server, exactly.** IK means the client already knows the
+    // server's public key, and that is what stops somebody in the middle
+    // answering in its place - so it is given rather than discovered, and a
+    // client without one does not connect.
+    uint8_t     server_key[GS_NOISE_KEY_BYTES];
+    bool        has_server_key;
     const char *online_name;      // who to appear as
     bool        use_relay;        // go through the server, for awkward routers
     uint16_t    port;
@@ -618,6 +625,31 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->online = true;
             a->server_host = argv[++i];
             a->port = (uint16_t)SDL_atoi(argv[++i]);
+        } else if (SDL_strcmp(argv[i], "--server-key") == 0 && i + 1 < argc) {
+            const char *hex = argv[++i];
+            if (SDL_strlen(hex) != 64) {
+                SDL_Log("--server-key wants 64 hex characters; the server "
+                        "prints its key when it starts");
+                return SDL_APP_FAILURE;
+            }
+            for (int k = 0; k < GS_NOISE_KEY_BYTES; k++) {
+                unsigned byte = 0;
+                for (int half = 0; half < 2; half++) {
+                    char ch = hex[k * 2 + half];
+                    unsigned digit =
+                        (ch >= '0' && ch <= '9') ? (unsigned)(ch - '0')
+                      : (ch >= 'a' && ch <= 'f') ? (unsigned)(ch - 'a' + 10)
+                      : (ch >= 'A' && ch <= 'F') ? (unsigned)(ch - 'A' + 10)
+                                                 : 16u;
+                    if (digit > 15u) {
+                        SDL_Log("--server-key is not hexadecimal");
+                        return SDL_APP_FAILURE;
+                    }
+                    byte = byte * 16u + digit;
+                }
+                a->server_key[k] = (uint8_t)byte;
+            }
+            a->has_server_key = true;
         } else if (SDL_strcmp(argv[i], "--join") == 0 && i + 2 < argc) {
             a->online = true;
             a->join_host = argv[++i];
@@ -686,6 +718,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --host PORT [N]   wait for N players in total (2-4, default 2)");
             SDL_Log("  --join HOST PORT  join somebody who is waiting");
             SDL_Log("  --server HOST PORT  meet everybody at a server");
+            SDL_Log("  --server-key HEX    that server's public key, which it "
+                    "prints when it starts");
             SDL_Log("  --name NAME     who to appear as online");
             SDL_Log("  --relay         send through the server, if peers cannot connect");
             SDL_Log("  J toggles the landing arc while airborne.");
@@ -777,7 +811,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         const char *me = a->online_name != nullptr ? a->online_name : "driver";
 
         a->wire = a->server_host != nullptr
-                      ? gs_wire_server(a->server_host, a->port, me)
+                      ? gs_wire_server(a->server_host, a->port, me,
+                                       a->has_server_key ? a->server_key : nullptr)
                   : a->join_host != nullptr
                       ? gs_wire_join(a->join_host, a->port)
                       : gs_wire_host(a->port, want);
