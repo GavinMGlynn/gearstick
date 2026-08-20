@@ -150,6 +150,38 @@ client that genuinely restarted waits out the silence timeout first.
 
 ---
 
+### 4.6 The state machine
+
+Each endpoint is in exactly one of four states. Anything not listed as accepted
+in a state is dropped without a reply.
+
+| state | accepts | on success | on failure |
+|---|---|---|---|
+| `NEW` (initiator) | nothing | sends message one → `WAITING` | — |
+| `NEW` (responder) | `HANDSHAKE` message one | sends message two, `Split()` → `OPEN` | → `DEAD` |
+| `WAITING` (initiator) | `HANDSHAKE` message two | `Split()` → `OPEN` | → `DEAD` |
+| `OPEN` | `SEALED` only | stays `OPEN` | a datagram that fails to open is dropped; the state does not change |
+| `DEAD` | nothing | — | — |
+
+Four rules that are easy to get wrong and matter:
+
+- **The responder reaches `OPEN` on one datagram.** It writes message two and
+  splits immediately; it does not wait for anything from the initiator. There is
+  no half-open state on a server, deliberately — there is nothing to fill up.
+- **`DEAD` is final.** A handshake that failed is not retried on the same state.
+  A peer that wants to try again begins a new handshake with a fresh ephemeral
+  key. A handshake that could be retried is one somebody can grind against.
+- **A datagram that fails to open in `OPEN` does not change the state**, does
+  not advance the replay window, and does not produce a reply. Only a datagram
+  that authenticated moves anything.
+- **A `HANDSHAKE` arriving in `OPEN` is not a reason to start again.** The
+  gearstick server refuses one from an address that already has a live client,
+  because message one is replayable and accepting it would let a recorded packet
+  knock a racing player off. See §4.5.
+
+The initiator repeats message one until message two arrives or it gives up;
+retransmission is the only recovery, because there is nothing to acknowledge.
+
 ## 5. The key schedule
 
 Exactly the framework's, with no additions.
