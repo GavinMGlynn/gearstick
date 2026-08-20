@@ -27,6 +27,17 @@ on:
       - '.github/workflows/package.yml'
 
 env:
+  # **What a release calls itself.** The tag without its leading `v`, or empty
+  # when this is not a tag build - in which case CMake keeps the project's own
+  # version and the file is named for that.
+  #
+  # This was written down in CMakeLists.txt as "set by the release job from the
+  # tag" and no job ever set it, so a `v0.1.0-beta1` tag would have produced
+  # files called `gearstick-0.1.0-...` with the beta marker gone. The comment
+  # said exactly why that matters - somebody with the file in their downloads
+  # folder needs to be able to tell - and the code did not do it.
+  GS_RELEASE: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+
   # ext/imgui too, now that the editor's panels are built on it. NOT
   # ext/dear_bindings: it generates the C API and the result is committed, so
   # building needs the header but not the generator. That asymmetry is the whole
@@ -102,8 +113,12 @@ jobs:
 
       - name: Build and package
         run: |
+          rel="${GS_RELEASE#v}"
+          extra=""
+          if [ -n "$rel" ]; then extra="-DGEARSTICK_RELEASE=$rel"; fi
+          echo "naming this release: ${rel:-the project version}"
           cmake -B build -G Ninja -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
-                -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGEARSTICK_WERROR=ON
+                -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGEARSTICK_WERROR=ON $extra
           cmake --build build -j
           cd build && cpack
 
@@ -180,7 +195,11 @@ jobs:
 
       - name: Build and package
         run: |
-          cmake --preset macos-release
+          rel="${GS_RELEASE#v}"
+          extra=""
+          if [ -n "$rel" ]; then extra="-DGEARSTICK_RELEASE=$rel"; fi
+          echo "naming this release: ${rel:-the project version}"
+          cmake --preset macos-release $extra
           cmake --build --preset macos-release -j
           cd build/macos-release && cpack
 
@@ -233,10 +252,20 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with: { arch: x64 }
 
+      # cmd cannot strip the leading `v`, so pwsh does it and hands the answer
+      # over through the environment.
+      - name: What this release is called
+        shell: pwsh
+        run: |
+          $rel = "${{ env.GS_RELEASE }}" -replace '^v', ''
+          $extra = if ($rel) { "-DGEARSTICK_RELEASE=$rel" } else { "" }
+          Write-Host "naming this release: $(if ($rel) { $rel } else { 'the project version' })"
+          "GS_CMAKE_EXTRA=$extra" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build and package
         shell: cmd
         run: |
-          cmake --preset windows-release
+          cmake --preset windows-release %GS_CMAKE_EXTRA%
           cmake --build --preset windows-release
           cd build\windows-release && cpack
 
@@ -530,6 +559,11 @@ jobs:
         with:
           files: dist/*
           fail_on_unmatched_files: true
+          # **A beta is marked as one.** Semantic versioning says a hyphen in
+          # the version means a pre-release, so `v0.1.0-beta1` is flagged and
+          # `v0.1.0` is not - which is what stops a beta being served to
+          # somebody who asked for the latest release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
             ## Gearstick ${{ github.ref_name }}
 
