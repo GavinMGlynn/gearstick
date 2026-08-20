@@ -882,14 +882,25 @@ install is an installer.
       fatal on a player's, and unfixable by a zip. The runtime is static now and
       `dumpbin` checks the installed executable imports none.*
 
-- [ ] **The installer is in the release beside the archive.** Somebody who wants
+- [x] **The installer is in the release beside the archive.** Somebody who wants
       a zip still gets a zip. *Verification: a tagged release carries both, and
       both carry a provenance attestation.*
-      **Wired, unverified.** The Windows job uploads the MSI beside the zip, the
-      attestation step covers `dist/*.msi`, and `docs/RELEASES.md` lists both
-      with a line on which to take. It stays unticked because the verification
-      is about a tagged release and nothing has been tagged — running the
-      workflow is not the same as watching a release come out of it.
+      *Verification: `v0.1.0-beta1` is published and carries all five files — a
+      Linux tarball, a macOS disk image and tarball, a Windows zip and an MSI —
+      with one `SHA256SUMS` over the lot. `gh attestation verify` accepts the
+      tarball and the MSI against this repository, so the provenance is
+      something somebody can check rather than something the workflow claims.
+      It is flagged as a pre-release: semantic versioning says a hyphen means
+      one, and a beta should not be handed to somebody who asked for the latest
+      release.*
+      *Two things had to be fixed before a tag could produce a correct release,
+      and both were found by being told to cut one. `GEARSTICK_RELEASE` was
+      documented as "set by the release job from the tag" and no job set it, so
+      every file would have been named `0.1.0` with the beta marker gone. And
+      Windows Installer refuses a product version that is not four integers, so
+      the MSI carries `0.1.0.1` while the file keeps the name a person reads —
+      the fourth field coming from the pre-release number, which is what makes
+      beta2 install over beta1 as an upgrade instead of beside it.*
 
 ## Tails
 
