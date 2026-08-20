@@ -2038,6 +2038,78 @@ partly because it encrypts the *client's* identity inside its first message, so
 what a passive observer learns is that somebody spoke to this server, and not
 who.
 
+### A track has an owner, and the ones that shipped have none
+
+**Ownership is a key, not a name.** It used to be the author string — whatever
+the uploader typed — so "only the person who put it up may take it down" meant
+"only somebody willing to type the same word". The owner is now the static
+public key the client proved it holds during its handshake, which is a thing
+nobody else can present. There is a test with two clients both calling
+themselves ada, in which only one of them built the track, and only that one can
+take it down.
+
+That check was impossible to write before the tunnel. The server had nothing but
+a name, and a name is a claim. This is the first thing in the project that is
+built on knowing who somebody actually is.
+
+**A track that shipped with the game is outside all of it.** Not an owner nobody
+got round to setting — outside it. `shipped` says so in the row rather than
+leaving it to be inferred from a null owner, and every write path refuses a
+shipped track whoever is asking, including a profile that happens to be called
+the same thing as its author. `gearstick_make_store` marks them as it builds the
+library.
+
+**Private, shared with named people, or public.** Sharing names the person by
+the public key the server watched them prove, which a client reads out of the
+lobby — so a track is handed to somebody you are in a room with, rather than to
+a string you typed. A shared flag with no list would be shared with anybody who
+asks.
+
+The listing and the visibility check are the same SQL, written once and used
+twice. Two pieces of SQL that disagree about who may see what is exactly how a
+private track ends up in somebody's list.
+
+#### The schema needed a real migration
+
+The previous items all got away with `CREATE TABLE IF NOT EXISTS`, because a new
+table is created and an old database simply gains it. Columns are not like that:
+the statements do nothing to a table that already exists, and the library
+committed under `assets/` already exists. Every query naming a new column would
+have failed on the one database that ships and passed on every test that made
+its own.
+
+So columns are added with `ALTER TABLE`, ignoring the "duplicate column name"
+that a fresh database answers with, and each default makes an old row mean what
+it always meant: a track nobody owns, that did not ship. The old `published`
+flag is then translated into the new visibility, because leaving the two to
+disagree is what a migration is for.
+
+#### What is not there
+
+**No delete over the wire.** The store has `gs_store_delete_track` and it is
+owner-checked and tested, but no protocol message reaches it — so no client can
+delete anything, which satisfies the "cannot delete somebody else's" half by
+there being no delete at all. Worth saying plainly rather than counting it as
+done.
+
+#### Three CI failures, all from this phase
+
+**Windows could not find `ext/libsodium`.** That job spells its submodule list
+out inline rather than using `$CI_SUBMODULES`, because the shell it runs under
+does not expand it — so adding libsodium to the variable reached every job
+except the two that matter for Windows. Both inline lists now carry it and say
+why they are written out.
+
+**The fuzz job asked apt for `clang` and got 18**, which is below this project's
+C23 floor. The configure said so and stopped, which is the gate working rather
+than something to route around; it asks for clang-19.
+
+**The stock library no longer matched its own rebuild.** `gearstick_make_store`
+marks its tracks shipped now, so the committed database and the one CI builds
+from source had diverged — which is exactly what that job exists to catch. It
+was regenerated with the pinned SQLite amalgamation, as CI does, and checked
+byte-identical across two runs.
+
 ---
 
 ## What does not exist

@@ -273,8 +273,11 @@ transport work is larger and defends a channel nobody is currently attacking.
    between a client and the server, and again between every pair of peers on the
    mesh — keyed from the static keys the broker watched each of them prove. Only
    the handshake itself is in the clear, which is what a handshake is.
-7. **Accounts, and a track's ownership.** Now that identity exists, "only the
-   author may withdraw this" becomes true rather than decorative.
+7. **Accounts, and a track's ownership.** *Ownership is done:* a track belongs
+   to the static key its builder proved during the handshake, stock tracks are
+   outside ownership entirely, and sharing names people by key. Accounts — a
+   password, so an identity survives a reinstall rather than being whatever key
+   that machine generated — are still to come.
 
 **Said out loud rather than left to be discovered: one to four are not complete
 defences until six and seven land.** Binding a replay to a driver stops somebody

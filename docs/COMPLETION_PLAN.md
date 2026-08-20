@@ -823,15 +823,21 @@ review, and it fails it for good reasons.
       the window it is still valid for; and a profile with no password set still
       works, because a racing game that demands an account before anybody can
       drive has lost the argument.*
-- [ ] **A track has an owner, and the ones that shipped have none.** Whoever
+- [x] **A track has an owner, and the ones that shipped have none.** Whoever
       built a track can change it, take it down, keep it private, hand it to a
       named few, or publish it to everybody. The stock tracks are outside all of
       it and no request can touch them.
-      *Verification: a client that did not build a track cannot edit, withdraw or
-      delete it; a shared track is visible to exactly the profiles it was shared
-      with and to nobody else; and every write path aimed at a track that shipped
-      with the game is refused, including by the profile that happens to be
-      called the same thing as its author.*
+      *Verification: two clients both calling themselves ada, only one of whom
+      built the track — and only that one can take it down; a track handed to
+      one named person is listed for them and for nobody else, including
+      somebody asserting no identity at all; and every write path aimed at a
+      shipped track is refused, including by a profile called the same thing as
+      its author. Each of those turns red on its own when its rule is removed.*
+      *Said plainly: there is no delete over the wire. The store's delete is
+      owner-checked and tested, and no protocol message reaches it — so "cannot
+      delete somebody else's" holds by there being no delete at all.*
+      *Ownership is a key rather than a name, which is a check that could not be
+      written before the tunnel: the server had nothing but what somebody typed.*
 
 ## Phase 15 — Installers
 
