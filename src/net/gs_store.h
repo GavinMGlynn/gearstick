@@ -63,6 +63,38 @@ uint32_t gs_store_best_race(gs_store *s, uint64_t track, uint64_t conditions,
                             uint16_t laps, char *who, size_t cap);
 int gs_store_record_count(gs_store *s);
 
+// --- proving a name is yours ------------------------------------------------
+//
+// **The store holds; it does not decide.** What is kept here is an opaque
+// password hash and an opaque shared secret, and every question about whether a
+// password is right or a code is current is answered in `gs_auth.c`, which is
+// where libsodium is. That split is why the store links no cryptography.
+//
+// A driver with no password is the ordinary case and has to keep working: a
+// racing game that demands an account before anybody can drive has lost the
+// argument.
+
+#define GS_STORE_PWHASH 128     // libsodium's crypto_pwhash_STRBYTES, with room
+#define GS_STORE_TOTP    32
+
+// The hash `gs_auth_hash_password` produced, or null to take a password off.
+bool gs_store_set_password(gs_store *s, const char *name, const char *hash);
+
+// False when that driver has no password, which is not an error.
+bool gs_store_password(gs_store *s, const char *name, char *hash, size_t cap);
+bool gs_store_has_password(gs_store *s, const char *name);
+
+bool gs_store_set_totp(gs_store *s, const char *name, const uint8_t *secret,
+                       size_t len);
+bool gs_store_totp(gs_store *s, const char *name, uint8_t *secret, size_t cap,
+                   size_t *len);
+
+// **Spend a time step, once.** True only if this counter is newer than the last
+// one accepted for that driver - checked and written in one statement, because
+// reading and then updating leaves a gap, and the gap is the thirty seconds in
+// which somebody who saw a code can use it again.
+bool gs_store_totp_use(gs_store *s, const char *name, int64_t counter);
+
 // --- tracks ----------------------------------------------------------------
 
 // Keep a track. The hash is the key, so storing the same track twice stores it

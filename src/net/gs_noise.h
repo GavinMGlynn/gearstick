@@ -24,9 +24,9 @@
 #ifndef GS_NOISE_H
 #define GS_NOISE_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+// For `bool` and for the `nullptr` shim on a toolchain whose C23 is partial.
+// Rolling these includes by hand is what broke the Windows build twice.
+#include "core/gs_common.h"
 
 #define GS_NOISE_KEY_BYTES  32
 #define GS_NOISE_TAG_BYTES  16

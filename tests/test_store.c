@@ -4,6 +4,7 @@
 // file left behind by the last run - which is the failure mode that makes a
 // storage test pass on one machine and fail on a fresh checkout.
 #include "core/gs_track.h"
+#include "net/gs_auth.h"
 #include "net/gs_store.h"
 
 #include <stdio.h>
@@ -402,6 +403,127 @@ static bool gs_put_a_track(gs_store *s, uint64_t hash, const char *name) {
     return gs_store_put_track(s, hash, name, "", bytes, sizeof bytes);
 }
 
+TEST(a_profile_with_a_password_cannot_be_used_without_it) {
+    gs_store *s = gs_store_open(":memory:");
+    CHECK(s != nullptr);
+    if (s == nullptr) return;
+
+    // **A driver with no password still works.** This is first because it is
+    // the case that must never break: a racing game that demands an account
+    // before anybody can drive has lost the argument.
+    CHECK(!gs_store_has_password(s, "cy"));
+
+    char hash[GS_AUTH_HASH_BYTES];
+    CHECK(gs_auth_hash_password("the quick brown fox", hash, sizeof hash));
+    CHECK(gs_store_set_password(s, "ada", hash));
+    CHECK(gs_store_has_password(s, "ada"));
+
+    // The password itself is nowhere in what was stored.
+    char kept[GS_AUTH_HASH_BYTES];
+    CHECK(gs_store_password(s, "ada", kept, sizeof kept));
+    CHECK(strstr(kept, "the quick brown fox") == nullptr);
+
+    // **Two hashes of the same password differ**, because the salt is inside
+    // them - so a stolen database does not say which two people chose the same
+    // one.
+    char again[GS_AUTH_HASH_BYTES];
+    CHECK(gs_auth_hash_password("the quick brown fox", again, sizeof again));
+    CHECK(strcmp(again, kept) != 0);
+
+    CHECK(gs_auth_check_password(kept, "the quick brown fox"));
+    CHECK(!gs_auth_check_password(kept, "the quick brown fo"));
+    CHECK(!gs_auth_check_password(kept, "the quick brown fox "));
+    CHECK(!gs_auth_check_password(kept, ""));
+
+    // Taken off again, and the name is ordinary once more.
+    CHECK(gs_store_set_password(s, "ada", nullptr));
+    CHECK(!gs_store_has_password(s, "ada"));
+
+    gs_store_close(s);
+}
+
+TEST(the_one_time_code_is_the_one_rfc_6238_publishes) {
+    // **RFC 6238 appendix B**, the SHA-256 column, at this project's six digits
+    // rather than the specification's eight - which is why these are the last
+    // six of the published values. Checked against Python's `hmac` as well,
+    // which is a different implementation by different people, and it agrees
+    // with both.
+    //
+    // The seed is the specification's: thirty-two ASCII digits.
+    const uint8_t *seed = (const uint8_t *)"12345678901234567890123456789012";
+    const size_t len = 32;
+
+    static const struct { int64_t at; uint32_t code; } v[] = {
+        {         59, 119246 },      // published 46119246
+        { 1111111109,  84774 },      // published 68084774
+        { 1234567890, 819424 },      // published 91819424
+        { 2000000000, 698825 },      // published 90698825
+    };
+    for (size_t i = 0; i < sizeof v / sizeof v[0]; i++) {
+        int64_t step = gs_auth_step_of(v[i].at);
+        CHECK(gs_auth_code_at(seed, len, step) == v[i].code);
+    }
+
+    // And the time step is the specification's thirty seconds.
+    CHECK(gs_auth_step_of(59) == 1);
+    CHECK(gs_auth_step_of(60) == 2);
+}
+
+TEST(a_one_time_code_works_once_inside_the_window_it_is_valid_for) {
+    gs_store *s = gs_store_open(":memory:");
+    CHECK(s != nullptr);
+    if (s == nullptr) return;
+
+    uint8_t secret[GS_AUTH_SECRET_BYTES];
+    gs_auth_new_secret(secret, sizeof secret);
+    CHECK(gs_store_set_totp(s, "ada", secret, sizeof secret));
+
+    uint8_t back[GS_AUTH_SECRET_BYTES];
+    size_t len = 0;
+    CHECK(gs_store_totp(s, "ada", back, sizeof back, &len));
+    CHECK(len == sizeof secret);
+    CHECK(memcmp(back, secret, len) == 0);
+
+    // A fixed moment, so this does not depend on when it runs.
+    const int64_t now = 1700000000;
+    int64_t step = gs_auth_step_of(now);
+
+    uint32_t code = gs_auth_code_at(secret, sizeof secret, step);
+    CHECK(code < 1000000u);
+
+    int64_t used = 0;
+    CHECK(gs_auth_check_code(secret, sizeof secret, code, now, 1, &used));
+    CHECK(used == step);
+
+    // **Spent once.** The window is still open - the same thirty seconds, the
+    // same code - and it does not work a second time, which is the whole point
+    // of remembering which step was used.
+    CHECK(gs_store_totp_use(s, "ada", used));
+    CHECK(!gs_store_totp_use(s, "ada", used));
+    CHECK(gs_auth_check_code(secret, sizeof secret, code, now + 5, 1, &used));
+    CHECK(!gs_store_totp_use(s, "ada", used));
+
+    // The next step is a different code, and it can be spent.
+    uint32_t next = gs_auth_code_at(secret, sizeof secret, step + 1);
+    CHECK(next != code);
+    CHECK(gs_store_totp_use(s, "ada", step + 1));
+
+    // And a step already behind is refused, so a captured code from a minute
+    // ago is worth nothing even if the clock slack would have reached it.
+    CHECK(!gs_store_totp_use(s, "ada", step));
+
+    // A wrong code is a wrong code.
+    CHECK(!gs_auth_check_code(secret, sizeof secret, code ^ 1u, now, 1, &used));
+
+    // A little clock skew is allowed and a lot is not - a second factor that
+    // refuses a phone eleven seconds fast is one nobody can use.
+    uint32_t earlier = gs_auth_code_at(secret, sizeof secret, step - 1);
+    CHECK(gs_auth_check_code(secret, sizeof secret, earlier, now, 1, &used));
+    CHECK(!gs_auth_check_code(secret, sizeof secret, earlier, now, 0, &used));
+
+    gs_store_close(s);
+}
+
 TEST(a_track_belongs_to_whoever_built_it_and_to_nobody_else) {
     gs_store *s = gs_store_open(":memory:");
     CHECK(s != nullptr);
@@ -612,6 +734,9 @@ int main(void) {
     run_publishing_is_a_separate_thing_from_storing();
     run_a_name_with_a_quote_in_it_is_a_name_and_not_an_instruction();
     run_what_is_written_is_still_there_after_a_reopen();
+    run_a_profile_with_a_password_cannot_be_used_without_it();
+    run_the_one_time_code_is_the_one_rfc_6238_publishes();
+    run_a_one_time_code_works_once_inside_the_window_it_is_valid_for();
     run_a_track_belongs_to_whoever_built_it_and_to_nobody_else();
     run_a_shared_track_is_visible_to_exactly_who_it_was_shared_with();
     run_a_track_that_shipped_with_the_game_is_outside_all_of_it();

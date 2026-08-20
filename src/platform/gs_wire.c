@@ -328,6 +328,19 @@ void gs_wire_withdraw(gs_wire *w, uint64_t track) {
     gs_to_server(w, buf, gs_proto_withdraw(buf, sizeof buf, track));
 }
 
+void gs_wire_login(gs_wire *w, const char *name, const char *password,
+                   uint32_t code) {
+    if (w == nullptr || !w->via_server || name == nullptr) return;
+    uint8_t buf[GS_PROTO_MTU];
+    gs_to_server(w, buf,
+                 gs_proto_login(buf, sizeof buf, name,
+                                password != nullptr ? password : "", code));
+
+    // The name this client will be known by from here on, so the caller does
+    // not have to wait for a lobby to find out what it asked for.
+    SDL_strlcpy(w->me, name, sizeof w->me);
+}
+
 void gs_wire_share(gs_wire *w, uint64_t track, const uint8_t *with, bool on) {
     if (w == nullptr || !w->via_server || with == nullptr) return;
     uint8_t buf[GS_PROTO_MTU];

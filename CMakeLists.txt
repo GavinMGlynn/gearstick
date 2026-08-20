@@ -333,6 +333,7 @@ gs_add_sqlite()
 
 add_executable(gearstick_server
     src/frontend/server/main.c
+    src/net/gs_auth.c
     src/net/gs_noise.c
     src/net/gs_proto.c
     src/net/gs_carrier.c
@@ -421,11 +422,13 @@ if(GEARSTICK_TESTS)
     # track format, and neither of those has ever needed a window.
     add_executable(gearstick_store_tests
         tests/test_store.c
+        src/net/gs_auth.c
         src/net/gs_store.c)
     target_include_directories(gearstick_store_tests PRIVATE src)
     # gearstick_sim so the shipped library's tracks can be read back as tracks
     # rather than trusted as blobs; it links nothing, so this stays SDL-free.
-    target_link_libraries(gearstick_store_tests PRIVATE gearstick_sqlite gearstick_sim)
+    target_link_libraries(gearstick_store_tests PRIVATE gearstick_sqlite gearstick_sim
+                                                     gearstick_sodium)
     target_compile_definitions(gearstick_store_tests PRIVATE
         GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets")
     gs_configure(gearstick_store_tests)
@@ -433,8 +436,14 @@ if(GEARSTICK_TESTS)
     add_test(NAME gearstick_store COMMAND gearstick_store_tests)
     set_tests_properties(gearstick_store PROPERTIES TIMEOUT 120)
 
+    # **Seven minutes, because this suite got much bigger.** Each test here
+    # starts a real server process and talks to it over real sockets, and Phase
+    # 14 added six more of them - sessions, a sealed mesh, ownership, sharing.
+    # Ninety seconds on a developer's machine became more than three minutes on
+    # a loaded macOS runner, and the old three-minute limit turned that into a
+    # red tree that said "Timeout" and nothing about what was wrong.
     add_test(NAME gearstick_server COMMAND gearstick_server_tests)
-    set_tests_properties(gearstick_server PROPERTIES TIMEOUT 180)
+    set_tests_properties(gearstick_server PROPERTIES TIMEOUT 420)
 
     add_test(NAME gearstick_wire COMMAND gearstick_wire_tests)
     set_tests_properties(gearstick_wire PROPERTIES TIMEOUT 120)

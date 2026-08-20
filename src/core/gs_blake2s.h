@@ -20,14 +20,14 @@
 #ifndef GS_BLAKE2S_H
 #define GS_BLAKE2S_H
 
-// **`<stdbool.h>` explicitly.** In C23 `bool` is a keyword and this include is
-// a no-op; MSVC's C23 is partial and it is not, which is why `windows-clang`
-// exists as the documented fallback. Every other header in core picks this up
-// from `gs_common.h`; this one includes nothing of ours on purpose, so it says
-// so itself.
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+// **`gs_common.h`, like every other header here.** The first version of this
+// listed <stdbool.h>, <stddef.h> and <stdint.h> itself, on the reasoning that a
+// hash implementation should depend on nothing of ours. That reasoning cost two
+// separate Windows build failures: MSVC's C23 is partial, so `bool` needs the
+// header and `nullptr` needs the shim, and `gs_common.h` is where this project
+// already keeps both - with the shim switched on by a configure-time probe
+// rather than by guessing from a version number.
+#include "core/gs_common.h"
 
 #define GS_BLAKE2S_BYTES 32
 #define GS_BLAKE2S_BLOCK 64

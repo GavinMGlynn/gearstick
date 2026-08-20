@@ -57,6 +57,7 @@ typedef enum gs_msg {
     GS_MSG_WITHDRAW,   // "take mine down again"
     GS_MSG_WANT_LIST,  // "what is published?"
     GS_MSG_SHARE,      // "let this person have my track" - or stop letting them
+    GS_MSG_LOGIN,      // "this name is mine, and here is why"
 
     // Server to client.
     GS_MSG_WELCOME,    // "you are player N of M, and here is everyone"
@@ -198,6 +199,18 @@ size_t gs_proto_withdraw(uint8_t *buf, size_t cap, uint64_t track);
 // which is how everybody is named once there is a tunnel - a client learns the
 // others' keys from the lobby, and the server checks the asker owns the track
 // before it writes anything down.
+// **Proving a name is yours.** The password goes across as itself, which is
+// only sane because this is inside the tunnel - before that it would have
+// needed a challenge-response construction, and inventing one is exactly what
+// this project refuses to do. A code of zero means "no second factor offered".
+#define GS_PROTO_SECRET 64
+
+size_t gs_proto_login(uint8_t *buf, size_t cap, const char *name,
+                      const char *password, uint32_t code);
+bool   gs_proto_read_login(const uint8_t *buf, size_t len, char *name,
+                           size_t name_cap, char *password, size_t pw_cap,
+                           uint32_t *code);
+
 size_t gs_proto_share(uint8_t *buf, size_t cap, uint64_t track,
                       const uint8_t *with, bool on);
 bool   gs_proto_read_share(const uint8_t *buf, size_t len, uint64_t *track,

@@ -510,6 +510,30 @@ bool gs_proto_read_withdraw(const uint8_t *buf, size_t len, uint64_t *track) {
     return true;
 }
 
+size_t gs_proto_login(uint8_t *buf, size_t cap, const char *name,
+                      const char *password, uint32_t code) {
+    if (cap < GS_HEAD + GS_PROTO_NAME + GS_PROTO_SECRET + 4) return 0;
+    size_t n = gs_head(buf, cap, GS_MSG_LOGIN);
+    n += gs_put_str(buf + n, name, GS_PROTO_NAME);
+    n += gs_put_str(buf + n, password, GS_PROTO_SECRET);
+    gs_put32(buf + n, code); n += 4;
+    return n;
+}
+
+bool gs_proto_read_login(const uint8_t *buf, size_t len, char *name,
+                         size_t name_cap, char *password, size_t pw_cap,
+                         uint32_t *code) {
+    if (!gs_expect(buf, len, GS_MSG_LOGIN,
+                   GS_HEAD + GS_PROTO_NAME + GS_PROTO_SECRET + 4)) {
+        return false;
+    }
+    size_t n = GS_HEAD;
+    gs_get_str(buf + n, GS_PROTO_NAME, name, name_cap);       n += GS_PROTO_NAME;
+    gs_get_str(buf + n, GS_PROTO_SECRET, password, pw_cap);   n += GS_PROTO_SECRET;
+    *code = gs_get32(buf + n);
+    return true;
+}
+
 size_t gs_proto_share(uint8_t *buf, size_t cap, uint64_t track,
                       const uint8_t *with, bool on) {
     if (with == nullptr || cap < GS_HEAD + 8 + GS_NOISE_KEY_BYTES + 1) return 0;

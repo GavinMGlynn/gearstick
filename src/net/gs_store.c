@@ -434,6 +434,142 @@ int gs_store_record_count(gs_store *s) {
 
 // --- tracks ----------------------------------------------------------------
 
+// --- proving a name is yours ------------------------------------------------
+
+// Every one of these is about a driver row that may not exist yet, so the
+// driver is made first. A password set on a name nobody has used is a name
+// somebody has reserved, which is the honest reading of it.
+static bool gs_driver_row(gs_store *s, const char *name) {
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "INSERT INTO driver (name) VALUES (?1) ON CONFLICT(name) DO NOTHING",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "driver row");
+        return false;
+    }
+    sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_set_password(gs_store *s, const char *name, const char *hash) {
+    if (s == nullptr || name == nullptr || name[0] == '\0') return false;
+    if (!gs_driver_row(s, name)) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "UPDATE driver SET password = ?2 WHERE name = ?1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "set password");
+        return false;
+    }
+    sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+    if (hash != nullptr) {
+        sqlite3_bind_text(st, 2, hash, -1, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(st, 2);
+    }
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_password(gs_store *s, const char *name, char *hash, size_t cap) {
+    if (s == nullptr || name == nullptr || hash == nullptr || cap == 0) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "SELECT password FROM driver WHERE name = ?1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "password");
+        return false;
+    }
+    sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+
+    bool got = false;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *text = sqlite3_column_text(st, 0);
+        if (text != nullptr) {
+            snprintf(hash, cap, "%s", (const char *)text);
+            got = hash[0] != '\0';
+        }
+    }
+    sqlite3_finalize(st);
+    return got;
+}
+
+bool gs_store_has_password(gs_store *s, const char *name) {
+    char hash[GS_STORE_PWHASH];
+    return gs_store_password(s, name, hash, sizeof hash);
+}
+
+bool gs_store_set_totp(gs_store *s, const char *name, const uint8_t *secret,
+                       size_t len) {
+    if (s == nullptr || name == nullptr || name[0] == '\0') return false;
+    if (len > GS_STORE_TOTP) return false;
+    if (!gs_driver_row(s, name)) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "UPDATE driver SET totp = ?2, totp_at = 0 WHERE name = ?1",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "set totp");
+        return false;
+    }
+    sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+    if (secret != nullptr && len > 0) {
+        sqlite3_bind_blob(st, 2, secret, (int)len, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(st, 2);
+    }
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool gs_store_totp(gs_store *s, const char *name, uint8_t *secret, size_t cap,
+                   size_t *len) {
+    if (s == nullptr || name == nullptr || secret == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db, "SELECT totp FROM driver WHERE name = ?1",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "totp");
+        return false;
+    }
+    sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+
+    bool got = false;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const void *blob = sqlite3_column_blob(st, 0);
+        int n = sqlite3_column_bytes(st, 0);
+        if (blob != nullptr && n > 0 && (size_t)n <= cap) {
+            memcpy(secret, blob, (size_t)n);
+            if (len != nullptr) *len = (size_t)n;
+            got = true;
+        }
+    }
+    sqlite3_finalize(st);
+    return got;
+}
+
+bool gs_store_totp_use(gs_store *s, const char *name, int64_t counter) {
+    if (s == nullptr || name == nullptr) return false;
+
+    sqlite3_stmt *st = nullptr;
+    if (sqlite3_prepare_v2(s->db,
+            "UPDATE driver SET totp_at = ?2 WHERE name = ?1 AND totp_at < ?2",
+            -1, &st, nullptr) != SQLITE_OK) {
+        gs_fail(s, "use totp");
+        return false;
+    }
+    sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, counter);
+
+    bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(s->db) == 1;
+    sqlite3_finalize(st);
+    return ok;
+}
+
 bool gs_store_put_track(gs_store *s, uint64_t hash, const char *name,
                         const char *author, const uint8_t *bytes, size_t len) {
     if (s == nullptr || bytes == nullptr || len == 0) return false;

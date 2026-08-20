@@ -185,6 +185,12 @@ void gs_wire_withdraw(gs_wire *w, uint64_t track);
 // in a room with rather than with a string you typed.
 void gs_wire_share(gs_wire *w, uint64_t track, const uint8_t *with, bool on);
 
+// Prove a name is yours. The password crosses as itself, which is only sane
+// because this is inside the tunnel. `code` is zero when there is no second
+// factor to offer.
+void gs_wire_login(gs_wire *w, const char *name, const char *password,
+                   uint32_t code);
+
 // The public key the server says belongs to a slot, or null. This is what a
 // client shares a track *with*, and it is not something that player claimed
 // about themselves - the server watched them prove it.

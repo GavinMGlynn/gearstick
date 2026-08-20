@@ -15,6 +15,7 @@
 #include "net/gs_carrier.h"
 #include "net/gs_proto.h"
 #include "net/gs_store.h"
+#include "net/gs_auth.h"
 #include "net/gs_noise.h"
 
 #include <sodium.h>
@@ -112,6 +113,11 @@ typedef struct gs_client {
     // joined. The name beside it is whatever they typed; this is not.
     uint8_t    key[GS_NOISE_KEY_BYTES];
     bool       has_key;
+
+    // Whether this client has proved the name it is using is theirs. Only ever
+    // true for a name that has a password: a name with none needs no proving,
+    // and a name with one cannot be used without it.
+    bool       proved;
 
     // A track on its way up, for publishing. Separate from the proof carrier
     // because somebody can perfectly well be submitting a time on one track
@@ -410,8 +416,22 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
         SDL_strlcpy(c->text, NET_GetAddressString(addr), sizeof c->text);
         c->joined_ms = now;
     }
-    SDL_strlcpy(c->name, (name != nullptr && name[0] != '\0') ? name : "driver",
-                sizeof c->name);
+    // **A name somebody has put a password on is not one you can just type.**
+    // Joining under it without proving it lands them under a name of their own
+    // instead of being refused outright, because being thrown off a server for
+    // picking a name that happens to be taken is a worse experience than being
+    // told the name is spoken for.
+    const char *wanted = (name != nullptr && name[0] != '\0') ? name : "driver";
+    if (gs_srv.store != nullptr && !c->proved &&
+        gs_store_has_password(gs_srv.store, wanted)) {
+        SDL_Log("%s is spoken for; log in to use it", wanted);
+        char spare[GS_PROTO_NAME];
+        SDL_snprintf(spare, sizeof spare, "%.*s-%u",
+                     (int)(sizeof spare - 8), wanted, (unsigned)(at + 1));
+        SDL_strlcpy(c->name, spare, sizeof c->name);
+    } else if (!c->proved) {
+        SDL_strlcpy(c->name, wanted, sizeof c->name);
+    }
 
     // **And who they actually are**, from the tunnel they had to complete
     // before this message could arrive at all. The name above is typed; this is
@@ -828,6 +848,58 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
         } else {
             SDL_Log("%s tried to withdraw a track that is not theirs", own->name);
         }
+        break;
+    }
+
+    case GS_MSG_LOGIN: {
+        char who[GS_PROTO_NAME] = { 0 };
+        char password[GS_PROTO_SECRET] = { 0 };
+        uint32_t code = 0;
+        if (at < 0 || gs_srv.store == nullptr) break;
+        if (!gs_proto_read_login(msg, len, who, sizeof who, password,
+                                 sizeof password, &code)) {
+            break;
+        }
+
+        gs_client *c = &gs_srv.client[at];
+        char hash[GS_AUTH_HASH_BYTES];
+
+        // A name with no password is not something anybody logs in to, and
+        // saying so is not a leak: whether a name is taken is already visible
+        // from the lobby.
+        if (!gs_store_password(gs_srv.store, who, hash, sizeof hash)) {
+            SDL_Log("%s asked to log in as %s, which has no password", c->name, who);
+            break;
+        }
+        if (!gs_auth_check_password(hash, password)) {
+            SDL_Log("%s failed to log in as %s", c->name, who);
+            gs_srv.refused++;
+            break;
+        }
+
+        // **And the second factor, if that name has one.** The code has to be
+        // current *and* not already spent - a window without a spend is a
+        // window in which a code works more than once.
+        uint8_t secret[GS_STORE_TOTP];
+        size_t secret_len = 0;
+        if (gs_store_totp(gs_srv.store, who, secret, sizeof secret, &secret_len)) {
+            int64_t step = 0;
+            if (!gs_auth_check_code(secret, secret_len, code, gs_now(), 1, &step) ||
+                !gs_store_totp_use(gs_srv.store, who, step)) {
+                SDL_Log("%s gave a code for %s that was wrong or already used",
+                        c->name, who);
+                gs_srv.refused++;
+                sodium_memzero(secret, sizeof secret);
+                break;
+            }
+        }
+        sodium_memzero(secret, sizeof secret);
+        sodium_memzero(password, sizeof password);
+
+        SDL_strlcpy(c->name, who, sizeof c->name);
+        c->proved = true;
+        SDL_Log("%s proved the name is theirs", c->name);
+        gs_broadcast_lobby();
         break;
     }
 
