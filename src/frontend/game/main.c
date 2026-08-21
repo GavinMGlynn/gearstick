@@ -433,6 +433,17 @@ static void gs_net_settle(gs_app *a) {
 static void gs_store_save(gs_app *a) {
     if (!a->menu.store_dirty) return;
 
+    // **A machine being told what to draw never writes the player's roster.**
+    // --screen and --session invent drivers so there is somebody in the picture
+    // and somebody in the results, and every one of those runs was saving them
+    // into the store somebody actually plays with - which is how "ada" and
+    // "bez" turn up on a machine that never asked for them. A screenshot is not
+    // a session; it reads the store and leaves it alone.
+    if (a->want_screen || a->session || a->showroom || a->shot_path != nullptr) {
+        a->menu.store_dirty = false;
+        return;
+    }
+
     char path[1024];
     if (!gs_store_path(path, sizeof path)) return;
 
@@ -1472,6 +1483,21 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             if (next == GS_SCREEN_RACE) {
                 gs_start_race(a);
                 gs_layout(a);
+            }
+
+            // **Asking for another online race means there can be another
+            // one.** `net_started` was only ever cleared when somebody cheated,
+            // so after one race the whole online block above stopped running:
+            // the lobby froze on whatever it last heard and no second race
+            // could ever begin. Nothing noticed while a client went straight
+            // into one race and stayed there; a menu you can come back to is
+            // what made it reachable.
+            //
+            // Not while settling: the finished race is still being agreed with
+            // everybody else, and throwing that away loses the result.
+            if (next == GS_SCREEN_LOBBY && a->net_started && !a->net_settling) {
+                a->net_started = false;
+                a->race_settled = false;
             }
             a->menu.screen = next;
             gs_store_save(a);

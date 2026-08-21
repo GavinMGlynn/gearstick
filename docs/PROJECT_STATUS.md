@@ -2384,6 +2384,25 @@ ever raced. It runs as `gearstick_front_door`, redirects the store into a
 temporary directory so it cannot touch the profile somebody plays with, and was
 confirmed by putting the bug back and watching it go red.
 
+### The caret nobody could see
+
+Dear ImGui draws the text cursor with `ImGuiCol_InputTextCursor`, not
+`ImGuiCol_Text`. `gs_base_palette` is a fixed list of colours copied from
+upstream and written before that colour existed, so the slot kept whatever
+`ImGui_CreateContext` left in it — the dark theme's white — and the inversion
+that turns this palette dark then turned white into **black**. A black caret on
+a black field: a text box with no way to tell you were typing into it.
+
+That is the trap in writing a palette as an enumerated list. A colour added to
+the library later is silently inherited and then transformed by a rule that was
+never meant to apply to it, and nothing warns you, because every colour has a
+value.
+
+It is pinned by a test that renders an empty box with and without the keyboard
+and counts the pixels drawn inside it. The caret is the only thing that can be
+in an empty box, so the count *is* the caret. The test reproduced the fault
+before the fix — it was written to fail first, and did.
+
 The lesson worth keeping is about where the gap was: the rule that decides
 whether somebody is in a race was in the one file the test suite structurally
 cannot link, and nothing noticed until a person pressed the button.

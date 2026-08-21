@@ -2766,6 +2766,121 @@ TEST(the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed) {
     gs_frame_free(&passed);
 }
 
+// One frame containing a single empty text box. `focus` asks for the keyboard
+// on this frame; the caret only appears the frame *after* that, which is the
+// whole reason this is a loop rather than one call. The box's rectangle comes
+// back in `rect` so the search below looks exactly where the box was.
+static bool gs_caret_active = false;
+
+static void gs_caret_frame(SDL_Renderer *ren, char *buf, size_t cap, bool focus,
+                           float *rect, gs_frame *out) {
+    cImGui_ImplSDLRenderer3_NewFrame();
+    cImGui_ImplSDL3_NewFrame();
+    ImGui_NewFrame();
+
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+
+    ImGui_SetNextWindowPos((ImVec2){ 20.0f, 20.0f }, ImGuiCond_Always);
+    ImGui_SetNextWindowSize((ImVec2){ 320.0f, 120.0f }, ImGuiCond_Always);
+    if (ImGui_Begin("##caret", nullptr,
+                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                    ImGuiWindowFlags_NoTitleBar)) {
+        if (focus) ImGui_SetKeyboardFocusHere();
+        ImGui_InputText("##box", buf, cap, 0);
+        gs_caret_active = ImGui_IsItemActive();
+        ImVec2 lo = ImGui_GetItemRectMin();
+        ImVec2 hi = ImGui_GetItemRectMax();
+        rect[0] = lo.x; rect[1] = lo.y; rect[2] = hi.x; rect[3] = hi.y;
+    }
+    ImGui_End();
+
+    ImGui_Render();
+    cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), ren);
+
+    SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
+    *out = (gs_frame){ 0 };
+    if (raw != nullptr) {
+        out->own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(raw);
+        if (out->own != nullptr) out->px = (uint8_t *)out->own->pixels;
+    }
+}
+
+// How many pixels inside the box are the colour text is drawn in. The caret is
+// drawn with ImGuiCol_Text, and the box is empty, so in an empty box that count
+// *is* the caret. Counting "pixels that changed" instead would count the blue
+// the frame background turns when a box becomes active, which happens whether
+// or not a caret was ever drawn.
+static int gs_text_coloured_pixels(const gs_frame *f, const float *rect) {
+    if (f->own == nullptr) return -1;
+    int w = f->own->w, h = f->own->h;
+    int x0 = (int)rect[0], y0 = (int)rect[1];
+    int x1 = (int)rect[2], y1 = (int)rect[3];
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > w) x1 = w;
+    if (y1 > h) y1 = h;
+
+    int count = 0;
+    for (int y = y0; y < y1; y++) {
+        for (int x = x0; x < x1; x++) {
+            const uint8_t *p = f->px + ((size_t)y * (size_t)w + (size_t)x) * 4;
+            if (p[0] > 200 && p[1] > 200 && p[2] > 200) count++;
+        }
+    }
+    return count;
+}
+
+TEST(a_text_box_shows_a_caret_when_it_has_the_keyboard) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+
+    static char buf[32];
+    float rect[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    gs_frame f = { 0 };
+
+    // **Nothing has the keyboard**: an empty box, so nothing in it is the
+    // colour text is drawn in.
+    buf[0] = '\0';
+    for (int i = 0; i < 4; i++) {
+        gs_frame_free(&f);
+        gs_caret_frame(ren, buf, sizeof buf, false, rect, &f);
+    }
+    int idle = gs_text_coloured_pixels(&f, rect);
+    CHECK(idle == 0);
+
+    // Control: with text in it, the scan must find something. If this finds
+    // nothing the measurement is wrong and everything else here is worthless.
+    SDL_strlcpy(buf, "WWWW", sizeof buf);
+    for (int i = 0; i < 4; i++) {
+        gs_frame_free(&f);
+        gs_caret_frame(ren, buf, sizeof buf, false, rect, &f);
+    }
+    CHECK(gs_text_coloured_pixels(&f, rect) > 0);
+
+    // **Now give it the keyboard.** The ask lands on the first frame and the
+    // caret appears on the next, so several frames go by before looking.
+    buf[0] = '\0';
+    for (int i = 0; i < 6; i++) {
+        gs_frame_free(&f);
+        gs_caret_frame(ren, buf, sizeof buf, i == 0, rect, &f);
+    }
+    int typing = gs_text_coloured_pixels(&f, rect);
+    // The box really did have the keyboard, so a missing caret would be a
+    // missing caret rather than a box that was never focused.
+    CHECK(gs_caret_active);
+
+    // A caret is a short vertical line, so this is a handful of pixels rather
+    // than one - but the fact being pinned is that it is there at all, which is
+    // what somebody staring at a box they cannot see they are typing into is
+    // missing.
+    CHECK(typing > idle);
+    CHECK(typing > 0);
+
+    gs_frame_free(&f);
+}
+
 TEST(the_front_end_is_shut_until_somebody_signs_in) {
     (void)ren;
     static gs_menu m;
@@ -2985,6 +3100,7 @@ int main(void) {
     run_the_store_carries_the_library_too(ren);
     run_an_empty_store_round_trips_rather_than_failing(ren);
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
+    run_a_text_box_shows_a_caret_when_it_has_the_keyboard(ren);
     run_the_front_end_is_shut_until_somebody_signs_in(ren);
     run_a_password_cannot_be_set_to_nothing(ren);
     run_a_password_on_a_profile_is_actually_required(ren);

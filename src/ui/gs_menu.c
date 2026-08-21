@@ -332,6 +332,30 @@ bool gs_menu_sign_in(gs_menu *m, int index, const char *password,
     return true;
 }
 
+// What to call a track on screen. A track is *known* by its hash - that is what
+// makes two copies of the same ground the same track, and it is what a record is
+// filed under - but "4ac9ccc660fae00f" is not a thing anybody can talk about. If
+// the library has this one, its name is used; if it does not, the hash is all
+// there is and is shown short rather than in full.
+static const char *gs_track_label(const gs_menu *m, const gs_track *t) {
+    static char label[GS_LIBRARY_NAME + 24];
+    uint64_t hash = gs_track_hash(t);
+
+    int at = gs_library_find(&m->library, hash);
+    const gs_library_entry *e = at >= 0 ? gs_library_at(&m->library, at) : nullptr;
+    if (e != nullptr && e->name[0] != '\0') {
+        SDL_strlcpy(label, e->name, sizeof label);
+        return label;
+    }
+
+    // Not one of ours: an unnamed track somebody just built, or one that came
+    // from a server. Sixteen hex digits is a fingerprint, not a name, so only
+    // enough of it to tell two apart is shown.
+    SDL_snprintf(label, sizeof label, "unnamed track (%04llx)",
+                 (unsigned long long)(hash & 0xffffu));
+    return label;
+}
+
 static gs_screen gs_login_screen(gs_menu *m) {
     gs_screen next = GS_SCREEN_LOGIN;
     // Tall enough for the roster it actually has, plus the boxes underneath.
@@ -641,42 +665,42 @@ static gs_screen gs_profiles_screen(gs_menu *m) {
     if (ImGui_Begin("Drivers", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                     ImGuiWindowFlags_NoCollapse)) {
-        ImGui_TextUnformatted("Who is playing. A record with a name on it is "
+        // **Your own driver, and nobody else's.** This screen used to list the
+        // whole roster with an edit and a remove beside every row, which meant
+        // signing in as anybody let you rename, repaint and delete everybody -
+        // and a door that lets whoever walks through it edit the other people
+        // on the machine is not much of a door.
+        if (m->signed_in < 0 || m->signed_in >= (int)m->profiles.count) {
+            ImGui_TextUnformatted("Nobody is signed in.");
+            ImGui_Separator();
+            if (ImGui_Button("back")) next = GS_SCREEN_TITLE;
+            ImGui_End();
+            return next;
+        }
+
+        gs_profile *me = &m->profiles.entry[m->signed_in];
+
+        ImGui_TextUnformatted("Your driver. A record with a name on it is "
                               "somebody's record.");
         ImGui_Separator();
 
-        for (uint8_t i = 0; i < m->profiles.count; i++) {
-            gs_profile *p = &m->profiles.entry[i];
-            ImGui_PushIDInt((int)i);
-
-            gs_swatch(p->colour);
-            ImGui_SameLine();
-            ImGui_Text("%-14s %s", p->name, gs_vehicle(p->vehicle)->name);
-            ImGui_SameLine();
-            ImGui_Text("  %u race%s, %u won", p->races, p->races == 1 ? "" : "s",
-                       p->wins);
-
-            ImGui_SameLine();
-            if (ImGui_SmallButton("edit")) {
-                m->editing = (int)i;
-                SDL_strlcpy(m->new_name, p->name, sizeof m->new_name);
-                m->new_colour = p->colour;
-                m->new_vehicle = p->vehicle;
-            }
-            ImGui_SameLine();
-            if (ImGui_SmallButton("remove")) {
-                // Their records stay. A record belongs to the track, and
-                // deleting somebody should not rewrite a track's history.
-                gs_profile_remove(&m->profiles, i);
-                m->store_dirty = true;
-                ImGui_PopID();
-                break;
-            }
-            ImGui_PopID();
-        }
+        gs_swatch(me->colour);
+        ImGui_SameLine();
+        ImGui_Text("%-14s %s", me->name, gs_vehicle(me->vehicle)->name);
+        ImGui_SameLine();
+        ImGui_Text("  %u race%s, %u won", me->races, me->races == 1 ? "" : "s",
+                   me->wins);
 
         ImGui_Separator();
-        ImGui_TextUnformatted(m->editing >= 0 ? "Editing" : "New driver");
+
+        // The fields start on whoever is signed in, so this screen edits them
+        // without anybody having to press an "edit" button first.
+        if (m->editing != m->signed_in) {
+            m->editing = m->signed_in;
+            SDL_strlcpy(m->new_name, me->name, sizeof m->new_name);
+            m->new_colour = me->colour;
+            m->new_vehicle = me->vehicle;
+        }
 
         ImGui_InputText("name", m->new_name, sizeof m->new_name, 0);
 
@@ -706,42 +730,36 @@ static gs_screen gs_profiles_screen(gs_menu *m) {
             ImGui_PopID();
         }
 
-        if (m->editing >= 0) {
-            if (ImGui_Button("save")) {
-                gs_profile *p = &m->profiles.entry[m->editing];
-                SDL_strlcpy(p->name, m->new_name, sizeof p->name);
-                p->colour = m->new_colour;
-                p->vehicle = m->new_vehicle;
-                m->editing = -1;
-                m->new_name[0] = '\0';
-                m->store_dirty = true;
-            }
-            ImGui_SameLine();
-            if (ImGui_Button("cancel")) {
-                m->editing = -1;
-                m->new_name[0] = '\0';
-            }
-        } else {
-            if (ImGui_Button("add")) {
-                int added = gs_profile_add(&m->profiles, m->new_name,
-                                           m->new_colour, m->new_vehicle);
-                if (added < 0) {
+        if (ImGui_Button("save")) {
+            if (m->new_name[0] == '\0') {
+                SDL_snprintf(m->status, sizeof m->status, "a driver needs a name");
+            } else {
+                int clash = gs_profile_find(&m->profiles, m->new_name);
+                if (clash >= 0 && clash != m->signed_in) {
                     SDL_snprintf(m->status, sizeof m->status,
-                                 "that name is taken, empty, or the roster is full");
+                                 "somebody else on this machine is called that");
                 } else {
-                    m->new_name[0] = '\0';
+                    SDL_strlcpy(me->name, m->new_name, sizeof me->name);
+                    me->colour = m->new_colour;
+                    me->vehicle = m->new_vehicle;
                     m->store_dirty = true;
-                    m->status[0] = '\0';
+                    SDL_snprintf(m->status, sizeof m->status, "saved");
                 }
             }
+        }
+        ImGui_SameLine();
+        if (ImGui_Button("undo")) {
+            SDL_strlcpy(m->new_name, me->name, sizeof m->new_name);
+            m->new_colour = me->colour;
+            m->new_vehicle = me->vehicle;
+            m->status[0] = '\0';
         }
 
         // --- the lock on the driver who is signed in ------------------------
         //
         // **Only your own.** Changing somebody else's password from a screen
         // they are not standing at would make the gate decorative.
-        if (m->signed_in >= 0 && m->signed_in < (int)m->profiles.count) {
-            gs_profile *me = &m->profiles.entry[m->signed_in];
+        {
             ImGui_Separator();
             ImGui_Text("%s's password", me->name);
 
@@ -790,7 +808,7 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         // thing being chosen here. Choosing tracks is the library's job and it
         // does not exist yet - see docs/FEATURES.md, the platform section.
         ImGui_BeginChild("track", (ImVec2){ 0.0f, 56.0f }, ImGuiChildFlags_Borders, 0);
-        ImGui_Text("Track %016llx", (unsigned long long)gs_track_hash(t));
+        ImGui_Text("%s", gs_track_label(m, t));
         if (ok) {
             ImGui_PushStyleColorImVec4(ImGuiCol_Text,
                                        ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
@@ -1109,7 +1127,7 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
     if (ImGui_Begin("Records", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                     ImGuiWindowFlags_NoCollapse)) {
-        ImGui_Text("Track %016llx", (unsigned long long)gs_track_hash(t));
+        ImGui_Text("%s", gs_track_label(m, t));
         ImGui_PushStyleColorImVec4(ImGuiCol_Text,
                                    ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
         ImGui_Text("at %.2f x Earth gravity - change it and this is a different table",

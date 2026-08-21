@@ -1103,4 +1103,33 @@ worth as much as what was decided about it.
       *Verification: the hotkeys are skipped while Dear ImGui reports it wants
       the keyboard, and nothing is added to the roster until every field is
       right.*
+- [x] **The caret was invisible in every text box.** *(Found by typing into
+      one.)* Dear ImGui draws the text cursor with its own colour rather than
+      the text colour, and the palette here is a fixed list written before that
+      colour existed — so it kept the default, which the dark inversion then
+      turned black, on a black field. A box you cannot tell you are typing into.
+      *Verification: a test renders an empty box with and without the keyboard
+      and counts the pixels drawn in it; it reproduced the fault first and
+      passes now.*
+- [x] **A second online race was impossible.** *(Found by pressing Play twice.)*
+      The flag saying a race had begun was only ever cleared when somebody
+      cheated, so after one race the online half of the loop stopped running
+      entirely: the lobby froze on what it last heard and nothing ever started
+      again. Nothing noticed while a client went straight into one race and
+      stayed there.
+      *Verification: asking for the lobby again clears it, unless the last race
+      is still being agreed with everybody else.*
+- [x] **Screenshots and demo sessions wrote into the player's roster.** *(Found
+      by somebody having drivers they never made.)* `--screen` and `--session`
+      invent drivers so there is somebody in the picture and somebody in the
+      results, and every such run saved them into the real store. A machine
+      being told what to draw now reads the store and leaves it alone.
+- [x] **The profile screen let you edit everybody.** It listed the whole roster
+      with an edit and a remove on every row, so signing in as anybody let you
+      rename, repaint and delete the other people on the machine. It shows the
+      driver who is signed in, and only them.
+- [x] **Records named a track by its hash.** A track is known by its hash and
+      that is what a record is filed under, but "4ac9ccc660fae00f" is not
+      something anybody can talk about. The library's name for it is used where
+      there is one.
 

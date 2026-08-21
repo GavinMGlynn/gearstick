@@ -32,6 +32,16 @@ static void gs_base_palette(ImGuiStyle *s) {
     ImVec4 *c = s->Colors;
     c[ImGuiCol_Text]                 = (ImVec4){ 0.00f, 0.00f, 0.00f, 1.00f };
     c[ImGuiCol_TextDisabled]         = (ImVec4){ 0.60f, 0.60f, 0.60f, 1.00f };
+    // **The caret has its own colour, and this list did not name it.** Dear
+    // ImGui draws the text cursor with ImGuiCol_InputTextCursor rather than
+    // ImGuiCol_Text, and a colour this palette never sets keeps whatever the
+    // default style left there - white. The inversion below then turns white
+    // into black, which on a dark field is a caret nobody can see: a text box
+    // you cannot tell you are typing into.
+    //
+    // That is the trap in writing a palette as a fixed list: a colour added to
+    // Dear ImGui later is silently inherited and then inverted the wrong way.
+    c[ImGuiCol_InputTextCursor]      = (ImVec4){ 0.00f, 0.00f, 0.00f, 1.00f };
     c[ImGuiCol_WindowBg]             = (ImVec4){ 0.94f, 0.94f, 0.94f, 0.94f };
     c[ImGuiCol_ChildBg]              = (ImVec4){ 0.00f, 0.00f, 0.00f, 0.00f };
     c[ImGuiCol_PopupBg]              = (ImVec4){ 1.00f, 1.00f, 1.00f, 0.94f };
