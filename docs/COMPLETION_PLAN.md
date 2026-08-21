@@ -1193,4 +1193,12 @@ worth as much as what was decided about it.
       *Verification: a session raced end to end and photographed, with the whole
       sentence on it; and the panel test now measures the results screen with
       the note showing, which is the widest that screen gets.*
+- [x] **The construction set's gravity dial was labelled "gravity (x Eart".**
+      *(Found by opening the editor and looking at it.)* The one dial whose
+      units matter had its units cut off at the edge of the palette. Every
+      slider now stops where the longest label starts, that width being asked of
+      the font rather than counted by hand, so they fit however wide the palette
+      has been dragged — and they line up in a column, which was not the point
+      and is better anyway.
+      *Verification: the palette photographed with the whole label on it.*
 

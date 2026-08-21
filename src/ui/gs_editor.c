@@ -230,6 +230,22 @@ static void gs_name_surfaces(void) {
     for (int i = 0; i < GS_SURF_COUNT; i++) gs_surface_names[i] = gs_surfaces[i].name;
 }
 
+// How much room the labels down the right of the palette need, which is the
+// widest of them. Asked of the font rather than counted by hand, so it stays
+// right when the font or the wording changes.
+static float gs_label_column(void) {
+    static const char *labels[] = {
+        "gravity (x Earth)", "air drag", "friction", "damage",
+        "radius", "step (tiles)", "surface", "heading (deg)", "half width",
+    };
+    float widest = 0.0f;
+    for (size_t i = 0; i < sizeof labels / sizeof labels[0]; i++) {
+        float w = ImGui_CalcTextSize(labels[i]).x;
+        if (w > widest) widest = w;
+    }
+    return widest + ImGui_GetStyle()->ItemInnerSpacing.x;
+}
+
 static void gs_editor_palette(gs_editor *e, gs_track *t) {
     // Placed and sized explicitly rather than left to auto-fit. Two reasons,
     // and the second one cost an hour: a tool panel should appear in the same
@@ -244,6 +260,14 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
         ImGui_End();
         return;
     }
+
+    // **Every slider stops where the longest label starts.** ImGui puts a
+    // widget's label to its right and clips whatever does not fit, which is how
+    // the gravity dial came to be labelled "gravity (x Eart" - the one dial
+    // whose units matter, with the units cut off. Reserving the widest label
+    // means every one of them fits, at whatever width this palette has been
+    // dragged to and whatever font it is drawn in.
+    ImGui_PushItemWidth(-gs_label_column());
 
     ImGui_SeparatorText("Brush");
     ImGui_RadioButtonIntPtr("raise", &e->brush, GS_BRUSH_RAISE);
@@ -388,6 +412,7 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     ImGui_Text("%s", e->status);
     ImGui_Text("Tab races it. Arrows pan. Drag to paint.");
 
+    ImGui_PopItemWidth();
     ImGui_End();
 }
 
