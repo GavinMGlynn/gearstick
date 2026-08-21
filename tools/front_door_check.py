@@ -131,16 +131,60 @@ def run_client(game, port, key, screen, env, seconds):
     try:
         racing = reader.wait_for(RACING, seconds)
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        # **Killed rather than asked to leave, on every platform.** terminate()
+        # is a signal the game can act on where signals exist and is
+        # TerminateProcess on Windows, which is not - so a client that says
+        # goodbye on one platform and vanishes on another is a difference
+        # between platforms baked into the harness. This check has already been
+        # bitten once by passing on Linux for a reason it did not have on
+        # Windows; the cure is for both to do the harsher thing.
+        proc.kill()
+        proc.wait(timeout=5)
     return racing, reader.text()
 
 
 def server_log(watching):
     return "\n--- and what the server said ---\n" + watching.text()
+
+
+def start_server(server_bin, store_path, env):
+    """A server, waited for until it announces the key nobody can connect
+    without. Returns it, everything it says, and that key.
+
+    **One each, for the two halves below.** They used to share a server, and
+    that made the second half depend on the first client's seat being free -
+    which it is on the platforms where terminating a process gets it a chance to
+    say goodbye, and is not on Windows, where TerminateProcess does not. A
+    one-slot server then held a dead client's seat for its full timeout, the
+    second client was told the server was full, and a refused client does not
+    knock again by design (see gs_wire_poll). The check failed for a reason that
+    had nothing to do with what it was checking."""
+    port = free_udp_port()
+    proc = subprocess.Popen(
+        [server_bin, "--port", str(port), "--players", "1", "--plain",
+         "--store", store_path],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+    watching = Reader(proc.stdout)
+
+    key = None
+    deadline = time.monotonic() + 30.0
+    while key is None and time.monotonic() < deadline:
+        found = re.search(r"key ([0-9a-f]{64})", watching.text())
+        if found:
+            key = found.group(1)
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    return proc, watching, port, key
+
+
+def stop_server(proc):
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 def main():
@@ -153,63 +197,42 @@ def main():
         store_dir = os.path.join(tmp, "store")
         os.makedirs(store_dir, exist_ok=True)
         env = quiet_env(store_dir)
-        port = free_udp_port()
 
-        server = subprocess.Popen(
-            [server_bin, "--port", str(port), "--players", "1", "--plain",
-             "--store", os.path.join(tmp, "server.db")],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            env=env)
+        halves = [
+            # A client on the menu is not dragged onto the grid by a server
+            # that is ready and waiting.
+            ("title", MENU_SETTLE_SECONDS, False,
+             "a client on the menu was pulled into the race",
+             "the menu did not start a race, correct"),
+            # And one in the lobby is - because "the menu did not race" would
+            # pass just as well if nothing ever raced at all.
+            ("lobby", LOBBY_TIMEOUT_SECONDS, True,
+             "a client waiting in the lobby never got into the race - so the "
+             "check above proves nothing",
+             "the lobby did start a race, correct"),
+        ]
 
-        # Read from here to the end of the run, so the server is never held up
-        # by a pipe that has filled behind it.
-        watching = Reader(server.stdout)
-
-        try:
-            # The server prints its public key on the way up; a client without
-            # it refuses to connect, which is the whole point of IK.
-            key = None
-            deadline = time.monotonic() + 30.0
-            while key is None and time.monotonic() < deadline:
-                found = re.search(r"key ([0-9a-f]{64})", watching.text())
-                if found:
-                    key = found.group(1)
-                    break
-                if server.poll() is not None:
-                    break
-                time.sleep(0.05)
-            if key is None:
-                print("front_door_check: the server never announced a key\n"
-                      + watching.text())
-                return 1
-
-            # --- the menu must not be a way into a race --------------------
-            racing, log = run_client(game_bin, port, key, "title", env,
-                                     MENU_SETTLE_SECONDS)
-            if racing:
-                print("front_door_check: a client on the menu was pulled into "
-                      "the race\n" + log + server_log(watching))
-                return 1
-            print("front_door_check: the menu did not start a race, correct")
-
-            # --- and the lobby must be ------------------------------------
-            racing, log = run_client(game_bin, port, key, "lobby", env,
-                                     LOBBY_TIMEOUT_SECONDS)
-            if not racing:
-                # **Both sides of the conversation**, because which end went
-                # quiet is the first thing anybody reading this will want to
-                # know, and the client's log alone does not say.
-                print("front_door_check: a client waiting in the lobby never "
-                      "got into the race - so the check above proves nothing\n"
-                      + log + server_log(watching))
-                return 1
-            print("front_door_check: the lobby did start a race, correct")
-        finally:
-            server.terminate()
+        for screen, seconds, want_racing, wrong, right in halves:
+            server, watching, port, key = start_server(
+                server_bin, os.path.join(tmp, screen + ".db"), env)
             try:
-                server.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                server.kill()
+                if key is None:
+                    print("front_door_check: the server never announced a "
+                          "key\n" + watching.text())
+                    return 1
+
+                racing, log = run_client(game_bin, port, key, screen, env,
+                                         seconds)
+                if racing != want_racing:
+                    # **Both sides of the conversation**, because which end
+                    # went quiet is the first thing anybody reading this will
+                    # want to know, and the client's log alone does not say.
+                    print("front_door_check: " + wrong + "\n" + log +
+                          server_log(watching))
+                    return 1
+                print("front_door_check: " + right)
+            finally:
+                stop_server(server)
 
     return 0
 

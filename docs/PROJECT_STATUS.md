@@ -2483,6 +2483,45 @@ took the front door check — two real programs, a real socket and a real pipe �
 and it did not so much fail as reveal that one platform had been passing for a
 reason nobody had checked.
 
+### And the same check was red for a second reason underneath it
+
+With the pipe fixed, the Windows front door check failed again — and this time
+the server's log, which the harness had just learned to print, said what
+happened in two lines:
+
+```
+player 0 (tester) joined from 127.0.0.1:53443
+player 0 (tester) left: went quiet
+```
+
+One join, for two clients. The check runs two halves against one server that
+holds a single slot: a client on the menu, which must *not* be pulled into a
+race, and then a client in the lobby, which must be. **On Linux, killing the
+first client gets it a signal it can act on, and it says goodbye on the way
+out**, so its seat is free by the time the second knocks. On Windows,
+`terminate()` is `TerminateProcess`, which is not a signal and cannot be acted
+on: the client vanishes, the server keeps its seat for the full fifteen-second
+timeout, and the second client is told the server is full. A refused client does
+not knock again — that is deliberate, and the reason is in `gs_wire_poll`: a
+full server does not become less full for being asked twice.
+
+So the check was failing for something that had nothing to do with the rule it
+exists to pin, and it was passing on three platforms for a reason it did not
+have on the fourth.
+
+Reproduced on Linux by taking the goodbye away — `kill` instead of `terminate`
+on the first client — which produces the Windows log exactly, down to the "went
+quiet". Two changes fix it, and the second is the more important one:
+
+- **A server each.** The two halves are independent scenarios and had no
+  business sharing a lobby; sharing one made the second half depend on the
+  first's teardown.
+- **Both clients are killed outright, on every platform.** A harness whose
+  teardown is graceful on one platform and abrupt on another has a platform
+  difference baked into it, and this check has now been bitten by exactly that
+  twice in one afternoon. Both ends do the harsher thing, so a pass on Linux
+  means what it says about Windows.
+
 ---
 
 ## What does not exist

@@ -1155,4 +1155,19 @@ worth as much as what was decided about it.
       reads, requires it to stop when it was told to, and requires what it wrote
       to be less than a pipe holds — which the old server fails on every
       platform, including the ones where the fault never showed.*
+- [x] **And the same check was red for a second reason.** *(Found by the server
+      log the fix above taught it to print.)* Both halves of the check shared
+      one server with one seat in it. Killing a process on Windows gives it no
+      chance to say goodbye, so the first client's seat was still held when the
+      second knocked, the second was told the server was full — and a refused
+      client does not knock again, by design. The check was failing for
+      something that had nothing to do with the rule it exists to pin, and
+      passing elsewhere for a reason it did not have on Windows. Each half now
+      gets a server of its own, and both clients are killed outright on every
+      platform rather than being asked politely on some of them.
+      *Verification: killing the first client instead of asking it to leave
+      reproduces the Windows failure on Linux exactly, down to the server's
+      "went quiet"; with a server each it passes with the harsher teardown
+      everywhere, and pointing it at a server that needs two players still fails
+      the second half, with both logs printed.*
 
