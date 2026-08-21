@@ -504,6 +504,14 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
 // as a camera move, fast enough not to be waited on.
 #define GS_MERGE_RATE 1.6f
 
+// **How much of a car's height the camera takes on.** Not all of it: a jump has
+// to move the car up the screen rather than move the world down it, or nobody
+// can see they are airborne - and that gap between car and shadow is the single
+// most readable thing in the frame. Not none of it either, which is what the
+// race camera used to do: on ground that is not at height zero, "none of it"
+// draws the car as far above the middle of the screen as the ground is high.
+#define GS_CAM_FOLLOW_Z 0.35f
+
 void gs_split_init(gs_split *s) {
     *s = (gs_split){ 0 };
     s->merge = 1.0f;      // start together, because a race starts on a grid
@@ -511,8 +519,21 @@ void gs_split_init(gs_split *s) {
 }
 
 // The smallest box holding every active car, and its middle.
-static void gs_car_extent(const gs_world *w, float *cx, float *cy, float *spread) {
+// **How high the camera rides for one car.** The ground it is over, plus a
+// fraction of however far above that ground it has got. Following the ground
+// fully is what keeps a car centred on a track built up in the air; following
+// the air only partly is what makes a jump read as a jump, by letting the car
+// climb the screen away from its own shadow.
+static float gs_cam_height(const gs_track *t, const gs_car *c) {
+    float ground = gs_to_f(gs_track_height(t, c->x, c->y));
+    float z = gs_to_f(c->z);
+    return ground + (z - ground) * GS_CAM_FOLLOW_Z;
+}
+
+static void gs_car_extent(const gs_track *t, const gs_world *w,
+                          float *cx, float *cy, float *cz, float *spread) {
     float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
+    float sumz = 0.0f;
     int seen = 0;
 
     for (uint8_t i = 0; i < w->car_count; i++) {
@@ -522,22 +543,25 @@ static void gs_car_extent(const gs_world *w, float *cx, float *cy, float *spread
         if (x > maxx) maxx = x;
         if (y < miny) miny = y;
         if (y > maxy) maxy = y;
+        sumz += gs_cam_height(t, &w->car[i]);
         seen++;
     }
     if (seen == 0) {
-        *cx = 0; *cy = 0; *spread = 0;
+        *cx = 0; *cy = 0; *cz = 0; *spread = 0;
         return;
     }
     *cx = (minx + maxx) * 0.5f;
     *cy = (miny + maxy) * 0.5f;
+    *cz = sumz / (float)seen;
 
     float dx = maxx - minx, dy = maxy - miny;
     *spread = dx > dy ? dx : dy;
 }
 
-void gs_split_update(gs_split *s, const gs_world *w, int win_w, int win_h, float dt) {
-    float cx, cy, spread;
-    gs_car_extent(w, &cx, &cy, &spread);
+void gs_split_update(gs_split *s, const gs_track *t, const gs_world *w,
+                     int win_w, int win_h, float dt) {
+    float cx, cy, cz, spread;
+    gs_car_extent(t, w, &cx, &cy, &cz, &spread);
 
     // Hysteresis: only the crossing of a threshold changes the answer, and the
     // two thresholds are apart, so a pair of cars swapping places at the
@@ -561,13 +585,25 @@ void gs_split_update(gs_split *s, const gs_world *w, int win_w, int win_h, float
 
     s->shared.cx = cx;
     s->shared.cy = cy;
-    s->shared.cz = 0.0f;
+
+    // **The camera follows height, or the race happens off the top of the
+    // screen.** This was zero, which is right only on ground that happens to
+    // sit at height zero - and the ground under a start line usually does not.
+    // A car eight tiles up is drawn eight tiles up: three hundred and eighty
+    // pixels above the middle of a 720-pixel window, which is a race with no
+    // car in it and a camera that is, technically, exactly where the car is.
+    // Found by a player who raced a served track and saw nothing at all.
+    //
+    // The same partial follow the start-line camera uses, and for the same
+    // reason: losing height entirely makes a jump invisible, following it
+    // entirely makes the ground lurch.
+    s->shared.cz = cz;
     s->shared.zoom = fit;
     s->shared.vw = (float)win_w;
     s->shared.vh = (float)win_h;
 }
 
-uint8_t gs_split_views(const gs_split *s, const gs_world *w,
+uint8_t gs_split_views(const gs_split *s, const gs_track *t, const gs_world *w,
                        int win_w, int win_h, gs_view *out) {
     if (s->merge >= 1.0f || w->car_count <= 1) {
         out[0] = (gs_view){ 0 };
@@ -597,9 +633,10 @@ uint8_t gs_split_views(const gs_split *s, const gs_world *w,
         // so at the instant the divider appears or goes, every pane is already
         // showing what the other arrangement showed.
         float ox = gs_to_f(w->car[i].x), oy = gs_to_f(w->car[i].y);
+        float oz = gs_cam_height(t, &w->car[i]);
         out[i].cam.cx = ox + (s->shared.cx - ox) * eased;
         out[i].cam.cy = oy + (s->shared.cy - oy) * eased;
-        out[i].cam.cz = 0.0f;
+        out[i].cam.cz = oz + (s->shared.cz - oz) * eased;
         out[i].cam.zoom = GS_ISO_DEFAULT_ZOOM +
                           (s->shared.zoom - GS_ISO_DEFAULT_ZOOM) * eased;
         out[i].cam.vw = (float)rects[i].w;
@@ -673,17 +710,15 @@ static gs_car gs_car_lerp(const gs_car *a, const gs_car *b, float alpha) {
     return out;
 }
 
-void gs_render_track_camera(gs_view *view, const gs_world *prev,
-                            const gs_world *now, float alpha) {
+void gs_render_track_camera(gs_view *view, const gs_track *t,
+                            const gs_world *prev, const gs_world *now,
+                            float alpha) {
     if (view->car >= now->car_count) return;
     gs_car c = gs_car_lerp(&prev->car[view->car], &now->car[view->car], alpha);
 
     view->cam.cx = gs_to_f(c.x);
     view->cam.cy = gs_to_f(c.y);
-    // The camera follows height only partly, so a jump moves the car up the
-    // screen instead of moving the world down it. Losing that entirely makes a
-    // jump invisible; following it entirely makes the ground lurch.
-    view->cam.cz = gs_to_f(c.z) * 0.35f;
+    view->cam.cz = gs_cam_height(t, &c);
 }
 
 void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,

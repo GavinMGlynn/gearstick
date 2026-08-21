@@ -532,6 +532,25 @@ if(GEARSTICK_TESTS)
                              TIMEOUT 180 SKIP_RETURN_CODE 77)
     endif()
 
+    # **The game plays itself, and says what it is showing.** Everything that
+    # has gone wrong in front of a player went wrong after the green flag - a
+    # camera pointed elsewhere, controls that did nothing, a race frozen two
+    # seconds in - and none of it is reachable from a unit test or from the
+    # front door check, which stops watching once a race has begun. The client
+    # can drive itself now (--autodrive) and say what is on screen (--trace);
+    # this races it on this machine and against a real server, and makes
+    # assertions out of what it said.
+    if(Python3_FOUND AND GEARSTICK_SERVER AND TARGET gearstick)
+        add_test(NAME gearstick_plays
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/play_check.py
+                         $<TARGET_FILE:gearstick_server>
+                         $<TARGET_FILE:gearstick>
+                         ${CMAKE_CURRENT_SOURCE_DIR}/assets)
+        set_tests_properties(gearstick_plays PROPERTIES
+                             TIMEOUT 240 SKIP_RETURN_CODE 77)
+    endif()
+
     # **A server that stops serving because of its own output.** The dashboard
     # repaints four times a second; into a pipe nobody drains, that fills the
     # buffer and the next printf blocks - and a server blocked in a write

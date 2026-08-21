@@ -185,6 +185,17 @@ void gs_menu_init(gs_menu *m);
 // for showing its records and its name.
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
 
+// **Where "back" goes from here, in one callable place.** Escape is the way out
+// of everything, and what it means depends on where you are and whether this
+// machine is racing other people: an online race backs out to the lobby, where
+// there is a Play to press again, and never to a setup screen that decides a
+// race the server owns. Returning GS_SCREEN_COUNT means there is nothing left
+// to back out to, and the caller should quit.
+//
+// A rule in a key handler is a rule no test can reach, and every fault found by
+// playing this so far has been in code exactly that shape.
+gs_screen gs_menu_back(const gs_menu *m, bool editing);
+
 // **The gate's whole rule, in one callable place.** Sign `index` in if the
 // password and code are what that driver requires. Returns false and leaves
 // `login_error` saying why otherwise.

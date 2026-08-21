@@ -2668,6 +2668,67 @@ where the style says twenty-two, four kilobytes of slack where the data is
 ninety. The other two are what happens when a feature moves and the things that
 depended on where it used to be do not move with it.
 
+### The race with no car in it, and what was built so it cannot happen again
+
+The next race showed the track, the HUD, a clock that ran - and no car anywhere.
+The camera was, in x and y, exactly where the car was.
+
+**The race camera pinned its height to zero.** `gs_split_update` set
+`shared.cz = 0.0f` and the split panes did the same, while the camera that snaps
+to the grid at the start of a race - `gs_render_track_camera` - followed height
+at 0.35. So the first frame was right and every frame after it was wrong, by as
+much as the ground was high: on a track whose start line sits eight tiles up,
+the car is drawn eight tiles up, which at the default zoom is three hundred and
+eighty pixels above the middle of a 720-pixel window. Off the top. On flat
+ground at height zero - the demo track, and every screenshot anybody had ever
+taken - it looked perfect.
+
+The fix is to say what the camera is actually for: **it follows the ground
+fully and the air only partly.** `gs_cam_height` is the ground under a car plus
+`GS_CAM_FOLLOW_Z` of however far above that ground it has got, and all three
+cameras use it. A track built up in the air is centred; a car in a jump climbs
+its own screen away from its shadow, which is the most readable thing in the
+frame and the reason the partial follow existed in the first place. The two
+tests are the two halves of that sentence: every driver can see their own car on
+ground that is not at height zero, for one to four cars, split and merged; and a
+car in the air is higher up its own screen than one on the ground and still on
+it.
+
+**A wrecked car had nowhere to go.** A wreck ends nothing - the race waits for a
+finish that is never coming - so nothing moves the player on, and Escape led to
+the setup screen, which decides a race a server owns. Where "back" goes is now
+`gs_menu_back`, a rule with a test rather than four lines in a key handler that
+no test can reach: out of a race is the setup screen on this machine and the
+lobby when the race is somebody else's, everything else backs out to the title,
+and the title and the door are where leaving belongs. The HUD says `Esc leaves`
+when the car is wrecked, and the panel is sized for that line rather than
+hoping.
+
+**And the thing that stops this happening again.** Every fault found by playing
+this has been in the thirty seconds after the green flag, and nothing was
+looking there: the front door check proves a client gets *into* a race and then
+stops watching. So the client can now be driven and can now report itself:
+
+- `--autodrive` puts the AI at this machine's wheel through the ordinary loop -
+  input, network, camera and all - rather than the session's straight-line
+  simulation, so what is exercised is the client and not the physics that
+  already has tests.
+- `--trace` prints a line a second in key=value: the screen, the tick, which car
+  is this machine's, where it is, how fast, whether it is wrecked, **whether it
+  is on this machine's screen**, where it was drawn, where the camera is, and
+  how many times the rollback has stalled.
+- `--track FILE` opens a particular track, so a check can race ground that is
+  not at height zero.
+
+`tools/play_check.py` races the game twice - on this machine and against a real
+server - and asserts what a person checks in the first five seconds without
+noticing they are checking: a race starts, the clock advances and keeps
+advancing, the car is on screen every single look, it gets somewhere, and
+nothing stalls. Every one of those was false today on a build whose tests were
+all green. Run against the old camera it fails with the whole diagnosis in one
+line: *the car was off the screen on 8 of 17 looks - at tick 0 it was at
+3.00,5.50 drawn at 640,-24 with the camera on 3.00,5.50*.
+
 ---
 
 ## What does not exist

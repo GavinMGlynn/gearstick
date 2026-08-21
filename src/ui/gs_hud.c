@@ -62,6 +62,19 @@ static void gs_hud_damage(const gs_car *c, float width) {
     ImGui_PopStyleColor();
 }
 
+// **A wreck is not the end of the session, and the screen has to say so.** A
+// car that cannot move is in a race that will never finish, so nothing takes
+// the player anywhere and the HUD is the only thing still talking to them.
+// Escape is the way out of a race wherever it is being raced - the setup screen
+// on this machine, the lobby when the race belongs to a server - so that is
+// what this says, without having to be told which it is.
+static void gs_hud_way_out(void) {
+    ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                               ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+    ImGui_TextUnformatted("Esc leaves");
+    ImGui_PopStyleColor();
+}
+
 void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                  uint32_t tick) {
     if (w == nullptr || t == nullptr || v == nullptr) return;
@@ -92,6 +105,10 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                    st->ItemSpacing.y * 12.0f;
     if (c->finish_tick != 0) height += line * (GS_HUD_SMALL + 1.0f) +
                                        st->ItemSpacing.y * 2.0f;
+    // The way out, when there is a wreck to need one. Counted here rather than
+    // hoped for: a panel sized before its contents is how a button ends up half
+    // outside the box it is in.
+    if (c->wrecked) height += line + st->ItemSpacing.y;
 
     ImGui_SetNextWindowSize((ImVec2){ GS_HUD_W, height }, ImGuiCond_Always);
 
@@ -148,6 +165,8 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // eight assumed here, so the bar was twenty-eight pixels wider than the
         // panel it sits in and ran off the edge of it.
         gs_hud_damage(c, ImGui_GetContentRegionAvail().x);
+
+        if (c->wrecked) gs_hud_way_out();
 
         // --- And whether this one is over. A finished car still gets a HUD,
         // because the others are still racing and the screen is still theirs.

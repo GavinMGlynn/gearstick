@@ -1578,6 +1578,30 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     return next;
 }
 
+gs_screen gs_menu_back(const gs_menu *m, bool editing) {
+    // The construction set is a layer over whatever is underneath it, so
+    // closing it is the first thing Escape does and it changes no screen.
+    if (editing) return m->screen;
+
+    switch (m->screen) {
+    case GS_SCREEN_RACE:
+        // **Out of a race, and online that means the lobby.** A wrecked car in
+        // a race that cannot end is otherwise a dead screen with no way off it
+        // - which is what an online player got, because the setup screen this
+        // used to go to decides a race that belongs to the server.
+        return m->online ? GS_SCREEN_LOBBY : GS_SCREEN_SETUP;
+
+    case GS_SCREEN_TITLE:
+        return GS_SCREEN_COUNT;      // nothing behind the title but the door
+
+    case GS_SCREEN_LOGIN:
+        return GS_SCREEN_COUNT;      // and nothing behind the door but leaving
+
+    default:
+        return GS_SCREEN_TITLE;
+    }
+}
+
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {
     // **The gate, enforced once.** Every other screen is unreachable until
     // somebody has signed in, and this is the only place that is decided - a

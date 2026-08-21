@@ -64,12 +64,14 @@ void gs_split_init(gs_split *s);
 
 // Advance the merge state by `dt` seconds. Hysteresis is deliberate: cars
 // hovering at the threshold must not flicker the screen in half.
-void gs_split_update(gs_split *s, const gs_world *w, int win_w, int win_h, float dt);
+void gs_split_update(gs_split *s, const gs_track *t, const gs_world *w,
+                     int win_w, int win_h, float dt);
 
 // Fill in the views to draw. Returns how many - one while merged, one per car
 // otherwise. Cameras are blended by the merge factor, which is what makes the
 // switch continuous rather than sudden.
-uint8_t gs_split_views(const gs_split *s, const gs_world *w,
+uint8_t gs_split_views(const gs_split *s, const gs_track *t,
+                       const gs_world *w,
                        int win_w, int win_h, gs_view *out);
 
 // Where each view goes, for one to four of them, in a window `w` by `h`.
@@ -127,7 +129,8 @@ void gs_render_ghost_lerp(SDL_Renderer *ren, const gs_track *t,
                           const gs_view *view);
 
 // Put the camera where it should be for the car it follows.
-void gs_render_track_camera(gs_view *view, const gs_world *prev,
+void gs_render_track_camera(gs_view *view, const gs_track *t,
+                            const gs_world *prev,
                             const gs_world *now, float alpha);
 
 #endif // GS_RENDER_H

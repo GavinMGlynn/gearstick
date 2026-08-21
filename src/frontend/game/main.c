@@ -115,6 +115,10 @@ typedef struct gs_app {
     int      shot_screen;         // with --screen: which one to show
     bool     want_screen;
     bool     session;             // run setup -> race -> results by itself
+    const char *track_path;       // a track named on the command line
+    bool     trace;               // say what is on screen, once a second
+    bool     autodrive;           // the AI drives this machine's car
+    uint64_t traced_at;           // the tick the last trace line went out on
     bool     demo_library;        // a few tracks, for looking at the screen
     uint32_t    waiting;     // ticks spent stalled, for telling the player
 
@@ -216,7 +220,7 @@ static void gs_start_test_drive(gs_app *a) {
     for (uint8_t i = 0; i < a->views; i++) {
         a->view[i].car = i;
         a->view[i].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
-        gs_render_track_camera(&a->view[i], &a->prev, &a->world, 1.0f);
+        gs_render_track_camera(&a->view[i], &a->t, &a->prev, &a->world, 1.0f);
     }
     gs_layout(a);
 }
@@ -311,7 +315,7 @@ static void gs_start_race(gs_app *a) {
         a->view[i].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
         a->view[i].show_gravity = a->overlay;
         a->view[i].show_arc = a->arc;
-        gs_render_track_camera(&a->view[i], &a->prev, &a->world, 1.0f);
+        gs_render_track_camera(&a->view[i], &a->t, &a->prev, &a->world, 1.0f);
     }
 
     if (a->showroom && a->world.car_count > 0) {
@@ -712,6 +716,23 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->online_name = argv[++i];
         } else if (SDL_strcmp(argv[i], "--demo-library") == 0) {
             a->demo_library = true;
+        } else if (SDL_strcmp(argv[i], "--track") == 0 && i + 1 < argc) {
+            a->track_path = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--trace") == 0) {
+            // **The client says what it is showing.** Every fault found by
+            // playing this so far has been in the thirty seconds after the
+            // green flag - the camera somewhere else, the controls dead, a
+            // wreck with no way out - and none of it is reachable by a test
+            // that cannot see the screen. A line a second, in key=value, is
+            // what makes those things assertions instead of screenshots.
+            a->trace = true;
+        } else if (SDL_strcmp(argv[i], "--autodrive") == 0) {
+            // The AI takes this machine's car through the ordinary loop -
+            // input, network, camera and all - rather than the session's
+            // straight-line simulation. That is what makes a scripted race a
+            // test of the *client* and not of the simulation it already has
+            // tests for.
+            a->autodrive = true;
         } else if (SDL_strcmp(argv[i], "--session") == 0) {
             // A whole session with nobody at the keyboard: the grid from the
             // setup screen, a race driven by the AI, and the results table it
@@ -754,6 +775,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --screen NAME   login/title/drivers/setup/tracks/"
                     "results/records/lobby");
             SDL_Log("  --session       run a whole race by itself and stop on the results");
+        SDL_Log("  --track FILE    open this track rather than the library's first");
+        SDL_Log("  --autodrive     let the AI drive this machine's car");
+        SDL_Log("  --trace         print what is on screen once a second");
             SDL_Log("  --audio-out F   with --shot: write the race as a .wav to listen to");
             SDL_Log("  --zoom N        camera zoom, 1.0 being one tile to 64 px");
             SDL_Log("  --players N     one to four, split-screen to match");
@@ -832,8 +856,33 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // library already held as well.
     gs_load_stock_tracks(a);
 
+    // **A track asked for by name wins over the library's first**, and says so
+    // if it cannot be read rather than quietly racing something else. For
+    // somebody opening a track they were sent, and for a check that needs a
+    // race on ground that is not at height zero - which is where the camera
+    // fault lived, invisible on the flat.
+    if (a->track_path != nullptr) {
+        size_t named_len = 0;
+        void *named_bytes = SDL_LoadFile(a->track_path, &named_len);
+        bool named_ok = false;
+        if (named_bytes != nullptr) {
+            static gs_track named;
+            named_ok = gs_track_deserialize(&named, (const uint8_t *)named_bytes,
+                                            named_len);
+            SDL_free(named_bytes);
+            if (named_ok) {
+                a->t = named;
+                a->menu.chosen = gs_library_find(&a->menu.library,
+                                                 gs_track_hash(&a->t));
+            }
+        }
+        if (!named_ok) SDL_Log("track: could not read %s", a->track_path);
+    }
+
     const gs_track *first = gs_library_track(&a->menu.library, 0);
-    if (first != nullptr) {
+    if (a->track_path != nullptr) {
+        // already chosen above
+    } else if (first != nullptr) {
         a->t = *first;
         a->menu.chosen = 0;
     } else {
@@ -1012,6 +1061,78 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     return SDL_APP_CONTINUE;
 }
 
+// --- what the client is showing -------------------------------------------
+//
+// **A line a second, in words a script can read.** Everything that has gone
+// wrong in front of a player so far went wrong after the green flag: a camera
+// pointed somewhere else, controls that did nothing, a wreck with no way out.
+// None of it is reachable from a unit test, because it is a property of what
+// ended up on the screen - so the client says what ended up on the screen, and
+// tools/play_check.py makes assertions out of it.
+static const char *gs_screen_name(gs_screen s) {
+    switch (s) {
+    case GS_SCREEN_LOGIN:    return "login";
+    case GS_SCREEN_TITLE:    return "title";
+    case GS_SCREEN_PROFILES: return "drivers";
+    case GS_SCREEN_SETUP:    return "setup";
+    case GS_SCREEN_RACE:     return "race";
+    case GS_SCREEN_RESULTS:  return "results";
+    case GS_SCREEN_RECORDS:  return "records";
+    case GS_SCREEN_LOBBY:    return "lobby";
+    case GS_SCREEN_TRACKS:   return "tracks";
+    default:                 return "?";
+    }
+}
+
+static void gs_trace(gs_app *a, uint8_t views) {
+    if (!a->trace) return;
+
+    // Once a second while racing, and on every screen change, which is the
+    // rate a person notices things at.
+    static gs_screen was = GS_SCREEN_COUNT;
+    bool moved = a->menu.screen != was;
+    if (!moved && a->world.tick < a->traced_at + GS_TICK_HZ) return;
+    was = a->menu.screen;
+    a->traced_at = a->world.tick;
+
+    if (a->menu.screen != GS_SCREEN_RACE) {
+        SDL_Log("trace screen=%s tick=%llu", gs_screen_name(a->menu.screen),
+                (unsigned long long)a->world.tick);
+        return;
+    }
+
+    uint8_t me = a->online && a->net_started ? a->net.local : 0;
+    if (me >= a->world.car_count) me = 0;
+    const gs_car *c = &a->world.car[me];
+
+    // The pane this machine's driver is looking at: its own where the screen is
+    // split, and the shared one where it is not.
+    const gs_view *v = &a->view[0];
+    for (uint8_t i = 0; i < views; i++) {
+        if (a->view[i].car == me) { v = &a->view[i]; break; }
+    }
+
+    // **Is the car this machine drives actually on this machine's screen?**
+    // That is the whole question a player asks first, and the one nothing was
+    // asking: a camera left at the world origin draws a perfectly good race
+    // that has no car in it.
+    float sx = 0.0f, sy = 0.0f;
+    gs_iso_project(&v->cam, gs_to_f(c->x), gs_to_f(c->y), gs_to_f(c->z), &sx, &sy);
+    bool on = sx >= 0.0f && sx < v->cam.vw && sy >= 0.0f && sy < v->cam.vh;
+
+    float speed = gs_to_f(gs_fix_len2(c->vx, c->vy));
+
+    SDL_Log("trace screen=race tick=%llu cars=%u me=%u x=%.2f y=%.2f "
+            "speed=%.2f wrecked=%u onscreen=%u sx=%.0f sy=%.0f "
+            "cam=%.2f,%.2f zoom=%.2f lap=%u/%u over=%u stalls=%u",
+            (unsigned long long)a->world.tick, a->world.car_count, me,
+            (double)gs_to_f(c->x), (double)gs_to_f(c->y), (double)speed,
+            c->wrecked ? 1u : 0u, on ? 1u : 0u, (double)sx, (double)sy,
+            (double)v->cam.cx, (double)v->cam.cy, (double)v->cam.zoom,
+            c->laps, a->world.laps_to_win, a->world.over ? 1u : 0u,
+            a->online ? a->net.stalls : 0u);
+}
+
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
     gs_app *a = (gs_app *)appstate;
 
@@ -1037,14 +1158,29 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
             // Back out one step rather than always quitting: quitting from a
             // race because you wanted the menu is the oldest bad habit in
             // games, and the title screen is where quitting belongs.
+            //
+            // **Where back goes is gs_menu_back's to say**, not this handler's,
+            // so that it is a rule with a test rather than four lines nothing
+            // can reach. A machine driving itself - a shot, a session, the
+            // showroom - has no front end to back out to and quits.
             if (a->editor.active) {
                 gs_editor_toggle(&a->editor, &a->view[0]);
-            } else if (a->menu.screen == GS_SCREEN_RACE && !a->skip_menu) {
-                a->menu.screen = GS_SCREEN_SETUP;
-            } else if (a->menu.screen != GS_SCREEN_TITLE && !a->skip_menu) {
-                a->menu.screen = GS_SCREEN_TITLE;
-            } else {
+            } else if (a->skip_menu) {
                 return SDL_APP_SUCCESS;
+            } else {
+                gs_screen back = gs_menu_back(&a->menu, false);
+                if (back == GS_SCREEN_COUNT) return SDL_APP_SUCCESS;
+
+                // Leaving an online race is leaving the race: the lobby is
+                // where it can be joined again, and it is only ready to be
+                // rejoined once this machine has stopped racing.
+                if (a->menu.screen == GS_SCREEN_RACE && a->online &&
+                    a->net_started && !a->net_settling) {
+                    gs_net_finish(&a->net);
+                    a->net_started = false;
+                    a->race_settled = false;
+                }
+                a->menu.screen = back;
             }
         }
         if (e->key.key == SDLK_G) {
@@ -1164,7 +1300,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             // be advanced alongside the simulation rather than only at the end.
             int ww = 0, wh = 0;
             SDL_GetRenderOutputSize(a->ren, &ww, &wh);
-            gs_split_update(&a->split, &a->world, ww, wh, 1.0f / (float)GS_TICK_HZ);
+            gs_split_update(&a->split, &a->t, &a->world, ww, wh, 1.0f / (float)GS_TICK_HZ);
         }
     }
 
@@ -1303,6 +1439,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
             gs_input in[GS_MAX_CARS];
             gs_input_poll(&a->input, in, 1);
+            if (a->autodrive) {
+                in[0] = gs_ai_drive(&a->world, &a->t, a->net.local);
+            }
             gs_net_local_input(&a->net, in[0]);
 
             n = gs_net_packet(&a->net, buf, sizeof buf);
@@ -1335,6 +1474,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     for (uint32_t i = 0; i < steps; i++) {
         gs_input in[GS_MAX_CARS];
         gs_input_poll(&a->input, in, a->world.car_count);
+        if (a->autodrive) {
+            for (uint8_t c = 0; c < a->world.car_count; c++) {
+                in[c] = gs_ai_drive(&a->world, &a->t, c);
+            }
+        }
 
         a->prev = a->world;
         gs_replay_record(&a->recording, in);
@@ -1443,10 +1587,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (!a->editor.active && !a->showroom && a->menu.screen == GS_SCREEN_RACE) {
         int ww = 0, wh = 0;
         SDL_GetRenderOutputSize(a->ren, &ww, &wh);
-        gs_split_update(&a->split, &a->world, ww, wh, (float)delta / 1e9f);
+        gs_split_update(&a->split, &a->t, &a->world, ww, wh, (float)delta / 1e9f);
 
         gs_view merged[GS_MAX_CARS];
-        views = gs_split_views(&a->split, &a->world, ww, wh, merged);
+        views = gs_split_views(&a->split, &a->t, &a->world, ww, wh, merged);
         for (uint8_t i = 0; i < views; i++) {
             merged[i].show_gravity = a->view[i].show_gravity;
             merged[i].show_arc = a->arc;
@@ -1455,6 +1599,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             a->view[i] = merged[i];
         }
     }
+
+    gs_trace(a, views);
 
     for (uint8_t i = 0; i < views; i++) {
         gs_render_view(a->ren, &a->t, &a->prev, &a->world, alpha, &a->view[i]);
@@ -1575,7 +1721,16 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     ImGui_Render();
     cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), a->ren);
 
-    if (a->shot_path != nullptr) {
+    // **An online capture waits for the race, rather than stepping it.** The
+    // block above counts ticks out by hand, which is right for a race this
+    // machine owns and wrong for one it does not: an online world is replaced
+    // every tick by what the rollback agreed, so a locally stepped one is a
+    // picture of a race nobody else is in. Online, the frame loop does the
+    // racing and the capture waits for the tick it was asked for.
+    bool waiting_for_tick = a->online && a->net_started &&
+                            a->world.tick < a->shot_at;
+
+    if (a->shot_path != nullptr && !waiting_for_tick) {
         SDL_Surface *s = SDL_RenderReadPixels(a->ren, nullptr);
         if (s == nullptr || !SDL_SaveBMP(s, a->shot_path)) {
             SDL_Log("could not write %s: %s", a->shot_path, SDL_GetError());

@@ -1242,4 +1242,33 @@ worth as much as what was decided about it.
       *Verification: a rendered frame with none of the bar's colour in the last
       few pixels before the frame and plenty of it inside, so the check cannot
       pass by there being no bar at all.*
+- [x] **A race with no car in it.** *(Found by playing it: track, HUD, running
+      clock, no car.)* The race camera held its height at zero while the camera
+      that sets you on the grid follows it, so on a track whose start line is
+      eight tiles up the car was drawn eight tiles up — off the top of the
+      window, with the camera otherwise exactly where the car was. On flat
+      ground at height zero, which is every picture anyone had taken, it looked
+      perfect. The camera follows the ground fully and the air only partly now,
+      which is what it was always meant to mean.
+      *Verification: every driver can see their own car on ground that is not at
+      height zero, for one to four cars, split screen and merged — and a car in
+      the air is higher up its own screen than one on the ground and still on
+      it, so the fix cannot be "follow everything" and lose the jump.*
+- [x] **A wrecked car had no way out.** A wreck ends nothing, so nothing moved
+      you on, and the one key that means "out" went to a setup screen that
+      decides a race a server owns. Where back goes is a rule with a test now,
+      and the HUD says `Esc leaves` when you are wrecked.
+      *Verification: out of a race is the setup screen on this machine and the
+      lobby when the race is somebody else's; everything else backs out to the
+      title; the title and the door are where leaving belongs.*
+- [x] **The game can play itself, and say what it is showing.** Every fault
+      found by playing this was in the thirty seconds after the green flag, and
+      nothing was looking there. The AI can take this machine's wheel
+      (`--autodrive`), the client reports what is on screen once a second
+      (`--trace`), and a track can be opened by name (`--track`).
+      *Verification: `tools/play_check.py` races on this machine and against a
+      real server and asserts what a person checks in the first five seconds — a
+      race starts, the clock keeps advancing, the car is on screen every look,
+      it gets somewhere, nothing stalls. Against the old camera it fails with
+      the diagnosis in one line.*
 
