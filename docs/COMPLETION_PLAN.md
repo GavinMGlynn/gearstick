@@ -1138,4 +1138,21 @@ worth as much as what was decided about it.
       *Verification: a name that is not on the roster and a name with the wrong
       password are refused with the identical message, so the box cannot be
       asked who is on this machine one guess at a time.*
+- [x] **A server whose output nobody was reading stopped serving.** *(Found by
+      Windows CI, where the front door check had never passed.)* The server
+      draws a dashboard four times a second; sent into a pipe nobody is
+      draining, that fills the buffer and the next line blocks the server inside
+      a write, where it answers no knock and sends no track. A Windows pipe
+      holds about one second of dashboard and a Linux one about sixteen, which
+      is the whole reason one platform failed and three passed. The dashboard is
+      now for a terminal; anything else gets a log — the lines that mark events,
+      and one a minute saying the server is still here. Its output is also
+      unbuffered now, because the key line a client cannot connect without had
+      only ever escaped its buffer on the back of the flood.
+      *Verification: leaving the pipe unread for twenty-five seconds before
+      joining reproduces the Windows failure on Linux, and does not once fixed;
+      and a new check runs the server with its output going into a pipe nobody
+      reads, requires it to stop when it was told to, and requires what it wrote
+      to be less than a pipe holds — which the old server fails on every
+      platform, including the ones where the fault never showed.*
 

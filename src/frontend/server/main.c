@@ -30,6 +30,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Only to ask whether stdout is a terminal. There is no portable spelling of
+// that question, and the answer decides whether this writes a dashboard or a
+// log - see gs_stdout_is_terminal.
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #define GS_DEFAULT_PORT 47800
 
 // Silence for this long and a client is gone. Generous, because a client that
@@ -44,6 +53,11 @@ static uint32_t gs_timeout_ms = GS_TIMEOUT_MS;
 // How often the view is redrawn. Four times a second is fast enough to feel
 // live and slow enough that a terminal over ssh is not the bottleneck.
 #define GS_DRAW_MS 250
+
+// And how often a server whose output is not a terminal says it is still here.
+// A minute apart, so an hour of running is sixty short lines rather than
+// fourteen thousand copies of a table.
+#define GS_HEARTBEAT_MS 60000
 
 // How often the server asks each client how far away it is. The client cannot
 // tell the server this - only the end that sent a ping can time its own reply -
@@ -143,7 +157,8 @@ static struct {
     uint8_t  peak;
 
     bool quit;
-    bool plain;                // no ANSI, for a log file or a dumb terminal
+    bool plain;                // no ANSI, for a dumb terminal
+    bool tty;                  // stdout is a terminal, so there is a dashboard
 
     // Uploads in progress, one per client, and the track this lobby races on. **The server hands it out**, so
     // everybody races the same ground - which is the one thing rollback cannot
@@ -478,6 +493,39 @@ static void gs_bytes_text(char *out, size_t cap, uint64_t n) {
     if (n < 1024ull) SDL_snprintf(out, cap, "%llu B", (unsigned long long)n);
     else if (n < 1024ull * 1024ull) SDL_snprintf(out, cap, "%.1f KB", (double)n / 1024.0);
     else SDL_snprintf(out, cap, "%.1f MB", (double)n / (1024.0 * 1024.0));
+}
+
+// **Is anybody watching?** The dashboard repaints four times a second, which is
+// what a person at a terminal wants and is a trap for everything else: written
+// into a pipe nobody is draining it fills the buffer, and then the server
+// blocks inside printf and stops answering the network. It stops being a server
+// because of its own output. A pipe on Windows holds four kilobytes by default,
+// which is about one second of dashboard - which is why a client on Windows
+// could never join a server whose output was being captured, and why the same
+// server on Linux worked for the sixteen seconds it took to fill a bigger pipe.
+//
+// So the dashboard is for a terminal, and anything else gets a log: the lines
+// that mark events, and one line a minute saying the server is still here.
+static bool gs_stdout_is_terminal(void) {
+#ifdef _WIN32
+    return _isatty(_fileno(stdout)) != 0;
+#else
+    // STDOUT_FILENO rather than fileno(stdout), which a strict -std=c2x does
+    // not declare without asking for POSIX by name.
+    return isatty(STDOUT_FILENO) != 0;
+#endif
+}
+
+// The whole dashboard in one line, for a log. Everything a person scrolling
+// back would want to know about a moment: how long it has been up, who is on
+// it, and whether anything is moving.
+static void gs_heartbeat(uint64_t now) {
+    uint64_t up = (now - gs_srv.started_ms) / 1000u;
+    SDL_Log("up %llu:%02llu:%02llu, %u of %u here, %u datagram(s) in, %u out",
+            (unsigned long long)(up / 3600u),
+            (unsigned long long)((up / 60u) % 60u),
+            (unsigned long long)(up % 60u), gs_present(), gs_srv.capacity,
+            gs_srv.total_in, gs_srv.total_out);
 }
 
 static void gs_draw(uint64_t now) {
@@ -1283,7 +1331,10 @@ static void gs_usage(void) {
            GS_PROTO_MAX_PLAYERS, GS_PROTO_MAX_PLAYERS);
     printf("  --track FILE   the track this lobby races on\n");
     printf("  --store FILE   where to remember drivers, records and tracks\n");
-    printf("  --plain        no cursor control, for a log file\n");
+    printf("  --plain        no cursor control, for a dumb terminal.\n");
+    printf("                 The dashboard is only drawn to a terminal at "
+           "all; anything\n");
+    printf("                 else - a pipe, a file - gets the log instead.\n");
     printf("  --timeout N    drop a client after N ms of silence (default %u)\n",
            GS_TIMEOUT_MS);
     printf("  --key HEX      this server's 32-byte secret, as 64 hex "
@@ -1295,6 +1346,16 @@ static void gs_usage(void) {
 }
 
 int main(int argc, char **argv) {
+    // **Unbuffered, because somebody is reading this while it runs.** stdout to
+    // a pipe or a file is fully buffered by default, so the key line - which
+    // nobody can connect without - would sit in a four-kilobyte buffer until
+    // the server exited. It was only ever visible because the dashboard used to
+    // flood that buffer several times a second, which is the same flood that
+    // could block the server; fixing one uncovered the other. Windows makes
+    // this the only answer of the three: setvbuf there treats line buffering as
+    // full buffering, so _IONBF is what actually reaches a reader.
+    (void)setvbuf(stdout, nullptr, _IONBF, 0);
+
     uint16_t port = GS_DEFAULT_PORT;
     uint8_t players = GS_PROTO_MAX_PLAYERS;
     uint32_t seconds = 0;
@@ -1456,6 +1517,12 @@ int main(int argc, char **argv) {
     SDL_Log("gearstick server listening on port %u for up to %u players",
             port, players);
 
+    gs_srv.tty = gs_stdout_is_terminal();
+    if (!gs_srv.tty) {
+        SDL_Log("this output is not a terminal, so there is no dashboard - "
+                "a line a minute says the server is still here");
+    }
+
     uint64_t last_draw = 0;
     while (!gs_srv.quit) {
         uint64_t now = SDL_GetTicks();
@@ -1492,8 +1559,15 @@ int main(int argc, char **argv) {
             }
         }
 
-        if (now - last_draw >= GS_DRAW_MS) {
-            gs_draw(now);
+        // **A terminal gets the dashboard; anything else gets a log.** Drawn
+        // on a timer into a pipe nobody reads, the dashboard is what stops
+        // this server serving - see gs_stdout_is_terminal.
+        if (now - last_draw >= (gs_srv.tty ? GS_DRAW_MS : GS_HEARTBEAT_MS)) {
+            if (gs_srv.tty) {
+                gs_draw(now);
+            } else {
+                gs_heartbeat(now);
+            }
             last_draw = now;
         }
 

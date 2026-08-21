@@ -532,6 +532,20 @@ if(GEARSTICK_TESTS)
                              TIMEOUT 180 SKIP_RETURN_CODE 77)
     endif()
 
+    # **A server that stops serving because of its own output.** The dashboard
+    # repaints four times a second; into a pipe nobody drains, that fills the
+    # buffer and the next printf blocks - and a server blocked in a write
+    # answers nothing. Windows pipes hold four kilobytes, about a second of it,
+    # which is why the front door check above failed there and nowhere else.
+    if(Python3_FOUND AND GEARSTICK_SERVER)
+        add_test(NAME gearstick_server_output
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/server_output_check.py
+                         $<TARGET_FILE:gearstick_server>)
+        set_tests_properties(gearstick_server_output PROPERTIES
+                             TIMEOUT 120 SKIP_RETURN_CODE 77)
+    endif()
+
     if(Python3_FOUND)
         add_test(NAME gearstick_noise_interop
                  COMMAND ${Python3_EXECUTABLE}

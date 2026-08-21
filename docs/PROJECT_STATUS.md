@@ -2407,6 +2407,82 @@ The lesson worth keeping is about where the gap was: the rule that decides
 whether somebody is in a race was in the one file the test suite structurally
 cannot link, and nothing noticed until a person pressed the button.
 
+### A server that stopped serving because of its own output
+
+The front door check went green on Linux, Rocky and macOS and red on Windows,
+every time, from the commit that introduced it. The client's log was three
+startup lines and then thirty seconds of nothing: it announced the server it was
+meeting, printed the assets directory and the track hash, and never heard back.
+
+The server was blocked inside `printf`.
+
+`gs_draw` repaints a dashboard four times a second — six hundred bytes of table
+— and the check ran the server with its output on a pipe, read it until the key
+line and then never read it again. A pipe holds what a pipe holds; once it was
+full the next write blocked, and a server blocked in a write is not draining its
+socket, not answering a knock and not sending a track. It had stopped being a
+server on account of its own output.
+
+The platform split is the pipe size and nothing else. **Windows `CreatePipe`
+takes a four-kilobyte default buffer, which is about one second of dashboard;
+Linux gives a pipe 64 KB, which is sixteen seconds.** The check spends its first
+eight seconds proving that a client on the *menu* does not get pulled into a
+race, and then has its lobby client join at about the nine-second mark — inside
+the sixteen, outside the one. The Linux pass was luck with a stopwatch on it.
+
+It reproduces on Linux by taking the luck away: leave the pipe unread for
+twenty-five seconds and then join, and the client sits there exactly as it did
+on Windows, with the same three lines and nothing after them. With the fix in,
+the same run gets `net: 1 players, driving car 0`.
+
+**The dashboard is now for a terminal, and everything else gets a log.**
+`isatty` on stdout decides which: a terminal gets the four-a-second repaint, and
+a pipe or a file gets the event lines it was already writing plus one line a
+minute saying how long the server has been up and who is on it. Sixty bytes a
+minute cannot fill a pipe this decade, and a log of what happened is what
+somebody redirecting a server's output wanted in the first place — nobody has
+ever wanted fourteen thousand copies of a table. `--plain` keeps its old meaning
+of "no cursor control", which is now only about dumb terminals.
+
+Fixing that uncovered a second fault underneath it, which is the reason the
+first one was ever survivable: **stdout is fully buffered when it is not a
+terminal**, so the `key` line — the one a client cannot connect without, because
+IK means the client has to know who it is talking to — was sitting in a
+four-kilobyte buffer. It had only ever been visible because the dashboard was
+flooding that buffer several times a second. Take the flood away and the key
+never arrives; the check hung waiting for it. So stdout is unbuffered from the
+first line of `main`. `setvbuf` with `_IOLBF` would do on Unix and would not on
+Windows, where the runtime treats line buffering as full buffering, so `_IONBF`
+is the only spelling that reaches a reader everywhere.
+
+The check that pins it is `tools/server_output_check.py`, and it states the rule
+in the units that caused the bug. It runs the server with `--seconds 5` and its
+output going into a pipe nobody reads, requires it to stop when it was told to —
+blocked in a write it would never reach its own clock — and then requires what
+it wrote in that time to be **less than a pipe holds**, taking 4096 bytes as the
+smallest buffer any of the three platforms gives us. The old server writes about
+11,800 bytes in those five seconds and fails it on every platform, including the
+ones where the fault was invisible; the new one writes 572. There is a third
+assertion, that the key was announced at all, because "wrote almost nothing" is
+also what a server that never started looks like.
+
+`tools/front_door_check.py` now reads the server's output the whole way through
+on a thread of its own, and prints **both** logs when a half fails. The server
+no longer writes enough to fill a pipe, so the drain is belt and braces — but a
+harness that leaves a child's pipe unread is a trap set for whoever writes the
+next one, and the missing server log is why this took an afternoon rather than
+ten minutes: the client's log says only that nobody answered, which is equally
+what a broken client, a broken server and a blocked server look like. The same
+change took out `os.set_blocking`, which only learned about pipes on Windows in
+Python 3.12; a blocking read on a thread behaves the same everywhere.
+
+The lesson worth keeping: **the tripwire that found this was a test of something
+else entirely.** No unit test can catch a server that blocks on its own stdout,
+because a unit test does not run the server as a process with a pipe on it. It
+took the front door check — two real programs, a real socket and a real pipe —
+and it did not so much fail as reveal that one platform had been passing for a
+reason nobody had checked.
+
 ---
 
 ## What does not exist
