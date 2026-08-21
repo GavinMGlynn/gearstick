@@ -2919,6 +2919,41 @@ TEST(the_front_end_is_shut_until_somebody_signs_in) {
     CHECK(!gs_menu_sign_in(&m, -1, "x", ""));
 }
 
+TEST(a_wrong_name_and_a_wrong_password_are_refused_identically) {
+    (void)ren;
+    static gs_menu m;
+    gs_menu_init(&m);
+    CHECK(gs_profile_add(&m.profiles, "gavin", GS_COLOUR_RED,
+                         (uint8_t)GS_VEH_BAJA_BUG) == 0);
+    CHECK(gs_menu_set_password(&m, 0, "correct horse", "correct horse"));
+
+    // **The screen lists nobody, so the refusals must not either.** If a name
+    // that exists failed differently from one that does not, the login box
+    // would answer "who is on this machine" one guess at a time - which is the
+    // question the list used to answer for free.
+    char no_such[sizeof m.login_error];
+    char wrong_pw[sizeof m.login_error];
+
+    CHECK(!gs_menu_sign_in_named(&m, "nobody", "correct horse", ""));
+    SDL_strlcpy(no_such, m.login_error, sizeof no_such);
+
+    CHECK(!gs_menu_sign_in_named(&m, "gavin", "wrong", ""));
+    SDL_strlcpy(wrong_pw, m.login_error, sizeof wrong_pw);
+
+    CHECK(no_such[0] != '\0');
+    CHECK(strcmp(no_such, wrong_pw) == 0);
+    CHECK(m.signed_in == -1);
+
+    // An empty name is refused the same way rather than matching anybody.
+    CHECK(!gs_menu_sign_in_named(&m, "", "", ""));
+    CHECK(strcmp(m.login_error, no_such) == 0);
+
+    // And the right pair gets in.
+    CHECK(gs_menu_sign_in_named(&m, "gavin", "correct horse", ""));
+    CHECK(m.signed_in == 0);
+    CHECK(strcmp(gs_menu_driver(&m), "gavin") == 0);
+}
+
 TEST(a_password_cannot_be_set_to_nothing) {
     (void)ren;
     static gs_menu m;
@@ -3102,6 +3137,7 @@ int main(void) {
     run_a_track_goes_out_through_the_clipboard_and_comes_back_the_same(ren);
     run_a_text_box_shows_a_caret_when_it_has_the_keyboard(ren);
     run_the_front_end_is_shut_until_somebody_signs_in(ren);
+    run_a_wrong_name_and_a_wrong_password_are_refused_identically(ren);
     run_a_password_cannot_be_set_to_nothing(ren);
     run_a_password_on_a_profile_is_actually_required(ren);
     run_a_second_factor_is_asked_for_when_the_profile_has_one(ren);

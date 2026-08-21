@@ -18,7 +18,9 @@ turning behind it — that is a real track, not a picture of one.
 
 **2. Say who you are.** The first time there is nobody here, so press **NEW
 DRIVER**, type a name, choose a password and type it twice, then press
-**CREATE**. **Tab** moves between the boxes. Every driver has a password; if you
+**CREATE**. Afterwards you sign in by typing that name and password — the screen
+does not list who is on the machine, on purpose. **Tab** moves between the
+boxes. Every driver has a password; if you
 have been playing since before the game had one, your driver is offered a
 password the first time you sign in rather than being locked out. Then press
 **SIGN IN**.

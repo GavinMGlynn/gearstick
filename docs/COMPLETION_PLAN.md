@@ -1132,4 +1132,10 @@ worth as much as what was decided about it.
       that is what a record is filed under, but "4ac9ccc660fae00f" is not
       something anybody can talk about. The library's name for it is used where
       there is one.
+- [x] **The login screen listed everybody on the machine.** A list of drivers
+      answers "who is here" to whoever sits down, which is half of what a
+      password protects. The name is typed now, alongside the password.
+      *Verification: a name that is not on the roster and a name with the wrong
+      password are refused with the identical message, so the box cannot be
+      asked who is on this machine one guess at a time.*
 

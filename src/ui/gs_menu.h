@@ -112,7 +112,10 @@ typedef struct gs_menu {
     char login_confirm[64];
     char login_code[8];             // the six digits, when a second factor is set
     char login_error[112];
+    char login_name[GS_PROFILE_NAME];
     bool login_making;              // the "new driver" fields are showing
+    bool login_wants_code;          // the password was right and a code is due
+    bool login_setting;             // an older driver is choosing a password
     bool focus_form;                // put the caret in the first box next frame
 
     // **Handed to the frontend exactly once, to prove the same name at a
@@ -181,6 +184,13 @@ gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
 // can only be exercised by clicking is a rule nothing checks.
 bool gs_menu_sign_in(gs_menu *m, int index, const char *password,
                      const char *code);
+
+// Sign in by name, the way somebody at the keyboard does it. **A name that is
+// not on the roster and a name with the wrong password fail identically** - the
+// screen never lists who is on this machine, and it must not answer the same
+// question one guess at a time either.
+bool gs_menu_sign_in_named(gs_menu *m, const char *name, const char *password,
+                           const char *code);
 
 // Put a password on a driver. `again` must match, and neither may be empty.
 // This is how a driver from an older roster gets one, and how somebody changes
