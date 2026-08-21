@@ -1201,4 +1201,45 @@ worth as much as what was decided about it.
       has been dragged — and they line up in a column, which was not the point
       and is better anyway.
       *Verification: the palette photographed with the whole label on it.*
+- [x] **Nothing anybody did was ever saved.** *(Found by playing it: the log
+      said it could not write the store, and gave no reason because there was
+      none to give.)* The game held room for the roster, the records and four
+      kilobytes of everything else — and everything else is the track library,
+      which is four kilobytes for one track and ninety for the twenty-two that
+      ship. So every save was refused, on every machine, from the day the
+      library joined the store, and the message blamed the disk. It asks how big
+      the store is now, and the two ways of failing say different things.
+      *Verification: a store with a library of shipped tracks in it is saved and
+      read back whole, every track by name and identity — and a buffer that does
+      not fit is refused rather than half-written, because a store with three of
+      somebody's four tracks in it is worse than one that failed loudly.*
+- [x] **A race with nobody else in it froze after two seconds.** *(Found by
+      racing on a server of your own.)* The rollback only ever agreed a tick
+      when somebody else's packet arrived, and in a one-player race nobody
+      writes in — so nothing was ever agreed, and after one window of ticks the
+      race stopped dead with the controls doing nothing. Two and an eighth
+      seconds, every time. A machine now agrees what it already knows on its
+      own.
+      *Verification: three windows of solo racing with no stall, producing the
+      same world a machine with no network at all would have; and a race with
+      company still waits for the other machine, which the test that pins that
+      has always checked.*
+- [x] **An online race was built from your own setup screen.** *(Found in the
+      same race: two cars on a one-player server.)* When the front door was
+      built, online players started going through the front end — and the race
+      went on being built the way a menu-less client built it, which after that
+      change meant reading the local setup screen. On a one-seat server that
+      invented a second car, and the ghost of it on the start line is what
+      dragged the camera off your own; in a real two-player race the two
+      machines would build different worlds, which is the one thing rollback
+      cannot recover from. An online race is the server's race again.
+      *Verification: the client says the grid it built as the race starts, and
+      the front door check refuses a race whose grid is not the size the server
+      said — which the old code fails.*
+- [x] **The condition bar ran into the edge of the HUD.** It was drawn to a
+      padding somebody wrote down, and the style pads a window by nearly three
+      times that, so the bar ended hard against the frame with no margin.
+      *Verification: a rendered frame with none of the bar's colour in the last
+      few pixels before the frame and plenty of it inside, so the check cannot
+      pass by there being no bar at all.*
 

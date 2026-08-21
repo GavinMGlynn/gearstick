@@ -242,7 +242,18 @@ static void gs_start_race(gs_app *a) {
             gs_world_add_car(&a->world, &a->t, which,
                              GS_INT(8) + GS_INT(2) * v, GS_INT(12), GS_DEG(30));
         }
-    } else if (a->skip_menu) {
+    } else if (a->skip_menu || a->online) {
+        // **An online race is the server's race, not this machine's.** The grid
+        // is as many cars as the server said are playing, on the stock
+        // machines, with the world's own dials - because every machine has to
+        // build the identical world and the only thing they all agree about is
+        // what the server told them. Reading the setup screen here is what a
+        // client did for one afternoon after the front door was built, and it
+        // put two cars on a one-player server's grid: the phantom sat on the
+        // start line, the camera framed the pair of them, and in a real
+        // two-player race the two machines would have built different worlds
+        // from their own screens - which is the one thing rollback cannot
+        // recover from.
         for (uint8_t i = 0; i < players; i++) {
             gs_fix sx, sy; gs_angle facing;
             gs_track_grid(&a->t, i, &sx, &sy, &facing);
@@ -447,12 +458,36 @@ static void gs_store_save(gs_app *a) {
     char path[1024];
     if (!gs_store_path(path, sizeof path)) return;
 
-    static uint8_t buf[sizeof(gs_profiles) + sizeof(gs_records) + 4096];
-    size_t n = gs_menu_save(&a->menu, buf, sizeof buf);
-    if (n == 0 || !SDL_SaveFile(path, buf, n)) {
-        SDL_Log("store: could not write %s: %s", path, SDL_GetError());
+    // **As many bytes as this store takes, asked rather than guessed.** What
+    // was here was the roster, the records and four kilobytes of slack for
+    // everything else - and "everything else" is the library, which is four
+    // kilobytes for *one* track and ninety for the twenty-two that ship. So
+    // gs_menu_save refused every time it was called, on every machine, and
+    // nothing anybody did in the front end was ever written down. The message
+    // below blamed the disk, which is why it went unnoticed for so long: it
+    // printed SDL's last error, and SDL had not been asked to do anything yet.
+    size_t cap = gs_menu_size(&a->menu);
+    uint8_t *buf = (uint8_t *)SDL_malloc(cap);
+    if (buf == nullptr) {
+        SDL_Log("store: no room to build %zu bytes of store", cap);
         return;
     }
+
+    size_t n = gs_menu_save(&a->menu, buf, cap);
+    if (n == 0) {
+        SDL_Log("store: could not build the store - %zu bytes was not enough "
+                "for %u driver(s), %u record(s) and %u track(s)",
+                cap, a->menu.profiles.count, a->menu.records.count,
+                a->menu.library.count);
+        SDL_free(buf);
+        return;
+    }
+    if (!SDL_SaveFile(path, buf, n)) {
+        SDL_Log("store: could not write %s: %s", path, SDL_GetError());
+        SDL_free(buf);
+        return;
+    }
+    SDL_free(buf);
     a->menu.store_dirty = false;
 }
 
@@ -1023,7 +1058,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
             a->arc = !a->arc;
             for (uint8_t i = 0; i < a->views; i++) a->view[i].show_arc = a->arc;
         }
-        if (e->key.key == SDLK_R) gs_start_race(a);
+        // Restarting is not one machine's to decide when the race is shared:
+        // everybody else would carry on racing the world this one threw away.
+        if (e->key.key == SDLK_R && !a->online) gs_start_race(a);
         if (e->key.key == SDLK_H) a->show_ghost = !a->show_ghost;
         if (e->key.key == SDLK_M) {
             if (gs_music_playing()) gs_music_stop();
@@ -1236,7 +1273,13 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             a->net_settle_frames = 0;
             a->net_started = true;
             a->menu.screen = GS_SCREEN_RACE;
-            SDL_Log("net: %u players, driving car %u", a->net.players, a->net.local);
+            // **The grid is said out loud**, because "one player" and "two
+            // cars" is what a race built from the wrong place looks like, and
+            // it is the difference between a race and a desync waiting to
+            // happen. tools/front_door_check.py reads this line and refuses a
+            // race whose grid is not the size the server said.
+            SDL_Log("net: %u players, driving car %u, %u car(s) on the grid",
+                    a->net.players, a->net.local, a->world.car_count);
         }
         steps = 0;
     }

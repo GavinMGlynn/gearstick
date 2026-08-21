@@ -2588,6 +2588,86 @@ of each of them, and the window's own margin. Nothing there needs re-tuning when
 the font changes. The same string the column is measured from is the string that
 gets drawn, so the two cannot drift apart.
 
+### And the construction set's gravity dial was labelled "gravity (x Eart"
+
+The third of the same kind, in the other half of the product. Dear ImGui puts a
+widget's label to its right and clips whatever does not fit, and the palette is
+340 pixels wide by default - so the one dial whose units matter had its units
+cut off. Every slider in the palette now stops where the longest label starts,
+that width being asked of the font across all nine of them, so they fit at
+whatever width somebody has dragged the palette to. They also line up in a
+column now, which was not the point and is an improvement anyway.
+
+**All three are the same mistake**: a width decided by hand, and text measured by
+eye against it. The cure in each case is to ask the font how wide the words are
+and let the layout follow, which stays true when the words change.
+
+### Four things found by playing it against a real server
+
+A player signed in, pressed PLAY, and got a race that froze after two seconds
+with the controls dead. Four faults, three of them serious, and no test in the
+tree would have found any of them.
+
+**Nothing anybody did had ever been saved.** The client's log carried
+`store: could not write .../gearstick.store:` with an empty reason after it, over
+and over, and the disk was fine. `gs_store_save` sized its buffer as the roster,
+the records and four kilobytes of slack - and the slack has to hold the
+*library*, which is about four kilobytes for one track and ninety for the
+twenty-two that ship. So `gs_menu_save` refused every time it was called, on
+every machine, from the moment the library joined the store. The message blamed
+the disk because it printed `SDL_GetError()` on a path where SDL had not been
+asked to do anything: the "could not build it" case and the "could not write it"
+case shared one line. The frontend now asks `gs_menu_size` how many bytes this
+store takes and holds exactly that, and the two failures say different things.
+`a_store_with_tracks_in_it_is_saved_whole` builds its library out of the tracks
+that ship - a track built in a loop is flat, compresses to nothing and would fit
+in any buffer, which would have made the test pass while saying nothing - and
+pins both halves: a buffer that does not fit is refused rather than
+half-written, and the size that is asked for is enough.
+
+**A race with nobody else in it froze after 2.12 seconds.**
+`gs_advance_confirmed` was called from `gs_net_receive` and nowhere else, so
+confirmation depended on somebody writing in. In a one-player race nobody ever
+does: nothing was confirmed, the 256-tick window filled, and the stall that
+means "the other machine has gone quiet" fired forever at a race that had no
+other machine in it. Tick 255 at 120 Hz is 2.125 seconds, which is the number
+the HUD was stuck on in the screenshot. `gs_net_step` now confirms what this
+machine already knows, which walks forward only over ticks whose inputs are
+*all* known - so a race with company still waits for the other machine's reveal,
+and `a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing` still
+passes. `a_race_with_nobody_else_in_it_never_stalls` drives three windows solo
+and fails on the first one without the fix.
+
+**An online race was built from the local setup screen.** Before the front door
+existed an online client skipped the menu, so `gs_start_race` took its
+`skip_menu` branch and built the grid from the wire. Phase 16 sent online
+clients through the front end and nothing moved the race-building with them, so
+the setup branch ran instead: the car count, the machines, the paint, the
+gravity, the laps and the mode all came from *this machine's* setup screen. On a
+one-seat server that put two cars on the grid, and the phantom sitting on the
+start line is what pulled the camera off the player's own car. In a real
+two-player race it is worse than untidy: two machines would build different
+worlds from their own screens, which is the one thing rollback cannot recover
+from. An online race is the server's race again - as many cars as the server
+says are playing, on the stock machines, with the world's own dials. The client
+now says the grid it built as the race begins, and `tools/front_door_check.py`
+refuses a race whose grid is not the size the server said; on the old code it
+fails with "the server said 1 player(s) and this client built 2 car(s)".
+
+**The condition bar ran into the edge of the HUD.** It was drawn `GS_HUD_W - 16`
+wide - eight pixels of padding a side - and the HUD is drawn in the menu's
+style, which pads a window by twenty-two. Nothing was drawn outside the panel,
+because ImGui clips; what happened is that the bar ran up to the frame and sat
+against it with no margin. It asks for the content region it is in now. The test
+counts the bar's green in the last ten pixels before the frame, where finding
+any is the fault.
+
+Two of the four are the morning's mistake again - **a number written down by
+hand about something that is measured somewhere else**: eight pixels of padding
+where the style says twenty-two, four kilobytes of slack where the data is
+ninety. The other two are what happens when a feature moves and the things that
+depended on where it used to be do not move with it.
+
 ---
 
 ## What does not exist

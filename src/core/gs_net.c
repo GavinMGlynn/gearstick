@@ -101,6 +101,9 @@ void gs_net_finish(gs_net *n) {
     n->flush_wait = GS_NET_COMMITS * 4u;
 }
 
+// Defined below, next to the receiving it used to be the only part of.
+static void gs_advance_confirmed(gs_net *n, const gs_track *t);
+
 bool gs_net_step(gs_net *n, const gs_track *t) {
     // Somebody has been caught breaking a promise. There is no honest reading
     // of what follows, so the race does not carry on and find out.
@@ -121,6 +124,20 @@ bool gs_net_step(gs_net *n, const gs_track *t) {
 
     gs_world_step(&n->current, t, in);
     n->local_tick++;
+
+    // **What this machine already knows is confirmed here, not only when
+    // somebody writes in.** Confirmation used to happen in gs_net_receive
+    // alone, which is fine while there is somebody to receive from and is a
+    // trap when there is not: a race with one car in it never hears a datagram,
+    // so nothing was ever confirmed, and after a windowful of ticks the stall
+    // above fired and the race froze - at tick 255, two and an eighth seconds
+    // in, with the controls dead and no way out. A player on a server of their
+    // own found it in the first race they drove.
+    //
+    // It costs nothing in a race with company: this walks forward only over
+    // ticks whose inputs are all known, which for two machines still means
+    // waiting for the other one's reveal.
+    gs_advance_confirmed(n, t);
     return true;
 }
 

@@ -80,6 +80,12 @@ void gs_menu_init(gs_menu *m) {
 #define GS_STORE_MAGIC   0x54535347u   // "GSST"
 #define GS_STORE_VERSION 2u
 
+// The header, and then each of the three parts at whatever they serialise to.
+size_t gs_menu_size(const gs_menu *m) {
+    return 16 + gs_profiles_size(&m->profiles) + gs_records_size(&m->records) +
+           gs_library_size(&m->library);
+}
+
 size_t gs_menu_save(const gs_menu *m, uint8_t *buf, size_t cap) {
     size_t head = 16;
     if (cap < head) return 0;

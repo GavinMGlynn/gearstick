@@ -46,6 +46,14 @@ LOBBY_TIMEOUT_SECONDS = 30.0
 
 RACING = "driving car"
 
+# The line the client prints as a race begins:
+#   net: 1 players, driving car 0, 1 car(s) on the grid
+# The grid has to be the size the server said, or this machine has built a
+# different world from everybody else's - which is the one thing rollback cannot
+# recover from. It is checked here because it takes a real server to say how
+# many players there are.
+GRID = re.compile(r"net: (\d+) players, driving car (\d+), (\d+) car")
+
 
 def free_udp_port():
     """A port nothing is on. Bound and released, which is racy in principle and
@@ -223,6 +231,28 @@ def main():
 
                 racing, log = run_client(game_bin, port, key, screen, env,
                                          seconds)
+
+                # **What it built, when it did race.** A grid that is not the
+                # size the server said means this machine invented part of the
+                # race - it built two cars for a one-player server once, from
+                # its own setup screen - and two machines that invent
+                # differently are a desync from the first tick.
+                if racing:
+                    grid = GRID.search(log)
+                    if grid is None:
+                        print("front_door_check: the client raced without "
+                              "saying what grid it built\n" + log)
+                        return 1
+                    players, local, cars = (int(g) for g in grid.groups())
+                    if cars != players or local >= players:
+                        print(f"front_door_check: the server said {players} "
+                              f"player(s) and this client built {cars} car(s), "
+                              f"driving car {local}\n" + log +
+                              server_log(watching))
+                        return 1
+                    print(f"front_door_check: {players} player(s), "
+                          f"{cars} car(s) on the grid, correct")
+
                 if racing != want_racing:
                     # **Both sides of the conversation**, because which end
                     # went quiet is the first thing anybody reading this will

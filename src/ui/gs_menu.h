@@ -237,6 +237,14 @@ void gs_time_text(char *out, size_t cap, uint32_t ticks);
 
 // Load and save. The frontend owns the disk, so these take bytes rather than
 // paths - and both of them are how "remembered between executions" happens.
+// **How many bytes a store of this menu takes**, so that a caller can hold
+// exactly that many and never the wrong number. The frontend used to guess -
+// the roster, the records and four kilobytes of slack - and a library of
+// twenty-two tracks is nearer ninety, so `gs_menu_save` refused every time and
+// nothing anybody did was ever saved. A number the same code works out is not a
+// guess that can go stale.
+size_t gs_menu_size(const gs_menu *m);
+
 size_t gs_menu_save(const gs_menu *m, uint8_t *buf, size_t cap);
 bool   gs_menu_load(gs_menu *m, const uint8_t *buf, size_t len);
 

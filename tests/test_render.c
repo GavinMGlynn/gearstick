@@ -2011,6 +2011,88 @@ TEST(the_store_remembers_drivers_and_records_between_runs) {
     CHECK(!gs_menu_load(&back, buf, n));
 }
 
+TEST(a_store_with_tracks_in_it_is_saved_whole) {
+    (void)ren;
+
+    // **The library is the big half of a store and was the half nobody sized
+    // for.** One track serialises to about four kilobytes, the twenty-two that
+    // ship to about ninety, and the frontend held the roster, the records and
+    // four kilobytes of slack - so every save refused and nothing anybody did
+    // was ever written down. It looked like a disk problem in the log, because
+    // the message printed SDL's last error and SDL had not been asked to do
+    // anything.
+    gs_menu_init(&gs_m);
+    CHECK(gs_profile_add(&gs_m.profiles, "ada", GS_COLOUR_ORANGE,
+                         (uint8_t)GS_VEH_BAJA_BUG) == 0);
+
+    // **Tracks that ship, not tracks made of nothing.** A flat track built in
+    // a loop compresses to almost nothing and would fit in any buffer, which
+    // would make this pass while saying nothing at all. These are the real
+    // files, each copy nudged by one corner so that it is its own track.
+    const char *assets = gs_assets_dir();
+    CHECK(assets != nullptr);
+    if (assets == nullptr) return;
+
+    static const char *const shipped[] = {
+        "first-light", "the-long-drop", "ice-house", "jupiter-run",
+    };
+
+    static gs_track t;
+    for (int i = 0; i < GS_LIBRARY_MAX; i++) {
+        char path[1024];
+        SDL_snprintf(path, sizeof path, "%s/tracks/%s.gstrack", assets,
+                     shipped[(size_t)i % SDL_arraysize(shipped)]);
+        size_t len = 0;
+        void *bytes = SDL_LoadFile(path, &len);
+        CHECK(bytes != nullptr);
+        if (bytes == nullptr) return;
+        CHECK(gs_track_deserialize(&t, (const uint8_t *)bytes, len));
+        SDL_free(bytes);
+
+        t.corner[i] = (int16_t)(t.corner[i] + 1);
+        char name[GS_LIBRARY_NAME];
+        SDL_snprintf(name, sizeof name, "track number %d", i + 1);
+        CHECK(gs_library_put(&gs_m.library, &t, name, "ada") >= 0);
+    }
+    CHECK(gs_m.library.count == GS_LIBRARY_MAX);
+
+    // What the old guess was: everything except the thing that takes the room.
+    // It has to be refused rather than half-written - a store with three of
+    // somebody's four tracks in it is worse than one that failed loudly.
+    static uint8_t guessed[sizeof(gs_profiles) + sizeof(gs_records) + 4096];
+    CHECK(gs_menu_size(&gs_m) > sizeof guessed);
+    CHECK(gs_menu_save(&gs_m, guessed, sizeof guessed) == 0);
+
+    // And what the size says, which is the number the frontend now asks for.
+    size_t cap = gs_menu_size(&gs_m);
+    uint8_t *buf = (uint8_t *)SDL_malloc(cap);
+    CHECK(buf != nullptr);
+    if (buf == nullptr) return;
+
+    size_t n = gs_menu_save(&gs_m, buf, cap);
+    CHECK(n > 0);
+    CHECK(n <= cap);
+
+    static gs_menu back;
+    gs_menu_init(&back);
+    CHECK(gs_menu_load(&back, buf, n));
+    CHECK(back.library.count == GS_LIBRARY_MAX);
+    CHECK(back.profiles.count == 1);
+
+    // Every track by name and by identity, because a library that comes back
+    // with four entries and the wrong tracks in them would pass a count.
+    for (int i = 0; i < GS_LIBRARY_MAX; i++) {
+        const gs_library_entry *was = gs_library_at(&gs_m.library, i);
+        const gs_library_entry *now = gs_library_at(&back.library, i);
+        CHECK(was != nullptr && now != nullptr);
+        if (was == nullptr || now == nullptr) continue;
+        CHECK(was->hash == now->hash);
+        CHECK(SDL_strcmp(was->name, now->name) == 0);
+    }
+
+    SDL_free(buf);
+}
+
 TEST(the_stock_tracks_ship_and_are_worth_racing) {
     (void)ren;
 
@@ -2766,6 +2848,65 @@ TEST(the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed) {
     gs_frame_free(&passed);
 }
 
+// The damage bar's green, which nothing in the scene shares: bright green, and
+// far more green than red or blue.
+static int gs_count_bar(const gs_frame *f, int from_x, int to_x) {
+    if (f->px == nullptr) return -1;
+    int n = 0;
+    for (int y = 0; y < GS_HUD_BOX_H && y < GS_H; y++) {
+        for (int x = from_x; x < to_x && x < GS_W; x++) {
+            const uint8_t *px = &f->px[((size_t)y * (size_t)GS_W + (size_t)x) * 4];
+            if (px[1] > 150 && px[0] < 150 && px[2] < 120 &&
+                px[1] > px[0] + 60 && px[1] > px[2] + 60) {
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
+TEST(the_condition_bar_stays_inside_the_hud) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    // **Found by looking at a race.** The bar was drawn at the window's width
+    // less a padding of eight, and the style the HUD is drawn in pads a window
+    // by twenty-two - so it was twenty-eight pixels wider than the panel and
+    // ran off the right-hand edge of it.
+    static gs_track t;
+    gs_flat_pavement(&t, 24, 12);
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(6), GS_INT(6), 0);
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    gs_render_track_camera(&v, &w, &w, 1.0f);
+
+    gs_frame f = { 0 };
+    for (int i = 0; i < 3; i++) {
+        gs_frame_free(&f);
+        gs_hud_frame(ren, &t, &w, &v, &f);
+    }
+
+    // The panel starts GS_HUD_PAD from the edge and is GS_HUD_W wide. Inside
+    // it there is a bar - the control, without which "nothing at the edge"
+    // would be true of a HUD that drew no bar at all.
+    CHECK(gs_count_bar(&f, 0, 10 + 132) > 40);
+
+    // **And it stops short of the frame.** Nothing is ever drawn outside an
+    // ImGui window - it clips - so what a too-wide bar actually does is run
+    // into the panel's own edge and sit there with no margin, which is what it
+    // looked like. The last few pixels before the frame must be background.
+    CHECK(gs_count_bar(&f, 10 + 132 - 10, 10 + 132) == 0);
+
+    gs_frame_free(&f);
+}
+
 // One frame containing a single empty text box. `focus` asks for the keyboard
 // on this frame; the caret only appears the frame *after* that, which is the
 // whole reason this is a loop rather than one call. The box's rectangle comes
@@ -3291,6 +3432,8 @@ int main(void) {
     run_the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
+    run_a_store_with_tracks_in_it_is_saved_whole(ren);
+    run_the_condition_bar_stays_inside_the_hud(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

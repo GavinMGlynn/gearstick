@@ -2767,6 +2767,57 @@ TEST(two_machines_race_to_the_same_finish_over_a_bad_connection) {
     CHECK(a.confirmed.car[0].x > GS_INT(20));
 }
 
+TEST(a_race_with_nobody_else_in_it_never_stalls) {
+    // **Found by playing it.** A player on a server of their own drove one
+    // race, and two and an eighth seconds in - tick 255, one window - it froze
+    // with the controls dead. Confirmation only ever happened when a datagram
+    // arrived, and a race with one car in it never hears one, so nothing was
+    // confirmed, the window filled, and the stall that is meant to say "the
+    // other machine has gone quiet" fired forever at a race that had no other
+    // machine in it.
+    static gs_track t;
+    gs_world w;
+    gs_net_scene(&t, &w);
+
+    static gs_net solo;
+    gs_net_begin(&solo, &w, 1, 0, gs_test_secret(0));
+
+    // Three windows and a bit, so this fails at the first one if the fault
+    // comes back and does not pass by not getting that far.
+    uint32_t ticks = GS_NET_WINDOW * 3u + 17u;
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        gs_net_local_input(&solo, gs_net_drive(0, tick));
+
+        // A packet is still built and thrown away, exactly as the frontend
+        // does it: a race with nobody in it still talks, and if building the
+        // packet were what confirmed a tick this test would be measuring the
+        // wrong thing.
+        uint8_t buf[GS_LINK_MTU];
+        (void)gs_net_packet(&solo, buf, sizeof buf);
+
+        CHECK(gs_net_step(&solo, &t));
+        if (solo.stalls > 0) break;
+    }
+
+    CHECK(solo.stalls == 0);
+    CHECK(solo.local_tick == ticks);
+
+    // And the confirmed state keeps up with what is being driven, because it is
+    // the only thing that can: there is nobody else's input to wait for.
+    CHECK(solo.confirmed_tick == ticks);
+
+    // The race it produced is the race one machine with no network would have
+    // driven, which is the claim that makes a solo online race worth having.
+    gs_world alone;
+    gs_net_scene(&t, &alone);
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        in[0] = gs_net_drive(0, tick);
+        gs_world_step(&alone, &t, in);
+    }
+    CHECK(gs_world_hash(&alone) == gs_world_hash(&solo.confirmed));
+}
+
 TEST(four_machines_race_to_the_same_finish_over_a_bad_connection) {
     // Four players is what this game is for, and four players is a different
     // problem from two: every machine is guessing about *three* other people at
@@ -6177,6 +6228,7 @@ int main(void) {
     run_a_four_player_race_produces_a_log_that_re_races_to_the_ending_they_agreed_on();
     run_a_recording_carries_its_agreed_ending_across_a_serialise();
     run_a_machine_that_goes_quiet_stalls_the_race_rather_than_desyncing();
+    run_a_race_with_nobody_else_in_it_never_stalls();
     run_a_desync_is_noticed_rather_than_lived_with();
     run_the_same_inputs_produce_the_same_world_every_time();
     run_the_clock_delivers_the_same_ticks_however_the_time_is_chopped_up();

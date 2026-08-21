@@ -142,7 +142,12 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
 
         // --- What is left of the car.
         ImGui_Spacing();
-        gs_hud_damage(c, GS_HUD_W - 2.0f * 8.0f);
+        // **As wide as the room there is**, not as wide as the window less a
+        // padding somebody wrote down once. The HUD is drawn in the menu's
+        // style, whose window padding is twenty-two a side rather than the
+        // eight assumed here, so the bar was twenty-eight pixels wider than the
+        // panel it sits in and ran off the edge of it.
+        gs_hud_damage(c, ImGui_GetContentRegionAvail().x);
 
         // --- And whether this one is over. A finished car still gets a HUD,
         // because the others are still racing and the screen is still theirs.
