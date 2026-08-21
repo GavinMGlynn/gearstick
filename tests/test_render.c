@@ -3060,6 +3060,141 @@ TEST(a_second_factor_is_asked_for_when_the_profile_has_one) {
     CHECK(m.signed_in == 0);
 }
 
+// Every front-end screen, drawn once, with what its panel came out as.
+//
+// Three frames rather than one: ImGui settles a window's size and its scroll on
+// the frame after it first sees it, and a measurement taken on the first frame
+// is a measurement of a window that has not finished existing.
+static gs_panel_report gs_panel_of(SDL_Renderer *ren, gs_menu *m,
+                                   const gs_track *t, gs_screen screen) {
+    for (int i = 0; i < 3; i++) {
+        cImGui_ImplSDLRenderer3_NewFrame();
+        cImGui_ImplSDL3_NewFrame();
+        ImGui_NewFrame();
+
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+        SDL_RenderClear(ren);
+
+        // Held on the screen being measured: gs_menu_frame hands back where to
+        // go next, and a screen that decided to move on would be measured
+        // somewhere else.
+        m->screen = screen;
+        (void)gs_menu_frame(m, t);
+
+        ImGui_Render();
+        cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), ren);
+    }
+    return m->panel;
+}
+
+// A menu with enough in it that every screen has something to draw: a driver
+// signed in, a full library, a finished race and a lobby with people in it.
+// A screen measured with nothing in it is a screen measured at its smallest,
+// which is not the size anything goes wrong at.
+static gs_lobby gs_panel_lobby;
+
+static void gs_panel_menu(gs_menu *m, gs_track *t) {
+    gs_menu_init(m);
+    CHECK(gs_profile_add(&m->profiles, "gavin", GS_COLOUR_RED,
+                         (uint8_t)GS_VEH_BAJA_BUG) == 0);
+    CHECK(gs_menu_set_password(m, 0, "a good one", "a good one"));
+    CHECK(gs_menu_sign_in(m, 0, "a good one", ""));
+
+    // A full library, because the library is the thing that grows. Each track
+    // differs by one corner so that each one hashes differently and the library
+    // keeps all of them rather than folding them into one entry.
+    for (int i = 0; i < GS_LIBRARY_MAX; i++) {
+        gs_track_init(t, 32, 32, GS_SURF_PAVEMENT);
+        t->corner[i] = (int16_t)(i + 1);
+        char name[GS_LIBRARY_NAME];
+        SDL_snprintf(name, sizeof name, "track number %d", i + 1);
+        CHECK(gs_library_put(&m->library, t, name, "somebody") >= 0);
+    }
+    CHECK(m->library.count == GS_LIBRARY_MAX);
+    gs_track_init(t, 32, 32, GS_SURF_PAVEMENT);
+
+    // A finished race for the results screen, and a lobby for the lobby.
+    m->result_count = GS_MAX_CARS;
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        m->result[i].car = i;
+        m->result[i].place = (uint8_t)(i + 1);
+        m->result[i].finish_tick = 60u * 120u;
+        m->result[i].best_lap = 20u * 120u;
+        m->result[i].laps = 3;
+    }
+    gs_panel_lobby = (gs_lobby){ 0 };
+    gs_panel_lobby.count = GS_PROTO_MAX_PLAYERS;
+    gs_panel_lobby.capacity = GS_PROTO_MAX_PLAYERS;
+    for (int i = 0; i < GS_PROTO_MAX_PLAYERS; i++) {
+        SDL_snprintf(gs_panel_lobby.player[i].name,
+                     sizeof gs_panel_lobby.player[i].name, "player %d", i);
+        gs_panel_lobby.player[i].slot = (uint8_t)i;
+        gs_panel_lobby.player[i].present = true;
+    }
+    m->lobby = &gs_panel_lobby;
+    m->track_progress = 0.5f;
+}
+
+static const gs_screen gs_every_screen[] = {
+    GS_SCREEN_LOGIN, GS_SCREEN_TITLE, GS_SCREEN_PROFILES, GS_SCREEN_SETUP,
+    GS_SCREEN_RESULTS, GS_SCREEN_RECORDS, GS_SCREEN_LOBBY, GS_SCREEN_TRACKS,
+};
+
+TEST(no_screen_is_drawn_bigger_than_the_window_it_is_in) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    static gs_menu m;
+    static gs_track t;
+    gs_panel_menu(&m, &t);
+
+    // **The window the game opens at.** These panels cannot be moved, resized
+    // or collapsed, so a panel taller than the window is a panel whose top rows
+    // are off the top edge with no way to reach them - which is what a library
+    // of thirty-two tracks did to the one screen you choose a track on.
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+        gs_panel_report p = gs_panel_of(ren, &m, &t, gs_every_screen[i]);
+        // The measurement itself is worth checking: a zero-sized panel would
+        // pass everything below without a screen having been drawn at all.
+        CHECK(p.w > 100.0f);
+        CHECK(p.h > 100.0f);
+        CHECK(p.view_w >= 1280.0f);
+
+        CHECK(p.x >= 0.0f);
+        CHECK(p.y >= 0.0f);
+        CHECK(p.x + p.w <= p.view_w + 1.0f);
+        CHECK(p.y + p.h <= p.view_h + 1.0f);
+
+        // And at the size the game opens at, nothing is below the fold: a
+        // button half outside the bottom of its own panel is the other half of
+        // this fault, and it is what a screen grown one control at a time
+        // eventually does.
+        CHECK(p.hidden == 0.0f);
+    }
+
+    // Half that window, which is what somebody dragging a corner gets. The
+    // panels no longer fit, and the rule that still has to hold is that they
+    // are inside the window: what does not fit scrolls, rather than being drawn
+    // where the mouse cannot go.
+    CHECK(SDL_SetWindowSize(gs_win, GS_W, GS_H));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, GS_W, GS_H,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+        gs_panel_report p = gs_panel_of(ren, &m, &t, gs_every_screen[i]);
+        CHECK(p.w > 100.0f);
+        CHECK(p.x >= 0.0f);
+        CHECK(p.y >= 0.0f);
+        CHECK(p.x + p.w <= p.view_w + 1.0f);
+        CHECK(p.y + p.h <= p.view_h + 1.0f);
+    }
+}
+
 TEST(exit_is_something_the_menu_asks_for_rather_than_does) {
     (void)ren;
     static gs_menu m;
@@ -3150,6 +3285,7 @@ int main(void) {
     run_the_hud_says_what_lap_it_is_and_changes_when_the_lap_does(ren);
     run_the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
+    run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

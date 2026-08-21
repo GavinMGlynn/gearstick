@@ -43,6 +43,13 @@ typedef enum gs_screen {
 
 // What the setup screen has been told to do. Handed to the frontend, which
 // builds the world from it - so the menu never touches gs_world itself.
+// What a screen's panel came out as, measured as it was drawn.
+typedef struct gs_panel_report {
+    float x, y, w, h;   // the panel on screen, in pixels
+    float view_w, view_h;   // and the window it had to fit inside
+    float hidden;       // content below the fold: how far it can be scrolled
+} gs_panel_report;
+
 typedef struct gs_race_setup {
     uint8_t  players;               // 1 to GS_MAX_CARS
     int8_t   profile[GS_MAX_CARS];  // index into the roster, or -1 for a guest
@@ -161,6 +168,14 @@ typedef struct gs_menu {
     int  take;                      // handed to the frontend, then cleared
     char track_name[GS_LIBRARY_NAME];
     int  name_for;                  // which entry track_name is showing
+
+    // **Where the panel drawn last frame ended up, and how much of it was out
+    // of sight.** Written by every screen on its way out. A panel taller than
+    // the window puts its own first row above the top edge, where a window that
+    // cannot be moved or resized leaves it unreachable - and that is not
+    // something a screenshot test notices, because the screenshot looks fine.
+    // It is something a number can say.
+    gs_panel_report panel;
 } gs_menu;
 
 void gs_menu_init(gs_menu *m);

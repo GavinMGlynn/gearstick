@@ -208,13 +208,48 @@ static bool gs_go_button(const char *label, float w, float h) {
 // afternoon once already, on the editor's palette. The screens with tables in
 // them compute their height from the number of rows instead, which gets the
 // same result and can be captured.
+// How much of the window a panel leaves alone on each side, when it is big
+// enough to want all of it.
+#define GS_PANEL_MARGIN 8.0f
+
 static void gs_centre_window(const char *title, float w, float h) {
     ImGuiViewport *vp = ImGui_GetMainViewport();
+
+    // **Never bigger than the window it is in.** These panels cannot be moved,
+    // resized or collapsed, so a panel taller than the window is centred with
+    // its own first rows above the top edge and no way to reach them - which is
+    // what a library of thirty-two tracks did to the screen you choose a track
+    // on. Clamped, what does not fit scrolls instead, which is reachable.
+    // The margin is so a panel that only just fits does not sit edge to edge
+    // with the window, which reads as a drawing mistake.
+    float most_w = vp->WorkSize.x - GS_PANEL_MARGIN * 2.0f;
+    float most_h = vp->WorkSize.y - GS_PANEL_MARGIN * 2.0f;
+    if (w > most_w) w = most_w;
+    if (h > most_h) h = most_h;
+
     ImGui_SetNextWindowPosEx((ImVec2){ vp->WorkPos.x + vp->WorkSize.x * 0.5f,
                                        vp->WorkPos.y + vp->WorkSize.y * 0.5f },
                              ImGuiCond_Always, (ImVec2){ 0.5f, 0.5f });
     ImGui_SetNextWindowSize((ImVec2){ w, h }, ImGuiCond_Always);
     (void)title;
+}
+
+// **What the panel came out as**, noted on the way out of every screen.
+//
+// A panel is centred at a size its screen worked out, and a size worked out by
+// hand goes stale the moment somebody adds a button to the screen: the panel
+// stays the height it was and the last thing in it is drawn half outside. Worse
+// is a panel taller than the window, which puts its own first row *above* the
+// top edge - and these windows cannot be moved or resized, so what is up there
+// is unreachable rather than merely ugly. Neither shows up in a screenshot
+// test, because both screenshots look like a panel. They show up here.
+static void gs_panel_measure(gs_menu *m) {
+    ImGuiViewport *vp = ImGui_GetMainViewport();
+    ImVec2 pos = ImGui_GetWindowPos();
+    ImVec2 size = ImGui_GetWindowSize();
+    m->panel = (gs_panel_report){ pos.x, pos.y, size.x, size.y,
+                                  vp->WorkSize.x, vp->WorkSize.y,
+                                  ImGui_GetScrollMaxY() };
 }
 
 // One table row, near enough, for working a panel's height out from its
@@ -525,6 +560,7 @@ static gs_screen gs_login_screen(gs_menu *m) {
             ImGui_TextWrapped("%s", m->login_error);
             ImGui_PopStyleColor();
         }
+        gs_panel_measure(m);
     }
     ImGui_End();
     return next;
@@ -532,7 +568,7 @@ static gs_screen gs_login_screen(gs_menu *m) {
 
 static gs_screen gs_title(gs_menu *m) {
     gs_screen next = GS_SCREEN_TITLE;
-    gs_centre_window("title", 460.0f, 490.0f);
+    gs_centre_window("title", 460.0f, 530.0f);
 
     if (ImGui_Begin("##title", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -608,6 +644,7 @@ static gs_screen gs_title(gs_menu *m) {
         }
 
         if (m->status[0] != '\0') ImGui_TextUnformatted(m->status);
+        gs_panel_measure(m);
     }
     ImGui_End();
     return next;
@@ -615,7 +652,7 @@ static gs_screen gs_title(gs_menu *m) {
 
 static gs_screen gs_profiles_screen(gs_menu *m) {
     gs_screen next = GS_SCREEN_PROFILES;
-    gs_centre_window("drivers", 560.0f, 440.0f);
+    gs_centre_window("drivers", 560.0f, 510.0f);
 
     if (ImGui_Begin("Drivers", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -629,6 +666,7 @@ static gs_screen gs_profiles_screen(gs_menu *m) {
             ImGui_TextUnformatted("Nobody is signed in.");
             ImGui_Separator();
             if (ImGui_Button("back")) next = GS_SCREEN_TITLE;
+            gs_panel_measure(m);
             ImGui_End();
             return next;
         }
@@ -744,6 +782,7 @@ static gs_screen gs_profiles_screen(gs_menu *m) {
             ImGui_SameLine();
             ImGui_TextUnformatted(m->status);
         }
+        gs_panel_measure(m);
     }
     ImGui_End();
     return next;
@@ -968,6 +1007,7 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
                                   "  construction set (Tab)");
             ImGui_PopStyleColor();
         }
+        gs_panel_measure(m);
     }
     ImGui_End();
     return next;
@@ -1059,6 +1099,7 @@ static gs_screen gs_results_screen(gs_menu *m) {
         if (ImGui_ButtonEx("Records", (ImVec2){ 110.0f, 40.0f })) next = GS_SCREEN_RECORDS;
         ImGui_SameLine();
         if (ImGui_ButtonEx("Title", (ImVec2){ 110.0f, 40.0f })) next = GS_SCREEN_TITLE;
+        gs_panel_measure(m);
     }
     ImGui_End();
     return next;
@@ -1077,7 +1118,7 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
     uint16_t n = gs_records_for(&m->records, gs_track_hash(t), conditions, rows, 16);
 
     gs_centre_window("records", 720.0f,
-                     214.0f + gs_row_height() * (float)(n > 0 ? n + 1 : 1));
+                     222.0f + gs_row_height() * (float)(n > 0 ? n + 1 : 1));
 
     if (ImGui_Begin("Records", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -1138,6 +1179,7 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
         ImGui_Separator();
         ImGui_Spacing();
         if (ImGui_ButtonEx("Back", (ImVec2){ 120.0f, 38.0f })) next = GS_SCREEN_TITLE;
+        gs_panel_measure(m);
     }
     ImGui_End();
     return next;
@@ -1167,6 +1209,7 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
             if (ImGui_ButtonEx("Back", (ImVec2){ 120.0f, 38.0f })) {
                 next = GS_SCREEN_TITLE;
             }
+            gs_panel_measure(m);
             ImGui_End();
             return next;
         }
@@ -1238,6 +1281,7 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
         ImGui_Separator();
         ImGui_Spacing();
         if (ImGui_ButtonEx("Leave", (ImVec2){ 120.0f, 38.0f })) next = GS_SCREEN_TITLE;
+        gs_panel_measure(m);
     }
     ImGui_End();
     return next;
@@ -1346,11 +1390,33 @@ int gs_menu_take_choice(gs_menu *m) {
     return take;
 }
 
+// Everything on the library screen that is not the list of tracks: the two
+// lines at the top, the two headings, what is known about the one picked, and
+// the buttons along the bottom. Measured once by growing it until nothing was
+// hidden, which is what the panel test now checks on every build.
+#define GS_TRACKS_CHROME 348.0f
+
 static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     gs_screen next = GS_SCREEN_TRACKS;
 
+    // **The list scrolls; the panel does not grow.** A library is the one thing
+    // on any of these screens with no upper bound worth designing around - it
+    // holds thirty-two tracks today and the whole point of the editor is that
+    // it fills up - so the space left over after everything else decides how
+    // many rows are on screen at once, and the rest are a scroll away. Sizing
+    // the panel to the library instead is what put its first entry above the
+    // top of the window, on a panel that cannot be moved.
+    ImGuiViewport *vp = ImGui_GetMainViewport();
+    float row = gs_row_height();
+    float spare = vp->WorkSize.y - GS_PANEL_MARGIN * 2.0f - GS_TRACKS_CHROME;
+
     int rows = m->library.count > 0 ? m->library.count : 1;
-    gs_centre_window("tracks", 720.0f, 340.0f + gs_row_height() * (float)(rows + 1));
+    int fits = (int)(spare / row) - 1;          // less the table's header row
+    if (fits < 3) fits = 3;                     // something to aim at, always
+    if (rows > fits) rows = fits;
+
+    float list_h = row * (float)(rows + 1);
+    gs_centre_window("tracks", 720.0f, GS_TRACKS_CHROME + list_h);
 
     if (ImGui_Begin("Tracks", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -1367,13 +1433,18 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
             ImGui_TextUnformatted("Nothing here yet. Build something in the "
                                   "construction set and keep it.");
             ImGui_PopStyleColor();
-        } else if (ImGui_BeginTable("library", 4,
-                                    ImGuiTableFlags_RowBg |
-                                    ImGuiTableFlags_SizingFixedFit)) {
+        } else if (ImGui_BeginTableEx("library", 4,
+                                      ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_ScrollY |
+                                      ImGuiTableFlags_SizingFixedFit,
+                                      (ImVec2){ 0.0f, list_h }, 0.0f)) {
             ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthFixed, 30.0f, 0);
             ImGui_TableSetupColumnEx("track", ImGuiTableColumnFlags_WidthFixed, 240.0f, 0);
             ImGui_TableSetupColumnEx("by", ImGuiTableColumnFlags_WidthFixed, 130.0f, 0);
             ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+            // The heading stays put while the tracks go past it, or a scrolled
+            // list is four unlabelled columns.
+            ImGui_TableSetupScrollFreeze(0, 1);
             ImGui_TableHeadersRow();
 
             uint64_t here = gs_track_hash(t);
@@ -1470,6 +1541,7 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
         if (ImGui_ButtonEx("Back", (ImVec2){ 100.0f, 38.0f })) next = GS_SCREEN_TITLE;
 
         if (m->status[0] != '\0') ImGui_TextUnformatted(m->status);
+        gs_panel_measure(m);
     }
     ImGui_End();
     return next;

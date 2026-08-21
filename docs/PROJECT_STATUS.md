@@ -2522,6 +2522,55 @@ quiet". Two changes fix it, and the second is the more important one:
   twice in one afternoon. Both ends do the harsher thing, so a pass on Linux
   means what it says about Windows.
 
+### Panels that had outgrown their windows
+
+Three things found by photographing every front-end screen and looking at the
+pictures.
+
+**The library screen was taller than the window.** Its panel was sized to hold
+the whole library — `340 + row * (tracks + 1)` — which is 869 pixels for the
+twenty-two tracks that ship and 1,099 for the thirty-two a library can hold.
+Centred in a 720-pixel window, that puts the title bar and the first track
+*above the top edge*, and these panels are `NoMove | NoResize`, so what is up
+there cannot be reached at all. **The first track in the library could not be
+chosen**, and the more tracks somebody built the more of them went with it.
+
+**The title screen and the drivers screen were the same fault from the other
+end**: a panel at a height worked out by hand, with content that had grown past
+it since. The title screen hid fifteen pixels — the bottom of the `sign out`
+button and the status line under it — and the drivers screen hid forty-three,
+which was its `back` button. Neither is visible in a screenshot as anything but
+a slightly odd-looking panel, which is why both survived a screenshot test.
+
+The fix has three parts:
+
+- **`gs_centre_window` clamps to the window.** A panel is never wider or taller
+  than the viewport less a small margin, so the library screen is now 700 tall
+  in a 720 window instead of 1,396, and what does not fit scrolls — reachable,
+  rather than drawn where the mouse cannot go.
+- **The library list scrolls inside its own box.** The space left over after
+  everything else on the screen decides how many rows are on view; the header
+  row is frozen so a scrolled list still says what its columns are. A library is
+  the one thing on any of these screens with no upper bound worth designing
+  around — the whole point of the editor is that it fills up.
+- **The two hand-set heights were raised** to fit what is now in them, which is
+  a fix that goes stale again the moment somebody adds a control. That is what
+  the test is for.
+
+`no_screen_is_drawn_bigger_than_the_window_it_is_in` draws every screen — with a
+driver signed in, a full library, a finished race and a lobby with four people
+in it, because a screen measured with nothing in it is measured at its smallest
+— and checks two things at the size the game opens at: the panel lies inside the
+window, and nothing is below the fold. Then it halves the window, which is what
+dragging a corner does, and checks the first of those again: what does not fit
+must scroll rather than be drawn out of reach.
+
+The measurement comes from the menu itself. Every screen ends with
+`gs_panel_measure`, which notes where the panel came out and what
+`ImGui_GetScrollMaxY` says is hidden below it, and the test reads that rather
+than counting pixels. It failed on five of the eight screens before the fix,
+which is the only reason to believe it is measuring anything.
+
 ---
 
 ## What does not exist

@@ -1170,4 +1170,17 @@ worth as much as what was decided about it.
       "went quiet"; with a server each it passes with the harsher teardown
       everywhere, and pointing it at a server that needs two players still fails
       the second half, with both logs printed.*
+- [x] **The library screen was taller than the window it was in.** *(Found by
+      photographing every screen and looking at the pictures.)* Its panel was
+      sized to hold the whole library, so twenty-two tracks made it taller than
+      the window and centring it put the first track above the top edge — on a
+      panel that cannot be moved or resized, which means the first track in the
+      library could not be chosen. The title and drivers screens were the same
+      fault from the other end: a height set by hand, with a button added since
+      that fell off the bottom. Panels are now never bigger than the window, and
+      the library list scrolls inside its own box instead of growing the panel.
+      *Verification: every screen is drawn and measured — its panel has to lie
+      inside the window and have nothing below the fold at the size the game
+      opens at, and to still lie inside the window when it is dragged to half
+      that. It failed on five of the eight screens before the fix.*
 
