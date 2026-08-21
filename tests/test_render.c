@@ -3121,6 +3121,11 @@ static void gs_panel_menu(gs_menu *m, gs_track *t) {
         m->result[i].finish_tick = 60u * 120u;
         m->result[i].best_lap = 20u * 120u;
         m->result[i].laps = 3;
+        // The widest a results row gets: the note that says both records went
+        // to the same drive. Measuring the screen without it would be measuring
+        // it at its narrowest, which is not the size it goes wrong at.
+        m->result[i].beat_lap = true;
+        m->result[i].beat_race = true;
     }
     gs_panel_lobby = (gs_lobby){ 0 };
     gs_panel_lobby.count = GS_PROTO_MAX_PLAYERS;

@@ -2571,6 +2571,23 @@ The measurement comes from the menu itself. Every screen ends with
 than counting pixels. It failed on five of the eight screens before the fix,
 which is the only reason to believe it is measuring anything.
 
+### And the line that says you set a record read "lap + race r"
+
+Found in the same pass, by racing a whole session and photographing what came
+out of it. The results table's last column is the note that says which records
+the drive took, and it was a stretch column — it got whatever was left after
+five fixed ones, which was eighty pixels for a sentence that wants a hundred and
+thirty. A table wider than the window it sits in does not overflow; the last
+column gives up what is missing. The one line telling somebody they have just
+beaten a record was the line being cut in half.
+
+The column is now as wide as the widest sentence that can go in it, asked of the
+font rather than counted by hand, and the panel is worked out from what the
+table needs: the five columns, the note, the padding a cell puts on either side
+of each of them, and the window's own margin. Nothing there needs re-tuning when
+the font changes. The same string the column is measured from is the string that
+gets drawn, so the two cannot drift apart.
+
 ---
 
 ## What does not exist

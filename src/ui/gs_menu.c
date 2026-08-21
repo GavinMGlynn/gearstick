@@ -1013,9 +1013,32 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
     return next;
 }
 
+// **The column is as wide as the widest thing that goes in it.** A stretch
+// column gets what is left over, and what was left over on the results screen
+// was eighty pixels - so the one line that tells somebody they have just set a
+// record read "lap + race r". Asking the font how wide the sentence is cannot
+// go stale when the font changes, and it is the whole sentence or nothing.
+#define GS_RECORD_NOTE "lap + race record"
+
+// The five columns before the note, which are what they hold at their widest:
+// a place, a name, a machine, a time and a time.
+#define GS_RESULT_COLUMNS (34.0f + 150.0f + 130.0f + 100.0f + 100.0f)
+
 static gs_screen gs_results_screen(gs_menu *m) {
     gs_screen next = GS_SCREEN_RESULTS;
-    gs_centre_window("results", 720.0f,
+
+    // **Wide enough for its own table, worked out rather than guessed.** A
+    // table wider than the window it is in does not overflow; the last column
+    // gives up what is missing, and the last column here is the one line that
+    // says somebody has just set a record. So the panel is the columns, plus
+    // the padding a cell puts on either side of each of them, plus the window's
+    // own margin - and nothing has to be re-tuned when the font changes.
+    ImGuiStyle *style = ImGui_GetStyle();
+    float note = ImGui_CalcTextSize(GS_RECORD_NOTE).x + style->CellPadding.x * 2.0f;
+    float w = GS_RESULT_COLUMNS + note + style->CellPadding.x * 2.0f * 6.0f +
+              style->WindowPadding.x * 2.0f;
+
+    gs_centre_window("results", w,
                      168.0f + gs_row_height() * (float)(m->result_count + 1));
 
     if (ImGui_Begin("Results", nullptr,
@@ -1028,7 +1051,7 @@ static gs_screen gs_results_screen(gs_menu *m) {
             ImGui_TableSetupColumnEx("machine", ImGuiTableColumnFlags_WidthFixed, 130.0f, 0);
             ImGui_TableSetupColumnEx("time", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
             ImGui_TableSetupColumnEx("best lap", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
-            ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+            ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthFixed, note, 0);
             ImGui_TableHeadersRow();
 
             for (uint8_t i = 0; i < m->result_count; i++) {
@@ -1079,7 +1102,9 @@ static gs_screen gs_results_screen(gs_menu *m) {
                     float ar, ag, ab;
                     gs_style_accent(&ar, &ag, &ab);
                     ImGui_PushStyleColorImVec4(ImGuiCol_Text, (ImVec4){ ar, ag, ab, 1.0f });
-                    ImGui_TextUnformatted(r->beat_lap && r->beat_race ? "lap + race record"
+                    // The same string the column was measured from, so the
+                    // two cannot drift apart.
+                    ImGui_TextUnformatted(r->beat_lap && r->beat_race ? GS_RECORD_NOTE
                                           : r->beat_lap ? "lap record" : "race record");
                     ImGui_PopStyleColor();
                 }

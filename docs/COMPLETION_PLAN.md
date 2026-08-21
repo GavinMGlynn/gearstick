@@ -1183,4 +1183,14 @@ worth as much as what was decided about it.
       inside the window and have nothing below the fold at the size the game
       opens at, and to still lie inside the window when it is dragged to half
       that. It failed on five of the eight screens before the fix.*
+- [x] **The line that says you set a record was cut in half.** *(Found by racing
+      a whole session and looking at the results.)* It read "lap + race r": the
+      note sat in the last column of the results table, which was given whatever
+      was left over, and what was left over was not enough for the sentence. The
+      column is now as wide as the widest thing that goes in it, asked of the
+      font, and the panel is worked out from what its table needs rather than
+      set by hand.
+      *Verification: a session raced end to end and photographed, with the whole
+      sentence on it; and the panel test now measures the results screen with
+      the note showing, which is the widest that screen gets.*
 
