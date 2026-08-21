@@ -530,20 +530,46 @@ static float gs_cam_height(const gs_track *t, const gs_car *c) {
     return ground + (z - ground) * GS_CAM_FOLLOW_Z;
 }
 
+// **Partly, but never so partly that the car leaves the pane.** 0.35 of the air
+// is what makes a jump read: the car climbs the screen away from its shadow.
+// It is a rule for a car that is briefly airborne, and a car can be
+// permanently airborne - wrecked over the drop, where the simulation stops it
+// where it is rather than at the bottom - at which point "partly" means "gone".
+// So the follow is capped by the pane it has to stay inside.
+static float gs_cam_hold(float cam_z, float car_z, float zoom, float vh) {
+    if (zoom <= 0.0f || vh <= 0.0f) return cam_z;
+
+    // A third of the pane, in tiles, which leaves the car well inside it with
+    // its shadow and its own height still on screen.
+    float most = (vh * 0.33f) / (GS_ISO_TILE_Z * zoom);
+    if (car_z - cam_z > most) return car_z - most;
+    if (cam_z - car_z > most) return car_z + most;
+    return cam_z;
+}
+
 static void gs_car_extent(const gs_track *t, const gs_world *w,
                           float *cx, float *cy, float *cz, float *spread) {
     float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
+    float minz = 1e9f, maxz = -1e9f;
     float sumz = 0.0f;
     int seen = 0;
 
     for (uint8_t i = 0; i < w->car_count; i++) {
         if (!w->car[i].active) continue;
         float x = gs_to_f(w->car[i].x), y = gs_to_f(w->car[i].y);
+        float h = gs_cam_height(t, &w->car[i]);
+        float z = gs_to_f(w->car[i].z);
         if (x < minx) minx = x;
         if (x > maxx) maxx = x;
         if (y < miny) miny = y;
         if (y > maxy) maxy = y;
-        sumz += gs_cam_height(t, &w->car[i]);
+        // **How far apart in height is asked of where the cars are, not of
+        // where the camera would like to ride.** The damped height is what the
+        // camera rides at; the raw one is what the screen has to hold, and
+        // holding both is what the answer here decides.
+        if (z < minz) minz = z;
+        if (z > maxz) maxz = z;
+        sumz += h;
         seen++;
     }
     if (seen == 0) {
@@ -554,8 +580,15 @@ static void gs_car_extent(const gs_track *t, const gs_world *w,
     *cy = (miny + maxy) * 0.5f;
     *cz = sumz / (float)seen;
 
-    float dx = maxx - minx, dy = maxy - miny;
-    *spread = dx > dy ? dx : dy;
+    // **How far apart they are, height included.** Measuring the ground plane
+    // alone says two cars are together when one of them is twenty tiles down a
+    // drop - and a shared view of that pair is a view of the empty air between
+    // them, with a car above the top edge and a car below the bottom one. Which
+    // is what a player got, with one car wrecked in the run-off and the other
+    // still racing.
+    float dx = maxx - minx, dy = maxy - miny, dz = maxz - minz;
+    float widest = dx > dy ? dx : dy;
+    *spread = dz > widest ? dz : widest;
 }
 
 void gs_split_update(gs_split *s, const gs_track *t, const gs_world *w,
@@ -598,6 +631,16 @@ void gs_split_update(gs_split *s, const gs_track *t, const gs_world *w,
     // reason: losing height entirely makes a jump invisible, following it
     // entirely makes the ground lurch.
     s->shared.cz = cz;
+
+    // Held inside the pane for every car it is meant to be showing. With the
+    // spread above including height, a pair too far apart in the air to hold
+    // has already split the screen; this is what keeps each of them on their
+    // own pane once it has.
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        if (!w->car[i].active) continue;
+        s->shared.cz = gs_cam_hold(s->shared.cz, gs_to_f(w->car[i].z), fit,
+                                   (float)win_h);
+    }
     s->shared.zoom = fit;
     s->shared.vw = (float)win_w;
     s->shared.vh = (float)win_h;
@@ -641,6 +684,12 @@ uint8_t gs_split_views(const gs_split *s, const gs_track *t, const gs_world *w,
                           (s->shared.zoom - GS_ISO_DEFAULT_ZOOM) * eased;
         out[i].cam.vw = (float)rects[i].w;
         out[i].cam.vh = (float)rects[i].h;
+
+        // Held inside this pane, once the pane and its zoom are known - a car
+        // stuck high above the ground is otherwise followed only partly and
+        // stays above the top edge for the rest of the race.
+        out[i].cam.cz = gs_cam_hold(out[i].cam.cz, gs_to_f(w->car[i].z),
+                                    out[i].cam.zoom, (float)rects[i].h);
     }
     return n;
 }

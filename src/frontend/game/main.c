@@ -897,6 +897,26 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         gs_track_add_gate(&a->t, GS_INT(34), GS_INT(12), 0, GS_INT(6));
     }
 
+    // **Decided before the race is built, because the race is built from it.**
+    // A shot, a showroom or the construction set is a machine being told
+    // exactly what to do and gets no front end; anything else is a person.
+    // This used to be worked out a hundred lines further down, after the world
+    // had already been built - so gs_start_race took its menu branch on every
+    // start, and --players was quietly ignored on every one of them. Four
+    // players raced as two, and a split screen was unreachable from the
+    // command line while the help text offered it.
+    //
+    // **Online is a person, so online gets the front end.** It used to be in
+    // this list, which is why a client pointed at a server went straight into a
+    // race and never showed a menu: the one case where knowing who you are
+    // matters most was the one case that never asked.
+    a->skip_menu = (a->shot_path != nullptr && !a->want_screen && !a->session) ||
+                   a->showroom || a->start_in_editor;
+
+    // And a grid asked for on the command line is the grid the setup screen
+    // offers, so the two cannot disagree about how many people are racing.
+    if (a->players > 0) a->menu.setup.players = a->players;
+
     gs_start_race(a);
 
     if (a->online) {
@@ -998,15 +1018,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // and nobody hears the same one on all fifty tracks.
     gs_music_start(gs_track_hash(&a->t));
 
-    // A shot, a showroom or an online race is a machine being told exactly what
-    // to do, so it goes straight there. Anything else is a person, and a person
-    // gets the front end.
-    // **Online is a person, so online gets the front end.** It used to be in
-    // this list, which is why a client pointed at a server went straight into a
-    // race and never showed a menu: the one case where knowing who you are
-    // matters most was the one case that never asked.
-    a->skip_menu = (a->shot_path != nullptr && !a->want_screen && !a->session) ||
-                   a->showroom || a->start_in_editor;
+    // Where this start goes: straight to the grid for a machine, the front door
+    // for a person. `skip_menu` was decided before the world was built - see
+    // above, where the reason is written down.
     if (a->skip_menu) {
         a->menu.screen = GS_SCREEN_RACE;
     } else {

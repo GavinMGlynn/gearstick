@@ -2917,6 +2917,44 @@ TEST(every_driver_can_see_their_own_car_on_ground_that_is_not_at_height_zero) {
     }
 }
 
+TEST(a_car_down_a_drop_does_not_take_the_camera_off_the_other_one) {
+    (void)ren;
+
+    // **One of them is wrecked twenty tiles down and the other is still
+    // racing.** Two cars a few tiles apart on the map and twenty apart in
+    // height are not "together", and a shared view of that pair is a view of
+    // the air between them with a car above the top edge and a car below the
+    // bottom one. That is what a player saw with one car in the run-off.
+    static gs_track t;
+    gs_track_init(&t, 40, 40, GS_SURF_PAVEMENT);
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(14), GS_INT(12), 0);
+    // The second one has gone over the lip and stopped where it ended up, which
+    // is what the simulation does with a car that leaves the world.
+    w.car[1].z -= GS_INT(20);
+
+    gs_split sp = { 0 };
+    for (int i = 0; i < 240; i++) {
+        gs_split_update(&sp, &t, &w, GS_W, GS_H, 1.0f / 60.0f);
+    }
+
+    gs_view v[GS_MAX_CARS];
+    uint8_t n = gs_split_views(&sp, &t, &w, GS_W, GS_H, v);
+
+    // Whether that is answered by splitting the screen or by pulling back far
+    // enough to hold both, every driver still has to be able to see their own
+    // car - which is the rule, and the arrangement is the renderer's business.
+    for (uint8_t i = 0; i < n; i++) {
+        float sx = 0.0f, sy = 0.0f;
+        gs_car_on_screen(&v[i], &w, v[i].car, &sx, &sy);
+        CHECK(sx >= 0.0f && sx <= (float)v[i].rect.w);
+        CHECK(sy >= 0.0f && sy <= (float)v[i].rect.h);
+    }
+}
+
 TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
     (void)ren;
 
@@ -2952,6 +2990,31 @@ TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
     CHECK(in_air < on_ground);
     CHECK(in_air > 0.0f);
     CHECK(on_ground > 0.0f && on_ground < (float)GS_H);
+
+    // **And a car that is airborne for good is still on the screen.** A wreck
+    // over the drop stops where it is rather than falling to the bottom, so it
+    // can hang twelve tiles up for the rest of the race - and a camera that
+    // takes on a third of the air leaves it above the top edge and keeps it
+    // there. Partial follow is for reading a jump, not for losing the car.
+    static gs_world stuck;
+    stuck = grounded;
+    stuck.car[0].z += GS_INT(12);
+
+    gs_split sp = { 0 };
+    for (int i = 0; i < 240; i++) {
+        gs_split_update(&sp, &t, &stuck, GS_W, GS_H, 1.0f / 60.0f);
+    }
+    gs_view v[GS_MAX_CARS];
+    CHECK(gs_split_views(&sp, &t, &stuck, GS_W, GS_H, v) == 1);
+
+    float hung = 0.0f;
+    gs_car_on_screen(&v[0], &stuck, 0, &sx, &hung);
+    CHECK(sx >= 0.0f && sx <= (float)v[0].rect.w);
+    CHECK(hung >= 0.0f && hung <= (float)v[0].rect.h);
+
+    // Still higher up the screen than the one on the ground, so the reason for
+    // the partial follow survives the cap on it.
+    CHECK(hung < on_ground);
 }
 
 TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
@@ -3574,6 +3637,7 @@ int main(void) {
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
     run_every_driver_can_see_their_own_car_on_ground_that_is_not_at_height_zero(ren);
     run_a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it(ren);
+    run_a_car_down_a_drop_does_not_take_the_camera_off_the_other_one(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

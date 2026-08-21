@@ -1271,4 +1271,22 @@ worth as much as what was decided about it.
       race starts, the clock keeps advancing, the car is on screen every look,
       it gets somewhere, nothing stalls. Against the old camera it fails with
       the diagnosis in one line.*
+- [x] **A car wrecked in the air never came back on screen.** *(Found by the
+      trace, in minutes.)* A car that goes over the drop stops where it is, so
+      it can hang eight tiles up for the rest of the race — and a camera that
+      follows a third of the air leaves it above the top edge and keeps it
+      there. The follow is capped by the pane it has to stay inside now. Two
+      cars far apart in *height* also counted as being together, so the screen
+      stayed merged and framed the air between them; height is part of how far
+      apart two cars are now.
+      *Verification: a car down a drop does not take the camera off the other
+      one, and a car in the air is higher up its own screen than one on the
+      ground and still on it — both fail without the fix.*
+- [x] **`--players` had been doing nothing.** The race was built at start-up
+      before the game had decided whether this run has a front end, so it always
+      took the menu's two cars. Four-player split screen was unreachable from
+      the command line while the help offered it.
+      *Verification: the screenshot pass — one, two, three and four cars, and
+      the camera invariant checked over all twenty-two shipped tracks by racing
+      each of them with the trace on.*
 

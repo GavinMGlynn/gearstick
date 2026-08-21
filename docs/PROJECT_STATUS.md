@@ -2729,6 +2729,54 @@ all green. Run against the old camera it fails with the whole diagnosis in one
 line: *the car was off the screen on 8 of 17 looks - at tick 0 it was at
 3.00,5.50 drawn at 640,-24 with the camera on 3.00,5.50*.
 
+### Two more the trace found, in the same afternoon
+
+With the trace in, the next two took minutes rather than hours - which is the
+argument for having built it.
+
+**A car wrecked in the air stayed above the top edge for the rest of the race.**
+A car that goes over the drop is stopped where it is rather than at the bottom,
+because what a player needs to see is where the mistake ended - so it can hang
+eight tiles up for good. Following 0.35 of the air is right for a jump, which
+lasts a second, and wrong for a car that is airborne permanently: it sat off the
+screen and stayed there. `gs_cam_hold` caps the follow at a third of the pane,
+in tiles worked out from the pane's own height and zoom, so the car is always
+inside its own view - and still higher up it than one on the ground, which is
+the half of the rule worth keeping.
+
+**And two cars far apart in height counted as together.** The split screen asked
+how far apart the pack was in x and y alone, so a car twenty tiles down a drop
+and a car still racing were "close", the screen stayed merged, and the shared
+view framed the empty air between them. Height is part of how far apart two cars
+are now, which splits the screen for a pair that cannot be held in one view -
+and the cap above keeps each of them inside their own pane once it has.
+
+Both are pinned by tests that fail without them: a car down a drop does not take
+the camera off the other one, and a car in the air climbs its own screen rather
+than leaving it.
+
+### What was photographed, and what it showed
+
+Every screen and every mode, captured headless and looked at: the eight
+front-end screens, races on seven tracks including ice, high gravity and two
+jump tracks, one to four cars, split and merged, the landing arc, the gravity
+overlay, the construction set, the analyser's heatmap, the showroom, a wreck,
+and a race against a real server. **And then the camera invariant over all
+twenty-two shipped tracks** - each raced by the AI for half a minute with the
+trace on, checking that the car is on screen at every look.
+
+Two things worth writing down from that pass. `--players` had been doing nothing
+since the front door landed: `gs_start_race` ran at start-up *before*
+`skip_menu` was decided, so it always took the menu branch and built the setup
+screen's two cars. Four-player split screen was unreachable from the command
+line while the help text offered it, and every capture anybody had taken of a
+"four player" race was a picture of two. The decision now happens before the
+world is built, and a grid asked for on the command line is also what the setup
+screen offers, so the two cannot disagree.
+
+The other is that the showroom draws a HUD for a car nobody is driving, which is
+harmless and looks odd. Left alone deliberately: it is a screenshot mode.
+
 ---
 
 ## What does not exist
