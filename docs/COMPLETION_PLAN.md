@@ -1461,3 +1461,11 @@ worth as much as what was decided about it.
 - [x] **Tab is no longer the front door to the editor.** *(Asked for.)* New and
       Edit on the tracks screen are. Tab still runs the build-drive-build loop
       while you are working on something, and does nothing once you are not.
+- [x] **A window with its own icon.** *(Asked for.)* A gear lever — a red knob
+      on a shaft out of a gaiter, over the shift pattern's gate — drawn by
+      `tools/make_icon.py` rather than by hand, so it is still true that no art
+      in this game came from anywhere else. It needed an image library:
+      SDL_image, cut down to PNG and nothing else.
+      *Verification: the icon ships, decodes, is square, is not one flat colour,
+      and has a transparent surround rather than being a full square — which is
+      what lets it sit on a title bar of any colour.*

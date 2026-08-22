@@ -21,6 +21,8 @@
 #include "gfx/gs_meshes.h"
 #include "platform/gs_bind.h"
 #include "ui/gs_editor.h"
+#include <SDL3_image/SDL_image.h>
+
 #include "platform/gs_paths.h"
 #include "net/gs_auth.h"
 #include "ui/gs_menu.h"
@@ -3976,6 +3978,56 @@ TEST(no_screen_is_drawn_bigger_than_the_window_it_is_in) {
     }
 }
 
+TEST(the_window_has_an_icon_of_its_own) {
+    (void)ren;
+
+    // **An untitled window with the toolkit's default icon is what an
+    // unfinished thing looks like**, and it is the first thing anybody sees of
+    // the game. The icon is generated rather than drawn - tools/make_icon.py -
+    // so what is checked here is that the file shipped, that it decodes, and
+    // that it is actually a picture rather than a square of nothing.
+    char path[1024];
+    gs_asset_path(path, sizeof path, "icon.png");
+
+    SDL_Surface *icon = IMG_Load(path);
+    CHECK(icon != nullptr);
+    if (icon == nullptr) return;
+
+    // Square, and big enough that a desktop scaling it down for a title bar has
+    // something to work with.
+    CHECK(icon->w == icon->h);
+    CHECK(icon->w >= 64);
+
+    SDL_Surface *rgba = SDL_ConvertSurface(icon, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(icon);
+    CHECK(rgba != nullptr);
+    if (rgba == nullptr) return;
+
+    // Something is drawn, it is not one flat colour, and it has a transparent
+    // surround rather than being a full square - which is what an icon needs to
+    // sit on a title bar of any colour.
+    int opaque = 0, clear = 0, reddish = 0;
+    const uint8_t *px = (const uint8_t *)rgba->pixels;
+    for (int y = 0; y < rgba->h; y++) {
+        for (int x = 0; x < rgba->w; x++) {
+            const uint8_t *p = px + (size_t)y * (size_t)rgba->pitch + (size_t)x * 4;
+            if (p[3] > 200) {
+                opaque++;
+                // The knob, in the same red the cars are painted.
+                if (p[0] > 140 && p[0] > 2 * p[1] && p[0] > 2 * p[2]) reddish++;
+            }
+            if (p[3] < 20) clear++;
+        }
+    }
+
+    int total = rgba->w * rgba->h;
+    CHECK(opaque > total / 20);      // there is a picture
+    CHECK(clear > total / 5);        // and it is not a solid square
+    CHECK(reddish > total / 200);    // and the gear knob is on it
+
+    SDL_DestroySurface(rgba);
+}
+
 TEST(the_lobby_offers_a_race_only_when_it_could_start_one) {
     (void)ren;
 
@@ -4107,6 +4159,7 @@ int main(void) {
     run_a_password_cannot_be_set_to_nothing(ren);
     run_a_password_on_a_profile_is_actually_required(ren);
     run_a_second_factor_is_asked_for_when_the_profile_has_one(ren);
+    run_the_window_has_an_icon_of_its_own(ren);
     run_the_lobby_offers_a_race_only_when_it_could_start_one(ren);
     run_exit_is_something_the_menu_asks_for_rather_than_does(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);

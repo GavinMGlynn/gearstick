@@ -217,6 +217,54 @@ if(NOT GS_SDL_NET)
 endif()
 
 # ---------------------------------------------------------------------------
+# SDL_image, for the one picture the game has: its own icon.
+#
+# **PNG, and nothing else at all.** SDL_image will happily pull in libjpeg,
+# libtiff, libwebp and libavif as well; every one of those is a system
+# dependency for formats the game does not read. One picture, one format.
+#
+# PNG goes through libpng, which is asked for by name. The alternative is
+# SDL_image's built-in stb decoder, which needs no system library at all - and
+# that is the safer default, because libpng drags in zlib and a system zlib
+# advertising a static library it does not actually ship fails the configure
+# with an error naming neither of them. If this ever stops configuring on a
+# machine, SDLIMAGE_PNG_LIBPNG OFF is the one-line way back to stb.
+#
+# Nothing saves images. The game reads one file and writes none.
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext/sdl_image/CMakeLists.txt")
+    message(FATAL_ERROR
+        "ext/sdl_image is empty - the submodules are not checked out.\n"
+        "  git submodule update --init --depth 1 ext/sdl_image")
+endif()
+
+set(SDLIMAGE_TESTS   OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_INSTALL OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_DEPS_SHARED OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_VENDORED    OFF CACHE BOOL "" FORCE)
+
+set(SDLIMAGE_PNG        ON  CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNG_LIBPNG ON  CACHE BOOL "" FORCE)   # see the note above
+set(SDLIMAGE_PNG_SAVE   OFF CACHE BOOL "" FORCE)
+
+foreach(gs_format AVIF BMP GIF JPG JXL LBM PCX PNM QOI SVG TGA TIF WEBP XCF XPM XV ANI CUR ICO)
+    set(SDLIMAGE_${gs_format}      OFF CACHE BOOL "" FORCE)
+    set(SDLIMAGE_${gs_format}_SAVE OFF CACHE BOOL "" FORCE)
+endforeach()
+
+# Like SDL_net, SDL_image takes static-or-shared from BUILD_SHARED_LIBS rather
+# than an option of its own. A shared one would be a second file to ship beside
+# a game that is otherwise a single executable.
+set(GS_BUILD_SHARED_WAS ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+add_subdirectory(ext/sdl_image EXCLUDE_FROM_ALL)
+set(BUILD_SHARED_LIBS ${GS_BUILD_SHARED_WAS})
+
+set(GS_SDL_IMAGE SDL3_image::SDL3_image)
+message(STATUS "gearstick: SDL3_image from the ext/ submodule, PNG only")
+
+# ---------------------------------------------------------------------------
 # The editor's UI - Dear ImGui, and the generated C API over it
 #
 # **The one C++ in the project, and none of it is ours.** Palettes, property
@@ -287,7 +335,7 @@ add_library(gearstick_shell STATIC
 
 target_include_directories(gearstick_shell PUBLIC src)
 target_link_libraries(gearstick_shell PUBLIC gearstick_sim gearstick_ui ${GS_SDL}
-    ${GS_SDL_NET} gearstick_sodium)
+    ${GS_SDL_NET} ${GS_SDL_IMAGE} gearstick_sodium)
 
 # Where the art lives when running straight out of the build tree, so the
 # ordinary edit-build-run loop needs no install step. See src/platform/gs_paths.c.

@@ -3515,6 +3515,36 @@ armed when the tracks screen opens the editor and disarmed on the way back to a
 menu, so it is the loop while you are working on something and nothing at all
 once you are not.
 
+### A window with its own icon
+
+**"We need a gearstick icon in the caption base of the window."** An untitled
+window wearing the toolkit's default icon is what an unfinished thing looks
+like, and it is the first thing anybody sees of the game.
+
+`assets/icon.png` is a gear lever - a red knob on a shaft out of a gaiter, over
+the shift pattern's gate. At sixteen pixels almost none of that survives; what
+survives is a round red knob above a pale diagonal, which is what the shape is
+chosen to keep.
+
+**Generated, not drawn**, like the vehicles and the trig tables:
+`tools/make_icon.py` draws it from shapes described in the script and writes the
+PNG with the Python standard library alone, so it can be regenerated on any
+machine rather than only one with an imaging library. It is the one image file
+in the game and `assets/ATTRIBUTION.md` says so.
+
+**And an image library, which is a new dependency.** `ext/sdl_image` at
+`release-3.4.4`, configured down to PNG and nothing else - nineteen other
+formats off, every save path off. It is linked by the shell only; `src/core/`
+still links nothing and `gearstick_cli` still lists libc and the loader.
+
+PNG goes through the system libpng, which was asked for by name. That is worth
+recording because it hit exactly the trap `CLAUDE.md` had already written down:
+the configure failed on `ZLIB::zlibstatic` referencing a `/usr/lib64/libz.a`
+that the system zlib package does not ship, in an error naming neither zlib nor
+SDL_image. The missing piece on this machine was `zlib-ng-compat-static`.
+`SDLIMAGE_PNG_LIBPNG OFF` remains the one-line way back to the built-in stb
+decoder, which needs no system library at all.
+
 ---
 
 ## Known risks

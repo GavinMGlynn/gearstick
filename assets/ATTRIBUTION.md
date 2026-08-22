@@ -23,7 +23,15 @@ is no third-party art in the game.
 ## Ground, surfaces and terrain
 
 Generated at run time as shaded geometry, tinted by surface and slope.
-There is no tile atlas, no terrain texture and no image file of any kind.
+There is no tile atlas and no terrain texture.
+
+## The window icon
+
+`assets/icon.png` is the one image file in the game, and it is drawn by
+`tools/make_icon.py` from shapes described in that script - a gear lever,
+which is what the game is named after. Nothing is traced, downloaded or
+third-party, and the script writes the PNG with the Python standard
+library alone so it can be regenerated anywhere.
 
 ## Everything else
 

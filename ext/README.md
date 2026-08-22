@@ -12,8 +12,23 @@ this repository — a clone gets URLs and commit SHAs, not sources.
 | `imgui` | ocornut/imgui | `v1.92.9b` | **The editor's UI.** Not built yet — see below | MIT |
 | `dear_bindings` | dearimgui/dear_bindings | `v0.21` | **Build-time only.** Generates the C API for the above; never linked | MIT |
 | `sdl_net` | libsdl-org/SDL_net | `release-3.2.0` | **Linked by the shell only.** The datagram socket the rollback netcode sends over | Zlib |
+| `sdl_image` | libsdl-org/SDL_image | `release-3.4.4` | **Linked by the shell only.** Decodes the one image the game has: its own window icon. PNG only — every other format is off | Zlib |
 | `imgui_styles` | GraphicsProgramming/dear-imgui-styles | `2684aea` | **Reference only.** A collection of Dear ImGui themes; the front end's layout numbers follow their shape. Never built, never linked | MIT |
 | `libsodium` | jedisct1/libsodium | `1.0.20-RELEASE` | **The transport's primitives.** X25519 and ChaCha20-Poly1305 for the Noise tunnel | ISC |
+
+`sdl_image` is configured down to almost nothing: PNG on, and AVIF, BMP, GIF,
+JPEG, JXL, LBM, PCX, PNM, QOI, SVG, TGA, TIFF, WEBP, XCF, XPM, XV, ANI, CUR and
+ICO all off, along with every save path. One picture, one format, and no system
+library for any of the rest.
+
+PNG goes through the system libpng, which brings zlib with it. That is worth
+knowing about because it is the one dependency here that can fail at *configure*
+time on a machine that looks fine: a system zlib may advertise a static library
+in its CMake package and not actually ship it, and the resulting error names
+neither zlib nor SDL_image. On Fedora and RHEL the missing piece is
+`zlib-ng-compat-static`. `SDLIMAGE_PNG_LIBPNG OFF` in `CMakeLists.txt` is the
+one-line way back to SDL_image's built-in stb decoder, which needs no system
+library at all.
 
 `imgui_styles` is here because it was *consulted*, not because anything builds
 it. The front end's spacing, padding and rounding follow the shape those themes

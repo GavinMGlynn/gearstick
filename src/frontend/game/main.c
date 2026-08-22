@@ -18,6 +18,8 @@
 #include "core/gs_track.h"
 #include "gfx/gs_render.h"
 #include "platform/gs_input.h"
+#include <SDL3_image/SDL_image.h>
+
 #include "platform/gs_paths.h"
 #include "audio/gs_audio.h"
 #include "audio/gs_music.h"
@@ -885,6 +887,26 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                                      SDL_WINDOW_RESIZABLE, &a->win, &a->ren)) {
         SDL_Log("SDL_CreateWindowAndRenderer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
+    }
+
+    // **The icon in the title bar and on the taskbar.** Not decoration: an
+    // untitled window with the toolkit's default icon is what an unfinished
+    // thing looks like, and it is the first thing anybody sees of the game.
+    //
+    // Generated rather than drawn - see tools/make_icon.py - so there is no
+    // third-party art here either. A failure is logged and shrugged off: a
+    // missing icon is a window with the wrong picture on it, which is not a
+    // reason to refuse to start.
+    {
+        char icon_path[1024];
+        gs_asset_path(icon_path, sizeof icon_path, "icon.png");
+        SDL_Surface *icon = IMG_Load(icon_path);
+        if (icon != nullptr) {
+            SDL_SetWindowIcon(a->win, icon);
+            SDL_DestroySurface(icon);
+        } else {
+            SDL_Log("icon: %s (%s)", SDL_GetError(), icon_path);
+        }
     }
 
     gs_input_init(&a->input);
