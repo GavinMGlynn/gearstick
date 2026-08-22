@@ -65,6 +65,21 @@
 // a seed yet. The *world* hash below did not move, because the three original
 // surfaces kept their numbers and their physics - which is what appending to
 // that enum rather than renumbering it is for.
-#define GS_SELFTEST_GENERATOR_HASH 0xab0105176f872f72ULL
+//
+// Moved a second time, deliberately, when the tracks became raceable. The
+// generator used to lay two gates on every shape it built - one near the left
+// edge, one near the right - and the simulation counted a lap when the last
+// gate was crossed, so a "lap" was a one-way trip and lap two meant driving
+// back across an open field with nothing marking the way. A player put it
+// plainly: the track does not seem to go anywhere.
+//
+// Every seed now builds either a loop or a path, the route is *carved* into the
+// ground rather than dropped on top of it, and the road has its own surface so
+// it can be seen. Every seed therefore lands somewhere new, and every seed
+// anybody had shared names a different track. That is the cost and it was worth
+// paying: what the old seeds named was not raceable.
+//
+// The *world* hash below did not move. The physics is untouched by any of this.
+#define GS_SELFTEST_GENERATOR_HASH 0x7b1a7fb8d486b941ULL
 
 #endif // GS_GOLDEN_H

@@ -3136,6 +3136,87 @@ held for an instant. `the_light_tree_counts_down_and_then_goes_green` counts lit
 pixels at each stage and requires exactly one more lamp's worth per second, all
 green at the off, and nothing lit afterwards.
 
+### Tracks that go somewhere
+
+**"It is useless if the tracks are not real examples... without this, the
+application is useless."** That was right, and the reason is worth writing down
+because it is a lesson about verification and not about track design.
+
+**What was wrong.** The generator laid the same route on every shape it built:
+one gate near the left edge, one near the right. And `gs_world_step` counted a
+lap when `next_gate` wrapped to zero - that is, on crossing the *last* gate. So
+on a two-gate track a "lap" was a one-way trip, and lap two meant driving all
+the way back across an open field, with nothing marking the way, to a line that
+was where you had started. The terrain varied; the route never did.
+
+**Why it passed.** `gs_analyse` asks whether a vehicle can get from gate to
+gate at a given gravity and prints *"the route is sound"*. That is
+**completability**, not raceability, and a two-gate open field is trivially
+completable - so the check was green and the green read as evidence. Nothing
+asked whether the route was a loop or a path, whether the finish was a
+meaningful distance from the start, or whether the route used the ground at all.
+The generator's own comment said what it was doing, and it was authored as a
+sprint; the simulation raced it as a circuit. Nothing exercised the pair
+together. `PROJECT_STATUS.md` had already named the risk - *"the feel is
+unproven... that question opens the moment there is a track worth driving"* -
+and `CLAUDE.md` says a hard-coded track is a prototype that must be replaced
+before anything is built on it. The placeholder stayed and a great deal got
+built on it, because everything downstream could be demonstrated on a bad track
+as well as a good one.
+
+**What a track is now.** `gs_track.route` says which of two things it is, and
+the two are raced differently and drawn differently:
+
+- **A circuit** is a closed loop. Gate zero is the start **and** the finish -
+  one chequered line with a flag at each end, crossed at the start of every lap
+  and the end of every lap. `gs_track_finish_gate` returns zero.
+- **A sprint** is a path. Gate zero is a plain white start line, the last gate
+  is the chequered finish, and they are a long way apart.
+
+Everything else on the route is a waypoint: two posts at its edges and an arrow
+through it, open in the middle, because only the line you cross to finish should
+look like a line you cross to finish.
+
+**And the route is carved into the ground rather than dropped onto it.** The
+terrain is laid first, then a corridor is cut along the centreline: level across
+its width, following the ground along its length - so a ridge in the way becomes
+a ramp up and a ramp down, which is a jump, while a car is never tipped sideways
+by ground that happens to fall away under one set of wheels. The road carries
+its own surface, never the same as the ground it crosses, which is what makes
+the route a thing you can *see* rather than a set of markers on a field.
+
+Three things fell out of building it, each caught by a test rather than by
+looking:
+
+- **The verge is not decoration.** Stamping the road's level straight in leaves
+  a cliff wherever road and hillside disagree.
+  `no_generated_slope_is_steeper_than_a_car_can_climb` caught it, and the answer
+  is `gs_relax`: the whole lattice is relaxed until no two neighbouring corners
+  differ by more than a car can climb, so the excess spreads outward until there
+  is room for it.
+- **Carving is done in two passes, not one.** With each sample stamping as it
+  goes, a later sample's verge lands on an earlier sample's road and the route
+  gets bitten into wherever it passes near itself. The first pass records the
+  nearest route point per corner; the second applies it. The result does not
+  depend on which end the route was walked from.
+- **A named track that would not load used to race anyway.** The failure was
+  logged and then the "a track was named" branch skipped the fallback, leaving
+  the track all zeros - no tiles wide - and sampling it indexed off the front of
+  its own arrays. Found only because a test hard-coded a generated track's name
+  and the generator had renamed it.
+
+**What moved, deliberately.** The generator hash in `src/frontend/cli/golden.h`,
+because every seed now builds a different track; and the track file format, from
+version 2 to version 3, to carry the route kind. **Version 2 files still load**,
+as sprints, which is what every one of them was - the test pins the old shared
+code and requires it still to decode. The **world hash did not move**: the
+physics is untouched by any of this.
+
+All 22 shipped tracks are regenerated. Generated ones now run 6 to 10 gates over
+52x52 to 64x32 rather than 2 gates over 36x18; `the-oval`, `the-crossing` and
+`the-long-way-round` are marked as the circuits they always were.
+`gearstick_cli generate 200` reports every one driveable.
+
 ---
 
 ## Known risks

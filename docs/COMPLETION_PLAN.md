@@ -1365,3 +1365,18 @@ worth as much as what was decided about it.
       it the moment the lights change. The lamps are counted in the rendered
       frame at each second. And a race nobody counted down is held for no time
       at all, which is why every replay ever recorded still lands where it did.*
+- [x] **Tracks that go somewhere.** *(Asked for after driving them: "the track
+      doesn't seem to go anywhere", and "it is useless if the tracks are not
+      real examples".)* Every generated track used to be an open field with two
+      gates on it, one near each edge — and a "lap" was counted on reaching the
+      far one, so lap two meant driving all the way back with nothing marking
+      the way. A track now says whether it is a **loop** or a **path**: a loop
+      has one chequered line that is both its start and its finish, a path has a
+      plain start line at one end and a chequered finish at the other. The route
+      is cut into the ground with its own road surface, so it can be seen, and
+      everything that is only a waypoint is marked at its edges rather than
+      barred across.
+      *Verification: all 200 seeds build a driveable track, now with six to ten
+      gates over a much bigger field rather than two. The route was checked for
+      completability before and that was the whole mistake — completable is not
+      raceable, and an open field with two gates is trivially completable.*

@@ -2544,7 +2544,22 @@ TEST(a_code_is_the_same_code_on_every_machine) {
     // format between two people, so it is pinned the same way the golden replay
     // is: if this moves, every code anybody has shared has stopped working, and
     // that should be a decision rather than a surprise.
+    //
+    // **Moved once, deliberately**, when a track gained the thing that says
+    // whether it is a loop or a path - see gs_route_kind, and the note in
+    // src/frontend/cli/golden.h about why the tracks had to change at all. The
+    // header grew a byte, so every code is a byte longer and none of the old
+    // ones spell the same string.
+    //
+    // Old codes still *read*, which is the half of it that matters: the version
+    // two code this test used to pin is below, and it still decodes to the same
+    // track it always did. Nobody's shared link stopped working - they just do
+    // not spell the same thing any more.
     static const char *want =
+        "GST1nO3tcjgrKaH_R1RSSwMAAAAnCAYCBQAABAEKBxEPYBEPEQ8RDxEPEQ0BQAEPAgEN"
+        "AhMPAQ8BDwECagPrAQLpAwYNCA";
+
+    static const char *version_two =
         "GST1nO3tcjgrKaH_R1RSSwIAAAATCAYFAQADAQkGEQ8RDzARDxEPEQ8RDgFAAQ8BDUEC"
         "Ew8BDwEPAQJqAwMDAALoAwYNCA";
 
@@ -2564,6 +2579,15 @@ TEST(a_code_is_the_same_code_on_every_machine) {
     // And the committed string still reads back as the track it was taken from.
     CHECK(gs_track_from_code(&back, want));
     CHECK(gs_track_hash(&back) == gs_track_hash(&t));
+    CHECK(gs_track_is_circuit(&back) == gs_track_is_circuit(&t));
+
+    // A code shared before the route kind existed still opens, and opens as a
+    // path - which is what every one of those tracks was.
+    static gs_track old_one;
+    CHECK(gs_track_from_code(&old_one, version_two));
+    CHECK(old_one.w == t.w && old_one.h == t.h);
+    CHECK(old_one.gate_count == t.gate_count);
+    CHECK(!gs_track_is_circuit(&old_one));
 }
 
 // ---------------------------------------------------------------------------
@@ -6081,20 +6105,43 @@ TEST(no_generated_slope_is_steeper_than_a_car_can_climb) {
 }
 
 TEST(a_generated_track_leaves_clear_ground_to_get_up_to_speed_on) {
-    // A car starts still. Ground that rises within a few tiles of the start
-    // line is arrived at too slowly to climb, and the track is then unfinishable
-    // for a reason that has nothing to do with how it was shaped.
+    // A car starts still. Ground that rises steeply between the grid and the
+    // first gate is arrived at too slowly to climb, and the track is then
+    // unfinishable for a reason that has nothing to do with how it was shaped.
+    //
+    // **Along the route rather than along +x.** This used to walk eight tiles
+    // in the +x direction from gate zero and require the ground to be dead
+    // level, which was right only because every generated route ran left to
+    // right across the field. Routes are loops and bends now, so the run-up is
+    // walked the way the car actually goes: from where it is gridded, through
+    // the line, in the direction the line faces.
     for (uint32_t seed = 1; seed <= 24; seed++) {
         gs_generate(&gs_gen_a, seed * 7919u);
         CHECK(gs_gen_a.gate_count >= 2);
         if (gs_gen_a.gate_count < 2) continue;
 
-        uint8_t row = (uint8_t)gs_fix_floor(gs_gen_a.gate[0].y);
-        uint8_t from = (uint8_t)gs_fix_floor(gs_gen_a.gate[0].x);
-        gs_fix at_the_line = gs_track_corner_at(&gs_gen_a, from, row);
+        gs_fix gx = 0, gy = 0;
+        gs_angle facing = 0;
+        gs_track_grid(&gs_gen_a, 0, &gx, &gy, &facing);
 
-        for (uint8_t x = from; x < from + 8 && x <= gs_gen_a.w; x++) {
-            CHECK(gs_track_corner_at(&gs_gen_a, x, row) == at_the_line);
+        gs_fix fx = gs_cos(facing), fy = gs_sin(facing);
+
+        // A standing start has to cover the run-up and the first tiles past the
+        // line, which is where the car is still slow.
+        gs_fix was = gs_track_height(&gs_gen_a, gx, gy);
+        for (int step = 1; step <= 16; step++) {
+            gs_fix at = (gs_fix)((int64_t)GS_ONE * step / 2);
+            gs_fix x = gx + gs_fix_mul(fx, at);
+            gs_fix y = gy + gs_fix_mul(fy, at);
+
+            gs_fix now = gs_track_height(&gs_gen_a, x, y);
+
+            // Half a tile of travel, so half the climb a full tile may have -
+            // and a good margin under even that, because this is the one place
+            // on the track where the car has no speed to help it.
+            gs_fix rise = now - was;
+            CHECK(rise < GS_MAX_CLIMB / 3);
+            was = now;
         }
     }
 }

@@ -206,7 +206,11 @@ def main():
     # and finds the same fault the server's track found.
     local = [game_bin, "--screen", "race", "--autodrive", "--trace"]
     if assets is not None:
-        local += ["--track", os.path.join(assets, "tracks", "steep-loop.gstrack")]
+        # A hand-authored track rather than a generated one: generated names
+        # come from their seeds, so a change to the generator renames them all
+        # and a check that hard-codes one silently stops checking anything. This
+        # one is written out by name in tools/make_tracks.c and stays.
+        local += ["--track", os.path.join(assets, "tracks", "first-light.gstrack")]
 
     with tempfile.TemporaryDirectory() as tmp:
         store = os.path.join(tmp, "store")

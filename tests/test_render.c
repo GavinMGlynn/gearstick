@@ -3153,71 +3153,77 @@ TEST(the_light_tree_counts_down_and_then_goes_green) {
 TEST(a_start_line_and_a_finish_line_are_different_things) {
     (void)ren;
 
-    // **"It is confusing whether beginning and end is."** The grid sits behind
-    // the line a lap is measured on, and that line was the only one drawn -
-    // chequered, a few tiles in front of cars that had not moved yet. So the
-    // first thing a player saw on arriving was a chequered flag line, which is
-    // the universal sign for *finished*.
+    // **"It is confusing whether beginning and end is."** A track drew one
+    // chequered line and it was gate zero, which is where the cars are gridded
+    // - so the first thing anybody saw on arriving was a chequered flag, which
+    // everywhere means *finished*.
     //
-    // There are two lines now and they must not look alike. Both are sampled
-    // where they actually lie rather than counted over the whole frame: a band
-    // behind the gate, which is the grid's plain white line and must have no
-    // black in it, and the gate itself, which is the chequer and must have
-    // both.
-    static gs_track t;
-    gs_flat_pavement(&t, 48, 48);
-    gs_track_add_gate(&t, GS_INT(24), GS_INT(24), 0, GS_INT(6));
+    // What a line looks like now depends on the job it does, and the job
+    // depends on what kind of route the track has. A path begins on a plain
+    // white line and ends on a chequered one a long way away. A loop has one
+    // line doing both, because a lap starts and finishes in the same place and
+    // drawing two would invent a distinction the track does not have.
+    static gs_track path, loop;
+    gs_flat_pavement(&path, 48, 48);
+    gs_track_add_gate(&path, GS_INT(12), GS_INT(24), 0, GS_INT(6));
+    gs_track_add_gate(&path, GS_INT(36), GS_INT(24), 0, GS_INT(6));
+    path.route = (uint8_t)GS_ROUTE_SPRINT;
 
-    // Parked well clear, so nothing is standing on either line.
+    gs_flat_pavement(&loop, 48, 48);
+    gs_track_add_gate(&loop, GS_INT(12), GS_INT(24), 0, GS_INT(6));
+    gs_track_add_gate(&loop, GS_INT(36), GS_INT(24), 0, GS_INT(6));
+    loop.route = (uint8_t)GS_ROUTE_CIRCUIT;
+
+    // Parked well clear, so nothing stands on either line.
     static gs_world w;
-    gs_park_car(&w, &t, GS_INT(24), GS_INT(40));
+    gs_park_car(&w, &path, GS_INT(24), GS_INT(44));
 
-    gs_camera cam = gs_camera_on(23.0f, 24.0f, 0.0f);
-    cam.zoom = 1.4f;
+    int white[2][2] = { { 0, 0 }, { 0, 0 } };
+    int black[2][2] = { { 0, 0 }, { 0, 0 } };
 
-    gs_frame f = gs_render_frame(ren, &t, &w, &w, 1.0f, &cam);
-    CHECK(f.px != nullptr);
-    if (f.px == nullptr) return;
+    for (int which = 0; which < 2; which++) {
+        const gs_track *t = which == 0 ? &path : &loop;
 
-    // Walk each line across the road and ask what colour the ground is there.
-    // The gate faces +x, so the line across it runs along y.
-    int grid_white = 0, grid_black = 0, gate_white = 0, gate_black = 0;
+        for (int gate = 0; gate < 2; gate++) {
+            float at = gate == 0 ? 12.0f : 36.0f;
 
-    for (int i = -30; i <= 30; i++) {
-        float across = 24.0f + (float)i * 0.09f;
+            gs_camera cam = gs_camera_on(at, 24.0f, 0.0f);
+            cam.zoom = 1.6f;
 
-        // Behind the gate: anywhere in the band the grid's line lives in.
-        for (int b = 0; b < 24; b++) {
-            float back = 1.5f + (float)b * 0.04f;
-            float sx = 0.0f, sy = 0.0f;
-            gs_iso_project(&cam, 24.0f - back, across, 0.0f, &sx, &sy);
-            if (sx < 0 || sy < 0 || sx >= GS_W || sy >= GS_H) continue;
-            const uint8_t *p = &f.px[((int)sy * GS_W + (int)sx) * 4];
-            if (p[0] > 225 && p[1] > 225 && p[2] > 225) grid_white++;
-            if (p[0] < 30 && p[1] < 30 && p[2] < 30) grid_black++;
-        }
+            gs_frame f = gs_render_frame(ren, t, &w, &w, 1.0f, &cam);
+            CHECK(f.px != nullptr);
+            if (f.px == nullptr) return;
 
-        // And on the gate itself.
-        for (int b = 0; b < 24; b++) {
-            float along = -0.5f + (float)b * 0.04f;
-            float sx = 0.0f, sy = 0.0f;
-            gs_iso_project(&cam, 24.0f + along, across, 0.0f, &sx, &sy);
-            if (sx < 0 || sy < 0 || sx >= GS_W || sy >= GS_H) continue;
-            const uint8_t *p = &f.px[((int)sy * GS_W + (int)sx) * 4];
-            if (p[0] > 225 && p[1] > 225 && p[2] > 225) gate_white++;
-            if (p[0] < 30 && p[1] < 30 && p[2] < 30) gate_black++;
+            // Sampled where the line lies, rather than counted over the frame.
+            for (int i = -34; i <= 34; i++) {
+                float across = 24.0f + (float)i * 0.08f;
+                for (int b = 0; b < 20; b++) {
+                    float along = -0.4f + (float)b * 0.04f;
+                    float sx = 0.0f, sy = 0.0f;
+                    gs_iso_project(&cam, at + along, across, 0.0f, &sx, &sy);
+                    if (sx < 0 || sy < 0 || sx >= GS_W || sy >= GS_H) continue;
+                    const uint8_t *p = &f.px[((int)sy * GS_W + (int)sx) * 4];
+                    if (p[0] > 225 && p[1] > 225 && p[2] > 225) white[which][gate]++;
+                    if (p[0] < 30 && p[1] < 30 && p[2] < 30) black[which][gate]++;
+                }
+            }
+            gs_frame_free(&f);
         }
     }
 
-    // The grid has a line and it is plain: white, with no chequer in it.
-    CHECK(grid_white > 40);
-    CHECK(grid_black == 0);
+    // The path: a plain white line where it starts, with no chequer in it, and
+    // a chequered one where it ends.
+    CHECK(white[0][0] > 40);
+    CHECK(black[0][0] == 0);
+    CHECK(white[0][1] > 40);
+    CHECK(black[0][1] > 40);
 
-    // The finish is chequered, which means both colours together.
-    CHECK(gate_white > 40);
-    CHECK(gate_black > 40);
-
-    gs_frame_free(&f);
+    // The loop: one chequered line doing both jobs, and the gate that was the
+    // path's finish is only a waypoint here - no line across it at all.
+    CHECK(white[1][0] > 40);
+    CHECK(black[1][0] > 40);
+    CHECK(white[1][1] == 0);
+    CHECK(black[1][1] == 0);
 }
 
 TEST(a_car_on_the_near_side_of_a_line_is_drawn_in_front_of_it) {

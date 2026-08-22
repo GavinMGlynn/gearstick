@@ -621,19 +621,34 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
             const gs_gate *g = &t->gate[c->next_gate % t->gate_count];
             if (!gs_gate_crossed(g, was[i].x, was[i].y, c->x, c->y)) continue;
 
+            uint8_t crossed = c->next_gate;
             c->next_gate = (uint8_t)((c->next_gate + 1) % t->gate_count);
-            // Back at the start line is a lap, which is the only place a lap can
-            // be counted without deciding arbitrarily where one begins.
-            if (c->next_gate != 0) continue;
+
+            // **Which gate ends a lap depends on what kind of route this is**,
+            // and getting that wrong is what made the shipped tracks
+            // unraceable. A lap used to be counted whenever `next_gate` wrapped
+            // to zero - that is, on crossing the *last* gate. On a loop that is
+            // one gate early. On the two-gate sprints the generator was making
+            // it meant a "lap" was a one-way trip, and lap two meant driving
+            // all the way back across an open field to a line that was where
+            // you started.
+            //
+            // A circuit's lap is bounded by gate zero, because a loop's start
+            // line is its finish line. A sprint's race is ended by its last
+            // gate, because a path finishes at the far end of it.
+            if (crossed != gs_track_finish_gate(t)) continue;
 
             c->laps++;
 
-            // The first crossing is the start of lap one rather than the end of
-            // a lap nobody drove: a car begins behind the line, so its first
-            // "lap" is the run up to it and timing that would give everybody a
-            // fictional best.
+            // On a circuit the first crossing is the start of lap one rather
+            // than the end of a lap nobody drove: a car begins behind the line,
+            // so its first "lap" is the run up to it and timing that would give
+            // everybody a fictional best. A sprint has no such crossing - its
+            // finish is a different gate from its start - so its one and only
+            // crossing is a real time and is kept.
             uint32_t now = (uint32_t)w->tick;
-            if (c->laps > 1) {
+            bool run_up = gs_track_is_circuit(t) && c->laps == 1;
+            if (!run_up) {
                 uint32_t lap = now - c->lap_start;
                 if (c->best_lap == 0 || lap < c->best_lap) c->best_lap = lap;
             }

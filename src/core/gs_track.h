@@ -143,6 +143,31 @@ extern const gs_surface_def gs_surfaces[GS_SURF_COUNT];
 // inferred from a shape.
 #define GS_TRACK_MAX_GATES 32
 
+// **What kind of route this is, which is the difference between a track that
+// goes somewhere and one that does not.**
+//
+// This was the missing distinction, and its absence is why the shipped tracks
+// were not raceable. The generator laid two gates - one near the left edge, one
+// near the right - and called it a route; the simulation counted a lap when the
+// *last* gate was crossed. So a "lap" was a one-way trip, and lap two meant
+// driving all the way back across the field with nothing marking the way, to a
+// line that was where you had started. Every part of that worked exactly as
+// written and the whole was not a race.
+//
+// A track now says which of the two things it is, and the two are raced
+// differently:
+//
+// - **A circuit** is a closed loop. Gate zero is the start *and* the finish -
+//   one line, crossed at the beginning of every lap and at the end of every
+//   lap - and the gates after it run round the loop in order.
+// - **A sprint** is a path from somewhere to somewhere else. Gate zero is the
+//   start line, the last gate is the finish, and they are a long way apart.
+//   There are no laps to count; arriving is the whole race.
+typedef enum gs_route_kind {
+    GS_ROUTE_SPRINT = 0,   // start at gate zero, finish at the last one
+    GS_ROUTE_CIRCUIT       // a loop, gate zero being start and finish both
+} gs_route_kind;
+
 typedef struct gs_gate {
     gs_fix   x, y;          // centre, in tiles
     gs_fix   half_width;    // how far the gate reaches either side of centre
@@ -162,9 +187,19 @@ typedef struct gs_track {
     uint8_t surface[GS_TRACK_TILES];     // gs_surface, indexed [y * GS_TRACK_MAX + x]
     uint8_t gravity[GS_TRACK_TILES];     // multiples of 1/GS_GRAVITY_UNIT
 
+    uint8_t route;                       // gs_route_kind
     uint8_t gate_count;
-    gs_gate gate[GS_TRACK_MAX_GATES];    // gate[0] is the start and the finish
+    gs_gate gate[GS_TRACK_MAX_GATES];    // gate[0] is where a race begins
 } gs_track;
+
+// Which gate ends a lap - or, on a sprint, ends the race. Gate zero on a
+// circuit, because a loop's start line is its finish line; the last gate on a
+// sprint, because a path's finish is at the far end of it.
+uint8_t gs_track_finish_gate(const gs_track *t);
+
+// Is this track a loop? Then one line does both jobs and the renderer draws one
+// chequered line rather than a plain start and a chequered finish.
+bool gs_track_is_circuit(const gs_track *t);
 
 #define GS_CORNER_STRIDE (GS_TRACK_MAX + 1)
 #define GS_TILE_INDEX(x, y) ((size_t)(y) * GS_TRACK_MAX + (size_t)(x))
@@ -295,7 +330,10 @@ uint64_t gs_track_hash(const gs_track *t);
 // provides the buffer and asks how big it needs to be.
 
 #define GS_TRACK_MAGIC   0x4b525447u   // "GTRK"
-#define GS_TRACK_VERSION 2u
+// Version 3 carries the route kind. Version 2 files still load: they are read
+// as sprints, which is what every one of them actually was - two gates, one at
+// each end, raced as though it were a loop.
+#define GS_TRACK_VERSION 3u
 
 // Bytes `gs_track_serialize` will write for this track.
 size_t gs_track_size(const gs_track *t);

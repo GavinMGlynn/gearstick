@@ -268,6 +268,8 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(48), GS_INT(8), 0, GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(32), 0, GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(48), GS_INT(32), 0, GS_INT(6));
+    // A circuit: a figure of eight closes on itself, so the line it starts on is the line it ends on.
+    gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
     snprintf(path, sizeof path, "%s/the-crossing.gstrack", dir);
     if (!gs_write(path)) return 1;
 
@@ -317,6 +319,8 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(50), GS_INT(20), GS_QUARTER, GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(30), GS_INT(32), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(10), GS_INT(20), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
+    // A circuit: an oval is a loop and a loop has one line, crossed at the start of every lap and the end of every lap.
+    gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
     snprintf(path, sizeof path, "%s/the-oval.gstrack", dir);
     if (!gs_write(path)) return 1;
 
@@ -342,6 +346,8 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(40), GS_INT(34), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(16), GS_INT(34), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(10), GS_INT(16), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
+    // A circuit: five corners back to where you began, which is what makes it a lap rather than a journey.
+    gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
     snprintf(path, sizeof path, "%s/the-long-way-round.gstrack", dir);
     if (!gs_write(path)) return 1;
 

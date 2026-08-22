@@ -885,6 +885,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // somebody opening a track they were sent, and for a check that needs a
     // race on ground that is not at height zero - which is where the camera
     // fault lived, invisible on the flat.
+    bool have_track = false;
     if (a->track_path != nullptr) {
         size_t named_len = 0;
         void *named_bytes = SDL_LoadFile(a->track_path, &named_len);
@@ -901,10 +902,18 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             }
         }
         if (!named_ok) SDL_Log("track: could not read %s", a->track_path);
+        have_track = named_ok;
     }
 
+    // **A named track that would not load must not race anyway.** It used to:
+    // the failure was logged and then the "a track was named" branch skipped
+    // the fallback, leaving `a->t` as it was found - all zeros, a track no tiles
+    // wide. Sampling that indexes off the front of its own arrays, which the
+    // sanitiser caught only because a test happened to name a track that had
+    // been renamed. Falling back to the library beats a race on a track that
+    // does not exist, and the log above still says what could not be read.
     const gs_track *first = gs_library_track(&a->menu.library, 0);
-    if (a->track_path != nullptr) {
+    if (have_track) {
         // already chosen above
     } else if (first != nullptr) {
         a->t = *first;

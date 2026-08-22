@@ -86,6 +86,11 @@ void gs_track_init(gs_track *t, uint8_t w, uint8_t h, gs_surface surface) {
     t->w = w;
     t->h = h;
     t->gate_count = 0;
+
+    // A fresh track is a path until something says otherwise, which is the
+    // safer of the two: a sprint's finish is its last gate, and a track with
+    // one gate then finishes where it starts rather than never at all.
+    t->route = (uint8_t)GS_ROUTE_SPRINT;
     for (size_t i = 0; i < GS_TRACK_MAX_GATES; i++) t->gate[i] = (gs_gate){ 0 };
 }
 
@@ -392,7 +397,11 @@ static uint32_t gs_get_u32(const uint8_t *p) {
 }
 
 // magic, version, width, height, gate count.
-#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1 + 1)
+// magic, version, w, h, gate count, route kind.
+#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1 + 1 + 1)
+
+// What a version 2 header was, before the route kind was in it.
+#define GS_TRACK_HEADER_BYTES_V2 (4 + 4 + 1 + 1 + 1)
 
 // x, y, half width, heading.
 #define GS_GATE_BYTES (4 + 4 + 4 + 2)
@@ -402,6 +411,16 @@ static size_t gs_track_payload(const gs_track *t) {
     size_t tiles = (size_t)t->w * (size_t)t->h * 2;                // surface, gravity
     size_t gates = (size_t)t->gate_count * GS_GATE_BYTES;
     return corners + tiles + gates;
+}
+
+uint8_t gs_track_finish_gate(const gs_track *t) {
+    if (t->gate_count == 0) return 0;
+    if (t->route == (uint8_t)GS_ROUTE_CIRCUIT) return 0;
+    return (uint8_t)(t->gate_count - 1);
+}
+
+bool gs_track_is_circuit(const gs_track *t) {
+    return t->route == (uint8_t)GS_ROUTE_CIRCUIT;
 }
 
 size_t gs_track_size(const gs_track *t) {
@@ -418,6 +437,7 @@ size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap) {
     *p++ = t->w;
     *p++ = t->h;
     *p++ = t->gate_count;
+    *p++ = t->route;
 
     for (uint32_t y = 0; y <= t->h; y++) {
         for (uint32_t x = 0; x <= t->w; x++) {
@@ -445,19 +465,30 @@ size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap) {
 }
 
 bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
-    if (len < GS_TRACK_HEADER_BYTES) return false;
+    if (len < GS_TRACK_HEADER_BYTES_V2) return false;
 
     const uint8_t *p = buf;
     if (gs_get_u32(p) != GS_TRACK_MAGIC) return false;
     p += 4;
-    if (gs_get_u32(p) != GS_TRACK_VERSION) return false;
+
+    // **Version 2 still loads.** Those files carry no route kind because there
+    // was none to carry, and every one of them is a sprint: two gates, one at
+    // each end. Refusing them would throw away every track anybody had saved to
+    // add a byte.
+    uint32_t version = gs_get_u32(p);
     p += 4;
+    if (version != GS_TRACK_VERSION && version != 2u) return false;
+    size_t header = version >= 3u ? GS_TRACK_HEADER_BYTES
+                                  : (size_t)GS_TRACK_HEADER_BYTES_V2;
+    if (len < header) return false;
 
     uint8_t w = *p++;
     uint8_t h = *p++;
     uint8_t gates = *p++;
+    uint8_t kind = version >= 3u ? *p++ : (uint8_t)GS_ROUTE_SPRINT;
     if (w == 0 || h == 0 || w > GS_TRACK_MAX || h > GS_TRACK_MAX) return false;
     if (gates > GS_TRACK_MAX_GATES) return false;
+    if (kind > (uint8_t)GS_ROUTE_CIRCUIT) return false;
 
     // Everything is checked before anything is written, so a refused file
     // leaves the caller's track exactly as it was. Half-loading is the failure
@@ -465,9 +496,10 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
     size_t corners = ((size_t)w + 1) * ((size_t)h + 1) * 2;
     size_t tiles = (size_t)w * (size_t)h * 2;
     size_t route = (size_t)gates * GS_GATE_BYTES;
-    if (len < GS_TRACK_HEADER_BYTES + corners + tiles + route) return false;
+    if (len < header + corners + tiles + route) return false;
 
     gs_track_init(t, w, h, GS_SURF_PAVEMENT);
+    t->route = kind;
 
     for (uint32_t y = 0; y <= h; y++) {
         for (uint32_t x = 0; x <= w; x++) {
