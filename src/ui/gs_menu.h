@@ -227,6 +227,13 @@ gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
 // playing this so far has been in code exactly that shape.
 gs_screen gs_menu_back(const gs_menu *m, bool editing);
 
+// **Can the lobby start a race right now?** A predicate rather than a condition
+// buried in the drawing, because the first version of it was buried there and
+// was wrong in a way nothing could see: it compared a count against a capacity,
+// and before the server has answered both are zero - so it offered Race to
+// somebody still knocking on the door, and did nothing when they pressed it.
+bool gs_menu_lobby_can_race(const gs_menu *m);
+
 // **The gate's whole rule, in one callable place.** Sign `index` in if the
 // password and code are what that driver requires. Returns false and leaves
 // `login_error` saying why otherwise.

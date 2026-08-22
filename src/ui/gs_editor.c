@@ -6,6 +6,7 @@
 
 #include "platform/gs_paths.h"
 #include "ui/gs_editor.h"
+#include "ui/gs_style.h"
 
 #include "core/gs_share.h"
 
@@ -264,12 +265,72 @@ static void gs_name_parts(void) {
 // the original's editor worked in and the reason it was quick: the dials that
 // appear are the ones that mean something for the piece in your hand, so a
 // start line has a width and a heading and no length, and a ramp has a rise.
+// **A window of its own, in the top right.** The original put the PARTS BOX
+// beside the COURSE, and that is the whole shape of the thing: what you are
+// building on over here, what you can build with over there. Folded into the
+// brush palette it was a mode inside a mode - choose the parts brush, then find
+// the pieces - which is two steps further from a box of parts than it needs to
+// be.
+static void gs_editor_parts_box(gs_editor *e, const gs_track *t);
+
+static void gs_editor_parts_window(gs_editor *e, const gs_track *t) {
+    ImGuiViewport *vp = ImGui_GetMainViewport();
+    // Wide enough for "crossroads" on a button and "turn (quarters)" beside a
+    // slider. Three across rather than four: the piece names are words, and a
+    // button labelled "crossroa" is a button nobody can read.
+    float w = 380.0f;
+
+    ImGui_SetNextWindowPos((ImVec2){ vp->WorkPos.x + vp->WorkSize.x - w - 16.0f,
+                                     vp->WorkPos.y + 16.0f },
+                           ImGuiCond_FirstUseEver);
+    ImGui_SetNextWindowSize((ImVec2){ w, 460.0f }, ImGuiCond_FirstUseEver);
+
+    if (!ImGui_Begin("Parts box", nullptr, 0)) {
+        ImGui_End();
+        return;
+    }
+
+    // Choosing a piece is choosing the parts brush: there is no reason to make
+    // somebody say it twice, and a palette you can click that does not select
+    // anything is the sort of thing that makes a UI feel broken.
+    gs_editor_parts_box(e, t);
+    ImGui_End();
+}
+
 static void gs_editor_parts_box(gs_editor *e, const gs_track *t) {
     gs_name_parts();
     gs_name_surfaces();
 
+    // **A box you can see, not a list you have to open.** This was a combo, so
+    // choosing a piece meant knowing there were pieces, opening a menu and
+    // reading nine words - and the original's whole editor was a *box of parts*
+    // sitting beside the course, where what you could build was the first thing
+    // you saw. Four across, laid out like the box it is named after.
     int was = e->part_kind;
-    ImGui_ComboChar("part", &e->part_kind, gs_part_names, GS_PART_COUNT);
+    const int across = 3;
+    float wide = (ImGui_GetContentRegionAvail().x -
+                  ImGui_GetStyle()->ItemSpacing.x * (float)(across - 1)) /
+                 (float)across;
+    if (wide < 60.0f) wide = 60.0f;
+
+    for (int i = 0; i < GS_PART_COUNT; i++) {
+        if (i % across != 0) ImGui_SameLine();
+        ImGui_PushIDInt(8100 + i);
+
+        bool chosen = e->part_kind == i;
+        if (chosen) {
+            float r, g, b;
+            gs_style_accent(&r, &g, &b);
+            ImGui_PushStyleColorImVec4(ImGuiCol_Button, (ImVec4){ r, g, b, 0.85f });
+        }
+        if (ImGui_ButtonEx(gs_part_name((gs_part_kind)i), (ImVec2){ wide, 34.0f })) {
+            e->part_kind = i;
+            e->brush = GS_BRUSH_PART;   // picking a piece is picking the tool
+        }
+        if (chosen) ImGui_PopStyleColor();
+        ImGui_PopID();
+    }
+
     if (e->part_kind != was) {
         // A new piece arrives with numbers worth dropping rather than whatever
         // the last one was set to - a corner's length is a radius and a
@@ -280,6 +341,22 @@ static void gs_editor_parts_box(gs_editor *e, const gs_track *t) {
 
     gs_part_kind kind = (gs_part_kind)e->part_kind;
     e->part.kind = (uint8_t)kind;
+
+    // **Every slider stops where the longest label starts.** ImGui puts a
+    // widget's label to its right and clips whatever does not fit, which is how
+    // "turn (quarters)" came to read "turn (quarter". The same fault the brush
+    // palette had, and the same answer: ask the font how wide the widest label
+    // is rather than guessing a width that is right in one font.
+    static const char *labels[] = {
+        "turn (quarters)", "width (tiles)", "length (tiles)",
+        "rise (tiles)", "made of",
+    };
+    float widest = 0.0f;
+    for (size_t i = 0; i < sizeof labels / sizeof labels[0]; i++) {
+        float lw = ImGui_CalcTextSize(labels[i]).x;
+        if (lw > widest) widest = lw;
+    }
+    ImGui_PushItemWidth(-(widest + ImGui_GetStyle()->ItemInnerSpacing.x + 8.0f));
 
     // Which way it points. Quarter turns rather than degrees: a part is laid on
     // a square grid and lands on it squarely.
@@ -327,6 +404,8 @@ static void gs_editor_parts_box(gs_editor *e, const gs_track *t) {
     default:
         break;
     }
+
+    ImGui_PopItemWidth();
 
     ImGui_Text("this track is a %s, %u gate%s",
                gs_track_is_circuit(t) ? "loop" : "path",
@@ -396,7 +475,7 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
         gs_name_surfaces();
         ImGui_ComboChar("surface", &e->surface, gs_surface_names, GS_SURF_COUNT);
     } else if (e->brush == GS_BRUSH_PART) {
-        gs_editor_parts_box(e, t);
+        ImGui_TextUnformatted("the parts box is over on the right.");
     } else if (e->brush == GS_BRUSH_GATE) {
         // The route. Gate zero is where a race begins; the rest say which way
         // round, in the order they were placed.
@@ -690,6 +769,7 @@ static void gs_controls_panel(gs_editor *e, gs_input_state *input) {
 void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view,
                      gs_input_state *input) {
     gs_editor_palette(e, t);
+    gs_editor_parts_window(e, t);
     if (input != nullptr) {
         gs_controls_panel(e, input);
         gs_capture_rebind(e, input);
@@ -724,6 +804,42 @@ void gs_editor_frame(gs_editor *e, gs_track *t, const gs_view *view,
             e->stroke = false;
         }
         return;
+    }
+
+    // **Getting around the track with the mouse.** Panning was the arrow keys
+    // and nothing else, on a board up to sixty-four tiles across at a zoom that
+    // shows a dozen - so building anything meant holding a key and waiting, and
+    // one hand was on the mouse anyway. Dragging with the right button or the
+    // middle one moves the board under the pointer, which is how every editor
+    // that has ever had a canvas does it.
+    //
+    // The isometric axes are the diagonals of the screen, so a drag of (dx, dy)
+    // in pixels is undone by moving the camera along both world axes at once -
+    // the inverse of the projection in gs_iso_project, with the zoom taken out.
+    if (ImGui_IsMouseDragging(ImGuiMouseButton_Right, 0.0f) ||
+        ImGui_IsMouseDragging(ImGuiMouseButton_Middle, 0.0f)) {
+        int button = ImGui_IsMouseDragging(ImGuiMouseButton_Right, 0.0f)
+                         ? ImGuiMouseButton_Right : ImGuiMouseButton_Middle;
+        ImVec2 d = ImGui_GetMouseDragDelta(button, 0.0f);
+        ImGui_ResetMouseDragDeltaEx(button);
+
+        float zoom = e->zoom > 0.01f ? e->zoom : 1.0f;
+        float u = d.x / (GS_ISO_TILE_W * 0.5f * zoom);
+        float v = d.y / (GS_ISO_TILE_H * 0.5f * zoom);
+
+        // u = dx - dy and v = dx + dy, so dx and dy fall out of the pair.
+        e->cam_x -= (v + u) * 0.5f;
+        e->cam_y -= (v - u) * 0.5f;
+    }
+
+    // And the wheel zooms, about the middle of the view. Clamped where the
+    // race camera is: closer than this is a car filling the screen and further
+    // is a track you cannot see the tiles of.
+    float wheel = io->MouseWheel;
+    if (wheel != 0.0f) {
+        e->zoom *= (wheel > 0.0f) ? 1.12f : (1.0f / 1.12f);
+        if (e->zoom < 0.25f) e->zoom = 0.25f;
+        if (e->zoom > 4.0f) e->zoom = 4.0f;
     }
 
     // A drag is one undo step, however many tiles it touched.

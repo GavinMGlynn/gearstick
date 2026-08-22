@@ -1339,9 +1339,17 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
         ImGui_Separator();
         ImGui_Spacing();
         // **Race**, for a lobby that is waiting on the player rather than on
-        // another player. Offered only when everybody is here, because a button
-        // that cannot work is worse than no button.
-        if (m->lobby->count >= m->lobby->capacity) {
+        // another player. Offered only when it can actually work, because a
+        // button that does nothing is worse than no button.
+        //
+        // `m->lobby_ready` and not a count comparison of its own. The first go
+        // at this asked whether count had reached capacity - and before the
+        // server has answered, both are zero, so it offered Race to somebody
+        // still knocking on the door and did nothing when they pressed it. It
+        // also read through `m->lobby` without checking it was there. Every
+        // other line on this screen already goes through `heard` or
+        // `lobby_ready` for exactly this reason.
+        if (gs_menu_lobby_can_race(m)) {
             if (ImGui_ButtonEx("Race", (ImVec2){ 120.0f, 38.0f })) {
                 m->race_requested = true;
             }
@@ -1731,6 +1739,14 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     }
     ImGui_End();
     return next;
+}
+
+bool gs_menu_lobby_can_race(const gs_menu *m) {
+    // Heard from at all, everybody present, and the ground arrived. Any of
+    // those missing and starting a race is something the client cannot do.
+    if (m->lobby == nullptr || m->lobby->capacity == 0) return false;
+    if (!m->lobby_ready) return false;
+    return m->track_progress >= 1.0f;
 }
 
 gs_screen gs_menu_back(const gs_menu *m, bool editing) {

@@ -16,3 +16,6 @@
 [submodule "ext/libsodium"]
 	path = ext/libsodium
 	url = https://github.com/jedisct1/libsodium.git
+[submodule "ext/sdl_image"]
+	path = ext/sdl_image
+	url = https://github.com/libsdl-org/SDL_image.git

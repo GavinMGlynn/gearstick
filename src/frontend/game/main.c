@@ -81,6 +81,18 @@ typedef struct gs_app {
     bool        overlay;      // start with the painted-gravity overlay on
     bool        arc;          // start with the landing arc on
     bool        start_in_editor;
+
+    // **Are we in the middle of building something?** Set when the tracks
+    // screen opened the construction set, cleared on the way back to a menu.
+    //
+    // Tab used to open the editor from anywhere, which is how somebody was
+    // expected to find it - a key nothing mentioned, on screens that never said
+    // it existed. New and Edit on the tracks screen are how you get in now. But
+    // Tab is also the build-drive-build loop, which is the single biggest thing
+    // the original could not do, so it keeps working *inside* a session: drive
+    // what you just built, Tab back, change it. It simply is not the front
+    // door any more.
+    bool        edit_session;
     float       zoom;         // 0 means the default
     uint8_t     players;      // 0 means the default of two
     bool        diverge;      // in shot mode, steer the cars apart and back
@@ -1050,7 +1062,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     }
     gs_layout(a);
 
-    if (a->start_in_editor) gs_editor_toggle(&a->editor, &a->view[0]);
+    if (a->start_in_editor) {
+        a->edit_session = true;
+        gs_editor_toggle(&a->editor, &a->view[0]);
+    }
     if (a->analyse_at_start) gs_editor_analyse(&a->editor, &a->t);
 
     SDL_Log("gearstick: assets at %s", gs_assets_dir());
@@ -1281,7 +1296,12 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         if (e->key.key == SDLK_F9) gs_ghost_open(a);
         // Tab is the whole loop: build, drive, build. No load step between
         // them, which is the single biggest thing the original could not do.
-        if (e->key.key == SDLK_TAB) {
+        //
+        // **Only inside a session, though.** It is not how you reach the
+        // construction set - that is New and Edit on the tracks screen, where
+        // somebody would look for it - it is how you get between building the
+        // thing and driving it once you are already building.
+        if (e->key.key == SDLK_TAB && (a->editor.active || a->edit_session)) {
             gs_editor_toggle(&a->editor, &a->view[0]);
             // Leaving the editor drops a car where you were looking. Coming
             // back does nothing at all to the track, which is the other half of
@@ -1791,6 +1811,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
             a->menu.screen = GS_SCREEN_RACE;
             next = GS_SCREEN_RACE;
+            a->edit_session = true;
             if (!a->editor.active) gs_editor_toggle(&a->editor, &a->view[0]);
         }
 
@@ -1822,6 +1843,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
                 a->menu.screen = GS_SCREEN_RACE;
                 next = GS_SCREEN_RACE;
+                a->edit_session = true;
                 if (!a->editor.active) gs_editor_toggle(&a->editor, &a->view[0]);
             }
         }
@@ -1890,6 +1912,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                 a->net_started = false;
                 a->race_settled = false;
             }
+            // Back to a menu ends the building session: Tab is the loop while
+            // you are working on something, and nothing at all once you are not.
+            if (next != GS_SCREEN_RACE) a->edit_session = false;
+
             a->menu.screen = next;
             gs_store_save(a);
         }

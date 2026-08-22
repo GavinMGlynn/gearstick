@@ -3976,6 +3976,56 @@ TEST(no_screen_is_drawn_bigger_than_the_window_it_is_in) {
     }
 }
 
+TEST(the_lobby_offers_a_race_only_when_it_could_start_one) {
+    (void)ren;
+
+    // **A button that does nothing is worse than no button.** The first go at
+    // the lobby's Race control asked whether the player count had reached the
+    // capacity - and before the server has answered, both are zero, so `0 >= 0`
+    // offered Race to somebody still knocking on the door and nothing happened
+    // when they pressed it. It read through the lobby pointer without checking
+    // it was there, too.
+    //
+    // Every state this screen can be in, and whether starting a race is a thing
+    // the client could actually do in it.
+    static gs_menu m;
+    gs_menu_init(&m);
+
+    // Nothing at all: no lobby yet.
+    m.lobby = nullptr;
+    m.lobby_ready = true;
+    m.track_progress = 1.0f;
+    CHECK(!gs_menu_lobby_can_race(&m));
+
+    // Knocking: a lobby struct, but the server has not said how big it is.
+    static gs_lobby lobby;
+    lobby = (gs_lobby){ 0 };
+    m.lobby = &lobby;
+    CHECK(!gs_menu_lobby_can_race(&m));
+
+    // Heard, and waiting for somebody else.
+    lobby.capacity = 2;
+    lobby.count = 1;
+    m.lobby_ready = false;
+    CHECK(!gs_menu_lobby_can_race(&m));
+
+    // Everybody here, but the ground is still arriving.
+    lobby.count = 2;
+    m.lobby_ready = true;
+    m.track_progress = 0.5f;
+    CHECK(!gs_menu_lobby_can_race(&m));
+
+    // Everybody here and the track landed: now it can.
+    m.track_progress = 1.0f;
+    CHECK(gs_menu_lobby_can_race(&m));
+
+    // A one-player lobby is a full lobby, which is the case a player testing
+    // alone is in and the one the fault was seen on.
+    lobby.capacity = 1;
+    lobby.count = 1;
+    CHECK(gs_menu_lobby_can_race(&m));
+}
+
 TEST(exit_is_something_the_menu_asks_for_rather_than_does) {
     (void)ren;
     static gs_menu m;
@@ -4057,6 +4107,7 @@ int main(void) {
     run_a_password_cannot_be_set_to_nothing(ren);
     run_a_password_on_a_profile_is_actually_required(ren);
     run_a_second_factor_is_asked_for_when_the_profile_has_one(ren);
+    run_the_lobby_offers_a_race_only_when_it_could_start_one(ren);
     run_exit_is_something_the_menu_asks_for_rather_than_does(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);
     run_the_landing_arc_is_off_until_it_is_asked_for(ren);

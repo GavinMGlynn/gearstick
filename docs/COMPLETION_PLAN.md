@@ -1445,3 +1445,19 @@ worth as much as what was decided about it.
       *Verification: the screen-fitting test caught the panel overflowing once
       the new controls were on it — after its fixture was made to actually pick
       a track, which it had never done.*
+- [x] **A Race button that did nothing.** *(Reported, with the fair complaint
+      that it should have been tested.)* It compared a player count against a
+      capacity, and before the server answers both are zero — so it offered
+      Race to somebody still knocking and did nothing when they pressed it.
+      *Verification: the condition is a predicate now rather than an expression
+      buried in the drawing, because a predicate is a thing a test can call —
+      which was the real failure. Every state the lobby has is checked, and the
+      version that shipped fails two of them.*
+- [x] **Getting around the track, and a box of parts you can see.** *(Reported:
+      "I don't have the toolbox to select from, and I don't have the ability to
+      scroll around the track".)* Right or middle drag pans, the wheel zooms,
+      and the parts box is its own window in the top right with all nine pieces
+      as buttons — after the original's PARTS BOX beside the COURSE.
+- [x] **Tab is no longer the front door to the editor.** *(Asked for.)* New and
+      Edit on the tracks screen are. Tab still runs the build-drive-build loop
+      while you are working on something, and does nothing once you are not.

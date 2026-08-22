@@ -3457,6 +3457,64 @@ only after the fixture was made to pick a track and go online: it built a full
 library and selected nothing, so the screen was measured at its smallest -
 which is exactly what that test's own comment warns against.
 
+### A Race button that did nothing
+
+**"I get to the lobby and click Race and nothing happens. Surely you could have
+tested for such an obvious bug."** Correct on both counts.
+
+The button asked `count >= capacity`. Before the server has answered, a lobby
+has neither - both are zero - so `0 >= 0` offered **Race** to somebody still
+knocking on the door, and pressing it did nothing because `gs_wire_ready` was
+false. It also read through the lobby pointer without checking it was there.
+Every other line on that screen already goes through `heard` or `lobby_ready`
+for exactly this reason; the new control did not.
+
+The condition is `gs_menu_lobby_can_race` now - a predicate rather than an
+expression buried in the drawing, **because a predicate is a thing a test can
+call**. That is the actual failure here: not the wrong comparison, but putting
+it somewhere nothing could reach.
+`the_lobby_offers_a_race_only_when_it_could_start_one` walks every state the
+screen has - no lobby, knocking, waiting on somebody, receiving the track,
+ready, and a one-player lobby - and the version that shipped fails two of them.
+
+### Getting around, and a box of parts you can see
+
+**"When editing, I don't have the toolbox to select from, and I don't have the
+ability to scroll around the track."** Both true.
+
+**Panning was the arrow keys and nothing else**, on a board up to sixty-four
+tiles across at a zoom that shows a dozen - so getting anywhere meant holding a
+key and waiting, with one hand already on the mouse. Dragging with the right or
+middle button moves the board under the pointer, and the wheel zooms. The
+isometric axes are the screen's diagonals, so a drag in pixels is undone by
+moving the camera along both world axes at once - the inverse of
+`gs_iso_project`, with the zoom taken out.
+
+**And the parts box is a window of its own, in the top right.** It was a combo
+inside the brush palette, which is a mode inside a mode: choose the parts brush,
+then open a menu, then read nine words. The original put the PARTS BOX beside
+the COURSE and that is the whole shape of the thing - what you are building on
+over here, what you can build with over there. Nine pieces as buttons, the
+chosen one lit, and clicking one selects the parts tool as well, because a
+palette that does not select anything feels broken.
+
+Its sliders reserve the widest label, the same rule the brush palette follows -
+ImGui clips a label that does not fit, which is how "turn (quarters)" came to
+read "turn (quarter".
+
+### Tab is no longer the front door
+
+**"Remove the tab to edit."** Tab opened the construction set from anywhere,
+which was how somebody was expected to find it. New and Edit on the tracks
+screen are how you get in now.
+
+Tab still works *inside* a building session, because it is also the
+build-drive-build loop - the single biggest thing the original could not do -
+and losing that to fix a discoverability problem would be a poor trade. It is
+armed when the tracks screen opens the editor and disarmed on the way back to a
+menu, so it is the loop while you are working on something and nothing at all
+once you are not.
+
 ---
 
 ## Known risks
