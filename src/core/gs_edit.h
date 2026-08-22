@@ -29,7 +29,18 @@ typedef enum gs_edit_kind {
     // that changes what a track *is* for scoring purposes was the one you could
     // not take back.
     GS_EDIT_GATE_ADD,
-    GS_EDIT_GATE_REMOVE
+    GS_EDIT_GATE_REMOVE,
+
+    // **Where a gate sits in the order is part of what the track is.** Gate
+    // zero is where a race begins, so a start line dropped after the corners
+    // have been laid has to become gate zero rather than the last thing on the
+    // route - and moving it has to be undoable like everything else, or the
+    // parts box has one action you cannot take back.
+    GS_EDIT_GATE_MOVE,
+
+    // Whether the track is a loop or a path, which decides which gate ends a
+    // lap. A change to what the track *is*, so it belongs in the history.
+    GS_EDIT_ROUTE_KIND
 } gs_edit_kind;
 
 typedef struct gs_edit {
@@ -94,6 +105,15 @@ bool gs_edit_gravity(gs_edit_log *l, gs_track *t, uint8_t x, uint8_t y, gs_fix m
 int  gs_edit_add_gate(gs_edit_log *l, gs_track *t, gs_fix x, gs_fix y,
                       gs_angle heading, gs_fix half_width);
 bool gs_edit_remove_gate(gs_edit_log *l, gs_track *t, uint8_t index);
+
+// Move a gate to a different place in the route, sliding the others along to
+// close the gap and open a new one. False if either index is past the end.
+bool gs_edit_move_gate(gs_edit_log *l, gs_track *t, uint8_t from, uint8_t to);
+
+// Say whether the track is a loop or a path, undoably - it decides which gate
+// ends a lap and how the lines are drawn, so it is a change to the track like
+// any other and not a setting beside it.
+bool gs_edit_route_kind(gs_edit_log *l, gs_track *t, gs_route_kind kind);
 
 bool gs_edit_can_undo(const gs_edit_log *l);
 bool gs_edit_can_redo(const gs_edit_log *l);

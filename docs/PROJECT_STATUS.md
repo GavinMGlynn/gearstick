@@ -3217,6 +3217,67 @@ All 22 shipped tracks are regenerated. Generated ones now run 6 to 10 gates over
 `the-long-way-round` are marked as the circuits they always were.
 `gearstick_cli generate 200` reports every one driveable.
 
+### A parts box, after the original's
+
+**"Let us make the track editor more like the original editor, where there were
+different blocks that could be dropped onto the map and then modified for height
+/ slope / width / shape — and we need blocks for start line, finish line or
+combined start / finish line for circuits."**
+
+The editor had brushes: raise a corner, paint a tile, place a gate. Brushes are
+how you shape *ground*, and they are not how you build a *road* - laying a
+straight by hand means keeping forty corners level yourself, and the moment you
+stop being perfect the car is tipped sideways by its own road. The original had
+a PARTS BOX beside the course for exactly this reason.
+
+**A part is a way of editing, not a second track format.** Everything a piece
+does is corner moves, surface changes and gate placements - the edits that
+already existed - grouped into one transaction. So a piece undoes in one step, a
+track built from parts is byte-for-byte the same kind of file as one built with
+brushes, and nothing downstream needs to know parts happened.
+
+Nine pieces, in `src/core/gs_parts.h`:
+
+- **Road**: straight, corner, ramp, crest, dip. Each lays level ground across
+  its width and its own surface, following the ground along its length - the
+  same rule the generator carves by, and for the same reason.
+- **Route**: start line, finish line, **combined start / finish**, checkpoint.
+
+Each carries what can be modified about it - turn in quarters, width, length,
+rise, what it is made of - and choosing a piece loads numbers worth dropping,
+because a corner's length is a radius and a straight's is a distance and
+carrying one into the other gives a shape nobody asked for.
+
+**The three lines are three different things, and dropping one says what kind of
+track this is.** A combined line makes it a circuit; a separate start or finish
+makes it a path. That is `gs_edit_route_kind`, which is undoable like everything
+else, because what a track *is* belongs in the history.
+
+**A start line becomes gate zero wherever it was dropped.** Gate zero is where a
+race begins, so a start line placed after the corners have been laid has to move
+to the front of the route - otherwise building a track in the order the pieces
+occur to somebody gives a track that starts in the middle of itself. That needed
+`gs_edit_move_gate`, also undoable.
+
+The hover preview shows the piece's footprint before the button goes down, in
+red when it will not fit: a brush affects the tile under the pointer and a part
+affects forty of them, and the piece that will not fit is exactly the one whose
+edges you cannot see.
+
+Five tests: a part undoes in one step and redoes to the same track; a road piece
+is level across its width and lays its surface only where the road is; a start
+line dropped last is still gate zero and undoes cleanly; a combined line makes
+the track a loop and taking it back makes it a path again; and a part that will
+not fit changes nothing at all.
+
+**What is not here: intersections and overpasses.** Asked for, and not
+representable in the current data model - terrain is a single per-corner
+heightfield, one height per point, so two roads cannot occupy the same tile at
+different heights. It needs a separate bridge layer in the track and a "which
+level am I on" bit per car in the simulation, which is a real design decision
+rather than another part in the box. A *flat* crossroads is representable and is
+the obvious next piece.
+
 ---
 
 ## Known risks

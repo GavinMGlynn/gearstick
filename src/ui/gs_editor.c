@@ -21,6 +21,8 @@ bool gs_editor_init(gs_editor *e, uint32_t history) {
     e->radius = 1;
     e->step = 0.25f;
     e->gate_heading = 0.0f;
+    e->part_kind = (int)GS_PART_STRAIGHT;
+    e->part = gs_part_default(GS_PART_STRAIGHT);
     e->gate_width = 2.5f;
     e->zoom = GS_ISO_DEFAULT_ZOOM;
     e->ghost_on = true;
@@ -109,7 +111,10 @@ static void gs_brush_at(gs_editor *e, gs_track *t, int tx, int ty) {
                         (gs_fix)(e->gravity * (float)GS_ONE));
         break;
     case GS_BRUSH_GATE:
+    case GS_BRUSH_PART:
     case GS_BRUSH_COUNT:
+        // Neither is a brush: both are placed once where the pointer is, in
+        // gs_editor_paint, rather than dragged over a disc of tiles.
         break;
     }
 }
@@ -184,6 +189,23 @@ const gs_car *gs_editor_ghost_car(const gs_editor *e) {
 }
 
 void gs_editor_paint(gs_editor *e, gs_track *t, float wx, float wy) {
+    // A part is dropped, not painted: one click puts a whole piece of track
+    // down, and one undo takes it back.
+    if (e->brush == GS_BRUSH_PART) {
+        e->part.kind = (uint8_t)e->part_kind;
+        if (gs_part_place(e->log, t, &e->part, (int32_t)wx, (int32_t)wy)) {
+            SDL_snprintf(e->status, sizeof e->status, "dropped a %s",
+                         gs_part_name((gs_part_kind)e->part.kind));
+        } else {
+            // The two reasons it refuses, and they are worth telling apart:
+            // one is where you put it, the other is that the history is full.
+            SDL_snprintf(e->status, sizeof e->status,
+                         "a %s will not fit there",
+                         gs_part_name((gs_part_kind)e->part.kind));
+        }
+        return;
+    }
+
     // A gate is placed, not painted: it goes where the pointer is rather than
     // over a disc of tiles, and one click makes one of them.
     if (e->brush == GS_BRUSH_GATE) {
@@ -228,6 +250,87 @@ static const char *gs_surface_names[GS_SURF_COUNT];
 
 static void gs_name_surfaces(void) {
     for (int i = 0; i < GS_SURF_COUNT; i++) gs_surface_names[i] = gs_surfaces[i].name;
+}
+
+static const char *gs_part_names[GS_PART_COUNT];
+
+static void gs_name_parts(void) {
+    for (int i = 0; i < GS_PART_COUNT; i++) {
+        gs_part_names[i] = gs_part_name((gs_part_kind)i);
+    }
+}
+
+// **The parts box.** A piece is chosen and then modified, which is the order
+// the original's editor worked in and the reason it was quick: the dials that
+// appear are the ones that mean something for the piece in your hand, so a
+// start line has a width and a heading and no length, and a ramp has a rise.
+static void gs_editor_parts_box(gs_editor *e, const gs_track *t) {
+    gs_name_parts();
+    gs_name_surfaces();
+
+    int was = e->part_kind;
+    ImGui_ComboChar("part", &e->part_kind, gs_part_names, GS_PART_COUNT);
+    if (e->part_kind != was) {
+        // A new piece arrives with numbers worth dropping rather than whatever
+        // the last one was set to - a corner's length is a radius and a
+        // straight's is a distance, and carrying one into the other gives a
+        // shape nobody asked for.
+        e->part = gs_part_default((gs_part_kind)e->part_kind);
+    }
+
+    gs_part_kind kind = (gs_part_kind)e->part_kind;
+    e->part.kind = (uint8_t)kind;
+
+    // Which way it points. Quarter turns rather than degrees: a part is laid on
+    // a square grid and lands on it squarely.
+    int turn = (int)e->part.turn;
+    ImGui_SliderInt("turn (quarters)", &turn, 0, 3);
+    e->part.turn = (uint8_t)(turn & 3);
+
+    int width = (int)e->part.width;
+    ImGui_SliderInt("width (tiles)", &width, 2, 16);
+    e->part.width = (uint8_t)width;
+
+    if (gs_part_is_road(kind)) {
+        int length = (int)e->part.length;
+        ImGui_SliderInt("length (tiles)", &length, 4, 24);
+        e->part.length = (uint8_t)length;
+
+        if (kind == GS_PART_RAMP || kind == GS_PART_CREST || kind == GS_PART_DIP) {
+            float rise = gs_to_f(e->part.rise);
+            ImGui_SliderFloat("rise (tiles)", &rise, 0.25f, 6.0f);
+            e->part.rise = (gs_fix)(rise * (float)GS_ONE);
+        }
+
+        int surface = (int)e->part.surface;
+        ImGui_ComboChar("made of", &surface, gs_surface_names, GS_SURF_COUNT);
+        e->part.surface = (uint8_t)surface;
+    }
+
+    // **What each line does to the track**, said here rather than discovered by
+    // saving it and driving it.
+    switch (kind) {
+    case GS_PART_START_FINISH:
+        ImGui_TextUnformatted("one line, start and finish both.");
+        ImGui_TextUnformatted("dropping it makes this track a loop.");
+        break;
+    case GS_PART_START:
+        ImGui_TextUnformatted("where a race begins. becomes gate zero");
+        ImGui_TextUnformatted("wherever it is dropped, and makes this a path.");
+        break;
+    case GS_PART_FINISH:
+        ImGui_TextUnformatted("where a race ends, and makes this a path.");
+        break;
+    case GS_PART_CHECKPOINT:
+        ImGui_TextUnformatted("through here, on the way round.");
+        break;
+    default:
+        break;
+    }
+
+    ImGui_Text("this track is a %s, %u gate%s",
+               gs_track_is_circuit(t) ? "loop" : "path",
+               t->gate_count, t->gate_count == 1 ? "" : "s");
 }
 
 // How much room the labels down the right of the palette need, which is the
@@ -280,17 +383,23 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     // Second row: five of these do not fit across the panel, and a control
     // clipped at the edge is a control nobody finds.
     ImGui_RadioButtonIntPtr("gate", &e->brush, GS_BRUSH_GATE);
+    ImGui_SameLine();
+    ImGui_RadioButtonIntPtr("parts box", &e->brush, GS_BRUSH_PART);
 
-    if (e->brush != GS_BRUSH_GATE) ImGui_SliderInt("radius", &e->radius, 0, 8);
+    if (e->brush != GS_BRUSH_GATE && e->brush != GS_BRUSH_PART) {
+        ImGui_SliderInt("radius", &e->radius, 0, 8);
+    }
 
     if (e->brush == GS_BRUSH_RAISE || e->brush == GS_BRUSH_LOWER) {
         ImGui_SliderFloat("step (tiles)", &e->step, 0.05f, 2.0f);
     } else if (e->brush == GS_BRUSH_SURFACE) {
         gs_name_surfaces();
         ImGui_ComboChar("surface", &e->surface, gs_surface_names, GS_SURF_COUNT);
+    } else if (e->brush == GS_BRUSH_PART) {
+        gs_editor_parts_box(e, t);
     } else if (e->brush == GS_BRUSH_GATE) {
-        // The route. Gate zero is the start and the finish; the rest say which
-        // way round, in the order they were placed.
+        // The route. Gate zero is where a race begins; the rest say which way
+        // round, in the order they were placed.
         ImGui_SliderFloat("heading (deg)", &e->gate_heading, 0.0f, 359.0f);
         ImGui_SliderFloat("half width", &e->gate_width, 0.5f, 8.0f);
         ImGui_Text("click to place gate %u", t->gate_count);
@@ -648,7 +757,38 @@ void gs_editor_draw_cursor(const gs_editor *e, SDL_Renderer *ren,
     // "No cursor" is expressed by not drawing one. Saying it with a radius of
     // -1 looks tidier and is a trap: `cy + r` then underflows past INT_MIN and
     // the loop runs four billion times.
-    if (e->hover_on && e->brush != GS_BRUSH_GATE) {
+    // **A part shows where it will land before the button goes down.** A brush
+    // affects the tile under the pointer and a part affects forty of them, so
+    // dropping one without seeing its footprint is guesswork - and the piece
+    // that will not fit is exactly the one you cannot see the edges of.
+    if (e->hover_on && e->brush == GS_BRUSH_PART) {
+        gs_part shown = e->part;
+        shown.kind = (uint8_t)e->part_kind;
+
+        int32_t x0, y0, x1, y1;
+        gs_part_footprint(&shown, (int32_t)e->hover_x, (int32_t)e->hover_y,
+                          &x0, &y0, &x1, &y1);
+
+        // Red when it would not fit, so the refusal is visible before it
+        // happens rather than as a line of status text afterwards.
+        bool fits = x0 >= 0 && y0 >= 0 &&
+                    x1 <= (int32_t)t->w && y1 <= (int32_t)t->h;
+        if (fits) SDL_SetRenderDrawColor(ren, 255, 235, 140, 210);
+        else      SDL_SetRenderDrawColor(ren, 235, 70, 60, 210);
+
+        const int32_t bx[5] = { x0, x1, x1, x0, x0 };
+        const int32_t by[5] = { y0, y0, y1, y1, y0 };
+        SDL_FPoint p[5];
+        for (int i = 0; i < 5; i++) {
+            gs_fix wx = GS_INT(bx[i]), wy = GS_INT(by[i]);
+            gs_fix wz = gs_track_height(t, wx, wy);
+            gs_iso_project(&cam, gs_to_f(wx), gs_to_f(wy), gs_to_f(wz) + 0.03f,
+                           &p[i].x, &p[i].y);
+        }
+        SDL_RenderLines(ren, p, 5);
+    }
+
+    if (e->hover_on && e->brush != GS_BRUSH_GATE && e->brush != GS_BRUSH_PART) {
         int cx = (int)SDL_floorf(e->hover_x);
         int cy = (int)SDL_floorf(e->hover_y);
         int r = e->radius;

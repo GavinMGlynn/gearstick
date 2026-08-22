@@ -98,6 +98,7 @@ add_library(gearstick_sim STATIC
     src/core/gs_stunts.c
     src/core/gs_clock.c
     src/core/gs_edit.c
+    src/core/gs_parts.c
     src/core/gs_fixed.c
     src/core/gs_track.c
     src/core/gs_vehicle.c

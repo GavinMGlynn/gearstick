@@ -1380,3 +1380,18 @@ worth as much as what was decided about it.
       gates over a much bigger field rather than two. The route was checked for
       completability before and that was the whole mistake — completable is not
       raceable, and an open field with two gates is trivially completable.*
+- [x] **A parts box, after the original's.** *(Asked for directly, with a
+      picture of the original's PARTS BOX.)* The editor had brushes, which shape
+      ground but do not build a road — laying a straight by hand means keeping
+      forty corners level yourself. There are nine pieces now: straight, corner,
+      ramp, crest, dip, and the four route pieces — start line, finish line,
+      **combined start / finish** and checkpoint. Choose one, modify its turn,
+      width, length, rise and surface, and drop it. Dropping a combined line
+      makes the track a loop; dropping a separate start or finish makes it a
+      path. A start line becomes the first gate wherever it is dropped.
+      *Verification: a whole piece undoes in one step and redoes to the same
+      track; a road piece is level across its width; a start line dropped after
+      everything else is still where the race begins; and a piece that will not
+      fit changes nothing. Intersections with overpasses are **not** included —
+      see PROJECT_STATUS.md, they need a second height per tile, which the
+      terrain does not have.*

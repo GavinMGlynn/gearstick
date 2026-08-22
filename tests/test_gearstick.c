@@ -19,6 +19,7 @@
 #include "core/gs_analyse.h"
 #include "core/gs_clock.h"
 #include "core/gs_edit.h"
+#include "core/gs_parts.h"
 #include "core/gs_generate.h"
 #include "core/gs_ghost.h"
 #include "core/gs_library.h"
@@ -6104,6 +6105,173 @@ TEST(no_generated_slope_is_steeper_than_a_car_can_climb) {
     }
 }
 
+TEST(a_part_dropped_on_a_track_undoes_in_one_step) {
+    // **A part is a way of editing, not a second track format.** Everything a
+    // piece does is corner moves, surface changes and gate placements grouped
+    // into one transaction - so a track built out of the parts box is the same
+    // file as one built with brushes, and one undo takes a whole piece back.
+    static gs_track t;
+    gs_track_init(&t, 40, 40, GS_SURF_DIRT);
+
+    static uint8_t buf[262144];
+    gs_edit_log *log = (gs_edit_log *)buf;
+    gs_edit_log_init(log, 8192);
+
+    static gs_track before;
+    before = t;
+
+    gs_part road = gs_part_default(GS_PART_STRAIGHT);
+    CHECK(gs_part_place(log, &t, &road, 6, 20));
+
+    // It did something, and that something was one action.
+    CHECK(gs_track_hash(&t) != gs_track_hash(&before));
+    CHECK(gs_edit_undo_depth(log) == 1);
+
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(gs_track_hash(&t) == gs_track_hash(&before));
+    CHECK(gs_edit_undo_depth(log) == 0);
+
+    // And forward again, to exactly where it was.
+    static gs_track after;
+    CHECK(gs_edit_redo(log, &t));
+    after = t;
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(gs_edit_redo(log, &t));
+    CHECK(gs_track_hash(&t) == gs_track_hash(&after));
+}
+
+TEST(a_road_part_is_level_across_its_width) {
+    // The rule the generator carves by and the reason a part exists at all: a
+    // car is never tipped sideways by the road it is on. Laid across ground
+    // that is not flat, so what is measured is the part and not the start.
+    static gs_track t;
+    gs_track_init(&t, 40, 40, GS_SURF_DIRT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_track_set_corner(&t, x, y, GS_INT(x) / 4);
+        }
+    }
+
+    static uint8_t buf[262144];
+    gs_edit_log *log = (gs_edit_log *)buf;
+    gs_edit_log_init(log, 8192);
+
+    gs_part road = gs_part_default(GS_PART_STRAIGHT);
+    road.width = 8;
+    road.length = 12;
+    CHECK(gs_part_place(log, &t, &road, 8, 20));
+
+    // Across the road, a third of the way along it, every corner is the same
+    // height as the middle.
+    gs_fix mid = gs_track_corner_at(&t, 12, 20);
+    for (int8_t d = -3; d <= 3; d++) {
+        gs_fix at = gs_track_corner_at(&t, 12, (uint8_t)(20 + d));
+        CHECK(at == mid);
+    }
+
+    // And the road took the surface it was made of, while the ground beside it
+    // did not.
+    CHECK(gs_track_surface(&t, GS_INT(12), GS_INT(20)) == GS_SURF_PAVEMENT);
+    CHECK(gs_track_surface(&t, GS_INT(12), GS_INT(33)) == GS_SURF_DIRT);
+}
+
+TEST(a_start_line_is_where_a_race_begins_however_late_it_was_dropped) {
+    // **Gate zero is where a race begins**, so a start line dropped after the
+    // rest of the route has to become gate zero rather than the last thing on
+    // it - otherwise building a track in the order the pieces occur to somebody
+    // gives a track that starts in the middle of itself.
+    static gs_track t;
+    gs_track_init(&t, 40, 40, GS_SURF_PAVEMENT);
+
+    static uint8_t buf[262144];
+    gs_edit_log *log = (gs_edit_log *)buf;
+    gs_edit_log_init(log, 8192);
+
+    gs_part check = gs_part_default(GS_PART_CHECKPOINT);
+    CHECK(gs_part_place(log, &t, &check, 20, 10));
+    CHECK(gs_part_place(log, &t, &check, 30, 20));
+    CHECK(t.gate_count == 2);
+
+    gs_part start = gs_part_default(GS_PART_START);
+    CHECK(gs_part_place(log, &t, &start, 8, 20));
+
+    // Three gates, and the one that begins the race is at the front.
+    CHECK(t.gate_count == 3);
+    CHECK(t.gate[0].x == GS_INT(8));
+    CHECK(t.gate[0].y == GS_INT(20));
+
+    // A start and a finish make a path, and the finish is its last gate.
+    CHECK(!gs_track_is_circuit(&t));
+    gs_part finish = gs_part_default(GS_PART_FINISH);
+    CHECK(gs_part_place(log, &t, &finish, 34, 20));
+    CHECK(gs_track_finish_gate(&t) == t.gate_count - 1);
+    CHECK(t.gate[gs_track_finish_gate(&t)].x == GS_INT(34));
+
+    // And taking the start line back leaves the route as it was.
+    CHECK(gs_edit_undo(log, &t));      // the finish
+    CHECK(gs_edit_undo(log, &t));      // the start
+    CHECK(t.gate_count == 2);
+    CHECK(t.gate[0].x == GS_INT(20));
+}
+
+TEST(a_combined_line_makes_the_track_a_loop) {
+    // **The case a loop needs**: one line that is the start and the finish
+    // both. Dropping it says the track is a circuit, which is what makes gate
+    // zero the gate that ends a lap - and dropping a separate start or finish
+    // says it is a path again.
+    static gs_track t;
+    gs_track_init(&t, 40, 40, GS_SURF_PAVEMENT);
+
+    static uint8_t buf[262144];
+    gs_edit_log *log = (gs_edit_log *)buf;
+    gs_edit_log_init(log, 8192);
+
+    CHECK(!gs_track_is_circuit(&t));
+
+    gs_part both = gs_part_default(GS_PART_START_FINISH);
+    CHECK(gs_part_place(log, &t, &both, 20, 20));
+
+    CHECK(gs_track_is_circuit(&t));
+    CHECK(t.gate_count == 1);
+
+    // One line doing both jobs: the gate that ends a lap is the gate it starts
+    // on, which is only true of a loop.
+    CHECK(gs_track_finish_gate(&t) == 0);
+
+    // Undo takes the kind back with it, because what a track *is* belongs in
+    // the history like everything else.
+    CHECK(gs_edit_undo(log, &t));
+    CHECK(!gs_track_is_circuit(&t));
+    CHECK(t.gate_count == 0);
+
+    // And a plain start line turns a loop back into a path.
+    CHECK(gs_edit_redo(log, &t));
+    CHECK(gs_track_is_circuit(&t));
+    gs_part start = gs_part_default(GS_PART_START);
+    CHECK(gs_part_place(log, &t, &start, 8, 20));
+    CHECK(!gs_track_is_circuit(&t));
+}
+
+TEST(a_part_that_will_not_fit_changes_nothing) {
+    // An edit that cannot be made must not half-happen: the rule the whole edit
+    // layer is built on, and a part is forty tiles of it at once.
+    static gs_track t;
+    gs_track_init(&t, 20, 20, GS_SURF_PAVEMENT);
+
+    static uint8_t buf[262144];
+    gs_edit_log *log = (gs_edit_log *)buf;
+    gs_edit_log_init(log, 8192);
+
+    static gs_track before;
+    before = t;
+
+    gs_part road = gs_part_default(GS_PART_STRAIGHT);
+    road.length = 18;
+    CHECK(!gs_part_place(log, &t, &road, 18, 10));   // runs off the far edge
+    CHECK(gs_track_hash(&t) == gs_track_hash(&before));
+    CHECK(gs_edit_undo_depth(log) == 0);
+}
+
 TEST(a_generated_track_leaves_clear_ground_to_get_up_to_speed_on) {
     // A car starts still. Ground that rises steeply between the grid and the
     // first gate is arrived at too slowly to climb, and the track is then
@@ -6366,6 +6534,11 @@ int main(void) {
     run_a_seed_always_generates_the_same_name();
     run_every_generated_track_has_terrain_on_it();
     run_no_generated_slope_is_steeper_than_a_car_can_climb();
+    run_a_part_dropped_on_a_track_undoes_in_one_step();
+    run_a_road_part_is_level_across_its_width();
+    run_a_start_line_is_where_a_race_begins_however_late_it_was_dropped();
+    run_a_combined_line_makes_the_track_a_loop();
+    run_a_part_that_will_not_fit_changes_nothing();
     run_a_generated_track_leaves_clear_ground_to_get_up_to_speed_on();
     run_every_generated_track_can_be_got_round();
     run_every_car_lines_up_behind_the_line_it_has_to_cross();

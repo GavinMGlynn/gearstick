@@ -16,6 +16,7 @@
 #include <SDL3/SDL.h>
 
 #include "core/gs_edit.h"
+#include "core/gs_parts.h"
 #include "core/gs_track.h"
 #include "core/gs_analyse.h"
 #include "gfx/gs_render.h"
@@ -27,6 +28,11 @@ typedef enum gs_brush {
     GS_BRUSH_SURFACE,
     GS_BRUSH_GRAVITY,
     GS_BRUSH_GATE,
+
+    // **The parts box.** Brushes shape ground; a part is a piece of track. See
+    // src/core/gs_parts.h for why that is a different act and why it is still
+    // only the ordinary edits underneath.
+    GS_BRUSH_PART,
     GS_BRUSH_COUNT
 } gs_brush;
 
@@ -41,6 +47,12 @@ typedef struct gs_editor {
 
     float gate_heading; // degrees, the way a car drives through a placed gate
     float gate_width;   // half width, in tiles
+
+    // Which piece is out of the parts box, and what has been modified about it.
+    // Held as the part itself rather than as loose numbers, so what the panel
+    // edits is exactly what gets dropped.
+    int     part_kind;  // gs_part_kind, an int because that is what ImGui edits
+    gs_part part;
 
     // The editor's own camera. It does not follow a car, because the thing you
     // are looking at while building is the part of the track you are building.

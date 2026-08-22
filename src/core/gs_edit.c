@@ -45,6 +45,8 @@ static int16_t gs_edit_read(const gs_track *t, gs_edit_kind kind, uint8_t x, uin
         return (int16_t)t->gravity[GS_TILE_INDEX(x, y)];
     case GS_EDIT_GATE_ADD:
     case GS_EDIT_GATE_REMOVE:
+    case GS_EDIT_GATE_MOVE:
+    case GS_EDIT_ROUTE_KIND:
         break;      // the route is not a tile; see gs_edit_route
     }
     return 0;
@@ -63,6 +65,8 @@ static void gs_edit_write(gs_track *t, gs_edit_kind kind, uint8_t x, uint8_t y, 
         break;
     case GS_EDIT_GATE_ADD:
     case GS_EDIT_GATE_REMOVE:
+    case GS_EDIT_GATE_MOVE:
+    case GS_EDIT_ROUTE_KIND:
         break;      // the route is not a tile; see gs_edit_route
     }
 }
@@ -197,11 +201,52 @@ bool gs_edit_remove_gate(gs_edit_log *l, gs_track *t, uint8_t index) {
     return true;
 }
 
+bool gs_edit_move_gate(gs_edit_log *l, gs_track *t, uint8_t from, uint8_t to) {
+    if (from >= t->gate_count || to >= t->gate_count) return false;
+    if (from == to) return true;
+
+    gs_gate moving = t->gate[from];
+
+    if (!gs_edit_route(l, GS_EDIT_GATE_MOVE, to, &moving)) return false;
+    l->ops[l->cursor - 1].before = (int16_t)from;
+
+    gs_gate_delete(t, from);
+    gs_gate_insert(t, to, &moving);
+    return true;
+}
+
+// The route kind rides in the same log as everything else. It is not a tile, so
+// it borrows the gate record's `before` and `after` for what it was and what it
+// became, and touches no gate at all.
+bool gs_edit_route_kind(gs_edit_log *l, gs_track *t, gs_route_kind kind) {
+    if (t->route == (uint8_t)kind) return true;
+    if (l->cursor >= l->cap) return false;
+    if (!l->open) l->group++;
+
+    gs_edit *e = &l->ops[l->cursor];
+    *e = (gs_edit){ 0 };
+    e->group = l->group;
+    e->kind = (uint8_t)GS_EDIT_ROUTE_KIND;
+    e->before = (int16_t)t->route;
+    e->after = (int16_t)kind;
+
+    l->cursor++;
+    l->count = l->cursor;
+
+    t->route = (uint8_t)kind;
+    return true;
+}
+
 // Undoing one entry, whichever kind it is.
 static void gs_edit_reverse(gs_track *t, const gs_edit *e) {
     switch ((gs_edit_kind)e->kind) {
     case GS_EDIT_GATE_ADD:    gs_gate_delete(t, e->index); break;
     case GS_EDIT_GATE_REMOVE: gs_gate_insert(t, e->index, &e->gate); break;
+    case GS_EDIT_GATE_MOVE:
+        gs_gate_delete(t, e->index);
+        gs_gate_insert(t, (uint8_t)e->before, &e->gate);
+        break;
+    case GS_EDIT_ROUTE_KIND: t->route = (uint8_t)e->before; break;
     default: gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->before); break;
     }
 }
@@ -210,6 +255,11 @@ static void gs_edit_forward(gs_track *t, const gs_edit *e) {
     switch ((gs_edit_kind)e->kind) {
     case GS_EDIT_GATE_ADD:    gs_gate_insert(t, e->index, &e->gate); break;
     case GS_EDIT_GATE_REMOVE: gs_gate_delete(t, e->index); break;
+    case GS_EDIT_GATE_MOVE:
+        gs_gate_delete(t, (uint8_t)e->before);
+        gs_gate_insert(t, e->index, &e->gate);
+        break;
+    case GS_EDIT_ROUTE_KIND: t->route = (uint8_t)e->after; break;
     default: gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->after); break;
     }
 }
