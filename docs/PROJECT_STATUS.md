@@ -3031,6 +3031,62 @@ car lost its bonnet, headlight, bumper and both front wheels. The test is on a
 `a_car_behind_a_rise_is_hidden_by_it` is: a kerb is strongly red, and the first
 version of this test counted kerb rather than car and was measuring nothing.
 
+### A start line and a finish line that are different things
+
+**"It is confusing whether beginning and end is."** The grid sits `GS_GRID_BACK`
+= three tiles behind gate zero, and gate zero was the only line drawn -
+chequered, a few tiles in front of cars that had not moved yet. The first thing
+a player saw on arriving at a track was therefore a chequered flag line, which
+is the universal sign for *finished*, and the same line was also the lap line
+they had to cross to complete a lap. One line doing two jobs, and looking like
+the wrong one of them.
+
+There are two lines now:
+
+- **A plain white start line across the grid**, just in front of where the cars
+  are placed so they line up behind it. `GS_GRID_BACK` moved from `gs_track.c`
+  into `gs_track.h` so the renderer draws it where the cars actually are rather
+  than somewhere that looks about right - the same "one definition" rule
+  `gs_track_grid` already follows for the race and the analyser.
+- **The chequer stays on gate zero**, with a flag standing at each end of it.
+  That is the lap line and the finish, and it is now the only line drawn across
+  the road that looks like one.
+
+**And the other gates stopped pretending to be finish lines.** A waypoint was a
+solid blue band right across the road, which reads as a line you cross to finish
+something - a player looking at one asked whether it was the end of the track.
+They are marked at their edges now, by a pale post with a blue head at each
+side, and left open in the middle the way a rally stage is. The arrow through
+the gate stays, because which way round a track goes was the other thing nobody
+could tell.
+
+**The flags also had to stop being ground marks.** They are drawn in the sweep
+at the tile each one stands in, not at the gate's diagonal: a flag at the near
+end of the line was otherwise painted over by every tile the sweep reached
+afterwards, so a line that should have had a flag at both ends was drawn with
+one.
+
+`a_start_line_and_a_finish_line_are_different_things` samples each line where it
+lies rather than counting the whole frame: the band behind the gate must be
+white with no black in it, and the gate itself must have both. Deleting the
+start line fails it.
+
+### A line no longer swallows the car in front of it
+
+**"The car just went behind the finish line."** The band reaches right across
+the track, so it lies on a wide span of diagonals - but a gate has only one, and
+the whole band was drawn at it. Every part of the line nearer the camera than
+the gate's centre was therefore painted *after* any car nearer than the centre,
+and swallowed it.
+
+Each block of the band, each piece of the arrow and each piece of the start line
+now sorts on the diagonal of the ground it actually lies on -
+`gs_ground_quad_diagonal`, the same rule `gs_car_diagonal` uses. A car on this
+side of the line is drawn in front of it and a car beyond it is drawn behind.
+`a_car_on_the_near_side_of_a_line_is_drawn_in_front_of_it` photographs a car
+five tiles short of a gate's centre with the band over it and without, and
+requires the line to cost the car none of itself.
+
 ---
 
 ## Known risks

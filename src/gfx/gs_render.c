@@ -210,7 +210,6 @@ static void gs_draw_kerb(SDL_Renderer *ren, const gs_camera *cam,
 // deep the chequered line itself is. Both in tiles, because everything here is.
 #define GS_FLAG_POLE_H    2.30f
 #define GS_LINE_HALF_DEPTH 0.55f
-#define GS_GATE_HALF_DEPTH 0.22f
 
 // **A flag is what says "line" from the other end of a straight.** Chequer
 // painted on the ground is only legible once it is nearly under the car, which
@@ -287,8 +286,69 @@ static void gs_draw_flag(SDL_Renderer *ren, const gs_camera *cam,
 // obvious" in the game this one is descended from, and it was obvious because
 // the track said so. A band across the gate, and an arrow through it pointing
 // the way a car is meant to pass.
+// **A post, for a gate that is only a waypoint.** These used to be a solid
+// band right across the road, which reads as a line you cross to finish
+// something - a player looking at one asked whether it was the end of the
+// track. A gate that is not the finish should say "through here" without
+// claiming to be a finish, so it is marked at its edges and left open in the
+// middle, the way a rally stage is.
+//
+// Screen-facing for the same reason the flag is: a panel standing in a plane of
+// the world collapses to a line at the two headings where that plane is edge on
+// to an isometric camera.
+static void gs_draw_post(SDL_Renderer *ren, const gs_camera *cam,
+                         const gs_track *t, float bx, float by) {
+    float bz = gs_to_f(gs_track_height(t, (gs_fix)(bx * (float)GS_ONE),
+                                       (gs_fix)(by * (float)GS_ONE)));
+    float px = 0.0f, py = 0.0f;
+    gs_iso_project(cam, bx, by, bz, &px, &py);
+
+    float h = 1.15f * GS_ISO_TILE_Z * cam->zoom;
+    float w = 0.13f * GS_ISO_TILE_W * cam->zoom;
+    if (w < 1.0f) w = 1.0f;
+
+    // A pale post with a blue head: the blue is what the route used to be
+    // painted in, kept so a player who learned that colour keeps it, and the
+    // head is at the top where it is not hidden by the car in front.
+    static const SDL_FColor shaft = { 0.88f, 0.88f, 0.86f, 1.0f };
+    static const SDL_FColor head  = { 0.30f, 0.65f, 0.95f, 1.0f };
+
+    float split = py - h * 0.62f;
+    const SDL_FPoint lower[4] = {
+        { px - w * 0.5f, py }, { px + w * 0.5f, py },
+        { px + w * 0.5f, split }, { px - w * 0.5f, split },
+    };
+    gs_quad(ren, lower, shaft);
+
+    const SDL_FPoint upper[4] = {
+        { px - w * 0.5f, split }, { px + w * 0.5f, split },
+        { px + w * 0.5f, py - h }, { px - w * 0.5f, py - h },
+    };
+    gs_quad(ren, upper, head);
+}
+
+// The diagonal a flat mark on the ground sorts on: the furthest into the sweep
+// that any corner of it reaches, so it is drawn after every tile it lies on.
+static int gs_ground_quad_diagonal(const float x[4], const float y[4]) {
+    int d = (int)SDL_floorf(x[0]) + (int)SDL_floorf(y[0]);
+    for (int i = 1; i < 4; i++) {
+        int e = (int)SDL_floorf(x[i]) + (int)SDL_floorf(y[i]);
+        if (e > d) d = e;
+    }
+    return d;
+}
+
+// **A gate is drawn a piece at a time, each piece where it lies.** The band
+// reaches right across the track, so it covers a wide span of diagonals while
+// the gate has only one - and drawn all at once at the gate's own diagonal, the
+// far half of the line is painted over every car that is nearer than the gate
+// centre. A player saw exactly that: "the car just went behind the finish
+// line". Each block and each piece of the arrow now sorts on the ground it
+// actually lies on, so a car on this side of the line is drawn in front of it
+// and a car beyond it is drawn behind.
 static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
-                         const gs_track *t, const gs_gate *g, bool start) {
+                         const gs_track *t, const gs_gate *g, bool start,
+                         int world_d) {
     float gx = gs_to_f(g->x), gy = gs_to_f(g->y);
     float hw = gs_to_f(g->half_width);
 
@@ -296,13 +356,14 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
     float fx = gs_to_f(gs_cos(g->heading)), fy = gs_to_f(gs_sin(g->heading));
     float sx = -fy, sy = fx;
 
-    // The band. The start and finish is a chequerboard - two rows deep, so the
-    // squares alternate across the line *and* along it; the rest are a single
-    // blue, because one of them is not like the others. One row of alternating
-    // blocks is a dashed line rather than a chequered one, which is what this
-    // was and what a picture of it showed.
-    float half_depth = start ? GS_LINE_HALF_DEPTH : GS_GATE_HALF_DEPTH;
-    int rows = start ? 2 : 1;
+    // **The chequer belongs to the finish and to nothing else.** A waypoint
+    // gets posts at its edges instead - see gs_draw_post - so that the one
+    // line a player has to cross to finish is the only line drawn across the
+    // road. Two rows deep, so the squares alternate across the line as well as
+    // along it: one row of alternating blocks is a dashed line rather than a
+    // chequered one, which is what this was and what a picture of it showed.
+    float half_depth = GS_LINE_HALF_DEPTH;
+    int rows = 2;
     float row = (2.0f * half_depth) / (float)rows;
 
     // Square blocks: how many fit across follows the depth of a row and not the
@@ -311,7 +372,7 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
     if (blocks < 2) blocks = 2;
     if (blocks > 24) blocks = 24;
 
-    for (int r = 0; r < rows; r++) {
+    for (int r = 0; start && r < rows; r++) {
         float d0 = -half_depth + row * (float)r, d1 = d0 + row;
 
         for (int i = 0; i < blocks; i++) {
@@ -323,10 +384,11 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
             float y[4] = { gy + sy * a + fy * d0, gy + sy * b + fy * d0,
                            gy + sy * b + fy * d1, gy + sy * a + fy * d1 };
 
-            SDL_FColor c = start
-                ? (((i + r) & 1) ? (SDL_FColor){ 0.08f, 0.08f, 0.09f, 1.0f }
-                                 : (SDL_FColor){ 0.95f, 0.95f, 0.95f, 1.0f })
-                : (SDL_FColor){ 0.30f, 0.65f, 0.95f, 0.85f };
+            if (gs_ground_quad_diagonal(x, y) != world_d) continue;
+
+            SDL_FColor c = ((i + r) & 1)
+                               ? (SDL_FColor){ 0.08f, 0.08f, 0.09f, 1.0f }
+                               : (SDL_FColor){ 0.95f, 0.95f, 0.95f, 1.0f };
             gs_ground_quad(ren, cam, t, x, y, 0.04f, c);
         }
     }
@@ -341,7 +403,9 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
                     gx + fx * (base + len) - sx * half, gx + fx * base - sx * half };
     float ay[4] = { gy + fy * base + sy * half, gy + fy * (base + len) + sy * half,
                     gy + fy * (base + len) - sy * half, gy + fy * base - sy * half };
-    gs_ground_quad(ren, cam, t, ax, ay, 0.05f, tip);
+    if (gs_ground_quad_diagonal(ax, ay) == world_d) {
+        gs_ground_quad(ren, cam, t, ax, ay, 0.05f, tip);
+    }
 
     // The head, as one triangle: a quad with two corners in the same place is
     // a triangle, and gs_quad draws the degenerate half for nothing.
@@ -358,8 +422,53 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
         gy + fy * (base + len) - sy * wide,
         gy + fy * (base + len + head),
     };
-    gs_ground_quad(ren, cam, t, hx, hy, 0.05f, tip);
+    if (gs_ground_quad_diagonal(hx, hy) == world_d) {
+        gs_ground_quad(ren, cam, t, hx, hy, 0.05f, tip);
+    }
 
+    // **Where the race begins, as opposed to where it ends.** The grid sits
+    // GS_GRID_BACK behind the line a lap is measured on, so a player looking at
+    // a chequered line under their own front wheels cannot tell whether it is
+    // the start or the finish - and one of them said exactly that. A plain
+    // white line is painted across the grid instead: that is the start, the
+    // chequer ahead of it is the finish, and the difference between them is now
+    // something you can see rather than something you have to be told.
+    if (start) {
+        // Just in front of the grid rather than under it, so the cars line up
+        // behind their line the way a grid does. Clear of the longest car.
+        float back = gs_to_f(GS_GRID_BACK) - 0.95f;
+        float depth = 0.16f;
+
+        float lx[4] = { gx - fx * back + sx * hw, gx - fx * back - sx * hw,
+                        gx - fx * (back - depth) - sx * hw,
+                        gx - fx * (back - depth) + sx * hw };
+        float ly[4] = { gy - fy * back + sy * hw, gy - fy * back - sy * hw,
+                        gy - fy * (back - depth) - sy * hw,
+                        gy - fy * (back - depth) + sy * hw };
+
+        // Split across its length so it sorts a piece at a time, for the same
+        // reason the chequer does: it reaches right across the road.
+        const int pieces = 12;
+        for (int i = 0; i < pieces; i++) {
+            float a = (float)i / (float)pieces, b = (float)(i + 1) / (float)pieces;
+            float qx[4] = { lx[0] + (lx[1] - lx[0]) * a, lx[0] + (lx[1] - lx[0]) * b,
+                            lx[3] + (lx[2] - lx[3]) * b, lx[3] + (lx[2] - lx[3]) * a };
+            float qy[4] = { ly[0] + (ly[1] - ly[0]) * a, ly[0] + (ly[1] - ly[0]) * b,
+                            ly[3] + (ly[2] - ly[3]) * b, ly[3] + (ly[2] - ly[3]) * a };
+            if (gs_ground_quad_diagonal(qx, qy) != world_d) continue;
+            gs_ground_quad(ren, cam, t, qx, qy, 0.04f,
+                           (SDL_FColor){ 0.95f, 0.95f, 0.95f, 1.0f });
+        }
+    } else {
+        // A waypoint is marked at its edges and left open in the middle.
+        for (int k = 0; k < 2; k++) {
+            float side = k == 0 ? 1.0f : -1.0f;
+            float bx = gx + sx * hw * side, by = gy + sy * hw * side;
+            if ((int)SDL_floorf(bx) + (int)SDL_floorf(by) == world_d) {
+                gs_draw_post(ren, cam, t, bx, by);
+            }
+        }
+    }
 }
 
 // Where the start line's two flags stand: at its ends and a little outside
@@ -1123,11 +1232,7 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         // it. Same trick as the cars below: drawn when the sweep reaches the
         // diagonal the gate is on.
         for (uint8_t gi = 0; gi < t->gate_count; gi++) {
-            const gs_gate *g = &t->gate[gi];
-            int gd = gs_fix_floor(g->x) + gs_fix_floor(g->y);
-            if (gd == d - fringe * 2) {
-                gs_draw_gate(ren, &cam, t, g, gi == 0);
-            }
+            gs_draw_gate(ren, &cam, t, &t->gate[gi], gi == 0, d - fringe * 2);
         }
 
         // The flags stand up out of the world rather than being painted on it,

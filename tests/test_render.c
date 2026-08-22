@@ -3080,6 +3080,120 @@ TEST(the_camera_holds_the_car_still_between_ticks) {
     }
 }
 
+TEST(a_start_line_and_a_finish_line_are_different_things) {
+    (void)ren;
+
+    // **"It is confusing whether beginning and end is."** The grid sits behind
+    // the line a lap is measured on, and that line was the only one drawn -
+    // chequered, a few tiles in front of cars that had not moved yet. So the
+    // first thing a player saw on arriving was a chequered flag line, which is
+    // the universal sign for *finished*.
+    //
+    // There are two lines now and they must not look alike. Both are sampled
+    // where they actually lie rather than counted over the whole frame: a band
+    // behind the gate, which is the grid's plain white line and must have no
+    // black in it, and the gate itself, which is the chequer and must have
+    // both.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(24), 0, GS_INT(6));
+
+    // Parked well clear, so nothing is standing on either line.
+    static gs_world w;
+    gs_park_car(&w, &t, GS_INT(24), GS_INT(40));
+
+    gs_camera cam = gs_camera_on(23.0f, 24.0f, 0.0f);
+    cam.zoom = 1.4f;
+
+    gs_frame f = gs_render_frame(ren, &t, &w, &w, 1.0f, &cam);
+    CHECK(f.px != nullptr);
+    if (f.px == nullptr) return;
+
+    // Walk each line across the road and ask what colour the ground is there.
+    // The gate faces +x, so the line across it runs along y.
+    int grid_white = 0, grid_black = 0, gate_white = 0, gate_black = 0;
+
+    for (int i = -30; i <= 30; i++) {
+        float across = 24.0f + (float)i * 0.09f;
+
+        // Behind the gate: anywhere in the band the grid's line lives in.
+        for (int b = 0; b < 24; b++) {
+            float back = 1.5f + (float)b * 0.04f;
+            float sx = 0.0f, sy = 0.0f;
+            gs_iso_project(&cam, 24.0f - back, across, 0.0f, &sx, &sy);
+            if (sx < 0 || sy < 0 || sx >= GS_W || sy >= GS_H) continue;
+            const uint8_t *p = &f.px[((int)sy * GS_W + (int)sx) * 4];
+            if (p[0] > 225 && p[1] > 225 && p[2] > 225) grid_white++;
+            if (p[0] < 30 && p[1] < 30 && p[2] < 30) grid_black++;
+        }
+
+        // And on the gate itself.
+        for (int b = 0; b < 24; b++) {
+            float along = -0.5f + (float)b * 0.04f;
+            float sx = 0.0f, sy = 0.0f;
+            gs_iso_project(&cam, 24.0f + along, across, 0.0f, &sx, &sy);
+            if (sx < 0 || sy < 0 || sx >= GS_W || sy >= GS_H) continue;
+            const uint8_t *p = &f.px[((int)sy * GS_W + (int)sx) * 4];
+            if (p[0] > 225 && p[1] > 225 && p[2] > 225) gate_white++;
+            if (p[0] < 30 && p[1] < 30 && p[2] < 30) gate_black++;
+        }
+    }
+
+    // The grid has a line and it is plain: white, with no chequer in it.
+    CHECK(grid_white > 40);
+    CHECK(grid_black == 0);
+
+    // The finish is chequered, which means both colours together.
+    CHECK(gate_white > 40);
+    CHECK(gate_black > 40);
+
+    gs_frame_free(&f);
+}
+
+TEST(a_car_on_the_near_side_of_a_line_is_drawn_in_front_of_it) {
+    (void)ren;
+
+    // **"The car just went behind the finish line."** The band reaches right
+    // across the track, so it lies on a wide span of diagonals - but the gate
+    // has only one, and the whole band was drawn at it. Every part of the line
+    // nearer the camera than the gate's centre was therefore painted after any
+    // car nearer than the centre, and swallowed it.
+    //
+    // The car here sits under the band but five tiles short of the gate's
+    // centre, so the block above it belongs to a diagonal the sweep reaches
+    // well before the gate's own. Photographed against the same car on the same
+    // ground with no route on it at all.
+    static gs_track bare, lined;
+    gs_flat_pavement(&bare, 48, 48);
+    gs_flat_pavement(&lined, 48, 48);
+    gs_track_add_gate(&lined, GS_INT(24), GS_INT(24), 0, GS_INT(8));
+
+    static gs_world w;
+    gs_park_car(&w, &bare, GS_INT(24), GS_INT(19));
+
+    gs_camera cam = gs_camera_on(24.0f, 19.0f, 0.0f);
+
+    gs_frame clear_ground = gs_render_frame(ren, &bare, &w, &w, 1.0f, &cam);
+    gs_frame on_the_line = gs_render_frame(ren, &lined, &w, &w, 1.0f, &cam);
+    CHECK(clear_ground.px != nullptr);
+    CHECK(on_the_line.px != nullptr);
+    if (clear_ground.px == nullptr || on_the_line.px == nullptr) {
+        gs_frame_free(&clear_ground);
+        gs_frame_free(&on_the_line);
+        return;
+    }
+
+    int alone = gs_count_car0(&clear_ground);
+    int over_the_line = gs_count_car0(&on_the_line);
+    CHECK(alone > 500);
+
+    // Painting a line under a car must not cost the car any of itself.
+    CHECK(over_the_line > alone * 95 / 100);
+
+    gs_frame_free(&clear_ground);
+    gs_frame_free(&on_the_line);
+}
+
 TEST(a_car_is_drawn_whole_wherever_it_sits_within_its_tile) {
     (void)ren;
 
@@ -3864,6 +3978,8 @@ int main(void) {
     run_the_condition_bar_stays_inside_the_hud(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
+    run_a_start_line_and_a_finish_line_are_different_things(ren);
+    run_a_car_on_the_near_side_of_a_line_is_drawn_in_front_of_it(ren);
     run_a_car_is_drawn_whole_wherever_it_sits_within_its_tile(ren);
     run_a_track_says_where_it_ends_and_which_way_it_goes(ren);
     run_the_camera_holds_the_car_still_between_ticks(ren);

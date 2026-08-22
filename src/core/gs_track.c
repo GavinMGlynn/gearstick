@@ -135,7 +135,6 @@ bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix n
 // crossed properly rather than been placed astride the plane, and little enough
 // that the run-up to the first corner is the track's business and not this
 // function's.
-#define GS_GRID_BACK GS_INT(3)
 
 void gs_track_grid(const gs_track *t, uint8_t slot,
                    gs_fix *x, gs_fix *y, gs_angle *heading) {

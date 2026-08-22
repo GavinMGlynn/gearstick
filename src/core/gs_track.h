@@ -211,6 +211,13 @@ void gs_track_set_gravity(gs_track *t, uint8_t x, uint8_t y, gs_fix multiplier);
 // about the simulation; gs_sim.h asserts the two agree.
 #define GS_TRACK_GRID 4
 
+// How far behind the start line the grid sits, in tiles. Public because the
+// renderer draws the start line *where the cars actually are* rather than
+// somewhere that looks about right - the same reason gs_track_grid is one
+// definition shared by the race and the analyser. Two answers to "where does a
+// race begin" is a start line painted somewhere nobody starts.
+#define GS_GRID_BACK GS_INT(3)
+
 // Append a gate to the route. Returns its index, or -1 if the route is full.
 int gs_track_add_gate(gs_track *t, gs_fix x, gs_fix y, gs_angle heading, gs_fix half_width);
 

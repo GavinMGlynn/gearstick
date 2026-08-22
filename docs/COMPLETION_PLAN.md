@@ -1339,3 +1339,18 @@ worth as much as what was decided about it.
       and the same car photographed at a tenth and at nine tenths into its tile
       covers the same pixels either way - before this it lost its bonnet,
       headlight, bumper and both front wheels.*
+- [x] **A start line and a finish line that are different things.** *(Asked for
+      directly: "it looks like the finish line is rendered at the start line",
+      and "it is confusing whether beginning and end is".)* The grid sits three
+      tiles behind the line a lap is measured on, and that chequered line was
+      the only one drawn — so the first thing anybody saw on arriving at a track
+      was a chequered flag, which everywhere means *finished*. There is a plain
+      white line across the grid now and the chequer stays ahead of it, with a
+      flag at each end. The other gates stopped pretending to be finishes too:
+      the solid blue band across the road is a post at each edge instead, open
+      in the middle, with the direction arrow kept.
+      *Verification: each line is sampled where it actually lies — the grid's
+      line must be white with no chequer in it, and the finish must have both
+      colours. And a car five tiles short of a gate keeps all of itself when the
+      line is painted over the ground it is standing on; before this the far
+      half of the line was drawn after the car and swallowed it.*
