@@ -286,6 +286,20 @@ static void gs_start_race(gs_app *a) {
             gs_track_grid(&a->t, i, &sx, &sy, &facing);
             gs_world_add_car(&a->world, &a->t, grid[i], sx, sy, facing);
         }
+
+        // **A race with no lap count never ends.** This branch set the grid and
+        // nothing else, so `laps_to_win` stayed at the zero `gs_world_init`
+        // leaves - and zero means a race with no finish line at all. Every
+        // online race was therefore unfinishable: a player crossed the line and
+        // nothing happened, twice reported and correct both times.
+        //
+        // Not read off this machine's setup screen, for the reason the grid is
+        // not: an online race is the server's race and two machines reading
+        // their own screens build two different worlds. The protocol carries no
+        // lap count, so it is derived from the track instead - which every
+        // machine has, and has had checked on the way in.
+        gs_world_set_mode(&a->world, GS_MODE_RACE);
+        gs_world_set_laps(&a->world, (uint16_t)GS_DEFAULT_LAPS);
     } else {
         // From the setup screen: the dials, the machines and the paint. The
         // paint goes to the renderer rather than into the world, because a

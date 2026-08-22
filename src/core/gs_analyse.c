@@ -75,10 +75,19 @@ void gs_analyse(const gs_track *t, uint32_t seconds, gs_analysis *out) {
                 // about, and the tile it happens to mill on collects more
                 // visits than any part of the route - which paints the busiest
                 // corner bright and the line everybody drove invisible.
-                if (w.car[0].laps > 0) break;
+                //
+                // **A whole lap, not a crossing.** This asked `laps > 0`, and
+                // on a circuit that is true the instant the car leaves the grid
+                // and crosses the start line - which is a few car lengths of
+                // driving. So every track reported completable however
+                // impossible the rest of it was, and two rounds of unraceable
+                // tracks went out under a green tick that meant almost nothing.
+                // gs_car_laps_done knows the difference between the run up to
+                // the line and a lap driven, and a path needs its arrival.
+                if (gs_car_laps_done(t, &w.car[0]) > 0) break;
             }
 
-            if (w.car[0].laps > 0) out->completed[step]++;
+            if (gs_car_laps_done(t, &w.car[0]) > 0) out->completed[step]++;
         }
 
         if (out->completed[step] > 0) {

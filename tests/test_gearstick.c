@@ -6110,6 +6110,43 @@ TEST(no_generated_slope_is_steeper_than_a_car_can_climb) {
     }
 }
 
+TEST(a_generated_race_can_actually_be_finished) {
+    // **The check that was missing, twice.** "Completable" was `laps > 0` after
+    // an AI drive - and on a circuit that is true the instant the car leaves
+    // the grid and crosses the start line, which is a few car lengths. So every
+    // track reported completable however impossible the rest of it was, and two
+    // rounds of unraceable tracks went out under a green tick that meant almost
+    // nothing.
+    //
+    // What a player does is *finish*, so that is what is asked here: a whole
+    // lap of a loop, or the arrival at the end of a path, with the race over
+    // and the car timed.
+    for (uint32_t seed = 1; seed <= 12; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, GS_MODE_RACE);
+        gs_world_set_laps(&w, 1);
+
+        gs_fix sx = 0, sy = 0;
+        gs_angle facing = 0;
+        gs_track_grid(&gs_gen_a, 0, &sx, &sy, &facing);
+        gs_world_add_car(&w, &gs_gen_a, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
+
+        CHECK(gs_world_laps_needed(&w, &gs_gen_a) == 1);
+
+        for (uint32_t i = 0; i < (uint32_t)GS_TICK_HZ * 180u; i++) {
+            gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &gs_gen_a, 0), 0, 0, 0 };
+            gs_world_step(&w, &gs_gen_a, in);
+            if (w.car[0].finish_tick != 0) break;
+        }
+
+        CHECK(w.car[0].finish_tick != 0);
+        CHECK(gs_car_laps_done(&gs_gen_a, &w.car[0]) >= 1);
+    }
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -6617,6 +6654,7 @@ int main(void) {
     run_a_seed_always_generates_the_same_name();
     run_every_generated_track_has_terrain_on_it();
     run_no_generated_slope_is_steeper_than_a_car_can_climb();
+    run_a_generated_race_can_actually_be_finished();
     run_every_gate_is_wider_than_the_road_it_crosses();
     run_a_lap_of_a_loop_is_a_lap_and_arriving_ends_a_path();
     run_a_part_dropped_on_a_track_undoes_in_one_step();

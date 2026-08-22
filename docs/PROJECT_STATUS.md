@@ -3343,6 +3343,54 @@ flat.** Two roads at *different* heights is an overpass, and that is not
 something this terrain can hold: it is one height per corner and an overpass
 needs two. It stays a design decision rather than another piece in the box.
 
+### An online race that could be finished at all
+
+**"I drove through the finish line and it still didn't recognise it."** Reported
+twice, and the second time the cause was different from the first.
+
+**Online races never had a lap count.** `gs_start_race` has two branches: one
+builds the grid from the server and one from the setup screen. The second sets
+the mode and the lap count; the first sets **neither**, so `laps_to_win` stayed
+at the zero `gs_world_init` leaves - and zero means *a race with no finish line
+at all*, which is what a test drive is. The finish block was skipped entirely.
+Every online race was unfinishable, and had been since online racing existed.
+
+It is not read off this machine's setup screen, for the same reason the grid is
+not: an online race is the server's race, and two machines reading their own
+screens build two different worlds. The protocol carries no lap count, so it is
+derived from the track - which every machine has and has had checked on the way
+in. `GS_DEFAULT_LAPS` is three, the number the original's Grand Prix circuits
+were raced over.
+
+**And a path is raced once.** Asked for directly and it is the only thing that
+makes sense: a path has a start at one end and a finish at the other, so "three
+laps" of one means driving back down it twice with nothing marking the way. The
+setup screen no longer offers the slider for a path, because a control that is
+quietly ignored is worse than one that is not offered.
+
+### The check that was missing, twice
+
+`gs_analyse` reported a track "completable" if `laps > 0` after an AI drive. On
+a circuit, `laps` counts crossings of gate zero - and the car crosses gate zero
+**leaving the grid**, a few car lengths into the race. So the check was
+answering "did the car manage to drive over the start line", and every track
+passed however impossible the rest of it was. That green tick is what carried
+two rounds of unraceable tracks.
+
+It asks `gs_car_laps_done` now - a whole lap of a loop, or the arrival at the
+end of a path. And `a_generated_race_can_actually_be_finished` races the AI on
+twelve seeds and requires `finish_tick`: what a player does is *finish*, so that
+is what is checked.
+
+### The light tree stood off the side of the screen
+
+Placed a fixed distance outside the *gate's* edge - so when gates were widened
+to span the road properly, the tree went three tiles out with them and left the
+frame at the zoom a race is actually driven at. A player looked for it and it
+was not there. It is tied to the road now, which is what it stands beside and
+what does not change when a gate's width does, and pulled in if the gate is
+narrower than that.
+
 ---
 
 ## Known risks

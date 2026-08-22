@@ -208,6 +208,12 @@ static void gs_draw_kerb(SDL_Renderer *ren, const gs_camera *cam,
 
 // How far a start-line flag stands above the ground it is planted in, and how
 // deep the chequered line itself is. Both in tiles, because everything here is.
+// How far to the side of the start line the light tree stands, in tiles. Beside
+// the road rather than outside the gate: a gate spans the road and then some,
+// and hanging the tree off *its* edge put the tree off the side of the screen
+// the moment gates were widened.
+#define GS_LIGHTS_OUT     5.0f
+
 #define GS_FLAG_POLE_H    2.30f
 #define GS_LINE_HALF_DEPTH 0.55f
 
@@ -344,7 +350,19 @@ static void gs_start_lights_at(const gs_track *t, float *x, float *y) {
     float sx = -fy, sy = fx;
 
     float back = gs_to_f(GS_GRID_BACK) - 0.95f;
-    float out = gs_to_f(g->half_width) + 1.7f;
+
+    // **Beside the road, not beside the line.** This stood a fixed distance
+    // outside the gate's own edge, and when gates were widened to span the road
+    // properly the tree went with them - three tiles further out, off the side
+    // of the screen at the zoom a race is actually driven at. A player looked
+    // for it and it was not there.
+    //
+    // Tied to the road instead, which is what it stands beside and what does
+    // not change when a gate's width does. Pulled in if the gate is narrower
+    // than that, so on a tight track it is never out past its own start line.
+    float out = GS_LIGHTS_OUT;
+    float edge = gs_to_f(g->half_width) + 0.9f;
+    if (out > edge) out = edge;
 
     *x = gx - fx * back + sx * out;
     *y = gy - fy * back + sy * out;

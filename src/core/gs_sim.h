@@ -222,6 +222,15 @@ uint32_t gs_world_countdown(const gs_world *w);
 // How long the green shows after the start, in ticks.
 #define GS_GREEN_TICKS ((uint32_t)GS_TICK_HZ)
 
+// **What a race is worth when nobody chose.** An online race is the server's
+// race and the protocol carries no lap count, so every machine has to arrive at
+// the same number without being told it - which means deriving it from the
+// track, which they all have and have all had checked. Three is the number the
+// Grand Prix circuits in the original were raced over.
+//
+// A path ignores it: see gs_world_laps_needed.
+#define GS_DEFAULT_LAPS 3u
+
 // How many laps to win. Set it before the race starts, for the same reason as
 // the mode. Zero is a race with no end, which is what a test drive wants.
 void gs_world_set_laps(gs_world *w, uint16_t laps);

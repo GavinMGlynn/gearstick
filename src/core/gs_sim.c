@@ -44,6 +44,11 @@ uint16_t gs_car_laps_done(const gs_track *t, const gs_car *c) {
 }
 
 uint16_t gs_world_laps_needed(const gs_world *w, const gs_track *t) {
+    // Zero still means a race with no end at all, which is what a test drive
+    // is. Everything else: a loop is raced for the number it was given, and a
+    // path for exactly one, because a path has a start at one end and a finish
+    // at the other and arriving is the whole race.
+    if (w->laps_to_win == 0) return 0;
     return gs_track_is_circuit(t) ? w->laps_to_win : (uint16_t)1;
 }
 
@@ -668,7 +673,7 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
     // Finishing. A car that has done its laps is timed once and never again;
     // the first of them is the winner, settled the moment it happens, because
     // "first past the flag" cannot be revisited by anything that comes after.
-    if (w->mode == (uint8_t)GS_MODE_RACE && w->laps_to_win > 0) {
+    if (w->mode == (uint8_t)GS_MODE_RACE && gs_world_laps_needed(w, t) > 0) {
         for (uint8_t i = 0; i < w->car_count; i++) {
             gs_car *c = &w->car[i];
             if (c->finish_tick != 0) continue;

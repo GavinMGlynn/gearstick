@@ -1416,3 +1416,15 @@ worth as much as what was decided about it.
 - [x] **A crossroads in the parts box.** Flat, both ways open. An overpass is
       still not possible: the terrain holds one height per corner and two roads
       at different heights need two.
+- [x] **An online race that can be finished at all.** *(Reported twice: "I drove
+      through the finish line and it still didn't recognise it.")* An online
+      race is built from the server rather than from the setup screen, and that
+      path set the grid and nothing else — so the lap count stayed at zero, and
+      zero means a race with no finish line. Every online race was unfinishable.
+      A path is now raced once, end to end, and the setup screen stops offering
+      a lap slider for one.
+      *Verification: the analyser used to call a track completable if the car
+      had crossed the start line once — which on a loop happens seconds after
+      leaving the grid, and is why two rounds of unraceable tracks passed. It
+      now requires a whole lap or an arrival, and a new test races the AI and
+      requires it to actually finish.*

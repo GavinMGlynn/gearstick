@@ -845,13 +845,26 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         }
         m->setup.mode = (uint8_t)mode;
 
+        // **Laps are a loop's question and nobody else's.** A path has a start
+        // at one end and a finish at the other, so "three laps" of one would
+        // mean driving back down it twice with nothing marking the way -
+        // gs_world_laps_needed races it once whatever this says, and a slider
+        // that is quietly ignored is worse than one that is not offered.
+        bool lapped = t != nullptr && gs_track_is_circuit(t) &&
+                      m->setup.mode == (uint8_t)GS_MODE_RACE;
+
         int laps = (int)m->setup.laps;
         gs_field("laps");
         ImGui_SetNextItemWidth(200.0f);
-        ImGui_BeginDisabled(m->setup.mode != (uint8_t)GS_MODE_RACE);
+        ImGui_BeginDisabled(!lapped);
         ImGui_SliderInt("##laps", &laps, 1, 20);
         ImGui_EndDisabled();
         m->setup.laps = (uint16_t)laps;
+
+        if (m->setup.mode == (uint8_t)GS_MODE_RACE && !lapped) {
+            gs_field("");
+            ImGui_TextUnformatted("a path is raced once, end to end.");
+        }
 
         int players = (int)m->setup.players;
         gs_field("drivers");
