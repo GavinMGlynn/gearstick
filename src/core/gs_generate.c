@@ -144,9 +144,6 @@ static void gs_lay_bowl(gs_track *t, gs_fix depth) {
 // overlap into a continuous road at the tightest corner an oval has.
 #define GS_GEN_SAMPLES 192
 
-// Half the width of the road, in tiles.
-#define GS_GEN_ROAD 4
-
 // Where the route goes, as a point and the direction of travel there.
 //
 // One definition for both kinds, because the road and the gates have to agree
@@ -341,9 +338,18 @@ static void gs_lay_gates(gs_track *t, gs_rng *r, bool loop, gs_fix swing) {
     uint8_t gates = loop ? (uint8_t)(8 + gs_pick(r, 3))
                          : (uint8_t)(6 + gs_pick(r, 3));
 
-    // Wide enough to be crossed by somebody who is not aiming, narrow enough
-    // that crossing it means having gone round rather than across.
-    gs_fix wide = GS_INT(3) + (gs_fix)((int64_t)GS_ONE * gs_pick(r, 2));
+    // **Wider than the road, always.** A gate is finite across its line - that
+    // is what makes it a gate rather than a tripwire across the world - and
+    // these were three or four tiles either side of a road that is four. So a
+    // car keeping to the outside of its own road passed *beside* a checkpoint
+    // without crossing it, `next_gate` never advanced, and the finish line then
+    // did nothing when it was reached, because gates count in order. A player
+    // drove over the finish and the game did not notice.
+    //
+    // Two tiles of margin on the road's own half width, so leaving the tarmac
+    // slightly is still a crossing and only genuinely going around one is not.
+    gs_fix wide = GS_INT(GS_GEN_ROAD + 2) +
+                  (gs_fix)((int64_t)GS_ONE * gs_pick(r, 2));
 
     for (uint8_t i = 0; i < gates; i++) {
         gs_fix along, ahead;

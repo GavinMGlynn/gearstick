@@ -32,6 +32,8 @@ typedef enum gs_part_kind {
     GS_PART_RAMP,          // rises along its length, for launching off the end of
     GS_PART_CREST,         // up and over: a jump with a landing on the far side
     GS_PART_DIP,           // down and out, which is a jump you arrive at faster
+    GS_PART_CROSSROADS,    // two roads meeting, level, both ways open
+
 
     // The route. **The three lines are three different things** and which one a
     // track has decides what kind of race it is: a combined line makes it a

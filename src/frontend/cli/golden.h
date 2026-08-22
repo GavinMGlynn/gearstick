@@ -79,7 +79,16 @@
 // anybody had shared names a different track. That is the cost and it was worth
 // paying: what the old seeds named was not raceable.
 //
+// Moved a third time, in the same breath, because the tracks that came out of
+// the second attempt still could not be finished. A gate is finite across its
+// line, and the generator was laying gates narrower than the road it had just
+// carved - so a car keeping to the outside of its own road went *past* a
+// checkpoint without crossing it, and because gates count in order the finish
+// line then did nothing when it was reached. A player drove over the finish and
+// the game did not notice. Gates are wider than the road now, and
+// `every_gate_is_wider_than_the_road_it_crosses` keeps them that way.
+//
 // The *world* hash below did not move. The physics is untouched by any of this.
-#define GS_SELFTEST_GENERATOR_HASH 0x7b1a7fb8d486b941ULL
+#define GS_SELFTEST_GENERATOR_HASH 0x41365c813fecc890ULL
 
 #endif // GS_GOLDEN_H

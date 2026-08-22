@@ -11,6 +11,7 @@ const char *gs_part_name(gs_part_kind k) {
     case GS_PART_RAMP:         return "ramp";
     case GS_PART_CREST:        return "crest";
     case GS_PART_DIP:          return "dip";
+    case GS_PART_CROSSROADS:   return "crossroads";
     case GS_PART_START:        return "start line";
     case GS_PART_FINISH:       return "finish line";
     case GS_PART_START_FINISH: return "start / finish";
@@ -20,7 +21,7 @@ const char *gs_part_name(gs_part_kind k) {
 }
 
 bool gs_part_is_road(gs_part_kind k) {
-    return k <= GS_PART_DIP;
+    return k <= GS_PART_CROSSROADS;
 }
 
 bool gs_part_is_route(gs_part_kind k) {
@@ -50,6 +51,13 @@ gs_part gs_part_default(gs_part_kind kind) {
     case GS_PART_DIP:
         p.length = 14;
         p.rise = GS_INT(2);
+        break;
+    case GS_PART_CROSSROADS:
+        // Square, and long enough either way that a car has road to arrive on
+        // and road to leave by. Level, always: an intersection with a slope in
+        // it is one where nobody can see what the other road is doing.
+        p.length = 14;
+        p.width = 8;
         break;
     default:
         break;
@@ -90,6 +98,16 @@ void gs_part_footprint(const gs_part *p, int32_t x, int32_t y,
     px[1] = x + sx * half;                 py[1] = y + sy * half;
     px[2] = x + ax * len + sx * -half;     py[2] = y + ay * len + sy * -half;
     px[3] = x + ax * len + sx * half;      py[3] = y + ay * len + sy * half;
+
+    // **A crossroads reaches both ways from where it was dropped**, because it
+    // is the middle of the piece that goes under the pointer rather than one
+    // end of it - an intersection is placed by its junction.
+    if ((gs_part_kind)p->kind == GS_PART_CROSSROADS) {
+        int32_t arm = len / 2;
+        *x0 = x - arm; *x1 = x + arm;
+        *y0 = y - arm; *y1 = y + arm;
+        return;
+    }
 
     // A corner turns, so its box is the square it turns inside.
     if ((gs_part_kind)p->kind == GS_PART_CORNER) {
@@ -153,8 +171,50 @@ static void gs_part_centre(const gs_part *p, int32_t x, int32_t y, gs_fix at,
 // overlap into a continuous road round the tightest corner a piece can be.
 #define GS_PART_STEPS 96
 
+// A crossroads is two roads through the same middle at right angles, laid at
+// one level so that neither arm tips a car crossing the other. **Flat, and only
+// flat**: two roads at *different* heights - an overpass - is not something the
+// terrain can hold, because it is one height per corner and an overpass needs
+// two. That is a change to what a track is rather than another piece in the
+// box, and it is not made here.
+static bool gs_part_lay_cross(gs_edit_log *l, gs_track *t, const gs_part *p,
+                              int32_t x, int32_t y) {
+    int32_t half = p->width / 2;
+    int32_t arm = p->length / 2;
+
+    gs_fix level = gs_track_height(t, GS_INT(x), GS_INT(y));
+
+    for (int32_t dy = -arm - half; dy <= arm + half; dy++) {
+        for (int32_t dx = -arm - half; dx <= arm + half; dx++) {
+            // Inside one arm or the other: a plus sign, not a square.
+            bool along_x = (dx * dx <= (arm + half) * (arm + half)) &&
+                           (dy * dy <= half * half);
+            bool along_y = (dy * dy <= (arm + half) * (arm + half)) &&
+                           (dx * dx <= half * half);
+            if (!along_x && !along_y) continue;
+
+            int32_t px = x + dx, py = y + dy;
+            if (px < 0 || py < 0) continue;
+            if (px > (int32_t)t->w || py > (int32_t)t->h) continue;
+
+            if (!gs_edit_corner(l, t, (uint8_t)px, (uint8_t)py, level)) return false;
+            if (px < (int32_t)t->w && py < (int32_t)t->h) {
+                if (!gs_edit_surface(l, t, (uint8_t)px, (uint8_t)py,
+                                     (gs_surface)p->surface)) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 static bool gs_part_lay_road(gs_edit_log *l, gs_track *t, const gs_part *p,
                              int32_t x, int32_t y) {
+    if ((gs_part_kind)p->kind == GS_PART_CROSSROADS) {
+        return gs_part_lay_cross(l, t, p, x, y);
+    }
+
     int32_t half = p->width / 2;
 
     // The ground the piece starts from, so a straight laid off the end of a

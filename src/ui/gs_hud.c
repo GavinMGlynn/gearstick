@@ -178,12 +178,18 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // --- Lap. The target counts from the world rather than the setup, so a
         // race whose length was changed shows the length being raced.
         ImGui_Spacing();
-        if (w->laps_to_win > 0) {
-            uint16_t on = (uint16_t)(c->laps + 1);
-            if (on > w->laps_to_win) on = w->laps_to_win;
-            SDL_snprintf(text, sizeof text, "%u/%u", on, w->laps_to_win);
+        // **Asked of the route rather than read off the car.** On a loop the
+        // first crossing of the line is the run up to it and not a lap anybody
+        // drove, so `laps` is one ahead of what a driver would say; and a path
+        // has no laps at all, only an arrival. See gs_car_laps_done.
+        uint16_t needed = gs_world_laps_needed(w, t);
+        uint16_t done = gs_car_laps_done(t, c);
+        if (needed > 0) {
+            uint16_t on = (uint16_t)(done + 1);
+            if (on > needed) on = needed;
+            SDL_snprintf(text, sizeof text, "%u/%u", on, needed);
         } else {
-            SDL_snprintf(text, sizeof text, "%u", (uint16_t)(c->laps + 1));
+            SDL_snprintf(text, sizeof text, "%u", (uint16_t)(done + 1));
         }
         gs_hud_stat("lap", text, GS_HUD_BIG);
 

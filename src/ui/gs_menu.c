@@ -1311,6 +1311,15 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
         ImGui_Spacing();
         ImGui_Separator();
         ImGui_Spacing();
+        // **Race**, for a lobby that is waiting on the player rather than on
+        // another player. Offered only when everybody is here, because a button
+        // that cannot work is worse than no button.
+        if (m->lobby->count >= m->lobby->capacity) {
+            if (ImGui_ButtonEx("Race", (ImVec2){ 120.0f, 38.0f })) {
+                m->race_requested = true;
+            }
+            ImGui_SameLine();
+        }
         if (ImGui_ButtonEx("Leave", (ImVec2){ 120.0f, 38.0f })) next = GS_SCREEN_TITLE;
         gs_panel_measure(m);
     }

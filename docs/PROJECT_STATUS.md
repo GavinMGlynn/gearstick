@@ -3278,6 +3278,71 @@ level am I on" bit per car in the simulation, which is a real design decision
 rather than another part in the box. A *flat* crossroads is representable and is
 the obvious next piece.
 
+### A finish line that fires, and a lap that means a lap
+
+**"I drove across the finish line and the game did not recognise it."**
+
+Three faults, all in the same handful of lines, and the first is the one that
+bit.
+
+**A gate is finite across its line** - that is what makes it a gate rather than
+a tripwire across the world - and the generator was laying gates three and four
+tiles either side of a road it had just carved four tiles either side of. So a
+car keeping to the outside of its own road went *past* a checkpoint without
+crossing it. Gates count in order, so `next_gate` never advanced, and the finish
+line then did nothing at all when it was reached.
+
+**Why nothing caught it.** `gs_analyse` races the AI, and the AI aims at gate
+centres - so the AI never missed a gate and every track reported completable. It
+is the same shape of mistake as the one before it: the check measured something
+true and adjacent to the thing that mattered.
+`every_gate_is_wider_than_the_road_it_crosses` now states the rule directly, and
+`GS_GEN_ROAD` moved into `gs_generate.h` so a test can say it.
+
+**A lap of a loop was one short.** With gate zero as a circuit's finish gate,
+the crossing a car makes on its way *out* of the grid counted as a lap - a car
+starts behind the start line, so it crosses it once before racing. A three-lap
+race ended after two. `gs_car_laps_done` asks the route rather than reading
+`laps`, and the HUD asks it too.
+
+**And a path was raced for three laps.** A sprint has a start at one end and a
+finish at the other; "three laps" of one means driving back down it twice with
+nothing marking the way. `gs_world_laps_needed` returns the chosen number for a
+loop and one for a path, because arriving is the whole race.
+
+### A tree with three colours, and ten seconds to read the road
+
+**"The start count for a race should be longer, ten seconds - we should actually
+show a real racing tree with red, orange, green lights."**
+
+Three seconds was not enough to settle your hands, look at where the road goes
+and pick a gear; a race that starts before you have read the first corner starts
+without you. Ten now. And counting lamps down one a second told you how long was
+left and nothing about what to *do* with it - red, amber and green are read
+without being counted, and every driver already knows them. Red for the wait,
+with the lamps falling away as it shortens; amber for the last three seconds;
+green on the tick the simulation stops holding the cars.
+
+### Escape backs out of a race instead of restarting it
+
+**"When I press Escape in the track, it no longer takes me to the menu - it
+restarts the race."** Exactly what it did. Escape out of an online race goes to
+the lobby, and the lobby starts a race the moment it is ready - so on a lobby
+that was already full, leaving put the player straight back into the race they
+had just left, with no way to a menu at all.
+
+The lobby waits now, once a player has left a race under their own steam, and
+offers **Race** to go again. Auto-start is right the first time and wrong every
+time after.
+
+### A crossroads in the parts box
+
+Two roads meeting, level, both ways open - laid as a plus rather than a square
+so the corners of the junction are ground rather than road. **Flat, and only
+flat.** Two roads at *different* heights is an overpass, and that is not
+something this terrain can hold: it is one height per corner and an overpass
+needs two. It stays a design decision rather than another piece in the box.
+
 ---
 
 ## Known risks

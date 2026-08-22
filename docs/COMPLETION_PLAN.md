@@ -1395,3 +1395,24 @@ worth as much as what was decided about it.
       fit changes nothing. Intersections with overpasses are **not** included —
       see PROJECT_STATUS.md, they need a second height per tile, which the
       terrain does not have.*
+- [x] **A finish line that fires, and a lap that means a lap.** *(Reported: "I
+      drove across the finish line and the game did not recognise it.")* Gates
+      were being laid narrower than the road they cross, so a car keeping to the
+      outside of its own road drove *past* a checkpoint — and because gates count
+      in order, the finish then did nothing when it was reached. Two more faults
+      came out with it: a lap of a loop counted the crossing a car makes leaving
+      the grid, so a three-lap race ended after two; and a path was being raced
+      for three laps when arriving is the whole race.
+      *Verification: every gate on every generated track is wider than the road
+      it crosses. The analyser had said all these tracks were fine, because it
+      races an AI that aims at gate centres and so never missed one.*
+- [x] **A racing tree, ten seconds, red then amber then green.** *(Asked for.)*
+      Three seconds was not long enough to read the first corner, and counting
+      lamps said how long was left but not what to do with it.
+- [x] **Escape backs out of a race instead of restarting it.** *(Reported.)*
+      Leaving an online race went to the lobby, and a full lobby started a race
+      immediately — so leaving put you back in the race you had just left. The
+      lobby waits now and offers Race to go again.
+- [x] **A crossroads in the parts box.** Flat, both ways open. An overpass is
+      still not possible: the terrain holds one height per corner and two roads
+      at different heights need two.

@@ -27,6 +27,15 @@ typedef enum gs_track_shape {
     GS_SHAPE_COUNT
 } gs_track_shape;
 
+// Half the width of the road a generated route is carved along, in tiles.
+//
+// Public because a gate has to be wider than it. A gate is finite across its
+// line - that is what makes it a gate rather than a tripwire across the world -
+// so one narrower than the road can be driven *past* on the outside, and
+// because gates count in order a checkpoint nobody crossed is a finish line
+// that never fires. A player drove over the finish and the game did not notice.
+#define GS_GEN_ROAD 4
+
 const char *gs_shape_name(gs_track_shape s);
 
 // Build one. The seed decides everything - the shape, the size, the terrain,

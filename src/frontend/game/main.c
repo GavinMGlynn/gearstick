@@ -111,6 +111,15 @@ typedef struct gs_app {
     uint16_t    port;
     uint8_t     online_players;   // how many the host is waiting for
     bool        net_started;      // everybody is here and the race has begun
+
+    // **Set when a player deliberately leaves an online race.** Escape out of a
+    // race goes to the lobby, and the lobby starts a race the moment it is
+    // ready - so on a lobby that is already full, leaving put the player
+    // straight back into the race they had just left. Escape appeared to
+    // restart the race instead of backing out of it, and there was no way to
+    // the menu at all. The lobby waits for the player to ask, once they have
+    // left one race under their own steam.
+    bool        lobby_hold;
     uint64_t    music_hash;       // the track the current tune was written for
 
     // The front end. A session starts here, comes back here after every race,
@@ -1226,6 +1235,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
                     gs_net_finish(&a->net);
                     a->net_started = false;
                     a->race_settled = false;
+                    a->lobby_hold = true;
                 }
                 a->menu.screen = back;
             }
@@ -1422,7 +1432,14 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         // whoever is at this machine has asked to be in it - and they may well
         // be signed in and reading the records. Waiting in the lobby is how
         // somebody says yes, so waiting in the lobby is what this waits for.
-        if (gs_wire_ready(a->wire) && a->menu.screen == GS_SCREEN_LOBBY) {
+        // Asking to race is what lifts the hold - see gs_menu.race_requested.
+        if (a->menu.race_requested) {
+            a->lobby_hold = false;
+            a->menu.race_requested = false;
+        }
+
+        if (gs_wire_ready(a->wire) && a->menu.screen == GS_SCREEN_LOBBY &&
+            !a->lobby_hold) {
             // **The server's track, not ours.** Whatever was loaded locally is
             // set aside: everybody has to be racing the same ground, and the
             // hash was checked on the way in, so this is the one moment the

@@ -176,6 +176,21 @@ void gs_world_init(gs_world *w, gs_fix gravity_scale);
 // half way through would be changing what everyone was doing.
 void gs_world_set_mode(gs_world *w, gs_mode mode);
 
+// **How many laps this car has actually completed.**
+//
+// `gs_car.laps` counts crossings of the finish gate, and on a circuit the first
+// of those is the run up to the line rather than a lap anybody drove - a car
+// starts *behind* the start line, so it crosses it once on the way out. Asking
+// this rather than reading `laps` is the difference between a three-lap race
+// ending after three laps and ending after two.
+uint16_t gs_car_laps_done(const gs_track *t, const gs_car *c);
+
+// **How many laps this race needs.** A loop is raced for however many were
+// chosen. A path is not: it has a start at one end and a finish at the other,
+// and "three laps" of a path would mean driving back down it twice with nothing
+// marking the way. Arriving is the whole race.
+uint16_t gs_world_laps_needed(const gs_world *w, const gs_track *t);
+
 // Count the race down: the lights go green `ticks` from now, and until then no
 // input reaches any car. Set it before the race starts, for the same reason the
 // mode and the lap count are - changing it half way through would be changing
@@ -188,12 +203,21 @@ bool gs_world_held(const gs_world *w);
 // How long is left, in ticks, or zero once it has gone green.
 uint32_t gs_world_countdown(const gs_world *w);
 
-// How long a race is counted down for. Three seconds: long enough to settle
-// your hands on the controls, short enough that nobody sits through it twice.
-#define GS_COUNTDOWN_TICKS ((uint32_t)GS_TICK_HZ * 3u)
+// How long a race is counted down for. Ten seconds: long enough to get your
+// hands settled, look at where the road goes and pick a gear, which three was
+// not - a race that starts before you have read the first corner starts without
+// you.
+#define GS_COUNTDOWN_TICKS ((uint32_t)GS_TICK_HZ * 10u)
 
-// How many lamps the light tree has, counted down one a second.
+// **A real tree, in the three colours every driver already knows.** Red while
+// there is time to wait, amber for the last of it, green to go. Counting lamps
+// down one a second told you how long was left and nothing about what to do
+// with it; a colour is read without being counted.
 #define GS_COUNTDOWN_LAMPS 3
+
+// How long the amber lasts before the green, in seconds. Long enough to be a
+// warning and short enough that it is not a second countdown.
+#define GS_AMBER_SECONDS 3u
 
 // How long the green shows after the start, in ticks.
 #define GS_GREEN_TICKS ((uint32_t)GS_TICK_HZ)

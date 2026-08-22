@@ -21,6 +21,7 @@
 #include "core/gs_edit.h"
 #include "core/gs_parts.h"
 #include "core/gs_generate.h"
+#include "core/gs_generate.h"
 #include "core/gs_ghost.h"
 #include "core/gs_library.h"
 #include "core/gs_blake2s.h"
@@ -3567,9 +3568,13 @@ TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
     for (uint8_t y = 0; y <= t.h; y++)
         for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
 
-    // Two gates, so a lap is out and back.
+    // Two gates, so a lap is out and back - and a track that is *lapped* is a
+    // circuit, which is what says gate zero is where a lap begins and ends.
+    // Left as a path this would be finished by arriving at the far gate once,
+    // because that is what a path is.
     gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
     gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
 
     gs_world w;
     gs_world_init(&w, GS_ONE);
@@ -6105,6 +6110,84 @@ TEST(no_generated_slope_is_steeper_than_a_car_can_climb) {
     }
 }
 
+TEST(every_gate_is_wider_than_the_road_it_crosses) {
+    // **"I drove across the finish line and the game did not recognise it."**
+    //
+    // A gate is finite across its line - that is what makes it a gate rather
+    // than a tripwire across the world - and the generator was laying gates
+    // three and four tiles either side of a road that is four. So a car keeping
+    // to the outside of its own road went *past* a checkpoint without crossing
+    // it, `next_gate` never advanced, and the finish line then did nothing when
+    // it was reached, because gates count in order. The track was completable
+    // and the analyser said so: the AI aims at gate centres, so the AI never
+    // missed one and nothing noticed.
+    for (uint32_t seed = 1; seed <= 40; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+        CHECK(gs_gen_a.gate_count >= 2);
+
+        for (uint8_t i = 0; i < gs_gen_a.gate_count; i++) {
+            CHECK(gs_gen_a.gate[i].half_width >= GS_INT(GS_GEN_ROAD));
+        }
+    }
+}
+
+TEST(a_lap_of_a_loop_is_a_lap_and_arriving_ends_a_path) {
+    // **What a lap means depends on the kind of route**, and getting it wrong
+    // ends a three-lap race after two. On a loop the start line is the finish
+    // line, so a car crosses it once on the way out of the grid - that crossing
+    // is the run up to the line and not a lap anybody drove. On a path there
+    // are no laps at all: there is a start at one end and a finish at the
+    // other, and arriving is the whole race.
+    static gs_track loop, path;
+
+    // Two gates far apart, so a car driving straight crosses both.
+    gs_track_init(&loop, 40, 12, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&loop, GS_INT(10), GS_INT(6), 0, GS_INT(5));
+    gs_track_add_gate(&loop, GS_INT(30), GS_INT(6), 0, GS_INT(5));
+    loop.route = (uint8_t)GS_ROUTE_CIRCUIT;
+
+    path = loop;
+    path.route = (uint8_t)GS_ROUTE_SPRINT;
+
+    // A loop needs the laps it was asked for; a path needs one arrival however
+    // many laps the setting says.
+    CHECK(gs_track_finish_gate(&loop) == 0);
+    CHECK(gs_track_finish_gate(&path) == 1);
+
+    for (int which = 0; which < 2; which++) {
+        const gs_track *t = which == 0 ? &loop : &path;
+
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, GS_MODE_RACE);
+        gs_world_set_laps(&w, 3);
+        gs_world_add_car(&w, t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(6), 0);
+
+        CHECK(gs_world_laps_needed(&w, t) == (which == 0 ? 3 : 1));
+        CHECK(gs_car_laps_done(t, &w.car[0]) == 0);
+
+        // Straight down the middle and back, for as long as it takes.
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        for (int i = 0; i < GS_TICK_HZ * 90 && !w.over; i++) {
+            // Turn round at each end, so a loop can be lapped on a strip.
+            if (w.car[0].x > GS_INT(36)) in[0] = GS_IN_ACCEL | GS_IN_LEFT;
+            else if (w.car[0].x < GS_INT(4)) in[0] = GS_IN_ACCEL | GS_IN_LEFT;
+            else in[0] = GS_IN_ACCEL;
+            gs_world_step(&w, t, in);
+        }
+
+        // A path is finished by arriving once. Whatever the loop managed on a
+        // strip of ground, it is never finished by fewer laps than it asked
+        // for - which is the fault this pins.
+        if (which == 1) {
+            CHECK(w.car[0].finish_tick != 0);
+            CHECK(gs_car_laps_done(t, &w.car[0]) >= 1);
+        } else if (w.car[0].finish_tick != 0) {
+            CHECK(gs_car_laps_done(t, &w.car[0]) >= 3);
+        }
+    }
+}
+
 TEST(a_part_dropped_on_a_track_undoes_in_one_step) {
     // **A part is a way of editing, not a second track format.** Everything a
     // piece does is corner moves, surface changes and gate placements grouped
@@ -6534,6 +6617,8 @@ int main(void) {
     run_a_seed_always_generates_the_same_name();
     run_every_generated_track_has_terrain_on_it();
     run_no_generated_slope_is_steeper_than_a_car_can_climb();
+    run_every_gate_is_wider_than_the_road_it_crosses();
+    run_a_lap_of_a_loop_is_a_lap_and_arriving_ends_a_path();
     run_a_part_dropped_on_a_track_undoes_in_one_step();
     run_a_road_part_is_level_across_its_width();
     run_a_start_line_is_where_a_race_begins_however_late_it_was_dropped();

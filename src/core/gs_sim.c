@@ -38,6 +38,15 @@ void gs_world_set_laps(gs_world *w, uint16_t laps) {
     w->laps_to_win = laps;
 }
 
+uint16_t gs_car_laps_done(const gs_track *t, const gs_car *c) {
+    if (!gs_track_is_circuit(t)) return c->laps;
+    return c->laps > 0 ? (uint16_t)(c->laps - 1) : 0;
+}
+
+uint16_t gs_world_laps_needed(const gs_world *w, const gs_track *t) {
+    return gs_track_is_circuit(t) ? w->laps_to_win : (uint16_t)1;
+}
+
 void gs_world_set_countdown(gs_world *w, uint32_t ticks) {
     w->green_tick = (uint32_t)w->tick + ticks;
 }
@@ -648,7 +657,7 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
             // crossing is a real time and is kept.
             uint32_t now = (uint32_t)w->tick;
             bool run_up = gs_track_is_circuit(t) && c->laps == 1;
-            if (!run_up) {
+            if (!run_up) {   // see gs_car_laps_done on why the first is not one
                 uint32_t lap = now - c->lap_start;
                 if (c->best_lap == 0 || lap < c->best_lap) c->best_lap = lap;
             }
@@ -662,7 +671,8 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
     if (w->mode == (uint8_t)GS_MODE_RACE && w->laps_to_win > 0) {
         for (uint8_t i = 0; i < w->car_count; i++) {
             gs_car *c = &w->car[i];
-            if (c->finish_tick != 0 || c->laps < w->laps_to_win) continue;
+            if (c->finish_tick != 0) continue;
+            if (gs_car_laps_done(t, c) < gs_world_laps_needed(w, t)) continue;
 
             c->finish_tick = (uint32_t)w->tick;
             if (w->winner == GS_NO_WINNER) w->winner = i;

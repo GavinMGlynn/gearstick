@@ -141,6 +141,14 @@ typedef struct gs_menu {
     // is not there.
     bool online;
 
+    // **Set when somebody in the lobby asks to race.** A lobby that is already
+    // full starts on its own, which is right the first time and wrong every
+    // time after: leaving a race goes to the lobby, and a full lobby would put
+    // the player straight back into the race they had just left. Once they have
+    // left one under their own steam the lobby waits, and this is how it hears
+    // that they are ready to go again.
+    bool race_requested;
+
     // Whether the library screen was opened to choose a race or to tidy up.
     // The same screen either way - the difference is what the big button says
     // and where Back goes, which is the whole difference between "pick one" and

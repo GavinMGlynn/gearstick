@@ -280,8 +280,12 @@ int main(int argc, char **argv) {
     gs_flat(56, 14, GS_SURF_PAVEMENT);
     gs_wall(0, 3, 0, 56, GS_INT(3));
     gs_wall(11, 14, 0, 56, GS_INT(3));
-    gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(7), 0, GS_INT(3));
-    gs_track_add_gate(&gs_t, GS_INT(48), GS_INT(7), 0, GS_INT(3));
+    // As wide as the corridor between the walls, not narrower: a gate is finite
+    // across its line, so one that does not span the road it crosses can be
+    // driven past on the outside - and a checkpoint nobody crosses is a finish
+    // line that never fires, because gates count in order.
+    gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(7), 0, GS_INT(5));
+    gs_track_add_gate(&gs_t, GS_INT(48), GS_INT(7), 0, GS_INT(5));
     snprintf(path, sizeof path, "%s/head-on.gstrack", dir);
     if (!gs_write(path)) return 1;
 

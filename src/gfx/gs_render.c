@@ -369,16 +369,27 @@ static void gs_draw_start_lights(SDL_Renderer *ren, const gs_camera *cam,
     };
     gs_quad(ren, post, steel);
 
-    // How many lamps are lit, and what colour. One a second, counting down, and
-    // all of them green together at the off.
+    // **Red, then amber, then green** - the three colours a driver reads without
+    // having to count anything. Red is the whole of the wait; amber is the last
+    // few seconds of it and means get ready; green is go, and go is the tick
+    // the simulation stops holding the cars.
     uint32_t left = gs_world_countdown(w);
+    uint32_t amber_from = (uint32_t)GS_TICK_HZ * GS_AMBER_SECONDS;
+
     bool green = left == 0 && w->green_tick > 0 &&
                  w->tick < (uint64_t)w->green_tick + GS_GREEN_TICKS;
+    bool amber = left > 0 && left <= amber_from;
+    bool red = left > amber_from;
 
+    // Within red, the lamps still fall away as the wait shortens, so the tree
+    // says roughly how long is left as well as what to do - three lit a long
+    // way out, one just before the amber.
     int lit = 0;
-    if (left > 0) {
-        lit = GS_COUNTDOWN_LAMPS - (int)((left - 1u) / (uint32_t)GS_TICK_HZ);
-        if (lit < 0) lit = 0;
+    if (red) {
+        uint32_t red_for = GS_COUNTDOWN_TICKS - amber_from;
+        uint32_t through = left - amber_from;          // 1 .. red_for
+        lit = 1 + (int)((through * (uint32_t)GS_COUNTDOWN_LAMPS - 1u) / red_for);
+        if (lit < 1) lit = 1;
         if (lit > GS_COUNTDOWN_LAMPS) lit = GS_COUNTDOWN_LAMPS;
     }
 
@@ -403,10 +414,12 @@ static void gs_draw_start_lights(SDL_Renderer *ren, const gs_camera *cam,
         SDL_FColor c;
         if (green) {
             c = (SDL_FColor){ 0.20f, 0.92f, 0.32f, 1.0f };
-        } else if (i < lit) {
+        } else if (amber) {
+            c = (SDL_FColor){ 0.98f, 0.62f, 0.08f, 1.0f };
+        } else if (red && i < lit) {
             c = (SDL_FColor){ 0.96f, 0.16f, 0.12f, 1.0f };
         } else {
-            c = (SDL_FColor){ 0.22f, 0.09f, 0.09f, 1.0f };
+            c = (SDL_FColor){ 0.20f, 0.10f, 0.09f, 1.0f };
         }
 
         const SDL_FPoint q[4] = {

@@ -3083,13 +3083,12 @@ TEST(the_camera_holds_the_car_still_between_ticks) {
 TEST(the_light_tree_counts_down_and_then_goes_green) {
     (void)ren;
 
-    // **"Can we have a light tree at the beginning with a countdown so we get a
-    // chance to start the race."** Asked for directly, and the reason is that a
-    // race simply was, from tick zero. The tree is the thing being read at the
-    // one moment nobody may miss, so what is pinned here is that it reads
-    // differently at each stage: lamps light one at a time, they are all green
-    // at the off, and the tree goes dark afterwards rather than sitting there
-    // claiming something.
+    // **"We should actually show a real racing tree with red, orange, green
+    // lights."** Counting lamps down one a second told you how long was left
+    // and nothing about what to do with it. Red, amber and green are read
+    // without being counted, and every driver already knows them: red while
+    // there is time to wait, amber for the last of it, green to go - and green
+    // is the tick the simulation stops holding the cars.
     static gs_track t;
     gs_flat_pavement(&t, 48, 48);
     gs_track_add_gate(&t, GS_INT(24), GS_INT(24), 0, GS_INT(5));
@@ -3104,16 +3103,18 @@ TEST(the_light_tree_counts_down_and_then_goes_green) {
     gs_camera cam = gs_camera_on(21.5f, 27.0f, 0.0f);
     cam.zoom = 1.2f;
 
-    // One lamp lit per second of the countdown, then green, then nothing.
-    struct { uint32_t at; int lamps; bool green; } when[] = {
-        { 0,                                    1, false },
-        { (uint32_t)GS_TICK_HZ,                 2, false },
-        { (uint32_t)GS_TICK_HZ * 2,             3, false },
-        { GS_COUNTDOWN_TICKS + 10u,             3, true  },
-        { GS_COUNTDOWN_TICKS + GS_GREEN_TICKS + 10u, 0, false },
+    const uint32_t amber_at = GS_COUNTDOWN_TICKS - (uint32_t)GS_TICK_HZ * GS_AMBER_SECONDS;
+
+    struct { uint32_t at; const char *want; } when[] = {
+        { 0,                                          "red"   },
+        { amber_at / 2u,                              "red"   },
+        { amber_at + 10u,                             "amber" },
+        { GS_COUNTDOWN_TICKS - 5u,                    "amber" },
+        { GS_COUNTDOWN_TICKS + 10u,                   "green" },
+        { GS_COUNTDOWN_TICKS + GS_GREEN_TICKS + 10u,  "dark"  },
     };
 
-    int one_lamp = 0;
+    int most_red = 0;
     for (size_t k = 0; k < sizeof when / sizeof when[0]; k++) {
         gs_world shown = w;
         shown.tick = when[k].at;
@@ -3122,32 +3123,40 @@ TEST(the_light_tree_counts_down_and_then_goes_green) {
         CHECK(f.px != nullptr);
         if (f.px == nullptr) return;
 
-        int red = 0, green = 0;
+        int red = 0, amber = 0, green = 0;
         for (int i = 0; i < GS_W * GS_H; i++) {
             const uint8_t *p = &f.px[i * 4];
+            // Amber is red *and* green together; red is red without green.
             if (p[0] > 200 && p[1] < 60 && p[2] < 50) red++;
-            if (p[1] > 200 && p[0] < 80 && p[2] < 100) green++;
+            else if (p[0] > 200 && p[1] > 120 && p[1] < 200 && p[2] < 60) amber++;
+            else if (p[1] > 200 && p[0] < 80 && p[2] < 100) green++;
         }
 
-        if (when[k].green) {
-            // All of them at once, which is the whole signal.
-            CHECK(red == 0);
-            CHECK(green > one_lamp * 2);
-        } else if (when[k].lamps == 0) {
-            CHECK(red == 0);
-            CHECK(green == 0);
-        } else {
-            CHECK(green == 0);
+        if (SDL_strcmp(when[k].want, "red") == 0) {
             CHECK(red > 0);
-            // Each second adds exactly one more lamp's worth of lit pixels.
-            if (one_lamp == 0) one_lamp = red;
-            CHECK(red > one_lamp * when[k].lamps - one_lamp / 2);
-            CHECK(red < one_lamp * when[k].lamps + one_lamp / 2);
+            CHECK(amber == 0);
+            CHECK(green == 0);
+            if (red > most_red) most_red = red;
+        } else if (SDL_strcmp(when[k].want, "amber") == 0) {
+            CHECK(amber > 0);
+            CHECK(red == 0);
+            CHECK(green == 0);
+        } else if (SDL_strcmp(when[k].want, "green") == 0) {
+            CHECK(green > 0);
+            CHECK(red == 0);
+            CHECK(amber == 0);
+        } else {
+            CHECK(red == 0);
+            CHECK(amber == 0);
+            CHECK(green == 0);
         }
 
         gs_frame_free(&f);
     }
-    CHECK(one_lamp > 20);
+
+    // The tree is on the screen at all, rather than three lamps' worth of
+    // nothing being counted as agreement.
+    CHECK(most_red > 20);
 }
 
 TEST(a_start_line_and_a_finish_line_are_different_things) {
