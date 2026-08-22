@@ -2971,6 +2971,66 @@ enforced at configure time. C23 needs GCC 14+, Clang 19+, AppleClang 16+ or
 MSVC 19.39+; MSVC's C23 is partial, so `windows-clang` exists as the documented
 fallback rather than as a discovery made late.
 
+### Cars that are drawn whole, and drawn where they are
+
+Three separate faults were making a car look wrong in motion, reported as
+"jerky", as "a rendering artefact around the car", and finally - the one that
+named the cause - as **"the background comes over the bonnet every few
+seconds"**. They had nothing to do with each other.
+
+**The camera read a state the renderer never drew.** The world advances in
+fixed 120 Hz steps and frames are drawn whenever the machine manages one, so
+`gs_render_view` draws every car interpolated between the last two states by
+`alpha`. The camera did not: `gs_split_update` and `gs_split_views` took only
+the settled state. So the camera was pointed a fraction of a tick away from
+what was on the screen, and the fraction changed every frame - which is a car
+that judders against a world that is otherwise smooth. Both now take `prev` and
+`alpha` and follow the same interpolated car the renderer draws.
+`the_camera_holds_the_car_still_between_ticks` walks alpha from 0 to 1 with the
+merge settled and requires the car's projected position to move less than half
+a pixel; it moved with alpha before.
+
+**A car's own triangles could not be sorted, because the meshes were solids
+that interpenetrated.** Every vehicle is built from boxes and the boxes
+deliberately sink into one another - the glass sits inside the cabin so the
+windows show on its flanks, the sills sit inside the body, the lamps sit into
+the nose. The stock car alone had thirteen interpenetrating pairs, and 47 of
+its 60 faces were buried in another box. `SDL_Renderer` has no depth buffer, so
+a car is drawn back-to-front by triangle depth, and a painter's sort cannot
+order interpenetrating solids: which triangle won was decided by two centroids,
+and the toss is thrown again every time the car turns. That is what made the
+artefacts *crawl*. Both alternative sort keys were tried against a real frame -
+nearest-vertex and farthest-vertex - and both are worse than the centroid.
+
+The fix is in `tools/make_meshes.py`: only the surface of the union is emitted
+now. Each box face is clipped against every other box whose interior its plane
+passes through, coplanar leftovers are merged back together, and what is
+written out is exactly the boundary of the union - every surface a player can
+see and nothing behind one. The vehicles are unchanged to the thousandth of a
+tile; the triangle counts went from 120-144 to 136-268, so
+`GS_MESH_MAX_TRIS` is 512, sized from the meshes rather than guessed. It was
+256, which the lunar rover's 268 would have silently truncated.
+
+**And a car was sorted into the terrain sweep by its centre tile.** The terrain
+is drawn one diagonal at a time; a car was drawn when the sweep reached
+`floor(x) + floor(y)`. But a car is about 1.3 tiles long, so its nose reaches
+into the tile in front of the one it is standing on - which is on the *next*
+diagonal, and drawn afterwards. The ground the car was standing on was
+therefore painted over its own bonnet, and because the centre crosses into a
+new tile every car length or so, the overpaint arrived and left as it drove.
+`gs_car_diagonal` takes the maximum over the whole footprint instead, so a car
+is drawn only once every tile it covers has been. Ground genuinely in front is
+on a diagonal beyond the footprint and still draws over it, so a car behind a
+rise is still hidden by the rise.
+
+`a_car_is_drawn_whole_wherever_it_sits_within_its_tile` photographs the same
+car from the same distance at a tenth into its tile and at nine tenths, and
+requires the two to differ by under five percent. Before the fix the straddling
+car lost its bonnet, headlight, bumper and both front wheels. The test is on a
+48x48 track with the car in the middle for the same reason
+`a_car_behind_a_rise_is_hidden_by_it` is: a kerb is strongly red, and the first
+version of this test counted kerb rather than car and was measuring nothing.
+
 ---
 
 ## Known risks
@@ -3004,6 +3064,10 @@ fallback rather than as a discovery made late.
 - **`GS_MAX_CARS` is 4 and baked into the replay format.** Changing it later
   changes every recorded replay, which is why it is 4 now rather than 2.
 - **`SDL_Renderer` has no depth buffer**, so once cars are meshes their
-  triangles sort by painter's order alone. Boxy near-convex silhouettes should
-  hold; when they do not, `SDL_GPU` is the swap the thin `src/gfx/` interface
-  exists to allow.
+  triangles sort by painter's order alone. This has now been hit and answered
+  once: the risk is not near-convexity but *interpenetration*, which a
+  painter's sort cannot order at all, and the answer was to stop generating
+  interpenetrating geometry rather than to sort it better - see "Cars that are
+  drawn whole" above. A single closed surface sorts acceptably. When that stops
+  being true, `SDL_GPU` is the swap the thin `src/gfx/` interface exists to
+  allow.

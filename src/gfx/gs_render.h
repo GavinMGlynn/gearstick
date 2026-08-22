@@ -64,14 +64,20 @@ void gs_split_init(gs_split *s);
 
 // Advance the merge state by `dt` seconds. Hysteresis is deliberate: cars
 // hovering at the threshold must not flicker the screen in half.
-void gs_split_update(gs_split *s, const gs_track *t, const gs_world *w,
-                     int win_w, int win_h, float dt);
+// **Given the same two states and the same alpha the renderer draws with**, so
+// the camera looks at where the cars are *this frame* rather than at the last
+// tick's settled positions. A camera on the settled state while the cars are
+// drawn between ticks has an offset that changes every frame, which looks
+// exactly like a car juddering in a smooth world - and did.
+void gs_split_update(gs_split *s, const gs_track *t, const gs_world *prev,
+                     const gs_world *w, float alpha, int win_w, int win_h,
+                     float dt);
 
 // Fill in the views to draw. Returns how many - one while merged, one per car
 // otherwise. Cameras are blended by the merge factor, which is what makes the
 // switch continuous rather than sudden.
 uint8_t gs_split_views(const gs_split *s, const gs_track *t,
-                       const gs_world *w,
+                       const gs_world *prev, const gs_world *w, float alpha,
                        int win_w, int win_h, gs_view *out);
 
 // Where each view goes, for one to four of them, in a window `w` by `h`.

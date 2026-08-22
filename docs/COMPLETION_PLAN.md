@@ -1322,4 +1322,20 @@ worth as much as what was decided about it.
       *Verification: a track is rendered and the three things are counted by
       their colours — the kerb's red, the arrow's yellow and the chequer's
       white. None of them was on the screen at all before this.*
-
+- [x] **A car is drawn whole, and drawn where it is.** *(Reported three times
+      over, as "jerky", as "an artefact around the car", and finally as "the
+      background comes over the bonnet every few seconds".)* Three unrelated
+      faults. The camera followed the settled simulation state while the cars
+      were drawn interpolated between two of them, so it was always aimed a
+      changing fraction of a tick away from what was on the screen. The vehicle
+      meshes were built from boxes that sink into one another, and a painter's
+      sort cannot order interpenetrating solids, so the windows and sills
+      surfaced through the bodywork and crawled about as the car turned. And a
+      car was sorted into the terrain by its centre tile despite being longer
+      than one, so the ground it was standing on was painted over its bonnet.
+      *Verification: the camera holds a car within half a pixel as the frame
+      lands anywhere between two ticks; only the outside surface of each
+      vehicle is generated now, so there is no buried face left to sort wrongly;
+      and the same car photographed at a tenth and at nine tenths into its tile
+      covers the same pixels either way - before this it lost its bonnet,
+      headlight, bumper and both front wheels.*

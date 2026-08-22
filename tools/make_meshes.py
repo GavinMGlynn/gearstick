@@ -125,24 +125,142 @@ VEHICLES = [
          wheel(-0.46, 0.32, 0.11, 0.07), wheel(-0.46, -0.32, 0.11, 0.07)]),
 ]
 
-# The eight corners of a unit box, and the twelve triangles over them. Wound
-# counter-clockwise seen from outside, so the renderer can cull back faces
-# rather than sorting every triangle of every car.
-CORNERS = [(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
-           (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1)]
+# **Only the surface of the union is geometry.** The vehicles are built from
+# boxes that deliberately sink into one another - the glass sits inside the
+# cabin so the windows show on its flanks, the sills sit inside the body, the
+# lamps sit into the nose. Everything sunk that way is *inside the solid*, and
+# a face inside the solid is a face that must never be seen.
+#
+# The renderer draws a car with back-face culling and a painter's sort by
+# triangle depth, and it has no depth buffer to appeal to - SDL's 2D renderer
+# does not have one. A painter's sort cannot order interpenetrating boxes
+# correctly, so every buried face was a coin toss decided by two triangle
+# centroids: the windscreen surfaced through the roof, the sills striped the
+# flanks. Because the toss is thrown again as the car turns, the wrong
+# triangles *strobed* - which is what a player sees as artefacts crawling
+# around a moving car. No sort key fixes it: nearest-vertex and farthest-vertex
+# were both tried against a real frame and both are worse than the centroid.
+#
+# So the buried faces are not emitted at all. Each box face is clipped against
+# every other box whose interior its plane passes through, and only what
+# survives is written out. What is left is exactly the boundary of the union:
+# every surface a player can see and nothing behind one. The boxes above are
+# untouched, so no vehicle changes shape by a thousandth of a tile.
+EPS = 1e-6
 
-FACES = [
-    (4, 5, 6, 7),   # +z
-    (1, 0, 3, 2),   # -z
-    (5, 1, 2, 6),   # +x
-    (0, 4, 7, 3),   # -x
-    (7, 6, 2, 3),   # +y
-    (0, 1, 5, 4),   # -y
-]
+# The two tangent axes of each face, ordered so that the first crossed into the
+# second gives the outward normal. That is what keeps every emitted triangle
+# wound counter-clockwise seen from outside, which is what the renderer culls
+# on.
+TANGENTS = {
+    (0, 1): (1, 2), (0, 0): (2, 1),   # +x, -x
+    (1, 1): (2, 0), (1, 0): (0, 2),   # +y, -y
+    (2, 1): (0, 1), (2, 0): (1, 0),   # +z, -z
+}
+
+
+def extents(b):
+    c, s = b["c"], b["s"]
+    return [(c[i] - s[i] / 2.0, c[i] + s[i] / 2.0) for i in range(3)]
+
+
+def subtract(rects, cut):
+    """Take an axis-aligned rectangle out of a list of them. What is left is
+    still axis-aligned rectangles - at most four, the strips around the bite."""
+    (cu0, cu1, cw0, cw1) = cut
+    out = []
+    for (u0, u1, w0, w1) in rects:
+        if cu0 >= u1 - EPS or cu1 <= u0 + EPS or cw0 >= w1 - EPS or cw1 <= w0 + EPS:
+            out.append((u0, u1, w0, w1))
+            continue
+        if u0 < cu0 - EPS:
+            out.append((u0, cu0, w0, w1))
+        if cu1 < u1 - EPS:
+            out.append((cu1, u1, w0, w1))
+        mu0, mu1 = max(u0, cu0), min(u1, cu1)
+        if mu1 - mu0 > EPS:
+            if w0 < cw0 - EPS:
+                out.append((mu0, mu1, w0, cw0))
+            if cw1 < w1 - EPS:
+                out.append((mu0, mu1, cw1, w1))
+    return out
+
+
+def merge(rects):
+    """Put a clipped face back together where the cutting split it needlessly.
+
+    Taking a bite out of a rectangle leaves up to four strips, and two of those
+    strips are very often a rectangle that was cut in half for no reason - the
+    sills leave a strip above and below every wheel arch. Welding them back is
+    worth doing twice over: it is fewer triangles, and it is fewer edges that
+    end in the middle of a neighbour's edge, which is where a rasteriser leaves
+    a one-pixel crack."""
+    rects = sorted(rects)
+    changed = True
+    while changed:
+        changed = False
+        for i in range(len(rects)):
+            for j in range(i + 1, len(rects)):
+                (au0, au1, aw0, aw1), (bu0, bu1, bw0, bw1) = rects[i], rects[j]
+                joined = None
+                if abs(au0 - bu0) < EPS and abs(au1 - bu1) < EPS:
+                    if abs(aw1 - bw0) < EPS:
+                        joined = (au0, au1, aw0, bw1)
+                    elif abs(bw1 - aw0) < EPS:
+                        joined = (au0, au1, bw0, aw1)
+                elif abs(aw0 - bw0) < EPS and abs(aw1 - bw1) < EPS:
+                    if abs(au1 - bu0) < EPS:
+                        joined = (au0, bu1, aw0, aw1)
+                    elif abs(bu1 - au0) < EPS:
+                        joined = (bu0, au1, aw0, aw1)
+                if joined is not None:
+                    rects = [r for k, r in enumerate(rects) if k not in (i, j)]
+                    rects.append(joined)
+                    rects.sort()
+                    changed = True
+                    break
+            if changed:
+                break
+    return rects
+
+
+def surface(boxes):
+    """Every box face, clipped to the part of it that is not inside another
+    box. Yields (four corner points, role) in outward winding order."""
+    ext = [extents(b) for b in boxes]
+
+    for i, b in enumerate(boxes):
+        for axis in range(3):
+            for side in (0, 1):
+                v = ext[i][axis][side]
+                u, w = TANGENTS[(axis, side)]
+
+                rects = [(ext[i][u][0], ext[i][u][1], ext[i][w][0], ext[i][w][1])]
+                for j in range(len(boxes)):
+                    if j == i:
+                        continue
+                    # Only a box whose interior the face's plane passes through
+                    # can bury any of it.
+                    if not (ext[j][axis][0] + EPS < v < ext[j][axis][1] - EPS):
+                        continue
+                    rects = subtract(rects, (ext[j][u][0], ext[j][u][1],
+                                             ext[j][w][0], ext[j][w][1]))
+                    if not rects:
+                        break
+
+                for (u0, u1, w0, w1) in merge(rects):
+                    if u1 - u0 <= EPS or w1 - w0 <= EPS:
+                        continue
+                    quad = []
+                    for (uu, ww) in ((u0, w0), (u1, w0), (u1, w1), (u0, w1)):
+                        p = [0.0, 0.0, 0.0]
+                        p[axis], p[u], p[w] = v, uu, ww
+                        quad.append(tuple(p))
+                    yield quad, b["role"]
 
 
 def build(boxes):
-    """Weld a list of boxes into one indexed mesh."""
+    """Weld the surface of a vehicle into one indexed mesh."""
     verts = []
     index = {}
     tris = []
@@ -156,14 +274,10 @@ def build(boxes):
             verts.append(key)
         return index[key]
 
-    for b in boxes:
-        cx, cy, cz = b["c"]
-        sx, sy, sz = b["s"]
-        ids = [vertex((cx + x * sx / 2.0, cy + y * sy / 2.0, cz + z * sz / 2.0))
-               for (x, y, z) in CORNERS]
-        for (a, bb, c, d) in FACES:
-            tris.append((ids[a], ids[bb], ids[c], b["role"]))
-            tris.append((ids[a], ids[c], ids[d], b["role"]))
+    for quad, role in surface(boxes):
+        ids = [vertex(p) for p in quad]
+        tris.append((ids[0], ids[1], ids[2], role))
+        tris.append((ids[0], ids[2], ids[3], role))
 
     return verts, tris
 

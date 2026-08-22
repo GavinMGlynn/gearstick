@@ -12,13 +12,13 @@ is no third-party art in the game.
 
 | Vehicle | Vertices | Triangles |
 | --- | --- | --- |
-| stock car | 80 | 120 |
-| sprint car | 88 | 132 |
-| dune buggy | 80 | 120 |
-| baja bug | 80 | 120 |
-| motorcycle | 64 | 96 |
-| lunar rover | 96 | 144 |
-| **total** | **488** | **732** |
+| stock car | 170 | 230 |
+| sprint car | 96 | 136 |
+| dune buggy | 116 | 140 |
+| baja bug | 140 | 192 |
+| motorcycle | 114 | 156 |
+| lunar rover | 194 | 268 |
+| **total** | **830** | **1122** |
 
 ## Ground, surfaces and terrain
 

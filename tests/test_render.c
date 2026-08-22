@@ -1364,29 +1364,29 @@ TEST(the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not) {
     const float dt = 1.0f / 60.0f;
 
     // Side by side: one view.
-    for (int i = 0; i < 120; i++) gs_split_update(&sp, &t, &w, GS_W, GS_H, dt);
+    for (int i = 0; i < 120; i++) gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
     gs_view v[GS_MAX_CARS];
     CHECK(sp.merge == 1.0f);
-    CHECK(gs_split_views(&sp, &t, &w, GS_W, GS_H, v) == 1);
+    CHECK(gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v) == 1);
 
     // Drive them apart: two.
     w.car[1].x = GS_INT(30) + GS_INT(30);
-    for (int i = 0; i < 120; i++) gs_split_update(&sp, &t, &w, GS_W, GS_H, dt);
+    for (int i = 0; i < 120; i++) gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
     CHECK(sp.merge == 0.0f);
-    CHECK(gs_split_views(&sp, &t, &w, GS_W, GS_H, v) == 2);
+    CHECK(gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v) == 2);
 
     // Back together: one again.
     w.car[1].x = GS_INT(32);
-    for (int i = 0; i < 120; i++) gs_split_update(&sp, &t, &w, GS_W, GS_H, dt);
-    CHECK(gs_split_views(&sp, &t, &w, GS_W, GS_H, v) == 1);
+    for (int i = 0; i < 120; i++) gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
+    CHECK(gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v) == 1);
 
     // A single car is always one view, whatever it does.
     gs_world solo;
     gs_world_init(&solo, GS_ONE);
     gs_world_add_car(&solo, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(5), GS_INT(5), 0);
     gs_split_init(&sp);
-    gs_split_update(&sp, &t, &solo, GS_W, GS_H, dt);
-    CHECK(gs_split_views(&sp, &t, &solo, GS_W, GS_H, v) == 1);
+    gs_split_update(&sp, &t, &solo, &solo, 1.0f, GS_W, GS_H, dt);
+    CHECK(gs_split_views(&sp, &t, &solo, &solo, 1.0f, GS_W, GS_H, v) == 1);
 }
 
 TEST(cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half) {
@@ -1415,10 +1415,10 @@ TEST(cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half) {
     for (int i = 0; i < 600; i++) {
         float wobble = (i % 2 == 0) ? 10.6f : 11.4f;
         w.car[1].x = GS_INT(30) + (gs_fix)(wobble * (float)GS_ONE);
-        gs_split_update(&sp, &t, &w, GS_W, GS_H, dt);
+        gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
 
         gs_view v[GS_MAX_CARS];
-        uint8_t n = gs_split_views(&sp, &t, &w, GS_W, GS_H, v);
+        uint8_t n = gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v);
         if (n != was) { changes++; was = n; }
     }
     CHECK(changes == 0);
@@ -1456,9 +1456,9 @@ TEST(the_view_does_not_jump_when_the_screen_merges_or_splits) {
         float away = (i < 450) ? (float)i * 0.08f : (float)(900 - i) * 0.08f;
         w.car[1].x = GS_INT(20) + (gs_fix)(away * (float)GS_ONE);
 
-        gs_split_update(&sp, &t, &w, GS_W, GS_H, dt);
+        gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
         gs_view v[GS_MAX_CARS];
-        gs_split_views(&sp, &t, &w, GS_W, GS_H, v);
+        gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v);
 
         // Pane zero is what a player watches throughout: the whole screen while
         // merged, the left half while split.
@@ -2907,11 +2907,11 @@ TEST(every_driver_can_see_their_own_car_on_ground_that_is_not_at_height_zero) {
 
         gs_split sp = { 0 };
         for (int i = 0; i < 240; i++) {
-            gs_split_update(&sp, &t, &w, GS_W, GS_H, 1.0f / 60.0f);
+            gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
         }
 
         gs_view v[GS_MAX_CARS];
-        uint8_t n = gs_split_views(&sp, &t, &w, GS_W, GS_H, v);
+        uint8_t n = gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v);
         CHECK(n >= 1);
 
         for (uint8_t i = 0; i < n; i++) {
@@ -2944,11 +2944,11 @@ TEST(a_car_down_a_drop_does_not_take_the_camera_off_the_other_one) {
 
     gs_split sp = { 0 };
     for (int i = 0; i < 240; i++) {
-        gs_split_update(&sp, &t, &w, GS_W, GS_H, 1.0f / 60.0f);
+        gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
     }
 
     gs_view v[GS_MAX_CARS];
-    uint8_t n = gs_split_views(&sp, &t, &w, GS_W, GS_H, v);
+    uint8_t n = gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v);
 
     // Whether that is answered by splitting the screen or by pulling back far
     // enough to hold both, every driver still has to be able to see their own
@@ -2983,10 +2983,10 @@ TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
         const gs_world *w = which == 0 ? &grounded : &flying;
         gs_split sp = { 0 };
         for (int i = 0; i < 240; i++) {
-            gs_split_update(&sp, &t, w, GS_W, GS_H, 1.0f / 60.0f);
+            gs_split_update(&sp, &t, w, w, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
         }
         gs_view v[GS_MAX_CARS];
-        CHECK(gs_split_views(&sp, &t, w, GS_W, GS_H, v) == 1);
+        CHECK(gs_split_views(&sp, &t, w, w, 1.0f, GS_W, GS_H, v) == 1);
         gs_car_on_screen(&v[0], w, 0, &sx, which == 0 ? &on_ground : &in_air);
 
         CHECK(sx >= 0.0f && sx <= (float)v[0].rect.w);
@@ -3008,10 +3008,10 @@ TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
 
     gs_split sp = { 0 };
     for (int i = 0; i < 240; i++) {
-        gs_split_update(&sp, &t, &stuck, GS_W, GS_H, 1.0f / 60.0f);
+        gs_split_update(&sp, &t, &stuck, &stuck, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
     }
     gs_view v[GS_MAX_CARS];
-    CHECK(gs_split_views(&sp, &t, &stuck, GS_W, GS_H, v) == 1);
+    CHECK(gs_split_views(&sp, &t, &stuck, &stuck, 1.0f, GS_W, GS_H, v) == 1);
 
     float hung = 0.0f;
     gs_car_on_screen(&v[0], &stuck, 0, &sx, &hung);
@@ -3021,6 +3021,119 @@ TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
     // Still higher up the screen than the one on the ground, so the reason for
     // the partial follow survives the cap on it.
     CHECK(hung < on_ground);
+}
+
+TEST(the_camera_holds_the_car_still_between_ticks) {
+    (void)ren;
+
+    // **The judder a recording showed.** The world advances 120 times a second
+    // and frames do not, so the renderer draws cars interpolated between the
+    // last two states - and the camera was reading the settled state instead.
+    // That is a camera pointed a fraction of a tick away from what is drawn,
+    // with the fraction changing every frame: the car wobbles against a world
+    // that is otherwise smooth. A camera that follows a car holds it still on
+    // the screen, whatever fraction of a tick the frame lands on.
+    static gs_track t;
+    gs_flat_pavement(&t, 40, 40);
+
+    static gs_world prev, now;
+    gs_world_init(&prev, GS_ONE);
+    gs_world_add_car(&prev, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(10), 0);
+
+    // One tick of travel, which is what a frame lands somewhere inside.
+    now = prev;
+    now.car[0].x += GS_INT(1) / 8;
+    now.car[0].y += GS_INT(1) / 16;
+
+    gs_split sp = { 0 };
+    for (int i = 0; i < 240; i++) {
+        gs_split_update(&sp, &t, &prev, &now, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
+    }
+
+    float first_x = 0.0f, first_y = 0.0f;
+    for (int step = 0; step <= 8; step++) {
+        float alpha = (float)step / 8.0f;
+
+        // dt of zero: the merge is settled, so what is measured is the
+        // interpolation and not a transition still in progress.
+        gs_split_update(&sp, &t, &prev, &now, alpha, GS_W, GS_H, 0.0f);
+
+        gs_view v[GS_MAX_CARS];
+        CHECK(gs_split_views(&sp, &t, &prev, &now, alpha, GS_W, GS_H, v) == 1);
+
+        // Where the renderer draws it: between the two states, by alpha.
+        float px = gs_to_f(prev.car[0].x), py = gs_to_f(prev.car[0].y);
+        float pz = gs_to_f(prev.car[0].z);
+        float cx = px + (gs_to_f(now.car[0].x) - px) * alpha;
+        float cy = py + (gs_to_f(now.car[0].y) - py) * alpha;
+        float cz = pz + (gs_to_f(now.car[0].z) - pz) * alpha;
+
+        gs_camera cam = v[0].cam;
+        float sx = 0.0f, sy = 0.0f;
+        gs_iso_project(&cam, cx, cy, cz, &sx, &sy);
+
+        if (step == 0) { first_x = sx; first_y = sy; continue; }
+
+        // Half a pixel is rounding; anything more is a wobble.
+        CHECK(sx > first_x - 0.5f && sx < first_x + 0.5f);
+        CHECK(sy > first_y - 0.5f && sy < first_y + 0.5f);
+    }
+}
+
+TEST(a_car_is_drawn_whole_wherever_it_sits_within_its_tile) {
+    (void)ren;
+
+    // **"The background comes over the bonnet every few seconds."** The terrain
+    // is swept one diagonal at a time and a car was drawn when the sweep
+    // reached the car's *centre* tile - but a car is about 1.3 tiles long, so
+    // its nose reaches into the tile in front, which is on the next diagonal
+    // and therefore drawn afterwards. The ground the car is standing on then
+    // lands on top of its bonnet. It came and went as the car drove because it
+    // depends on where in its tile the centre happens to sit, which is exactly
+    // how a player described it.
+    //
+    // Built to straddle a diagonal on purpose rather than hoping that a drive
+    // produced one: with the car facing +x, a centre a tenth into its tile
+    // keeps the whole footprint on one diagonal, and nine tenths pushes the
+    // nose two diagonals past it. Both are photographed from the same distance,
+    // so the same car covers the same pixels - unless some of it is painted
+    // over.
+    //
+    // In the middle of a track big enough to have no edge in shot, because a
+    // kerb is strongly red and would otherwise be counted as car.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+
+    const gs_fix tenth = GS_ONE / 10;
+
+    static gs_world aligned, straddling;
+    gs_park_car(&aligned, &t, GS_INT(24) + tenth, GS_INT(24) + tenth);
+    gs_park_car(&straddling, &t, GS_INT(24) + tenth * 9, GS_INT(24) + tenth * 9);
+
+    gs_camera cam_a = gs_camera_on(24.1f, 24.1f, 0.0f);
+    gs_camera cam_b = gs_camera_on(24.9f, 24.9f, 0.0f);
+
+    gs_frame fa = gs_render_frame(ren, &t, &aligned, &aligned, 1.0f, &cam_a);
+    gs_frame fb = gs_render_frame(ren, &t, &straddling, &straddling, 1.0f, &cam_b);
+    CHECK(fa.px != nullptr);
+    CHECK(fb.px != nullptr);
+    if (fa.px == nullptr || fb.px == nullptr) {
+        gs_frame_free(&fa);
+        gs_frame_free(&fb);
+        return;
+    }
+
+    int whole = gs_count_car0(&fa);
+    int eaten = gs_count_car0(&fb);
+    CHECK(whole > 500);
+
+    // A percent or two is the car landing on different pixels; a bonnet is a
+    // fifth of the car and nothing like that may go missing.
+    CHECK(eaten > whole * 95 / 100);
+    CHECK(eaten < whole * 105 / 100);
+
+    gs_frame_free(&fa);
+    gs_frame_free(&fb);
 }
 
 TEST(a_track_says_where_it_ends_and_which_way_it_goes) {
@@ -3751,7 +3864,9 @@ int main(void) {
     run_the_condition_bar_stays_inside_the_hud(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
+    run_a_car_is_drawn_whole_wherever_it_sits_within_its_tile(ren);
     run_a_track_says_where_it_ends_and_which_way_it_goes(ren);
+    run_the_camera_holds_the_car_still_between_ticks(ren);
     run_every_driver_can_see_their_own_car_on_ground_that_is_not_at_height_zero(ren);
     run_a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it(ren);
     run_a_car_down_a_drop_does_not_take_the_camera_off_the_other_one(ren);

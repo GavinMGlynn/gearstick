@@ -206,6 +206,81 @@ static void gs_draw_kerb(SDL_Renderer *ren, const gs_camera *cam,
     }
 }
 
+// How far a start-line flag stands above the ground it is planted in, and how
+// deep the chequered line itself is. Both in tiles, because everything here is.
+#define GS_FLAG_POLE_H    2.30f
+#define GS_LINE_HALF_DEPTH 0.55f
+#define GS_GATE_HALF_DEPTH 0.22f
+
+// **A flag is what says "line" from the other end of a straight.** Chequer
+// painted on the ground is only legible once it is nearly under the car, which
+// is too late to be told where the lap ends; a pair of flags stands up out of
+// the scene and is readable from a long way back. Racing has marked its line
+// this way for as long as there has been a line.
+//
+// Drawn facing the screen rather than lying in the world. A panel standing in a
+// plane of the world collapses to a line at the two headings where that plane
+// is edge on to an isometric camera - the projection maps both the panel's
+// width and its height onto the screen's vertical there - and a flag that
+// disappears on some tracks and not others is worse than no flag at all. Sizes
+// are still given in tiles and turned into pixels by the same numbers the
+// projection uses, so a flag keeps its size against the world at every zoom.
+static void gs_draw_flag(SDL_Renderer *ren, const gs_camera *cam,
+                         const gs_track *t, float bx, float by,
+                         float mid_x, float mid_y) {
+    float bz = gs_to_f(gs_track_height(t, (gs_fix)(bx * (float)GS_ONE),
+                                       (gs_fix)(by * (float)GS_ONE)));
+    float px = 0.0f, py = 0.0f;
+    gs_iso_project(cam, bx, by, bz, &px, &py);
+
+    // Which way the flag flies: away from the middle of the line, so the two of
+    // them open outwards and neither one hangs over the road.
+    float mz = gs_to_f(gs_track_height(t, (gs_fix)(mid_x * (float)GS_ONE),
+                                       (gs_fix)(mid_y * (float)GS_ONE)));
+    float mx = 0.0f, my = 0.0f;
+    gs_iso_project(cam, mid_x, mid_y, mz, &mx, &my);
+    (void)my;
+    float away = (px >= mx) ? 1.0f : -1.0f;
+
+    float pole_h = GS_FLAG_POLE_H * GS_ISO_TILE_Z * cam->zoom;
+    float pole_w = 0.07f * GS_ISO_TILE_W * cam->zoom;
+    if (pole_w < 1.0f) pole_w = 1.0f;
+
+    float flag_w = 0.95f * GS_ISO_TILE_W * 0.5f * cam->zoom;
+    float flag_h = 0.62f * GS_ISO_TILE_Z * cam->zoom;
+
+    float top = py - pole_h;
+
+    static const SDL_FColor shaft = { 0.80f, 0.80f, 0.83f, 1.0f };
+    const SDL_FPoint pole[4] = {
+        { px - pole_w * 0.5f, py },
+        { px + pole_w * 0.5f, py },
+        { px + pole_w * 0.5f, top },
+        { px - pole_w * 0.5f, top },
+    };
+    gs_quad(ren, pole, shaft);
+
+    // Four squares across and three down: enough to read as a chequered flag,
+    // few enough that each square is still a square and not a pixel.
+    const int across = 4, down = 3;
+    for (int i = 0; i < across; i++) {
+        for (int j = 0; j < down; j++) {
+            float x0 = px + away * flag_w * (float)i / (float)across;
+            float x1 = px + away * flag_w * (float)(i + 1) / (float)across;
+            float y0 = top + flag_h * (float)j / (float)down;
+            float y1 = top + flag_h * (float)(j + 1) / (float)down;
+
+            SDL_FColor c = ((i + j) & 1)
+                               ? (SDL_FColor){ 0.06f, 0.06f, 0.07f, 1.0f }
+                               : (SDL_FColor){ 0.97f, 0.97f, 0.97f, 1.0f };
+            const SDL_FPoint q[4] = {
+                { x0, y0 }, { x1, y0 }, { x1, y1 }, { x0, y1 },
+            };
+            gs_quad(ren, q, c);
+        }
+    }
+}
+
 // **The route, drawn on the ground.** Gates were in the simulation and in the
 // editor's white line and nowhere at all in a race, so a player arriving at a
 // track had nothing to say which way round it went - "the direction was sort of
@@ -221,27 +296,39 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
     float fx = gs_to_f(gs_cos(g->heading)), fy = gs_to_f(gs_sin(g->heading));
     float sx = -fy, sy = fx;
 
-    // The band. The start and finish is chequered, the rest are a single
-    // colour, because one of them is not like the others.
-    int blocks = (int)(hw * 2.0f) + 1;
+    // The band. The start and finish is a chequerboard - two rows deep, so the
+    // squares alternate across the line *and* along it; the rest are a single
+    // blue, because one of them is not like the others. One row of alternating
+    // blocks is a dashed line rather than a chequered one, which is what this
+    // was and what a picture of it showed.
+    float half_depth = start ? GS_LINE_HALF_DEPTH : GS_GATE_HALF_DEPTH;
+    int rows = start ? 2 : 1;
+    float row = (2.0f * half_depth) / (float)rows;
+
+    // Square blocks: how many fit across follows the depth of a row and not the
+    // width of the gate, so the chequer does not stretch on a wide one.
+    int blocks = (int)((2.0f * hw) / row + 0.5f);
     if (blocks < 2) blocks = 2;
     if (blocks > 24) blocks = 24;
 
-    for (int i = 0; i < blocks; i++) {
-        float a = -hw + (2.0f * hw) * (float)i / (float)blocks;
-        float b = -hw + (2.0f * hw) * (float)(i + 1) / (float)blocks;
-        float depth = 0.22f;
+    for (int r = 0; r < rows; r++) {
+        float d0 = -half_depth + row * (float)r, d1 = d0 + row;
 
-        float x[4] = { gx + sx * a - fx * depth, gx + sx * b - fx * depth,
-                       gx + sx * b + fx * depth, gx + sx * a + fx * depth };
-        float y[4] = { gy + sy * a - fy * depth, gy + sy * b - fy * depth,
-                       gy + sy * b + fy * depth, gy + sy * a + fy * depth };
+        for (int i = 0; i < blocks; i++) {
+            float a = -hw + (2.0f * hw) * (float)i / (float)blocks;
+            float b = -hw + (2.0f * hw) * (float)(i + 1) / (float)blocks;
 
-        SDL_FColor c = start
-            ? ((i & 1) ? (SDL_FColor){ 0.08f, 0.08f, 0.09f, 1.0f }
-                       : (SDL_FColor){ 0.95f, 0.95f, 0.95f, 1.0f })
-            : (SDL_FColor){ 0.30f, 0.65f, 0.95f, 0.85f };
-        gs_ground_quad(ren, cam, t, x, y, 0.04f, c);
+            float x[4] = { gx + sx * a + fx * d0, gx + sx * b + fx * d0,
+                           gx + sx * b + fx * d1, gx + sx * a + fx * d1 };
+            float y[4] = { gy + sy * a + fy * d0, gy + sy * b + fy * d0,
+                           gy + sy * b + fy * d1, gy + sy * a + fy * d1 };
+
+            SDL_FColor c = start
+                ? (((i + r) & 1) ? (SDL_FColor){ 0.08f, 0.08f, 0.09f, 1.0f }
+                                 : (SDL_FColor){ 0.95f, 0.95f, 0.95f, 1.0f })
+                : (SDL_FColor){ 0.30f, 0.65f, 0.95f, 0.85f };
+            gs_ground_quad(ren, cam, t, x, y, 0.04f, c);
+        }
     }
 
     // And the arrow through it: a shaft along the way through, and two barbs.
@@ -272,6 +359,20 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
         gy + fy * (base + len + head),
     };
     gs_ground_quad(ren, cam, t, hx, hy, 0.05f, tip);
+
+}
+
+// Where the start line's two flags stand: at its ends and a little outside
+// them, so a car crossing on the extreme edge still passes between the flags
+// rather than through one.
+static void gs_flag_feet(const gs_gate *g, float out[2][2]) {
+    float gx = gs_to_f(g->x), gy = gs_to_f(g->y);
+    float fx = gs_to_f(gs_cos(g->heading)), fy = gs_to_f(gs_sin(g->heading));
+    float sx = -fy, sy = fx;
+    float off = gs_to_f(g->half_width) + 0.40f;
+
+    out[0][0] = gx + sx * off;  out[0][1] = gy + sy * off;
+    out[1][0] = gx - sx * off;  out[1][1] = gy - sy * off;
 }
 
 // Is this tile anywhere near the viewport?
@@ -409,7 +510,12 @@ static inline float gs_mesh_depth(float x, float y, float z) {
     return x + y + z * (GS_ISO_TILE_H / GS_ISO_TILE_Z);
 }
 
-#define GS_MESH_MAX_TRIS 256
+// Room for the largest vehicle's triangles with plenty over. Sized from the
+// meshes rather than guessed: the loop below stops filling when it runs out,
+// so a mesh larger than this loses its tail silently - a car with a piece
+// missing and nothing said about it. tools/make_meshes.py prints every
+// vehicle's count, and the largest today is the lunar rover at 268.
+#define GS_MESH_MAX_TRIS 512
 
 typedef struct gs_sorted_tri {
     float     depth;
@@ -439,6 +545,11 @@ static void gs_tri(SDL_Renderer *ren, const SDL_FPoint p[3], SDL_FColor c) {
 // How a wreck is drawn against how the car was: wider on the ground and lower to
 // it. The spread matches GS_WRECK_RADIUS over GS_CAR_RADIUS, so the picture and
 // the collision are the same size.
+// How big a car is drawn, in tiles. See gs_draw_car on why this is deliberately
+// not to scale.
+#define GS_CAR_HALF_LEN 0.65f
+#define GS_CAR_HALF_WID 0.38f
+
 #define GS_WRECK_SPREAD 1.5f
 #define GS_WRECK_SQUASH 0.55f
 
@@ -485,6 +596,37 @@ static void gs_draw_arc(SDL_Renderer *ren, const gs_camera *cam,
     SDL_RenderLines(ren, ring, 13);
 }
 
+// **The diagonal the sweep must have reached before a car may be drawn - which
+// is not the car's centre tile.** A car is about 1.3 tiles long, so its body
+// reaches into the tile in front of the one it is standing on, and that tile
+// is on the *next* diagonal, which the sweep draws afterwards. Sorted by its
+// centre, a car therefore has the ground it is standing on painted over its
+// bonnet; and because the centre crosses into a new tile every car length or
+// so, the overpaint arrives and leaves as it drives. That is the "background
+// comes over the bonnet every few seconds" a player reported.
+//
+// Taken over the whole footprint instead, so a car is drawn only once every
+// tile it covers has been. Ground genuinely in front of it is on a diagonal
+// beyond the footprint and still draws over it, which is what makes a car
+// behind a rise disappear behind the rise.
+static int gs_car_diagonal(const gs_car *c) {
+    float half_len = GS_CAR_HALF_LEN, half_wid = GS_CAR_HALF_WID;
+    if (c->wrecked) {
+        half_len *= GS_WRECK_SPREAD;
+        half_wid *= GS_WRECK_SPREAD;
+    }
+
+    float fx[4], fy[4];
+    gs_car_footprint(c, half_len, half_wid, fx, fy);
+
+    int d = (int)SDL_floorf(fx[0]) + (int)SDL_floorf(fy[0]);
+    for (int i = 1; i < 4; i++) {
+        int e = (int)SDL_floorf(fx[i]) + (int)SDL_floorf(fy[i]);
+        if (e > d) d = e;
+    }
+    return d;
+}
+
 static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
                         const gs_track *t, const gs_car *c, uint8_t index,
                         float alpha) {
@@ -501,7 +643,7 @@ static void gs_draw_car(SDL_Renderer *ren, const gs_camera *cam,
     // Nothing in src/core/ knows about these numbers today. When collision
     // arrives it must use *these* rather than the metric truth, or a car is hit
     // by something the player cannot see.
-    float half_len = 0.65f, half_wid = 0.38f;
+    float half_len = GS_CAR_HALF_LEN, half_wid = GS_CAR_HALF_WID;
     if (c->wrecked) {
         half_len *= GS_WRECK_SPREAD;
         half_wid *= GS_WRECK_SPREAD;
@@ -698,7 +840,21 @@ static float gs_cam_hold(float cam_z, float car_z, float zoom, float vh) {
     return cam_z;
 }
 
-static void gs_car_extent(const gs_track *t, const gs_world *w,
+// Where a car is *this frame*, which is between two ticks rather than on one.
+// The renderer draws cars interpolated; a camera that reads the settled state
+// instead is pointed a fraction of a tick away from what is drawn, and the
+// fraction changes every frame - which is a car that judders in a smooth world,
+// and is what a recording of one showed.
+static gs_car gs_car_lerp(const gs_car *a, const gs_car *b, float alpha);
+
+static gs_car gs_car_now(const gs_world *prev, const gs_world *now, uint8_t i,
+                         float alpha) {
+    if (prev == nullptr || i >= prev->car_count) return now->car[i];
+    return gs_car_lerp(&prev->car[i], &now->car[i], alpha);
+}
+
+static void gs_car_extent(const gs_track *t, const gs_world *prev,
+                          const gs_world *w, float alpha,
                           float *cx, float *cy, float *cz, float *spread) {
     float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
     float minz = 1e9f, maxz = -1e9f;
@@ -707,9 +863,10 @@ static void gs_car_extent(const gs_track *t, const gs_world *w,
 
     for (uint8_t i = 0; i < w->car_count; i++) {
         if (!w->car[i].active) continue;
-        float x = gs_to_f(w->car[i].x), y = gs_to_f(w->car[i].y);
-        float h = gs_cam_height(t, &w->car[i]);
-        float z = gs_to_f(w->car[i].z);
+        gs_car c = gs_car_now(prev, w, i, alpha);
+        float x = gs_to_f(c.x), y = gs_to_f(c.y);
+        float h = gs_cam_height(t, &c);
+        float z = gs_to_f(c.z);
         if (x < minx) minx = x;
         if (x > maxx) maxx = x;
         if (y < miny) miny = y;
@@ -742,10 +899,11 @@ static void gs_car_extent(const gs_track *t, const gs_world *w,
     *spread = dz > widest ? dz : widest;
 }
 
-void gs_split_update(gs_split *s, const gs_track *t, const gs_world *w,
-                     int win_w, int win_h, float dt) {
+void gs_split_update(gs_split *s, const gs_track *t, const gs_world *prev,
+                     const gs_world *w, float alpha, int win_w, int win_h,
+                     float dt) {
     float cx, cy, cz, spread;
-    gs_car_extent(t, w, &cx, &cy, &cz, &spread);
+    gs_car_extent(t, prev, w, alpha, &cx, &cy, &cz, &spread);
 
     // Hysteresis: only the crossing of a threshold changes the answer, and the
     // two thresholds are apart, so a pair of cars swapping places at the
@@ -789,7 +947,8 @@ void gs_split_update(gs_split *s, const gs_track *t, const gs_world *w,
     // own pane once it has.
     for (uint8_t i = 0; i < w->car_count; i++) {
         if (!w->car[i].active) continue;
-        s->shared.cz = gs_cam_hold(s->shared.cz, gs_to_f(w->car[i].z), fit,
+        gs_car held = gs_car_now(prev, w, i, alpha);
+        s->shared.cz = gs_cam_hold(s->shared.cz, gs_to_f(held.z), fit,
                                    (float)win_h);
     }
     s->shared.zoom = fit;
@@ -797,7 +956,8 @@ void gs_split_update(gs_split *s, const gs_track *t, const gs_world *w,
     s->shared.vh = (float)win_h;
 }
 
-uint8_t gs_split_views(const gs_split *s, const gs_track *t, const gs_world *w,
+uint8_t gs_split_views(const gs_split *s, const gs_track *t,
+                       const gs_world *prev, const gs_world *w, float alpha,
                        int win_w, int win_h, gs_view *out) {
     if (s->merge >= 1.0f || w->car_count <= 1) {
         out[0] = (gs_view){ 0 };
@@ -826,8 +986,9 @@ uint8_t gs_split_views(const gs_split *s, const gs_track *t, const gs_world *w,
         // Its own car when fully split, the shared view as the merge closes -
         // so at the instant the divider appears or goes, every pane is already
         // showing what the other arrangement showed.
-        float ox = gs_to_f(w->car[i].x), oy = gs_to_f(w->car[i].y);
-        float oz = gs_cam_height(t, &w->car[i]);
+        gs_car c = gs_car_now(prev, w, i, alpha);
+        float ox = gs_to_f(c.x), oy = gs_to_f(c.y);
+        float oz = gs_cam_height(t, &c);
         out[i].cam.cx = ox + (s->shared.cx - ox) * eased;
         out[i].cam.cy = oy + (s->shared.cy - oy) * eased;
         out[i].cam.cz = oz + (s->shared.cz - oz) * eased;
@@ -839,7 +1000,7 @@ uint8_t gs_split_views(const gs_split *s, const gs_track *t, const gs_world *w,
         // Held inside this pane, once the pane and its zoom are known - a car
         // stuck high above the ground is otherwise followed only partly and
         // stays above the top edge for the rest of the race.
-        out[i].cam.cz = gs_cam_hold(out[i].cam.cz, gs_to_f(w->car[i].z),
+        out[i].cam.cz = gs_cam_hold(out[i].cam.cz, gs_to_f(c.z),
                                     out[i].cam.zoom, (float)rects[i].h);
     }
     return n;
@@ -968,6 +1129,24 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                 gs_draw_gate(ren, &cam, t, g, gi == 0);
             }
         }
+
+        // The flags stand up out of the world rather than being painted on it,
+        // so each one sorts on the tile it is planted in and not on the gate's
+        // - exactly as a car does. Drawn at the gate's own diagonal instead,
+        // the flag at the near end of the line is painted over by every tile
+        // the sweep reaches afterwards, and a line that should have a flag at
+        // both ends is drawn with one.
+        if (t->gate_count > 0) {
+            float feet[2][2];
+            gs_flag_feet(&t->gate[0], feet);
+            for (int k = 0; k < 2; k++) {
+                int fd = (int)SDL_floorf(feet[k][0]) + (int)SDL_floorf(feet[k][1]);
+                if (fd == d - fringe * 2) {
+                    gs_draw_flag(ren, &cam, t, feet[k][0], feet[k][1],
+                                 gs_to_f(t->gate[0].x), gs_to_f(t->gate[0].y));
+                }
+            }
+        }
         // The sweep counts from the fringe, so the world diagonal this pass is
         // drawing is `d` shifted back by the two tiles of margin it starts
         // outside on each axis. Comparing a car's own diagonal against the raw
@@ -977,8 +1156,9 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
 
         for (uint8_t i = 0; i < now->car_count; i++) {
             gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
-            int cd = gs_fix_floor(c.x) + gs_fix_floor(c.y);
-            if (cd == world_d) gs_draw_car(ren, &cam, t, &c, i, 1.0f);
+            if (gs_car_diagonal(&c) == world_d) {
+                gs_draw_car(ren, &cam, t, &c, i, 1.0f);
+            }
         }
     }
 
@@ -1016,7 +1196,7 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
     // they are drawn after everything - which is where they are.
     for (uint8_t i = 0; i < now->car_count; i++) {
         gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
-        int cd = gs_fix_floor(c.x) + gs_fix_floor(c.y);
+        int cd = gs_car_diagonal(&c);
         if (cd >= diagonals - fringe * 2 || cd < -fringe * 2) {
             gs_draw_car(ren, &cam, t, &c, i, 1.0f);
         }

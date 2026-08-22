@@ -1328,7 +1328,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             // be advanced alongside the simulation rather than only at the end.
             int ww = 0, wh = 0;
             SDL_GetRenderOutputSize(a->ren, &ww, &wh);
-            gs_split_update(&a->split, &a->t, &a->world, ww, wh, 1.0f / (float)GS_TICK_HZ);
+            gs_split_update(&a->split, &a->t, &a->prev, &a->world, 1.0f, ww, wh,
+                            1.0f / (float)GS_TICK_HZ);
         }
     }
 
@@ -1634,10 +1635,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (!a->editor.active && !a->showroom && a->menu.screen == GS_SCREEN_RACE) {
         int ww = 0, wh = 0;
         SDL_GetRenderOutputSize(a->ren, &ww, &wh);
-        gs_split_update(&a->split, &a->t, &a->world, ww, wh, (float)delta / 1e9f);
+        gs_split_update(&a->split, &a->t, &a->prev, &a->world, alpha, ww, wh,
+                        (float)delta / 1e9f);
 
         gs_view merged[GS_MAX_CARS];
-        views = gs_split_views(&a->split, &a->t, &a->world, ww, wh, merged);
+        views = gs_split_views(&a->split, &a->t, &a->prev, &a->world, alpha,
+                               ww, wh, merged);
         for (uint8_t i = 0; i < views; i++) {
             merged[i].show_gravity = a->view[i].show_gravity;
             merged[i].show_arc = a->arc;
