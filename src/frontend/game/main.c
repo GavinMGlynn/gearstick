@@ -38,6 +38,12 @@
 #define GS_WINDOW_W 1280
 #define GS_WINDOW_H 720
 
+// How long this machine waits for a silent one before calling the race over.
+// Longer than the server's own fifteen-second patience, so a client that is
+// merely having a bad moment gets dropped by the server first and this only
+// fires for somebody who is genuinely gone.
+#define GS_GIVE_UP_SECONDS 20
+
 typedef struct gs_app {
     SDL_Window   *win;
     SDL_Renderer *ren;
@@ -120,7 +126,15 @@ typedef struct gs_app {
     bool     autodrive;           // the AI drives this machine's car
     uint64_t traced_at;           // the tick the last trace line went out on
     bool     demo_library;        // a few tracks, for looking at the screen
-    uint32_t    waiting;     // ticks spent stalled, for telling the player
+    // **When this machine started waiting for somebody, and for how long it
+    // will.** A stall is the rollback saying the other machine has gone quiet,
+    // which is a thing that ends when a datagram arrives - and if it never
+    // arrives, a race that waits silently forever is indistinguishable from a
+    // game that has crashed. It is not a hypothetical: a player pressed Play
+    // into a race whose other seat had been left by somebody who had gone, and
+    // sat looking at a frozen screen with no idea why.
+    uint32_t    waiting;        // stalled frames, for telling the player
+    uint64_t    stalled_since;  // when it started, or 0 while the race is live
 
     // **A networked race is recorded from what everybody agreed, not from what
     // this machine is looking at.** The visible world is built partly on
@@ -1478,8 +1492,27 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                     break;
                 }
                 a->waiting++;
+                if (a->stalled_since == 0) a->stalled_since = SDL_GetTicksNS();
+
+                // **Waiting has an end.** The server drops a client that has
+                // been silent for fifteen seconds, so a machine still waiting
+                // after twenty is waiting for somebody nobody expects back.
+                // The race stops here rather than never: what there is of it
+                // goes to the results, which is a screen with a way off it.
+                uint64_t waited = SDL_GetTicksNS() - a->stalled_since;
+                if (waited > (uint64_t)GS_GIVE_UP_SECONDS * 1000000000ull) {
+                    SDL_Log("net: nothing from the other machine for %d "
+                            "seconds - the race is over at tick %u",
+                            GS_GIVE_UP_SECONDS, a->net.local_tick);
+                    gs_net_finish(&a->net);
+                    a->net_started = false;
+                    a->net_settling = false;
+                    a->stalled_since = 0;
+                    a->menu.screen = GS_SCREEN_RESULTS;
+                }
                 break;    // the other machine has gone quiet; wait for it
             }
+            a->stalled_since = 0;
             a->world = *gs_net_world(&a->net);
         }
         steps = 0;
@@ -1638,7 +1671,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // is not a race, and a lap counter over a title screen is furniture.
     if (!a->editor.active && a->menu.screen == GS_SCREEN_RACE) {
         for (uint8_t i = 0; i < views; i++) {
-            gs_hud_draw(&a->world, &a->t, &a->view[i], (uint32_t)a->world.tick);
+            float waited = a->stalled_since == 0 ? 0.0f
+                         : (float)(SDL_GetTicksNS() - a->stalled_since) / 1e9f;
+            gs_hud_draw(&a->world, &a->t, &a->view[i], (uint32_t)a->world.tick,
+                        waited, a->online);
         }
     }
 

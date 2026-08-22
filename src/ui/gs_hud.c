@@ -39,6 +39,9 @@ static void gs_hud_stat(const char *label, const char *value, float scale) {
     ImGui_PopStyleColor();
 }
 
+// What did not fit in the panel last time it was drawn - see gs_hud_overflow.
+static float gs_hud_hidden = 0.0f;
+
 // The damage bar. A number from 0 to 255 means nothing to a driver; a bar that
 // is running out means something immediately, and the colour says how worried to
 // be without anybody having to read it.
@@ -57,9 +60,16 @@ static void gs_hud_damage(const gs_car *c, float width) {
 
     float r, g, b;
     gs_style_accent(&r, &g, &b);
-    ImGui_PushStyleColorImVec4(ImGuiCol_Text, (ImVec4){ r, g, b, 0.85f });
-    ImGui_TextUnformatted(c->wrecked ? "WRECKED" : "condition");
-    ImGui_PopStyleColor();
+    if (c->wrecked) {
+        ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                   (ImVec4){ 0.95f, 0.35f, 0.30f, 1.0f });
+        ImGui_TextUnformatted("YOU DIED");
+        ImGui_PopStyleColor();
+    } else {
+        ImGui_PushStyleColorImVec4(ImGuiCol_Text, (ImVec4){ r, g, b, 0.85f });
+        ImGui_TextUnformatted("condition");
+        ImGui_PopStyleColor();
+    }
 }
 
 // **A wreck is not the end of the session, and the screen has to say so.** A
@@ -68,15 +78,22 @@ static void gs_hud_damage(const gs_car *c, float width) {
 // Escape is the way out of a race wherever it is being raced - the setup screen
 // on this machine, the lobby when the race belongs to a server - so that is
 // what this says, without having to be told which it is.
-static void gs_hud_way_out(void) {
+static void gs_hud_way_out(bool online) {
     ImGui_PushStyleColorImVec4(ImGuiCol_Text,
                                ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
-    ImGui_TextUnformatted("Esc leaves");
+    // **Both ways out, named by the key that does them.** "You are dead" with
+    // nothing after it is half a message: the question it leaves is what to do
+    // now, and the answer is two keys. Restarting is not offered in a race
+    // other people are in, because it is not one machine's to restart.
+    // Short enough to fit the panel, which is narrow on purpose: it is read
+    // while driving. "R" and "Esc" are the whole message.
+    if (!online) ImGui_TextUnformatted("R  restart");
+    ImGui_TextUnformatted(online ? "Esc  lobby" : "Esc  menu");
     ImGui_PopStyleColor();
 }
 
 void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
-                 uint32_t tick) {
+                 uint32_t tick, float waited, bool online) {
     if (w == nullptr || t == nullptr || v == nullptr) return;
     if (v->car >= w->car_count) return;
 
@@ -98,17 +115,42 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
     float line = ImGui_GetTextLineHeight();
     const ImGuiStyle *st = ImGui_GetStyle();
 
-    // The scaled rows, their labels, the bar, and the gaps between the groups.
-    float scaled = (GS_HUD_BIG * 2.0f + GS_HUD_SMALL * 2.0f) * line;
-    float labels = 5.0f * line;
-    float height = st->WindowPadding.y * 2.0f + scaled + labels + 8.0f +
-                   st->ItemSpacing.y * 12.0f;
-    if (c->finish_tick != 0) height += line * (GS_HUD_SMALL + 1.0f) +
-                                       st->ItemSpacing.y * 2.0f;
+    // **The rows this is about to draw, listed in the order it draws them.**
+    // The size and the contents are one list rather than two that have to be
+    // kept in step - which they were not: every state was a little short, the
+    // plain one by eleven pixels, and the wreck message by a whole line. What
+    // is drawn below adds a row here, or the test that renders every state and
+    // asks what did not fit will say so.
+    float row_big = line * GS_HUD_BIG + line + st->ItemSpacing.y * 2.0f;
+    float row_small = line * GS_HUD_SMALL + line + st->ItemSpacing.y * 2.0f;
+
+    float height = st->WindowPadding.y * 2.0f
+                 + row_big * 2.0f          // position, lap
+                 + row_small * 2.0f        // this lap, best
+                 + 8.0f + st->ItemSpacing.y * 2.0f + line   // the bar, labelled
+                 // And the four deliberate gaps between those groups. An
+                 // ImGui_Spacing() is an item of no height that still costs a
+                 // gap, and forgetting them is the whole of the twenty-nine
+                 // pixels this panel was short in every state it has.
+                 + st->ItemSpacing.y * 4.0f;
+    // A finished car's time, and the gap above it.
+    if (c->finish_tick != 0) height += row_small + st->ItemSpacing.y;
     // The way out, when there is a wreck to need one. Counted here rather than
     // hoped for: a panel sized before its contents is how a button ends up half
     // outside the box it is in.
-    if (c->wrecked) height += line + st->ItemSpacing.y;
+    // The one or two keys a wrecked driver is offered.
+    if (c->wrecked) {
+        height += (line + st->ItemSpacing.y) * (online ? 1.0f : 2.0f);
+    }
+    // And the race waiting for somebody: what is happening, how long it has
+    // been happening, and - when there is no wreck message already saying it -
+    // the way out.
+    if (waited > 0.5f) {
+        height += st->ItemSpacing.y + (line + st->ItemSpacing.y) * 2.0f;
+        if (!c->wrecked) {
+            height += (line + st->ItemSpacing.y) * (online ? 1.0f : 2.0f);
+        }
+    }
 
     ImGui_SetNextWindowSize((ImVec2){ GS_HUD_W, height }, ImGuiCond_Always);
 
@@ -147,10 +189,24 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
 
         // --- The lap being driven, counting up. Ticks since the last crossing,
         // which is the same clock the simulation will judge the lap by.
+        //
+        // **A wrecked car is not driving a lap.** The clock used to carry on
+        // past a wreck, so a car that had been dead for a minute and a half
+        // read as somebody on a very slow lap - which says the opposite of what
+        // happened. There is no lap being driven, so there is no time to show.
+        //
+        // The tick it stopped at is not shown, because the simulation does not
+        // record when a car was wrecked and adding a field to the car to carry
+        // it would change the world hash - which is every existing replay,
+        // ghost and shared time, for a line of text.
         ImGui_Spacing();
-        uint32_t running = tick > c->lap_start ? tick - c->lap_start : 0;
-        gs_time_text(text, sizeof text, running);
-        gs_hud_stat("this lap", text, GS_HUD_SMALL);
+        if (c->wrecked) {
+            gs_hud_stat("this lap", "-", GS_HUD_SMALL);
+        } else {
+            uint32_t running = tick > c->lap_start ? tick - c->lap_start : 0;
+            gs_time_text(text, sizeof text, running);
+            gs_hud_stat("this lap", text, GS_HUD_SMALL);
+        }
 
         // --- And the one to beat.
         ImGui_Spacing();
@@ -166,7 +222,21 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // panel it sits in and ran off the edge of it.
         gs_hud_damage(c, ImGui_GetContentRegionAvail().x);
 
-        if (c->wrecked) gs_hud_way_out();
+        if (c->wrecked) gs_hud_way_out(online);
+
+        // **Waiting, and for how long.** Half a second of it is a bad moment on
+        // the network and not worth mentioning; longer than that and the person
+        // watching a still screen deserves to know it is the other machine and
+        // not this one.
+        if (waited > 0.5f) {
+            ImGui_Spacing();
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       (ImVec4){ 0.95f, 0.6f, 0.3f, 1.0f });
+            ImGui_TextUnformatted("WAITING");
+            ImGui_Text("%.0fs quiet", (double)waited);
+            ImGui_PopStyleColor();
+            if (!c->wrecked) gs_hud_way_out(online);
+        }
 
         // --- And whether this one is over. A finished car still gets a HUD,
         // because the others are still racing and the screen is still theirs.
@@ -175,6 +245,10 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
             gs_time_text(text, sizeof text, c->finish_tick);
             gs_hud_stat("finished", text, GS_HUD_SMALL);
         }
+
+        gs_hud_hidden = ImGui_GetScrollMaxY();
     }
     ImGui_End();
 }
+
+float gs_hud_overflow(void) { return gs_hud_hidden; }

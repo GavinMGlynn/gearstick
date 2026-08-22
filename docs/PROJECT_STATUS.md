@@ -2777,6 +2777,41 @@ screen offers, so the two cannot disagree.
 The other is that the showroom draws a HUD for a car nobody is driving, which is
 harmless and looks odd. Left alone deliberately: it is a screenshot mode.
 
+### A dead driver, told so
+
+Dying said almost nothing. The word "WRECKED" replaced the word "condition"
+under an empty damage bar, and the lap clock kept counting - so a car that had
+been dead for a minute and a half read as somebody on a very slow lap, which is
+the opposite of what had happened. There was nothing to press, either: a wreck
+ends nothing in the simulation, so nothing moves the player on.
+
+The HUD says **YOU DIED** where the bar's label goes, stops the lap clock at a
+dash, and names the two keys that do something about it: `R restart` on this
+machine, `Esc menu` - or `Esc lobby` when the race belongs to a server, where
+restarting is not one machine's to do. The time the wreck happened is not shown,
+which would be nicer: the simulation does not record it, and adding a field to
+the car to carry it would change the world hash, and with it every replay,
+ghost and shared time in existence, for a line of text.
+
+The same panel now says when the race is **waiting** for another machine and for
+how long, because a rollback that stops the world while a peer is quiet is
+indistinguishable from a crash if nothing says otherwise - which is exactly what
+a player saw after pressing Play into a race whose second seat had been
+abandoned. And the waiting ends: after twenty seconds the race is over and the
+results screen appears. Twenty because the server drops a silent client at
+fifteen, so a client merely having a bad moment is dropped by the server first
+and this only fires for somebody genuinely gone.
+
+**Sizing that panel by hand had been quietly wrong all along.** The height was a
+sum of scaled rows, labels and a guess at the gaps, and it was eleven pixels
+short in *every* state - the bottom label was clipped and nobody noticed,
+because it is short. Adding the wreck message made it a whole line short. It is
+worked out from the rows it is about to draw now, in the order it draws them,
+including the four deliberate `Spacing()` gaps that cost a gap each and were
+never counted. `gs_hud_overflow` reports what did not fit, and the test renders
+every state the HUD has - racing, wrecked, waiting, finished and the
+combinations - and requires nothing below the bottom in any of them.
+
 ---
 
 ## What does not exist

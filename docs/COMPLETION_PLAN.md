@@ -1289,4 +1289,25 @@ worth as much as what was decided about it.
       *Verification: the screenshot pass — one, two, three and four cars, and
       the camera invariant checked over all twenty-two shipped tracks by racing
       each of them with the trace on.*
+- [x] **A dead car went on counting its lap time, and said nothing else.**
+      *(Found by dying.)* A wreck ends nothing in the simulation, so the clock
+      kept running and the screen looked like a very slow lap rather than a
+      dead driver. It says **YOU DIED** now, the lap clock stops, and the two
+      keys that do something about it are named: R restarts a race on this
+      machine, Escape goes back to the menu — or to the lobby, when the race
+      belongs to a server and restarting is not one machine's to do.
+      *Verification: the HUD is drawn in every state it has — racing, wrecked,
+      waiting, finished, and the combinations — and asked how much of it ended
+      up below the bottom of its own panel. It was eleven pixels short in every
+      state before this, and a whole line short with the wreck message on.*
+- [x] **A race whose other machine has gone says so, and ends.** Waiting used to
+      be silent and endless: the rollback stops the world when nobody else is
+      talking, and a stopped world with nothing said about it looks exactly like
+      a game that has crashed. It says how long it has been quiet, offers the
+      way out, and after twenty seconds — longer than the server's own patience
+      — it stops waiting and goes to the results.
+      *Verification: the give-up is longer than the fifteen seconds after which
+      the server drops a silent client, so a client having a bad moment is
+      dropped by the server first and this only fires for somebody genuinely
+      gone.*
 

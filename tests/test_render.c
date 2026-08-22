@@ -2502,7 +2502,7 @@ static void gs_hud_frame(SDL_Renderer *ren, const gs_track *t, const gs_world *w
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
     gs_render_view(ren, t, w, w, 1.0f, v);
-    gs_hud_draw(w, t, v, (uint32_t)w->tick);
+    gs_hud_draw(w, t, v, (uint32_t)w->tick, 0.0f, false);
 
     ImGui_Render();
     cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), ren);
@@ -3015,6 +3015,69 @@ TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
     // Still higher up the screen than the one on the ground, so the reason for
     // the partial follow survives the cap on it.
     CHECK(hung < on_ground);
+}
+
+TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    // **A panel sized by hand goes stale the moment somebody adds a line.** It
+    // did within the hour: the first version of the wreck message had "Esc back
+    // to the menu" drawn half outside the box. Every state the HUD has is drawn
+    // here and asked whether any of it ended up below the bottom.
+    static gs_track t;
+    gs_flat_pavement(&t, 24, 12);
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(6), GS_INT(6), 0);
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    gs_render_track_camera(&v, &t, &w, &w, 1.0f);
+
+    // Racing, wrecked, waiting, finished, and the combinations of those that a
+    // race can actually produce - offline, where a wreck is offered a restart,
+    // and online, where it is not.
+    struct { bool wrecked; bool finished; float waited; bool online; } states[] = {
+        { false, false, 0.0f,  false },
+        { true,  false, 0.0f,  false },
+        { true,  false, 0.0f,  true  },
+        { false, false, 3.0f,  false },
+        { true,  false, 3.0f,  true  },
+        { false, true,  0.0f,  false },
+        { true,  true,  9.0f,  false },
+    };
+
+    for (size_t i = 0; i < SDL_arraysize(states); i++) {
+        w.car[0].wrecked = states[i].wrecked;
+        w.car[0].damage = states[i].wrecked ? 255 : 0;
+        w.car[0].finish_tick = states[i].finished ? 4200 : 0;
+
+        gs_frame f = { 0 };
+        for (int frame = 0; frame < 3; frame++) {
+            gs_frame_free(&f);
+            cImGui_ImplSDLRenderer3_NewFrame();
+            cImGui_ImplSDL3_NewFrame();
+            ImGui_NewFrame();
+            SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+            SDL_RenderClear(ren);
+            gs_render_view(ren, &t, &w, &w, 1.0f, &v);
+            gs_hud_draw(&w, &t, &v, 600, states[i].waited, states[i].online);
+            ImGui_Render();
+            cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), ren);
+        }
+        gs_frame_free(&f);
+
+        CHECK(gs_hud_overflow() == 0.0f);
+    }
+
+    w.car[0].wrecked = false;
+    w.car[0].damage = 0;
+    w.car[0].finish_tick = 0;
 }
 
 TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
@@ -3635,6 +3698,7 @@ int main(void) {
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
     run_the_condition_bar_stays_inside_the_hud(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
+    run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
     run_every_driver_can_see_their_own_car_on_ground_that_is_not_at_height_zero(ren);
     run_a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it(ren);
     run_a_car_down_a_drop_does_not_take_the_camera_off_the_other_one(ren);
