@@ -123,6 +123,157 @@ static void gs_quad(SDL_Renderer *ren, const SDL_FPoint p[4], SDL_FColor c) {
     SDL_RenderGeometry(ren, nullptr, v, 4, idx, 6);
 }
 
+// A quad lying on the ground, its corners sampled from the terrain so it
+// follows whatever it is painted on rather than floating over a slope. Given in
+// tiles; `lift` is how far above the ground to draw, which stops it fighting
+// the surface for the same pixels.
+static void gs_ground_quad(SDL_Renderer *ren, const gs_camera *cam,
+                           const gs_track *t, const float x[4], const float y[4],
+                           float lift, SDL_FColor c) {
+    SDL_FPoint p[4];
+    for (int i = 0; i < 4; i++) {
+        gs_fix fx = (gs_fix)(x[i] * (float)GS_ONE);
+        gs_fix fy = (gs_fix)(y[i] * (float)GS_ONE);
+        float z = gs_to_f(gs_track_height(t, fx, fy)) + lift;
+        gs_iso_project(cam, x[i], y[i], z, &p[i].x, &p[i].y);
+    }
+    gs_quad(ren, p, c);
+}
+
+// **The edge of the road, said in kerb.** The authored track ends and the
+// run-off begins, and until now the only thing that said so was a change of
+// shade - which a player driving flat out at the end of a shelf does not see in
+// time. This is the red and white a racing driver has been reading since before
+// any of us: alternating blocks along the boundary, on the ground, one to a
+// tile. The original said it with a fence and there is no argument about which
+// is clearer; what matters is that the edge is a thing you can see coming.
+#define GS_KERB_DEPTH 0.32f
+
+static void gs_draw_kerb(SDL_Renderer *ren, const gs_camera *cam,
+                         const gs_track *t, int tx, int ty) {
+    if (tx < 0 || ty < 0 || tx >= (int)t->w || ty >= (int)t->h) return;
+
+    // Which sides of this tile face off the track. A corner tile has two.
+    const bool side[4] = {
+        ty == 0,                    // north, towards -y
+        tx == (int)t->w - 1,        // east
+        ty == (int)t->h - 1,        // south
+        tx == 0,                    // west
+    };
+
+    static const SDL_FColor pale = { 0.92f, 0.92f, 0.90f, 1.0f };
+    static const SDL_FColor red  = { 0.78f, 0.16f, 0.14f, 1.0f };
+
+    float x0 = (float)tx, y0 = (float)ty, d = GS_KERB_DEPTH;
+
+    for (int e = 0; e < 4; e++) {
+        if (!side[e]) continue;
+
+        // Alternating along the boundary, so the blocks read as a kerb rather
+        // than as a stripe. Keyed to the tile the block is on, which keeps
+        // neighbouring tiles in step.
+        bool even = (((e == 0 || e == 2) ? tx : ty) & 1) == 0;
+        SDL_FColor c = even ? pale : red;
+
+        float x[4], y[4];
+        switch (e) {
+        case 0:  // north edge, drawn just inside it
+            x[0] = x0;       y[0] = y0;
+            x[1] = x0 + 1.f; y[1] = y0;
+            x[2] = x0 + 1.f; y[2] = y0 + d;
+            x[3] = x0;       y[3] = y0 + d;
+            break;
+        case 1:  // east
+            x[0] = x0 + 1.f - d; y[0] = y0;
+            x[1] = x0 + 1.f;     y[1] = y0;
+            x[2] = x0 + 1.f;     y[2] = y0 + 1.f;
+            x[3] = x0 + 1.f - d; y[3] = y0 + 1.f;
+            break;
+        case 2:  // south
+            x[0] = x0;       y[0] = y0 + 1.f - d;
+            x[1] = x0 + 1.f; y[1] = y0 + 1.f - d;
+            x[2] = x0 + 1.f; y[2] = y0 + 1.f;
+            x[3] = x0;       y[3] = y0 + 1.f;
+            break;
+        default: // west
+            x[0] = x0;     y[0] = y0;
+            x[1] = x0 + d; y[1] = y0;
+            x[2] = x0 + d; y[2] = y0 + 1.f;
+            x[3] = x0;     y[3] = y0 + 1.f;
+            break;
+        }
+        gs_ground_quad(ren, cam, t, x, y, 0.03f, c);
+    }
+}
+
+// **The route, drawn on the ground.** Gates were in the simulation and in the
+// editor's white line and nowhere at all in a race, so a player arriving at a
+// track had nothing to say which way round it went - "the direction was sort of
+// obvious" in the game this one is descended from, and it was obvious because
+// the track said so. A band across the gate, and an arrow through it pointing
+// the way a car is meant to pass.
+static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
+                         const gs_track *t, const gs_gate *g, bool start) {
+    float gx = gs_to_f(g->x), gy = gs_to_f(g->y);
+    float hw = gs_to_f(g->half_width);
+
+    // The way through, and the line across it.
+    float fx = gs_to_f(gs_cos(g->heading)), fy = gs_to_f(gs_sin(g->heading));
+    float sx = -fy, sy = fx;
+
+    // The band. The start and finish is chequered, the rest are a single
+    // colour, because one of them is not like the others.
+    int blocks = (int)(hw * 2.0f) + 1;
+    if (blocks < 2) blocks = 2;
+    if (blocks > 24) blocks = 24;
+
+    for (int i = 0; i < blocks; i++) {
+        float a = -hw + (2.0f * hw) * (float)i / (float)blocks;
+        float b = -hw + (2.0f * hw) * (float)(i + 1) / (float)blocks;
+        float depth = 0.22f;
+
+        float x[4] = { gx + sx * a - fx * depth, gx + sx * b - fx * depth,
+                       gx + sx * b + fx * depth, gx + sx * a + fx * depth };
+        float y[4] = { gy + sy * a - fy * depth, gy + sy * b - fy * depth,
+                       gy + sy * b + fy * depth, gy + sy * a + fy * depth };
+
+        SDL_FColor c = start
+            ? ((i & 1) ? (SDL_FColor){ 0.08f, 0.08f, 0.09f, 1.0f }
+                       : (SDL_FColor){ 0.95f, 0.95f, 0.95f, 1.0f })
+            : (SDL_FColor){ 0.30f, 0.65f, 0.95f, 0.85f };
+        gs_ground_quad(ren, cam, t, x, y, 0.04f, c);
+    }
+
+    // And the arrow through it: a shaft along the way through, and two barbs.
+    // Drawn short of the line rather than on it, so it reads as "this way to
+    // there" rather than as part of the gate.
+    SDL_FColor tip = { 0.95f, 0.85f, 0.25f, 0.9f };
+    float base = -2.4f, len = 1.6f, half = 0.20f;
+
+    float ax[4] = { gx + fx * base + sx * half, gx + fx * (base + len) + sx * half,
+                    gx + fx * (base + len) - sx * half, gx + fx * base - sx * half };
+    float ay[4] = { gy + fy * base + sy * half, gy + fy * (base + len) + sy * half,
+                    gy + fy * (base + len) - sy * half, gy + fy * base - sy * half };
+    gs_ground_quad(ren, cam, t, ax, ay, 0.05f, tip);
+
+    // The head, as one triangle: a quad with two corners in the same place is
+    // a triangle, and gs_quad draws the degenerate half for nothing.
+    float head = 0.85f, wide = 0.62f;
+    float hx[4] = {
+        gx + fx * (base + len + head),
+        gx + fx * (base + len) + sx * wide,
+        gx + fx * (base + len) - sx * wide,
+        gx + fx * (base + len + head),
+    };
+    float hy[4] = {
+        gy + fy * (base + len + head),
+        gy + fy * (base + len) + sy * wide,
+        gy + fy * (base + len) - sy * wide,
+        gy + fy * (base + len + head),
+    };
+    gs_ground_quad(ren, cam, t, hx, hy, 0.05f, tip);
+}
+
 // Is this tile anywhere near the viewport?
 //
 // Clipping happens in the rasteriser, which saves the pixels and not the work
@@ -803,6 +954,19 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
             if (x < -fringe || y < -fringe) continue;
             if (!gs_tile_in_view(&cam, t, x, y)) continue;
             gs_draw_tile(ren, &cam, t, x, y, view->show_gravity, view->heat);
+            gs_draw_kerb(ren, &cam, t, x, y);
+        }
+
+        // The route's marks go down with the ground they are painted on, so a
+        // gate beyond a rise is hidden by the rise rather than floating over
+        // it. Same trick as the cars below: drawn when the sweep reaches the
+        // diagonal the gate is on.
+        for (uint8_t gi = 0; gi < t->gate_count; gi++) {
+            const gs_gate *g = &t->gate[gi];
+            int gd = gs_fix_floor(g->x) + gs_fix_floor(g->y);
+            if (gd == d - fringe * 2) {
+                gs_draw_gate(ren, &cam, t, g, gi == 0);
+            }
         }
         // The sweep counts from the fringe, so the world diagonal this pass is
         // drawing is `d` shifted back by the two tiles of margin it starts

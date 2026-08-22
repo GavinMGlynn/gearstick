@@ -2812,6 +2812,39 @@ never counted. `gs_hud_overflow` reports what did not fit, and the test renders
 every state the HUD has - racing, wrecked, waiting, finished and the
 combinations - and requires nothing below the bottom in any of them.
 
+### A track that says where it ends and which way it goes
+
+A player raced *the long drop* - "a shelf that ends" - drove straight off the
+end of it, and asked why they kept dying there. The trace answered it exactly:
+from the start line to the wreck, `y` never changed, and the wreck was at
+x=61.01 on a track 48 wide. Thirteen tiles past the edge is the run-off plus the
+fall depth, which is the "you are gone" rule. They drove off the end because
+**nothing on the screen said where the end was**.
+
+Two things were missing, and both had been missing since the renderer existed:
+
+**The edge of the road.** The only thing distinguishing the authored track from
+the run-off was a 0.55 multiplier on the tile's shade - which is legible in a
+still picture from above and useless at speed in an isometric view. It is a
+kerb now: red and white blocks, one to a tile, all the way round the authored
+ground, drawn on the tile at the boundary so it sorts with the terrain and
+follows the ground over a rise. A racing driver has been reading that pattern
+since before any of us.
+
+**Which way round.** Gates existed in the simulation, and as a thin white line
+in the construction set, and *nowhere at all in a race*. Arriving at a track
+told you nothing about the route. Every gate is drawn on the ground now - a band
+across it, and a large arrow through it pointing the way a car is meant to pass
+- and the start and finish is chequered, because one of them is not like the
+others. Drawn in the sweep at the gate's own diagonal, so a gate beyond a rise
+is hidden by the rise instead of floating over it.
+
+The test counts all three by colour: the kerb's red, the arrow's yellow, the
+chequer's white. It also cost one existing test a move: `a_car_behind_a_rise_is_hidden_by_it`
+counts strongly red pixels anywhere in the frame, which is what makes it strict,
+and a kerb is strongly red - so its scene now sits in the middle of a track big
+enough that no edge is in shot.
+
 ---
 
 ## What does not exist

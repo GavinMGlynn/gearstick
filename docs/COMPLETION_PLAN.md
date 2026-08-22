@@ -1310,4 +1310,16 @@ worth as much as what was decided about it.
       the server drops a silent client, so a client having a bad moment is
       dropped by the server first and this only fires for somebody genuinely
       gone.*
+- [x] **A track now says where it ends and which way it goes.** *(Asked for
+      after dying repeatedly at the same spot.)* The edge of the road was a
+      change of shade, which a driver at speed does not see coming — it is a red
+      and white kerb now, one block a tile, all the way round the authored
+      ground. And the route was drawn nowhere at all during a race: the gates
+      existed in the simulation and as a white line in the construction set, so
+      arriving at a track told you nothing about which way round it went. Every
+      gate is drawn on the ground with an arrow through it pointing the way, and
+      the start and finish is chequered so it is not just another gate.
+      *Verification: a track is rendered and the three things are counted by
+      their colours — the kerb's red, the arrow's yellow and the chequer's
+      white. None of them was on the screen at all before this.*
 

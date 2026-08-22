@@ -175,23 +175,29 @@ static gs_camera gs_camera_on(float cx, float cy, float cz) {
 
 TEST(a_car_behind_a_rise_is_hidden_by_it) {
     // Isometric depth runs along x + y, with larger values nearer the viewer.
-    // The car sits at depth 16; the wall in front of it at depth 20 and five
+    // The car sits at depth 40; the wall in front of it at depth 44 and five
     // tiles tall. If the painter's sweep is drawing cars after the terrain
     // instead of among it, the car shows through the wall.
+    //
+    // **Out in the middle of a big track on purpose.** This counts red pixels
+    // anywhere in the frame, which is what makes it strict - and the kerb that
+    // marks the edge of a track is red and white, so a scene with an edge in it
+    // would have this counting kerb as car. Twenty tiles of ground on every
+    // side puts the edge out of shot and leaves the rule alone.
     static gs_track open_ground, walled;
-    gs_flat_pavement(&open_ground, 24, 24);
-    gs_flat_pavement(&walled, 24, 24);
+    gs_flat_pavement(&open_ground, 48, 48);
+    gs_flat_pavement(&walled, 48, 48);
 
     for (uint8_t y = 0; y <= walled.h; y++) {
         for (uint8_t x = 0; x <= walled.w; x++) {
             int d = (int)x + (int)y;
-            if (d >= 20 && d <= 22) gs_track_set_corner(&walled, x, y, GS_INT(5));
+            if (d >= 44 && d <= 46) gs_track_set_corner(&walled, x, y, GS_INT(5));
         }
     }
 
     gs_world w;
-    gs_park_car(&w, &open_ground, GS_INT(8), GS_INT(8));
-    gs_camera cam = gs_camera_on(9.0f, 9.0f, 0.0f);
+    gs_park_car(&w, &open_ground, GS_INT(20), GS_INT(20));
+    gs_camera cam = gs_camera_on(21.0f, 21.0f, 0.0f);
 
     gs_frame clear_view = gs_render_frame(ren, &open_ground, &w, &w, 1.0f, &cam);
     gs_frame blocked = gs_render_frame(ren, &walled, &w, &w, 1.0f, &cam);
@@ -3017,6 +3023,52 @@ TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
     CHECK(hung < on_ground);
 }
 
+TEST(a_track_says_where_it_ends_and_which_way_it_goes) {
+    (void)ren;
+
+    // **Neither of these was on the screen at all.** A player raced a shelf
+    // that ends, drove straight off it, and asked why - and the answer was that
+    // nothing marked the edge, and nothing marked the route either: gates lived
+    // in the simulation and in the editor's white line, and a race drew none of
+    // them. Both are counted here by colour, because both are things whose
+    // whole job is to be seen.
+    static gs_track t;
+    gs_flat_pavement(&t, 20, 20);
+    gs_track_add_gate(&t, GS_INT(10), GS_INT(4), 0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(10), GS_INT(16), GS_DEG(180), GS_INT(4));
+
+    static gs_world w;
+    gs_park_car(&w, &t, GS_INT(10), GS_INT(10));
+
+    // From above the middle, far enough out to hold the whole track.
+    gs_camera cam = gs_camera_on(10.0f, 10.0f, 0.0f);
+    cam.zoom = 0.6f;
+
+    gs_frame f = gs_render_frame(ren, &t, &w, &w, 1.0f, &cam);
+    CHECK(f.px != nullptr);
+    if (f.px == nullptr) return;
+
+    int kerb = 0, arrow = 0, chequer = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        const uint8_t *p = &f.px[i * 4];
+        // The kerb's red: strong, and much darker in green and blue than the
+        // ground it sits on.
+        if (p[0] > 120 && p[0] > 2 * p[1] && p[0] > 2 * p[2]) kerb++;
+        // The arrow's yellow: red and green together, almost no blue.
+        if (p[0] > 180 && p[1] > 150 && p[2] < 110) arrow++;
+        // And the start line's black and white, which nothing else here is.
+        if (p[0] > 220 && p[1] > 220 && p[2] > 220) chequer++;
+    }
+
+    // Generous thresholds: what is being pinned is that these are drawn at all,
+    // not how many pixels of them a particular zoom produces.
+    CHECK(kerb > 200);
+    CHECK(arrow > 100);
+    CHECK(chequer > 100);
+
+    gs_frame_free(&f);
+}
+
 TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
     gs_imgui_start(gs_win, ren);
     CHECK(gs_imgui_ready);
@@ -3699,6 +3751,7 @@ int main(void) {
     run_the_condition_bar_stays_inside_the_hud(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
+    run_a_track_says_where_it_ends_and_which_way_it_goes(ren);
     run_every_driver_can_see_their_own_car_on_ground_that_is_not_at_height_zero(ren);
     run_a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it(ren);
     run_a_car_down_a_drop_does_not_take_the_camera_off_the_other_one(ren);
