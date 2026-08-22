@@ -294,6 +294,16 @@ static void gs_start_race(gs_app *a) {
         }
         players = set->players;
     }
+    // **Nobody drives until the lights go green.** Armed here rather than in
+    // gs_world_init, so the analyser, the AI sweeps and the editor's background
+    // ghost - none of which is a person who needs a moment to get ready - are
+    // untouched and every replay ever recorded still lands where it did.
+    //
+    // Set identically on every machine because it is set before the first tick,
+    // where every machine agrees the tick is zero. A countdown decided later,
+    // or by one machine and sent, would be a different world on each screen.
+    gs_world_set_countdown(&a->world, GS_COUNTDOWN_TICKS);
+
     a->race_settled = false;
     a->prev = a->world;
 

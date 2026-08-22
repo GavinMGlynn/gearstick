@@ -3080,6 +3080,76 @@ TEST(the_camera_holds_the_car_still_between_ticks) {
     }
 }
 
+TEST(the_light_tree_counts_down_and_then_goes_green) {
+    (void)ren;
+
+    // **"Can we have a light tree at the beginning with a countdown so we get a
+    // chance to start the race."** Asked for directly, and the reason is that a
+    // race simply was, from tick zero. The tree is the thing being read at the
+    // one moment nobody may miss, so what is pinned here is that it reads
+    // differently at each stage: lamps light one at a time, they are all green
+    // at the off, and the tree goes dark afterwards rather than sitting there
+    // claiming something.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(24), 0, GS_INT(5));
+
+    static gs_world w;
+    gs_fix sx = 0, sy = 0;
+    gs_angle facing = 0;
+    gs_track_grid(&t, 0, &sx, &sy, &facing);
+    gs_park_car(&w, &t, sx, sy);
+    gs_world_set_countdown(&w, GS_COUNTDOWN_TICKS);
+
+    gs_camera cam = gs_camera_on(21.5f, 27.0f, 0.0f);
+    cam.zoom = 1.2f;
+
+    // One lamp lit per second of the countdown, then green, then nothing.
+    struct { uint32_t at; int lamps; bool green; } when[] = {
+        { 0,                                    1, false },
+        { (uint32_t)GS_TICK_HZ,                 2, false },
+        { (uint32_t)GS_TICK_HZ * 2,             3, false },
+        { GS_COUNTDOWN_TICKS + 10u,             3, true  },
+        { GS_COUNTDOWN_TICKS + GS_GREEN_TICKS + 10u, 0, false },
+    };
+
+    int one_lamp = 0;
+    for (size_t k = 0; k < sizeof when / sizeof when[0]; k++) {
+        gs_world shown = w;
+        shown.tick = when[k].at;
+
+        gs_frame f = gs_render_frame(ren, &t, &shown, &shown, 1.0f, &cam);
+        CHECK(f.px != nullptr);
+        if (f.px == nullptr) return;
+
+        int red = 0, green = 0;
+        for (int i = 0; i < GS_W * GS_H; i++) {
+            const uint8_t *p = &f.px[i * 4];
+            if (p[0] > 200 && p[1] < 60 && p[2] < 50) red++;
+            if (p[1] > 200 && p[0] < 80 && p[2] < 100) green++;
+        }
+
+        if (when[k].green) {
+            // All of them at once, which is the whole signal.
+            CHECK(red == 0);
+            CHECK(green > one_lamp * 2);
+        } else if (when[k].lamps == 0) {
+            CHECK(red == 0);
+            CHECK(green == 0);
+        } else {
+            CHECK(green == 0);
+            CHECK(red > 0);
+            // Each second adds exactly one more lamp's worth of lit pixels.
+            if (one_lamp == 0) one_lamp = red;
+            CHECK(red > one_lamp * when[k].lamps - one_lamp / 2);
+            CHECK(red < one_lamp * when[k].lamps + one_lamp / 2);
+        }
+
+        gs_frame_free(&f);
+    }
+    CHECK(one_lamp > 20);
+}
+
 TEST(a_start_line_and_a_finish_line_are_different_things) {
     (void)ren;
 
@@ -3978,6 +4048,7 @@ int main(void) {
     run_the_condition_bar_stays_inside_the_hud(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
+    run_the_light_tree_counts_down_and_then_goes_green(ren);
     run_a_start_line_and_a_finish_line_are_different_things(ren);
     run_a_car_on_the_near_side_of_a_line_is_drawn_in_front_of_it(ren);
     run_a_car_is_drawn_whole_wherever_it_sits_within_its_tile(ren);

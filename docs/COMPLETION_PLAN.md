@@ -1354,3 +1354,14 @@ worth as much as what was decided about it.
       colours. And a car five tiles short of a gate keeps all of itself when the
       line is painted over the ground it is standing on; before this the far
       half of the line was drawn after the car and swallowed it.*
+- [x] **A race begins when everybody is ready.** *(Asked for directly.)* A race
+      used to simply be, from tick zero, so arriving at a track meant already
+      being late. A light tree stands beside the grid now: three lamps light one
+      a second, all three go green together, and until they do no input reaches
+      any car at all. The lap clock waits for the flag too — it used to count up
+      while the cars sat still on the grid.
+      *Verification: full throttle and full steering held down through the whole
+      countdown moves the car not one fixed-point unit, and the same input moves
+      it the moment the lights change. The lamps are counted in the rendered
+      frame at each second. And a race nobody counted down is held for no time
+      at all, which is why every replay ever recorded still lands where it did.*

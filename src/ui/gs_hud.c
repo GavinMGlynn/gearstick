@@ -199,8 +199,20 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // record when a car was wrecked and adding a field to the car to carry
         // it would change the world hash - which is every existing replay,
         // ghost and shared time, for a line of text.
+        //
+        // **Before the flag it is a countdown instead**, in the same row rather
+        // than an extra one: the panel is sized from the rows it has, and a row
+        // that exists for three seconds would leave a hole in it for the rest
+        // of the race. The light tree beside the grid is the thing being read
+        // at that moment; this is for anybody whose eyes are on their own car.
         ImGui_Spacing();
-        if (c->wrecked) {
+        uint32_t counting = gs_world_countdown(w);
+        if (counting > 0) {
+            SDL_snprintf(text, sizeof text, "%u",
+                         (unsigned)((counting + (uint32_t)GS_TICK_HZ - 1u) /
+                                    (uint32_t)GS_TICK_HZ));
+            gs_hud_stat("get ready", text, GS_HUD_SMALL);
+        } else if (c->wrecked) {
             gs_hud_stat("this lap", "-", GS_HUD_SMALL);
         } else {
             uint32_t running = tick > c->lap_start ? tick - c->lap_start : 0;

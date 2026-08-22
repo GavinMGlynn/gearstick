@@ -141,6 +141,18 @@ typedef struct gs_world {
     bool     over;      // the result is settled and will not change
     uint8_t  winner;    // car index, or GS_NO_WINNER for nobody
 
+    // **The tick the lights go green.** Until it arrives every car is stepped
+    // with no input at all, so a race begins from a standstill and everybody
+    // gets the same moment to react to. The physics still runs while they wait
+    // - a car on a slope has to settle onto it rather than hang above it - it
+    // is only the driving that is held.
+    //
+    // Zero is a race that was never counted down, which is every replay
+    // recorded before there were lights and every test drive since: tick zero
+    // is not before tick zero, so nothing is ever held and no existing
+    // recording changes by a bit.
+    uint32_t green_tick;
+
     // How many laps a race is. Zero means there is no finish line at all -
     // which is what a test drive is, and what every race was before there was
     // a front end to choose a number in.
@@ -163,6 +175,28 @@ void gs_world_init(gs_world *w, gs_fix gravity_scale);
 // Which game is being played. Set it before the race starts; changing it
 // half way through would be changing what everyone was doing.
 void gs_world_set_mode(gs_world *w, gs_mode mode);
+
+// Count the race down: the lights go green `ticks` from now, and until then no
+// input reaches any car. Set it before the race starts, for the same reason the
+// mode and the lap count are - changing it half way through would be changing
+// what everybody was doing.
+void gs_world_set_countdown(gs_world *w, uint32_t ticks);
+
+// Is the race still on the line? True until the lights go green.
+bool gs_world_held(const gs_world *w);
+
+// How long is left, in ticks, or zero once it has gone green.
+uint32_t gs_world_countdown(const gs_world *w);
+
+// How long a race is counted down for. Three seconds: long enough to settle
+// your hands on the controls, short enough that nobody sits through it twice.
+#define GS_COUNTDOWN_TICKS ((uint32_t)GS_TICK_HZ * 3u)
+
+// How many lamps the light tree has, counted down one a second.
+#define GS_COUNTDOWN_LAMPS 3
+
+// How long the green shows after the start, in ticks.
+#define GS_GREEN_TICKS ((uint32_t)GS_TICK_HZ)
 
 // How many laps to win. Set it before the race starts, for the same reason as
 // the mode. Zero is a race with no end, which is what a test drive wants.

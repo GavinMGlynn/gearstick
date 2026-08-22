@@ -327,6 +327,96 @@ static void gs_draw_post(SDL_Renderer *ren, const gs_camera *cam,
     gs_quad(ren, upper, head);
 }
 
+// **The light tree: a race that begins when everybody is ready.** Until now a
+// race simply was, from tick zero, so arriving at a track meant already being
+// late. Three lamps come on a second apart and all of them go green together,
+// which is the moment the simulation stops holding the cars - see
+// `gs_world_held`. Standing beside the grid rather than over it, because a
+// gantry across the road would be the one thing between the camera and the cars
+// at the only moment nobody may miss.
+//
+// Where it stands: beside the start line, one gate width plus a margin out, so
+// it is clear of the widest grid and never over the road.
+static void gs_start_lights_at(const gs_track *t, float *x, float *y) {
+    const gs_gate *g = &t->gate[0];
+    float gx = gs_to_f(g->x), gy = gs_to_f(g->y);
+    float fx = gs_to_f(gs_cos(g->heading)), fy = gs_to_f(gs_sin(g->heading));
+    float sx = -fy, sy = fx;
+
+    float back = gs_to_f(GS_GRID_BACK) - 0.95f;
+    float out = gs_to_f(g->half_width) + 1.7f;
+
+    *x = gx - fx * back + sx * out;
+    *y = gy - fy * back + sy * out;
+}
+
+static void gs_draw_start_lights(SDL_Renderer *ren, const gs_camera *cam,
+                                 const gs_track *t, const gs_world *w,
+                                 float bx, float by) {
+    float bz = gs_to_f(gs_track_height(t, (gs_fix)(bx * (float)GS_ONE),
+                                       (gs_fix)(by * (float)GS_ONE)));
+    float px = 0.0f, py = 0.0f;
+    gs_iso_project(cam, bx, by, bz, &px, &py);
+
+    float mast = 2.85f * GS_ISO_TILE_Z * cam->zoom;
+    float post_w = 0.10f * GS_ISO_TILE_W * cam->zoom;
+    if (post_w < 1.0f) post_w = 1.0f;
+
+    static const SDL_FColor steel = { 0.72f, 0.72f, 0.76f, 1.0f };
+    const SDL_FPoint post[4] = {
+        { px - post_w * 0.5f, py }, { px + post_w * 0.5f, py },
+        { px + post_w * 0.5f, py - mast }, { px - post_w * 0.5f, py - mast },
+    };
+    gs_quad(ren, post, steel);
+
+    // How many lamps are lit, and what colour. One a second, counting down, and
+    // all of them green together at the off.
+    uint32_t left = gs_world_countdown(w);
+    bool green = left == 0 && w->green_tick > 0 &&
+                 w->tick < (uint64_t)w->green_tick + GS_GREEN_TICKS;
+
+    int lit = 0;
+    if (left > 0) {
+        lit = GS_COUNTDOWN_LAMPS - (int)((left - 1u) / (uint32_t)GS_TICK_HZ);
+        if (lit < 0) lit = 0;
+        if (lit > GS_COUNTDOWN_LAMPS) lit = GS_COUNTDOWN_LAMPS;
+    }
+
+    // The housing, and the lamps down it: the first to light is the top one, so
+    // the tree fills downwards the way every start light a driver has seen does.
+    float lamp = 0.42f * GS_ISO_TILE_Z * cam->zoom;
+    float pad = lamp * 0.22f;
+    float box_w = lamp + pad * 2.0f;
+    float top = py - mast;
+
+    static const SDL_FColor housing = { 0.10f, 0.10f, 0.12f, 1.0f };
+    float box_h = (lamp + pad) * (float)GS_COUNTDOWN_LAMPS + pad;
+    const SDL_FPoint box[4] = {
+        { px - box_w * 0.5f, top }, { px + box_w * 0.5f, top },
+        { px + box_w * 0.5f, top + box_h }, { px - box_w * 0.5f, top + box_h },
+    };
+    gs_quad(ren, box, housing);
+
+    for (int i = 0; i < GS_COUNTDOWN_LAMPS; i++) {
+        float y0 = top + pad + (lamp + pad) * (float)i;
+
+        SDL_FColor c;
+        if (green) {
+            c = (SDL_FColor){ 0.20f, 0.92f, 0.32f, 1.0f };
+        } else if (i < lit) {
+            c = (SDL_FColor){ 0.96f, 0.16f, 0.12f, 1.0f };
+        } else {
+            c = (SDL_FColor){ 0.22f, 0.09f, 0.09f, 1.0f };
+        }
+
+        const SDL_FPoint q[4] = {
+            { px - lamp * 0.5f, y0 }, { px + lamp * 0.5f, y0 },
+            { px + lamp * 0.5f, y0 + lamp }, { px - lamp * 0.5f, y0 + lamp },
+        };
+        gs_quad(ren, q, c);
+    }
+}
+
 // The diagonal a flat mark on the ground sorts on: the furthest into the sweep
 // that any corner of it reaches, so it is drawn after every tile it lies on.
 static int gs_ground_quad_diagonal(const float x[4], const float y[4]) {
@@ -1242,6 +1332,12 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         // the sweep reaches afterwards, and a line that should have a flag at
         // both ends is drawn with one.
         if (t->gate_count > 0) {
+            float lx = 0.0f, ly = 0.0f;
+            gs_start_lights_at(t, &lx, &ly);
+            if ((int)SDL_floorf(lx) + (int)SDL_floorf(ly) == d - fringe * 2) {
+                gs_draw_start_lights(ren, &cam, t, now, lx, ly);
+            }
+
             float feet[2][2];
             gs_flag_feet(&t->gate[0], feet);
             for (int k = 0; k < 2; k++) {

@@ -38,6 +38,19 @@ void gs_world_set_laps(gs_world *w, uint16_t laps) {
     w->laps_to_win = laps;
 }
 
+void gs_world_set_countdown(gs_world *w, uint32_t ticks) {
+    w->green_tick = (uint32_t)w->tick + ticks;
+}
+
+bool gs_world_held(const gs_world *w) {
+    return w->tick < w->green_tick;
+}
+
+uint32_t gs_world_countdown(const gs_world *w) {
+    if (w->tick >= w->green_tick) return 0;
+    return w->green_tick - (uint32_t)w->tick;
+}
+
 void gs_world_set_mode(gs_world *w, gs_mode mode) {
     w->mode = (uint8_t)mode;
     w->over = false;
@@ -575,8 +588,27 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
         was[i].y = w->car[i].y;
     }
 
+    // **Held at the line until the lights go green.** The physics still runs,
+    // so a car on a slope settles onto it and the grid is where it looks like
+    // it is; it is only the driving that is held, which is what stops anybody
+    // jumping the start.
+    bool held = w->tick < w->green_tick;
+
+    // **And no lap clock runs before the flag.** A lap begins at a crossing,
+    // and until the first one `lap_start` is zero - so the HUD was showing time
+    // already spent on a lap nobody had started, counting up while the cars sat
+    // still. Pinned to the green while the hold lasts, so the clock reads zero
+    // at the moment anybody can first move. Done here rather than when the
+    // countdown is armed, so a car added after it is armed is right too.
+    if (held) {
+        for (uint8_t i = 0; i < w->car_count; i++) {
+            w->car[i].lap_start = w->green_tick;
+        }
+    }
+
     for (uint8_t i = 0; i < w->car_count; i++) {
-        gs_car_step(w, &w->car[i], t, in != nullptr ? in[i] : (gs_input)0, i);
+        gs_input got = (in != nullptr && !held) ? in[i] : (gs_input)0;
+        gs_car_step(w, &w->car[i], t, got, i);
     }
 
     // Route progress. Checked against where each car was *before* this tick, so

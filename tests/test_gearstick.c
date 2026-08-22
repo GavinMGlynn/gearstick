@@ -654,6 +654,51 @@ static void gs_flat_world(gs_track *t, gs_world *w, gs_surface s) {
     gs_world_add_car(w, t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(16), 0);
 }
 
+TEST(nobody_drives_before_the_lights_go_green) {
+    // **A race used to simply be, from tick zero**, so arriving at a track
+    // meant already being late and the only way to know a race had begun was
+    // that the car under you had started moving. There is a countdown now, and
+    // the rule it exists to enforce is this one: full throttle held down
+    // through the whole of it moves the car not at all, and the same throttle
+    // moves it the moment the lights go green.
+    static gs_track t;
+    gs_world w;
+    gs_flat_world(&t, &w, GS_SURF_PAVEMENT);
+    gs_world_set_countdown(&w, GS_COUNTDOWN_TICKS);
+
+    gs_fix started_at_x = w.car[0].x;
+    gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL | GS_IN_RIGHT, 0, 0, 0 };
+
+    CHECK(gs_world_held(&w));
+    CHECK(gs_world_countdown(&w) == GS_COUNTDOWN_TICKS);
+
+    for (uint32_t i = 0; i < GS_COUNTDOWN_TICKS; i++) {
+        gs_world_step(&w, &t, in);
+        CHECK(gs_car_speed(&w.car[0]) == 0);
+    }
+
+    // Not a step of it, and not a degree of steering either: the whole input is
+    // held, not only the throttle.
+    CHECK(w.car[0].x == started_at_x);
+    CHECK(!gs_world_held(&w));
+    CHECK(gs_world_countdown(&w) == 0);
+
+    // And the clock reads zero at the flag rather than three seconds, which is
+    // what it read while the cars sat still on the grid.
+    CHECK(w.car[0].lap_start == (uint32_t)w.tick);
+
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, in);
+    CHECK(gs_car_speed(&w.car[0]) > GS_INT(1));
+
+    // A race nobody counted down is not held for an instant - which is every
+    // replay recorded before there were lights, and why none of them moved.
+    gs_world plain;
+    gs_flat_world(&t, &plain, GS_SURF_PAVEMENT);
+    CHECK(!gs_world_held(&plain));
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&plain, &t, in);
+    CHECK(gs_car_speed(&plain.car[0]) > GS_INT(1));
+}
+
 TEST(a_car_accelerates_under_throttle_and_stops_under_the_brake) {
     static gs_track t;
     gs_world w;
@@ -6142,6 +6187,7 @@ int main(void) {
     run_a_route_is_part_of_the_track_and_survives_being_saved();
     run_removing_a_gate_closes_the_gap_and_leaves_the_order_alone();
     run_a_car_accelerates_under_throttle_and_stops_under_the_brake();
+    run_nobody_drives_before_the_lights_go_green();
     run_a_car_left_on_a_slope_rolls_downhill_and_one_on_the_flat_does_not();
     run_a_car_turns_more_sharply_at_a_crawl_than_at_speed();
     run_ice_lets_go_of_a_sliding_car_long_after_pavement_has_caught_it();

@@ -3087,6 +3087,55 @@ side of the line is drawn in front of it and a car beyond it is drawn behind.
 five tiles short of a gate's centre with the band over it and without, and
 requires the line to cost the car none of itself.
 
+### A race that begins when everybody is ready
+
+**"Can we have a light tree at the beginning with a countdown so we get a chance
+to start the race."** Until now a race simply *was*, from tick zero: the world
+began stepping and the only way to know it had started was that the car under
+you had begun to move. Arriving at a track meant already being late.
+
+`gs_world.green_tick` is the tick the lights go green. Before it, every car is
+stepped with **no input at all** - the physics still runs, so a car on a slope
+settles onto it rather than hanging above it, but nothing anybody presses
+reaches a car. That is what makes the start fair rather than a race to notice.
+
+Three things follow from where it is armed:
+
+- **It is set in the front end, not in `gs_world_init`.** The analyser, the AI
+  sweeps and the editor's background ghost are none of them people who need a
+  moment to get ready, and they are untouched.
+- **Zero means never counted down.** Tick zero is not before tick zero, so every
+  replay recorded before there were lights is held for exactly no ticks and
+  lands where it always did. `gearstick_cli selftest --verify` confirms it: the
+  golden replay hash is unchanged by this commit.
+- **It is armed before the first tick**, where every machine agrees the tick is
+  zero, so a networked race counts down identically on every screen without a
+  message being sent. A countdown decided later, or decided by one machine and
+  broadcast, would be a different world on each screen.
+
+**The lap clock no longer runs before the flag.** A lap begins at a crossing,
+and until the first one `lap_start` is zero - so the HUD was showing time
+already spent on a lap nobody had started, counting up while the cars sat still
+on the grid. While the hold lasts, `lap_start` is pinned to `green_tick`, so the
+clock reads zero at the moment anybody can first move.
+
+**The tree itself** stands beside the grid rather than over it - a gantry across
+the road would be the one thing between the camera and the cars at the only
+moment nobody may miss. Three lamps light one a second, all three go green
+together at the off, and the tree goes dark a second later rather than sitting
+there claiming something. The HUD carries the same count in the row the lap
+clock will occupy, rather than in a row of its own: the panel is sized from the
+rows it has, and a row that exists for three seconds would leave a hole in it
+for the rest of the race.
+
+`nobody_drives_before_the_lights_go_green` holds full throttle and full steering
+down through the entire countdown and requires the car not to have moved a
+single fixed-point unit, then requires the same input to move it once the lights
+change - and separately requires a race that was never counted down not to be
+held for an instant. `the_light_tree_counts_down_and_then_goes_green` counts lit
+pixels at each stage and requires exactly one more lamp's worth per second, all
+green at the off, and nothing lit afterwards.
+
 ---
 
 ## Known risks
