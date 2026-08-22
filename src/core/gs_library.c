@@ -50,6 +50,18 @@ int gs_library_put(gs_library *l, const gs_track *t, const char *name,
     return (int)l->count++;
 }
 
+int gs_library_put_builtin(gs_library *l, const gs_track *t, const char *name,
+                           const char *author) {
+    int at = gs_library_put(l, t, name, author);
+    if (at >= 0) l->entry[at].builtin = true;
+    return at;
+}
+
+bool gs_library_is_builtin(const gs_library *l, uint64_t hash) {
+    int at = gs_library_find(l, hash);
+    return at >= 0 && l->entry[at].builtin;
+}
+
 int gs_library_replace(gs_library *l, uint64_t was, const gs_track *now) {
     int at = gs_library_find(l, was);
     if (at < 0) return -1;
@@ -107,7 +119,7 @@ size_t gs_library_size(const gs_library *l) {
     // The worst case, because the real size is only known once each track has
     // been serialised. A caller sizing a buffer wants the ceiling.
     return 12 + (size_t)l->count *
-        (GS_LIBRARY_NAME + GS_LIBRARY_AUTHOR + 4 + GS_TRACK_BYTES);
+        (GS_LIBRARY_NAME + GS_LIBRARY_AUTHOR + 5 + GS_TRACK_BYTES);
 }
 
 size_t gs_library_serialize(const gs_library *l, uint8_t *buf, size_t cap) {
@@ -121,9 +133,10 @@ size_t gs_library_serialize(const gs_library *l, uint8_t *buf, size_t cap) {
     for (uint16_t i = 0; i < l->count; i++) {
         const gs_library_entry *e = &l->entry[i];
 
-        if (n + GS_LIBRARY_NAME + GS_LIBRARY_AUTHOR + 4 > cap) return 0;
+        if (n + GS_LIBRARY_NAME + GS_LIBRARY_AUTHOR + 5 > cap) return 0;
         memcpy(buf + n, e->name, GS_LIBRARY_NAME);     n += GS_LIBRARY_NAME;
         memcpy(buf + n, e->author, GS_LIBRARY_AUTHOR); n += GS_LIBRARY_AUTHOR;
+        buf[n++] = e->builtin ? 1u : 0u;
 
         // The track, serialised rather than copied whole: the struct is
         // seventeen kilobytes and the format is a few.
@@ -138,7 +151,12 @@ size_t gs_library_serialize(const gs_library *l, uint8_t *buf, size_t cap) {
 bool gs_library_deserialize(gs_library *l, const uint8_t *buf, size_t len) {
     if (len < 12) return false;
     if (gs_get32(buf) != GS_LIBRARY_MAGIC) return false;
-    if (gs_get32(buf + 4) != GS_LIBRARY_VERSION) return false;
+    // **Version one still loads.** Those files carry no "came with the game"
+    // byte because there was none to carry, and everything in one is the
+    // player's own work - which is what it was, before the game shipped a
+    // library of its own.
+    uint32_t version = gs_get32(buf + 4);
+    if (version != GS_LIBRARY_VERSION && version != 1u) return false;
 
     uint32_t count = gs_get32(buf + 8);
     if (count > GS_LIBRARY_MAX) return false;
@@ -147,7 +165,9 @@ bool gs_library_deserialize(gs_library *l, const uint8_t *buf, size_t len) {
     size_t n = 12;
 
     for (uint32_t i = 0; i < count; i++) {
-        if (n + GS_LIBRARY_NAME + GS_LIBRARY_AUTHOR + 4 > len) return false;
+        size_t head = (size_t)GS_LIBRARY_NAME + GS_LIBRARY_AUTHOR + 4 +
+                      (version >= 2u ? 1u : 0u);
+        if (n + head > len) return false;
 
         gs_library_entry *e = &l->entry[i];
         memset(e, 0, sizeof *e);
@@ -159,6 +179,9 @@ bool gs_library_deserialize(gs_library *l, const uint8_t *buf, size_t len) {
         memcpy(e->author, buf + n, GS_LIBRARY_AUTHOR);
         e->author[GS_LIBRARY_AUTHOR - 1] = '\0';
         n += GS_LIBRARY_AUTHOR;
+
+        e->builtin = version >= 2u && buf[n] != 0u;
+        if (version >= 2u) n++;
 
         uint32_t bytes = gs_get32(buf + n);
         n += 4;

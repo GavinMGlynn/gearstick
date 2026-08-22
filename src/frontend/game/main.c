@@ -196,7 +196,11 @@ static SDL_EnumerationResult SDLCALL gs_take_track(void *userdata, const char *d
         for (char *c = label; *c != '\0'; c++) {
             if (*c == '-' || *c == '_') *c = ' ';
         }
-        gs_library_put(&a->menu.library, &loaded, label, "gearstick");
+        // **Marked as the game's rather than the player's.** These are not
+        // theirs to change or throw away: editing one takes a copy and edits
+        // that, and deleting one is refused, so the library a player came with
+        // is still there after an afternoon of building.
+        gs_library_put_builtin(&a->menu.library, &loaded, label, "gearstick");
     }
     SDL_free(bytes);
     return SDL_ENUM_CONTINUE;
@@ -1769,6 +1773,101 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             // Keeping it across a load would let undo apply one track's edits
             // to another.
             gs_edit_reset(a->editor.log);
+        }
+
+        // **The construction set, reached from the screen about tracks.** It
+        // used to be Tab from anywhere - a key nothing mentioned, on a screen
+        // that never said the editor existed.
+        if (a->menu.new_requested) {
+            a->menu.new_requested = false;
+
+            // A blank field to build on, rather than whatever happened to be
+            // loaded. Big enough for a loop and flat, because levelling
+            // somebody else's hills is not the start of an idea.
+            gs_track_init(&a->t, 48, 40, GS_SURF_PAVEMENT);
+            a->menu.chosen = -1;
+            a->music_hash = gs_track_hash(&a->t);
+            gs_edit_reset(a->editor.log);
+
+            a->menu.screen = GS_SCREEN_RACE;
+            next = GS_SCREEN_RACE;
+            if (!a->editor.active) gs_editor_toggle(&a->editor, &a->view[0]);
+        }
+
+        if (a->menu.edit_requested) {
+            a->menu.edit_requested = false;
+
+            // **A track that came with the game is edited as a copy.** The
+            // original stays in the library exactly as it shipped, and what
+            // opens is the player's own from the first keystroke - which is
+            // better than refusing, and better than letting them change it and
+            // finding out at save time.
+            const gs_library_entry *e =
+                gs_library_at(&a->menu.library, a->menu.picked);
+            if (e != nullptr) {
+                a->t = e->track;
+                a->music_hash = gs_track_hash(&a->t);
+                gs_edit_reset(a->editor.log);
+
+                if (e->builtin) {
+                    char label[GS_LIBRARY_NAME];
+                    SDL_snprintf(label, sizeof label, "%s (copy)", e->name);
+                    int at = gs_library_put(&a->menu.library, &a->t, label, "");
+                    a->menu.chosen = at;
+                    a->menu.picked = at;
+                    a->menu.store_dirty = true;
+                } else {
+                    a->menu.chosen = a->menu.picked;
+                }
+
+                a->menu.screen = GS_SCREEN_RACE;
+                next = GS_SCREEN_RACE;
+                if (!a->editor.active) gs_editor_toggle(&a->editor, &a->view[0]);
+            }
+        }
+
+        // Sharing, which only happens where there is a server to share into.
+        if (a->menu.publish_requested) {
+            a->menu.publish_requested = false;
+            const gs_library_entry *e =
+                gs_library_at(&a->menu.library, a->menu.picked);
+            if (e != nullptr && a->online && a->wire != nullptr) {
+                gs_wire_publish(a->wire, &e->track, e->name);
+                SDL_snprintf(a->menu.status, sizeof a->menu.status,
+                             "sent %s to the server", e->name);
+            }
+        }
+
+        if (a->menu.withdraw_requested) {
+            a->menu.withdraw_requested = false;
+            const gs_library_entry *e =
+                gs_library_at(&a->menu.library, a->menu.picked);
+            if (e != nullptr && a->online && a->wire != nullptr) {
+                gs_wire_withdraw(a->wire, e->hash);
+                SDL_snprintf(a->menu.status, sizeof a->menu.status,
+                             "took %s down", e->name);
+            }
+        }
+
+        if (a->menu.share_with >= 0) {
+            int slot = a->menu.share_with;
+            a->menu.share_with = -1;
+
+            const gs_library_entry *e =
+                gs_library_at(&a->menu.library, a->menu.picked);
+            // **Named by the key the server watched them prove**, not by a
+            // string somebody typed - which is the whole reason sharing is with
+            // people you are in a room with.
+            const uint8_t *with = a->wire != nullptr
+                                      ? gs_wire_peer_key(a->wire, (uint8_t)slot)
+                                      : nullptr;
+            if (e != nullptr && with != nullptr) {
+                gs_wire_share(a->wire, e->hash, with, a->menu.share_on);
+                SDL_snprintf(a->menu.status, sizeof a->menu.status,
+                             a->menu.share_on ? "handed %s over"
+                                              : "took %s back",
+                             e->name);
+            }
         }
 
         if (next != a->menu.screen) {

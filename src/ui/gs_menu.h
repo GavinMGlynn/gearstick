@@ -19,6 +19,7 @@
 #define GS_MENU_H
 
 #include "core/gs_library.h"
+#include "core/gs_share.h"
 #include "core/gs_profile.h"
 #include "core/gs_records.h"
 #include "core/gs_sim.h"
@@ -155,6 +156,21 @@ typedef struct gs_menu {
     // "look after these".
     bool tracks_for_race;
 
+    // **What the tracks screen is asking the frontend to do.** The menu owns
+    // none of this: it cannot open the construction set, it cannot talk to a
+    // server, and it should not learn how - so it raises a request and the
+    // frontend acts on it, the same way the race setup is handed over rather
+    // than acted on here.
+    //
+    // Getting to the editor used to be Tab from anywhere, which is not a thing
+    // anybody finds and not a thing the tracks screen mentioned.
+    bool edit_requested;      // open the picked track in the construction set
+    bool new_requested;       // start a blank one there
+    bool publish_requested;   // hand the picked track to everybody on the server
+    bool withdraw_requested;  // stop listing it
+    int  share_with;          // a lobby slot to hand it to, or -1
+    bool share_on;            // hand it over, or take it back
+
     // **Exit, which only the frontend can actually do.** The menu cannot end
     // the loop - it does not own it - so it raises this and the frontend reads
     // it, the same way the race setup is handed over rather than acted on here.
@@ -176,6 +192,13 @@ typedef struct gs_menu {
     int  take;                      // handed to the frontend, then cleared
     char track_name[GS_LIBRARY_NAME];
     int  name_for;                  // which entry track_name is showing
+
+    // The picked track as text somebody can paste. Held rather than made every
+    // frame: a code is a few hundred characters of base64 over the whole track,
+    // which is not work to repeat sixty times a second for a field nobody is
+    // looking at.
+    char track_code[GS_SHARE_MAX];
+    int  code_for;                  // which entry track_code is showing
 
     // **Where the panel drawn last frame ended up, and how much of it was out
     // of sight.** Written by every screen on its way out. A panel taller than

@@ -4557,6 +4557,56 @@ TEST(editing_one_track_leaves_the_others_alone) {
     CHECK(!gs_library_remove(&gs_lib, 0xabcdull));
 }
 
+TEST(a_track_that_came_with_the_game_is_not_yours_to_change) {
+    // **The library a player came with is still there after an afternoon of
+    // building.** A shipped track is not theirs to rename, edit in place or
+    // throw away - editing one takes a copy, which *is* theirs from the first
+    // keystroke. That is better than refusing outright, and much better than
+    // letting them change it and finding out at save time.
+    static gs_library l;
+    gs_library_clear(&l);
+
+    static gs_track shipped, mine;
+    gs_track_init(&shipped, 24, 24, GS_SURF_PAVEMENT);
+    gs_track_set_corner(&shipped, 4, 4, GS_INT(1));
+
+    gs_track_init(&mine, 24, 24, GS_SURF_DIRT);
+    gs_track_set_corner(&mine, 6, 6, GS_INT(2));
+
+    CHECK(gs_library_put_builtin(&l, &shipped, "first light", "gearstick") == 0);
+    CHECK(gs_library_put(&l, &mine, "mine", "gavin") == 1);
+
+    CHECK(gs_library_is_builtin(&l, gs_track_hash(&shipped)));
+    CHECK(!gs_library_is_builtin(&l, gs_track_hash(&mine)));
+
+    // Nothing here at all is not "not protected": a hash the library has never
+    // heard of is not a shipped track, and saying so the other way round would
+    // make every unknown track unchangeable.
+    static gs_track stranger;
+    gs_track_init(&stranger, 8, 8, GS_SURF_ICE);
+    CHECK(!gs_library_is_builtin(&l, gs_track_hash(&stranger)));
+
+    // **It survives the round trip**, or the protection lasts until the game is
+    // next started and then quietly stops.
+    static uint8_t buf[1u << 20];
+    size_t wrote = gs_library_serialize(&l, buf, sizeof buf);
+    CHECK(wrote > 0);
+
+    static gs_library back;
+    CHECK(gs_library_deserialize(&back, buf, wrote));
+    CHECK(back.count == 2);
+    CHECK(gs_library_is_builtin(&back, gs_track_hash(&shipped)));
+    CHECK(!gs_library_is_builtin(&back, gs_track_hash(&mine)));
+
+    // And a copy of a shipped track is the player's own, because what makes an
+    // entry the game's is where it came from and not what is in it.
+    static gs_library copied;
+    gs_library_clear(&copied);
+    CHECK(gs_library_put_builtin(&copied, &shipped, "first light", "gearstick") == 0);
+    CHECK(gs_library_put(&copied, &mine, "first light (copy)", "") == 1);
+    CHECK(!gs_library_is_builtin(&copied, gs_track_hash(&mine)));
+}
+
 TEST(a_library_that_is_full_says_so_rather_than_losing_something) {
     gs_library_clear(&gs_lib);
 
@@ -6572,6 +6622,7 @@ int main(void) {
     run_the_heatmap_shows_where_everybody_actually_went();
     run_three_tracks_are_kept_and_all_three_survive_a_restart();
     run_editing_one_track_leaves_the_others_alone();
+    run_a_track_that_came_with_the_game_is_not_yours_to_change();
     run_a_library_that_is_full_says_so_rather_than_losing_something();
     run_a_chunk_the_reassembler_refuses_does_not_poison_the_transfer();
     run_the_chunk_reader_refuses_a_datagram_that_does_not_add_up();

@@ -3881,6 +3881,14 @@ static void gs_panel_menu(gs_menu *m, gs_track *t) {
     CHECK(m->library.count == GS_LIBRARY_MAX);
     gs_track_init(t, 32, 32, GS_SURF_PAVEMENT);
 
+    // **With one of them picked, and online.** The tracks screen only draws
+    // what you can do *to* a track once there is one chosen - the name, the
+    // code, the publishing and who to hand it to - and only offers the last two
+    // where there is a server to share into. Measured with nothing picked, it
+    // is measured at its smallest, which is the size nothing goes wrong at.
+    m->picked = 0;
+    m->online = true;
+
     // A finished race for the results screen, and a lobby for the lobby.
     m->result_count = GS_MAX_CARS;
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) {

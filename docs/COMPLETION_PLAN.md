@@ -1428,3 +1428,20 @@ worth as much as what was decided about it.
       leaving the grid, and is why two rounds of unraceable tracks passed. It
       now requires a whole lap or an arrival, and a new test races the AI and
       requires it to actually finish.*
+- [x] **The construction set, reached from the screen about tracks.** *(Asked
+      for: "hitting Tab off the main menu to edit a track is stupid and not
+      obvious".)* New, Edit and Delete sit beside Load now. New starts a blank
+      field; Edit opens the chosen track — or, for one that came with the game,
+      a copy of it, because the library a player came with should still be there
+      after an afternoon of building. A shipped track cannot be renamed or
+      deleted either.
+      *Verification: the flag that says where an entry came from survives being
+      written and read back, or the protection would last until the game was
+      next started and then quietly stop.*
+- [x] **Handing a track to somebody.** The code is always there to copy. With a
+      server there is Publish to everybody, Take it down, and a button per
+      person in the lobby to hand it to them or take it back — named by the key
+      the server watched them prove, not by a string somebody typed.
+      *Verification: the screen-fitting test caught the panel overflowing once
+      the new controls were on it — after its fixture was made to actually pick
+      a track, which it had never done.*

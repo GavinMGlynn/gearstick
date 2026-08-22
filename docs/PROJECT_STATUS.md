@@ -3391,6 +3391,72 @@ was not there. It is tied to the road now, which is what it stands beside and
 what does not change when a gate's width does, and pulled in if the gate is
 narrower than that.
 
+### The construction set, where somebody would look for it
+
+**"The way you get to a track editor is stupid. We should be able to create /
+delete a new track from the tracks menu, as well as being able to edit a track.
+Hitting Tab off the main menu to edit a track is stupid and not obvious."**
+
+It was. Tab from anywhere opened the construction set, and the one screen that
+is *about* tracks never mentioned it existed. The tracks screen now has **New**,
+**Edit** and **Delete** beside Load, and Tab still works for anybody who learned
+it.
+
+The menu does none of it. It cannot open the construction set, it cannot talk to
+a server, and it should not learn how - so it raises a request and the frontend
+acts on it, the same way the race setup is handed over rather than acted on
+there.
+
+- **New** starts a blank 48x40 flat field rather than whatever happened to be
+  loaded, because levelling somebody else's hills is not the start of an idea.
+- **Edit** opens the picked track. On a track that came with the game the button
+  says **Edit a copy**, and that is what it does.
+
+### A track that came with the game is not yours to change
+
+`gs_library_entry.builtin` says where an entry came from. It is not a property
+of the track - the same ground built by hand is an ordinary track - which is why
+it sits beside the name rather than anywhere near the content hash.
+
+A shipped track cannot be renamed or deleted, and editing one puts a copy in the
+library and edits that, so the library a player came with is still there after an
+afternoon of building. The flag survives the round trip, or the protection would
+last until the game was next started and then quietly stop.
+
+The library file went to version 2 to carry it. **Version 1 still loads**, with
+every entry treated as the player's own - which is what they all were, before the
+game shipped a library of its own.
+
+### Handing a track to somebody
+
+The store had all of this already - `GS_TRACK_PRIVATE`, `GS_TRACK_SHARED`,
+`GS_TRACK_PUBLIC`, per-key sharing, and shipped tracks outside all of it - and
+so did the wire, in `gs_wire_publish`, `gs_wire_withdraw` and `gs_wire_share`.
+What was missing was any way to ask for it.
+
+Under the picked track there is now:
+
+- **The code**, always, because a track as text needs nobody's permission. Ready
+  to copy, and rebuilt only when the selection changes rather than sixty times a
+  second for a field nobody may be looking at.
+- **Publish to everybody** and **Take it down**, where there is a server.
+- **One button per person in the lobby**, to hand it over or take it back. They
+  are named by the public key the server watched them prove, not by a string
+  somebody typed - which is the whole reason sharing is with people you are
+  actually in a room with.
+
+**The detail block scrolls in a box of its own.** It grew a name, a note, a
+code, publishing and a row per person you could hand it to - and the last of
+those has no fixed size, because it depends on who is in the room. A panel whose
+height depends on that is a panel that is the right size until somebody joins.
+The box is only there when there is a track to detail, so browsing gets twelve
+rows of library rather than five.
+
+`no_screen_is_drawn_bigger_than_the_window_it_is_in` caught the overflow, but
+only after the fixture was made to pick a track and go online: it built a full
+library and selected nothing, so the screen was measured at its smallest -
+which is exactly what that test's own comment warns against.
+
 ---
 
 ## Known risks

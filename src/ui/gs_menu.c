@@ -53,6 +53,8 @@ void gs_menu_init(gs_menu *m) {
     m->editing = -1;
     m->picking_for = -1;
     m->new_colour = GS_COLOUR_RED;
+    m->share_with = -1;
+    m->code_for = -1;
 
     m->setup.players = 2;
     m->setup.mode = (uint8_t)GS_MODE_RACE;
@@ -184,6 +186,18 @@ static void gs_set_name(gs_menu *m, int index) {
 
 static void gs_follow_selection(gs_menu *m) {
     if (m->name_for != m->picked) gs_set_name(m, m->picked);
+
+    // The code follows the selection too, and only when it changes: a code is
+    // the whole track packed and base64'd, which is not work to repeat sixty
+    // times a second for a field nobody may be looking at.
+    if (m->code_for != m->picked) {
+        m->code_for = m->picked;
+        m->track_code[0] = '\0';
+        const gs_library_entry *e = gs_library_at(&m->library, m->picked);
+        if (e != nullptr) {
+            gs_track_to_code(&e->track, m->track_code, sizeof m->track_code);
+        }
+    }
 }
 
 // One button, centred, the width of the panel.
@@ -1447,7 +1461,19 @@ int gs_menu_take_choice(gs_menu *m) {
 // lines at the top, the two headings, what is known about the one picked, and
 // the buttons along the bottom. Measured once by growing it until nothing was
 // hidden, which is what the panel test now checks on every build.
-#define GS_TRACKS_CHROME 348.0f
+// **What a track's details are given, and no more.** The block under THIS ONE
+// grew a name, a note, a code, publishing and a row per person you could hand
+// it to - and the last of those has no fixed size, because it depends on how
+// many people are in the room. A panel whose height depends on that is a panel
+// that is the right size until somebody joins.
+//
+// So it scrolls inside a box of its own instead, and the panel's height stops
+// depending on the lobby entirely.
+#define GS_TRACKS_DETAIL 176.0f
+
+// Everything but the detail box and the list: the blurb, the headings, two rows
+// of buttons and the panel's own padding.
+#define GS_TRACKS_CHROME (394.0f)
 
 static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     gs_screen next = GS_SCREEN_TRACKS;
@@ -1461,7 +1487,13 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     // top of the window, on a panel that cannot be moved.
     ImGuiViewport *vp = ImGui_GetMainViewport();
     float row = gs_row_height();
-    float spare = vp->WorkSize.y - GS_PANEL_MARGIN * 2.0f - GS_TRACKS_CHROME;
+    // The detail box is only there when there is a track to detail, so with
+    // nothing chosen the list gets the room instead of a blank box holding it.
+    bool detailing = gs_library_at(&m->library, m->picked) != nullptr;
+    float detail_h = detailing ? GS_TRACKS_DETAIL : 0.0f;
+
+    float spare = vp->WorkSize.y - GS_PANEL_MARGIN * 2.0f -
+                  GS_TRACKS_CHROME - detail_h;
 
     int rows = m->library.count > 0 ? m->library.count : 1;
     int fits = (int)(spare / row) - 1;          // less the table's header row
@@ -1469,7 +1501,7 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     if (rows > fits) rows = fits;
 
     float list_h = row * (float)(rows + 1);
-    gs_centre_window("tracks", 720.0f, GS_TRACKS_CHROME + list_h);
+    gs_centre_window("tracks", 720.0f, GS_TRACKS_CHROME + detail_h + list_h);
 
     if (ImGui_Begin("Tracks", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -1536,6 +1568,8 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
         gs_heading("THIS ONE");
 
         gs_follow_selection(m);
+        ImGui_BeginChild("detail", (ImVec2){ 0.0f, detail_h },
+                         ImGuiChildFlags_None, ImGuiWindowFlags_None);
         const gs_library_entry *picked = gs_library_at(&m->library, m->picked);
         if (picked == nullptr) {
             ImGui_PushStyleColorImVec4(ImGuiCol_Text,
@@ -1549,6 +1583,7 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
 
             gs_field("name");
             ImGui_SetNextItemWidth(260.0f);
+            ImGui_BeginDisabled(picked->builtin);
             if (ImGui_InputText("##name", m->track_name, sizeof m->track_name, 0)) {
                 // Renaming is not editing: the track is the same track, so the
                 // hash does not move and nothing else in the library cares.
@@ -1556,11 +1591,83 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
                                picked->author);
                 m->store_dirty = true;
             }
+            ImGui_EndDisabled();
+
+            if (picked->builtin) {
+                ImGui_PushStyleColorImVec4(
+                    ImGuiCol_Text, ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+                ImGui_TextUnformatted("came with the game. Edit makes a copy "
+                                      "that is yours.");
+                ImGui_PopStyleColor();
+            }
+
+            // --- handing it to somebody -------------------------------------
+            //
+            // **Sharing needs a server, because sharing is with people.** The
+            // code below is always there - it is a track as text and needs
+            // nobody's permission - and the rest appears when there is a room
+            // to share into.
+            gs_heading("SHARING");
+
+            gs_field("code");
+            ImGui_SetNextItemWidth(360.0f);
+            ImGui_InputText("##code", m->track_code, sizeof m->track_code,
+                            ImGuiInputTextFlags_ReadOnly);
+            ImGui_SameLine();
+            if (ImGui_ButtonEx("Copy", (ImVec2){ 80.0f, 0.0f })) {
+                ImGui_SetClipboardText(m->track_code);
+                SDL_snprintf(m->status, sizeof m->status, "copied");
+            }
+
+            if (!m->online) {
+                ImGui_PushStyleColorImVec4(
+                    ImGuiCol_Text, ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+                ImGui_TextUnformatted("Join a server to hand it to somebody, or "
+                                      "to publish it.");
+                ImGui_PopStyleColor();
+            } else {
+                if (ImGui_ButtonEx("Publish to everybody", (ImVec2){ 200.0f, 32.0f })) {
+                    m->publish_requested = true;
+                }
+                ImGui_SameLine();
+                if (ImGui_ButtonEx("Take it down", (ImVec2){ 140.0f, 32.0f })) {
+                    m->withdraw_requested = true;
+                }
+
+                // **Named by their key, not by a string somebody typed.** The
+                // lobby carries the public key the server watched each player
+                // prove, so sharing is with somebody you are in a room with.
+                if (m->lobby != nullptr && m->lobby->count > 0) {
+                    ImGui_Spacing();
+                    ImGui_TextUnformatted("Or hand it to one of these:");
+                    for (uint8_t i = 0; i < m->lobby->count; i++) {
+                        const char *who = m->lobby->player[i].name;
+                        if (who[0] == '\0') continue;
+                        if (i == m->lobby_slot) continue;   // not to yourself
+
+                        ImGui_PushIDInt(7200 + i);
+                        if (ImGui_ButtonEx(who, (ImVec2){ 150.0f, 28.0f })) {
+                            m->share_with = (int)i;
+                            m->share_on = true;
+                        }
+                        ImGui_SameLine();
+                        if (ImGui_ButtonEx("take back", (ImVec2){ 100.0f, 28.0f })) {
+                            m->share_with = (int)i;
+                            m->share_on = false;
+                        }
+                        ImGui_PopID();
+                    }
+                }
+            }
         }
+
+        ImGui_EndChild();
 
         ImGui_Dummy((ImVec2){ 0.0f, 8.0f });
         ImGui_Separator();
         ImGui_Spacing();
+
+        bool builtin = picked != nullptr && picked->builtin;
 
         ImGui_BeginDisabled(picked == nullptr);
         if (gs_go_button(m->tracks_for_race ? "Race this one" : "Load",
@@ -1568,8 +1675,23 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
             m->take = m->picked;
             next = GS_SCREEN_SETUP;
         }
+
+        // **Edit, where somebody would look for it.** This was Tab from
+        // anywhere - a key nothing mentioned, on a screen that is about tracks
+        // and never said the construction set existed.
         ImGui_SameLine();
-        if (ImGui_ButtonEx("Forget", (ImVec2){ 110.0f, 38.0f })) {
+        if (ImGui_ButtonEx(builtin ? "Edit a copy" : "Edit",
+                           (ImVec2){ 130.0f, 38.0f })) {
+            m->take = m->picked;
+            m->edit_requested = true;
+        }
+
+        // **A track that came with the game is not yours to throw away.** The
+        // copy an edit makes is, which is why the button above still works on
+        // one and this one does not.
+        ImGui_SameLine();
+        ImGui_BeginDisabled(builtin);
+        if (ImGui_ButtonEx("Delete", (ImVec2){ 110.0f, 38.0f })) {
             if (picked != nullptr) {
                 gs_library_remove(&m->library, picked->hash);
                 m->picked = -1;
@@ -1577,8 +1699,19 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
             }
         }
         ImGui_EndDisabled();
+        ImGui_EndDisabled();
 
+        // **Two rows, because six buttons do not fit across a panel this
+        // wide.** The last of them ran off the right-hand edge, and a control
+        // clipped at the edge is a control nobody finds - the same fault the
+        // brush palette had. What you do *to this track* is on the first row;
+        // what you do to the library is on the second.
         ImGui_SameLine();
+        if (ImGui_ButtonEx("New", (ImVec2){ 90.0f, 38.0f })) {
+            m->new_requested = true;
+        }
+
+        ImGui_Spacing();
         if (ImGui_ButtonEx("Keep this one", (ImVec2){ 150.0f, 38.0f })) {
             // Whatever is loaded, into the library. The commonest thing
             // somebody wants after building something.
