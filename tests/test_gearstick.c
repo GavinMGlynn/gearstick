@@ -3562,6 +3562,61 @@ TEST(a_desync_is_noticed_rather_than_lived_with) {
 // Finishing a race
 // ---------------------------------------------------------------------------
 
+TEST(a_race_that_is_over_stays_over_until_a_new_one_replaces_it) {
+    // **A finished world outlives the screen showing it.** The front end used
+    // to clear its "the results have been worked out" flag on the way back to
+    // the lobby - but the world it belongs to is the finished one, still loaded
+    // until a new race replaces it. So the next frame found the race over and
+    // the flag clear, ran the whole end-of-race path a second time, submitted
+    // the same result again and put the screen back on the results. Somebody
+    // who left the results for the tracks screen, chose a track and pressed
+    // race was thrown straight back to the results they had just left.
+    //
+    // The simulation's half of that promise is what is pinned here: once a race
+    // is over it stays over, however long it is stepped, so anything asking
+    // "has this finished" keeps getting the same answer until the world is
+    // replaced.
+    static gs_track t;
+    gs_track_init(&t, 40, 16, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(8), 0);
+
+    for (uint32_t i = 0; i < (uint32_t)GS_TICK_HZ * 120u && !w.over; i++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &t, 0), 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.over);
+
+    uint32_t finished_at = w.car[0].finish_tick;
+    uint8_t won = w.winner;
+    CHECK(finished_at != 0);
+
+    // Kept stepping, as a front end that has not started a new race does.
+    for (uint32_t i = 0; i < (uint32_t)GS_TICK_HZ * 10u; i++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &t, 0), 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+
+    // Still over, still the same result: a car that has finished is timed once
+    // and never again, so there is nothing here that would make a second
+    // submission look like a different race.
+    CHECK(w.over);
+    CHECK(w.winner == won);
+    CHECK(w.car[0].finish_tick == finished_at);
+
+    // And a new race is what clears it, which is the only moment it is honestly
+    // clear: when there is one for it to describe.
+    gs_world_init(&w, GS_ONE);
+    CHECK(!w.over);
+    CHECK(w.winner == GS_NO_WINNER);
+}
+
 TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
     static gs_track t;
     gs_track_init(&t, 40, 16, GS_SURF_PAVEMENT);
@@ -6638,6 +6693,7 @@ int main(void) {
     run_a_roster_written_before_passwords_existed_still_loads();
     run_a_lock_survives_being_written_out_and_read_back();
     run_the_race_that_sets_a_record_is_the_race_that_reports_it();
+    run_a_race_that_is_over_stays_over_until_a_new_one_replaces_it();
     run_a_race_ends_when_everybody_has_finished_and_the_first_one_wins();
     run_a_race_with_no_lap_target_never_ends();
     run_a_replay_carries_what_race_it_was();

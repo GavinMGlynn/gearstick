@@ -1289,8 +1289,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
                     a->net_started && !a->net_settling) {
                     gs_net_finish(&a->net);
                     a->net_started = false;
-                    a->race_settled = false;
                     a->lobby_hold = true;
+                    // Not race_settled - see the note by the other place this
+                    // used to be cleared. The finished world outlives the
+                    // screen, so clearing it here re-runs the end of the race.
+
                 }
                 a->menu.screen = back;
             }
@@ -1485,6 +1488,15 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             a->menu.track_progress =
                 gs_wire_track_hash(a->wire) != 0 ? gs_wire_track_progress(a->wire)
                                                  : 1.0f;
+
+            // Counted while there is nothing to show, and reset the moment
+            // there is: a lobby that arrives late is not a lobby that failed.
+            const gs_lobby *heard = a->menu.lobby;
+            if (heard != nullptr && heard->capacity > 0) {
+                a->menu.knocking_for = 0.0f;
+            } else {
+                a->menu.knocking_for += (float)delta / 1e9f;
+            }
             if (a->menu.screen == GS_SCREEN_RACE) a->menu.screen = GS_SCREEN_LOBBY;
         }
         // **Nobody is dragged into a race from anywhere but the lobby.** The
@@ -1932,7 +1944,19 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             // everybody else, and throwing that away loses the result.
             if (next == GS_SCREEN_LOBBY && a->net_started && !a->net_settling) {
                 a->net_started = false;
-                a->race_settled = false;
+
+                // **`race_settled` is not cleared here, and that is the point.**
+                // It used to be, and the world it belongs to is the finished
+                // one - which is still loaded until a new race replaces it. So
+                // the next frame found `world.over` true and `race_settled`
+                // false, ran the whole end-of-race path a second time,
+                // submitted the same result again and put the screen back on
+                // the results. Somebody who left the results for the tracks
+                // screen, chose a track and pressed race was thrown straight
+                // back to the results they had just left.
+                //
+                // gs_start_race clears it, which is the only moment it is
+                // honestly clear: when there is a new race for it to describe.
             }
             // Back to a menu ends the building session: Tab is the loop while
             // you are working on something, and nothing at all once you are not.

@@ -1469,3 +1469,17 @@ worth as much as what was decided about it.
       *Verification: the icon ships, decodes, is square, is not one flat colour,
       and has a transparent surround rather than being a full square — which is
       what lets it sit on a title bar of any colour.*
+- [x] **A results screen you can leave.** *(Reported: finishing a race, choosing
+      another track and pressing race put you straight back on the results.)*
+      Going to the lobby cleared the "results worked out" flag while the
+      finished world was still loaded, so the next frame ran the end of the race
+      again — submitting the same result twice and forcing the screen back.
+      *Verification: a race that is over stays over however long it is stepped,
+      and a car that has finished is timed once and never again.*
+- [x] **An online flow with no dead ends.** Racing is not this machine's to
+      start while it is on a server, so the tracks screen loads rather than
+      races, the results screen offers **Back to the lobby**, and the local
+      setup screen is offered offline only.
+- [x] **A door nobody answers says so.** A wrong key means the server cannot
+      decrypt what we sent and has nothing to reply to, so the lobby knocked
+      silently forever. It now names the three things it could be.

@@ -1150,9 +1150,22 @@ static gs_screen gs_results_screen(gs_menu *m) {
         ImGui_Separator();
         ImGui_Spacing();
 
-        if (gs_go_button("Race again", 160.0f, 40.0f)) next = GS_SCREEN_RACE;
+        // **Online, the way on is the lobby.** A race on a server is the
+        // server's race - this machine does not choose the track, the grid or
+        // when it starts - so "race again" is really "back to the room where
+        // that is decided", and saying so is the difference between a button
+        // that works and a button somebody presses twice.
+        if (gs_go_button(m->online ? "Back to the lobby" : "Race again",
+                         m->online ? 200.0f : 160.0f, 40.0f)) {
+            next = m->online ? GS_SCREEN_LOBBY : GS_SCREEN_RACE;
+        }
         ImGui_SameLine();
+        // The setup screen decides a race this machine owns, which an online
+        // race is not: reading it would build a different world from everybody
+        // else's. Offered offline and not online.
+        ImGui_BeginDisabled(m->online);
         if (ImGui_ButtonEx("Setup", (ImVec2){ 110.0f, 40.0f })) next = GS_SCREEN_SETUP;
+        ImGui_EndDisabled();
         ImGui_SameLine();
         if (ImGui_ButtonEx("Records", (ImVec2){ 110.0f, 40.0f })) next = GS_SCREEN_RECORDS;
         ImGui_SameLine();
@@ -1285,6 +1298,24 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
                                        ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
             ImGui_TextUnformatted("Knocking...");
             ImGui_PopStyleColor();
+
+            // **A door nobody answers, said out loud.** A server that refuses
+            // sends a reason and it arrives as lobby_error. A server that
+            // cannot decrypt what we sent has nothing to reply to at all, so
+            // the screen stayed on "Knocking..." for as long as somebody was
+            // willing to look at it - which is what a player did, twice, with
+            // no way to tell a slow connection from a wrong key.
+            if (gs_menu_lobby_unanswered(m)) {
+                ImGui_Spacing();
+                ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                           (ImVec4){ 0.95f, 0.6f, 0.3f, 1.0f });
+                ImGui_Text("No answer after %.0f seconds.",
+                           (double)m->knocking_for);
+                ImGui_PopStyleColor();
+                ImGui_TextUnformatted("The server is not running, the address is");
+                ImGui_TextUnformatted("wrong, or its key is not the one it prints");
+                ImGui_TextUnformatted("when it starts.");
+            }
         } else if (ImGui_BeginTable("lobby", 3,
                                     ImGuiTableFlags_RowBg |
                                     ImGuiTableFlags_SizingFixedFit)) {
@@ -1677,11 +1708,19 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
 
         bool builtin = picked != nullptr && picked->builtin;
 
+        // **Racing is not this machine's to start while it is on a server.**
+        // The track is the server's, the grid is the server's and so is the
+        // moment it begins - so choosing a track here and pressing race led to
+        // a setup screen that could not start anything, and left somebody back
+        // on the results wondering what they had done wrong. Loading one to
+        // look at, edit or share is still fine, which is what the button says
+        // instead.
         ImGui_BeginDisabled(picked == nullptr);
-        if (gs_go_button(m->tracks_for_race ? "Race this one" : "Load",
-                         m->tracks_for_race ? 160.0f : 130.0f, 38.0f)) {
+        if (gs_go_button(m->online ? "Load"
+                                   : (m->tracks_for_race ? "Race this one" : "Load"),
+                         m->tracks_for_race && !m->online ? 160.0f : 130.0f, 38.0f)) {
             m->take = m->picked;
-            next = GS_SCREEN_SETUP;
+            next = m->online ? GS_SCREEN_TRACKS : GS_SCREEN_SETUP;
         }
 
         // **Edit, where somebody would look for it.** This was Tab from
@@ -1739,6 +1778,15 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     }
     ImGui_End();
     return next;
+}
+
+bool gs_menu_lobby_unanswered(const gs_menu *m) {
+    // Only while there is nothing to show. A lobby that arrived, however
+    // slowly, is a lobby that answered - and a server that refused said why,
+    // which is a better message than this one.
+    if (m->lobby != nullptr && m->lobby->capacity > 0) return false;
+    if (m->lobby_error != nullptr && m->lobby_error[0] != '\0') return false;
+    return m->knocking_for > GS_KNOCK_PATIENCE;
 }
 
 bool gs_menu_lobby_can_race(const gs_menu *m) {

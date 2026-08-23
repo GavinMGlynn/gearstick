@@ -184,6 +184,13 @@ typedef struct gs_menu {
     uint8_t         lobby_slot;
     bool            lobby_ready;
     float           track_progress;   // 1.0 when there is nothing to wait for
+
+    // **How long this machine has been knocking with no answer.** A server that
+    // refuses says so and that arrives as `lobby_error`; a server that cannot
+    // *hear* us says nothing at all, because a wrong key means it cannot
+    // decrypt what we sent and has nothing to reply to. Those two look
+    // identical on screen - a quiet lobby - and the second one never resolves.
+    float           knocking_for;
     char            server_text[80];
 
     // The library screen's scratch: what was picked, and what it is being
@@ -225,6 +232,11 @@ gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
 //
 // A rule in a key handler is a rule no test can reach, and every fault found by
 // playing this so far has been in code exactly that shape.
+// How long to knock before saying nobody is answering, in seconds. Long enough
+// that a slow handshake is not called a failure, short enough that somebody is
+// not left reading "Knocking..." wondering whether it is them.
+#define GS_KNOCK_PATIENCE 6.0f
+
 gs_screen gs_menu_back(const gs_menu *m, bool editing);
 
 // **Can the lobby start a race right now?** A predicate rather than a condition
@@ -233,6 +245,13 @@ gs_screen gs_menu_back(const gs_menu *m, bool editing);
 // and before the server has answered both are zero - so it offered Race to
 // somebody still knocking on the door, and did nothing when they pressed it.
 bool gs_menu_lobby_can_race(const gs_menu *m);
+
+// **Has the door gone unanswered long enough to say so?** A server that refuses
+// sends a reason; a server that cannot decrypt what we sent has nothing to
+// reply to, so the screen sat on "Knocking..." indefinitely and a wrong key
+// looked exactly like a slow connection. A predicate, for the same reason
+// gs_menu_lobby_can_race is one: it is a thing a test can call.
+bool gs_menu_lobby_unanswered(const gs_menu *m);
 
 // **The gate's whole rule, in one callable place.** Sign `index` in if the
 // password and code are what that driver requires. Returns false and leaves

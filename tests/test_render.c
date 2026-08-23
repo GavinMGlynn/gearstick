@@ -4028,6 +4028,48 @@ TEST(the_window_has_an_icon_of_its_own) {
     SDL_DestroySurface(rgba);
 }
 
+TEST(a_lobby_nobody_answers_says_so_rather_than_knocking_forever) {
+    (void)ren;
+
+    // **A wrong key looks exactly like a slow connection.** A server that
+    // refuses sends a reason and it arrives as `lobby_error`; a server that
+    // cannot decrypt what we sent has nothing to reply to at all, so the screen
+    // stayed on "Knocking..." for as long as somebody was willing to look at
+    // it. A player sat there twice with no way to tell which was happening -
+    // and the second time the key really was wrong.
+    static gs_menu m;
+    gs_menu_init(&m);
+
+    static gs_lobby lobby;
+    lobby = (gs_lobby){ 0 };
+
+    // Just knocking. Not a failure yet: a handshake is allowed to take a moment.
+    m.lobby = &lobby;
+    m.knocking_for = 0.5f;
+    CHECK(!gs_menu_lobby_unanswered(&m));
+
+    m.knocking_for = GS_KNOCK_PATIENCE - 0.1f;
+    CHECK(!gs_menu_lobby_unanswered(&m));
+
+    // Long enough. Now it is worth saying.
+    m.knocking_for = GS_KNOCK_PATIENCE + 0.1f;
+    CHECK(gs_menu_lobby_unanswered(&m));
+
+    // A lobby that arrived, however late, is a lobby that answered.
+    lobby.capacity = 2;
+    lobby.count = 1;
+    CHECK(!gs_menu_lobby_unanswered(&m));
+
+    // And a server that refused said why, which is a better message than this
+    // one - so this one stays out of the way.
+    lobby = (gs_lobby){ 0 };
+    m.lobby_error = "the server is full";
+    CHECK(!gs_menu_lobby_unanswered(&m));
+
+    m.lobby_error = nullptr;
+    CHECK(gs_menu_lobby_unanswered(&m));
+}
+
 TEST(the_lobby_offers_a_race_only_when_it_could_start_one) {
     (void)ren;
 
@@ -4160,6 +4202,7 @@ int main(void) {
     run_a_password_on_a_profile_is_actually_required(ren);
     run_a_second_factor_is_asked_for_when_the_profile_has_one(ren);
     run_the_window_has_an_icon_of_its_own(ren);
+    run_a_lobby_nobody_answers_says_so_rather_than_knocking_forever(ren);
     run_the_lobby_offers_a_race_only_when_it_could_start_one(ren);
     run_exit_is_something_the_menu_asks_for_rather_than_does(ren);
     run_the_heatmap_puts_the_line_everybody_drove_on_the_screen(ren);

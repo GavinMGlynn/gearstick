@@ -3545,6 +3545,59 @@ SDL_image. The missing piece on this machine was `zlib-ng-compat-static`.
 `SDLIMAGE_PNG_LIBPNG OFF` remains the one-line way back to the built-in stb
 decoder, which needs no system library at all.
 
+### The results screen you could not leave
+
+**"I completed a race on one track, then went to the tracks menu, selected
+another and then race, and I saw this screen"** - the results, again.
+
+The end-of-race path is guarded by `race_settled`, worked out once so the same
+lap is not resubmitted every frame. Going back to the lobby cleared that flag -
+**and the world it describes is the finished one**, still loaded until a new
+race replaces it. So the next frame found `world.over` true and the flag clear,
+ran the whole ending a second time, submitted the same result again and put the
+screen back on the results. The client log shows it plainly: *the race is agreed
+at tick 2619, and submitted*, then *at tick 2620, and submitted*.
+
+It is cleared in `gs_start_race` and nowhere else now, which is the only moment
+it is honestly clear: when there is a new race for it to describe.
+
+### An online flow with no dead ends in it
+
+The same report exposed a worse thing behind it. **Racing is not this machine's
+to start while it is on a server** - the track is the server's, the grid is the
+server's, and so is the moment it begins. But the tracks screen offered *Race
+this one*, which went to the local setup screen, which cannot start a server
+race; and the results screen offered *Setup*, which goes to the same place.
+Reading that screen at all would build a different world from everybody else's,
+which is the one thing rollback cannot recover from.
+
+Online, the tracks screen loads a track to look at, edit or share and says so;
+the results screen's big button says **Back to the lobby**, because that is
+where a race is decided and what pressing it actually does; and *Setup* is
+offered offline only.
+
+### A door nobody answers
+
+**"I still can't start a race - I keep seeing this screen."** The lobby, on
+"Knocking...", forever.
+
+A server that *refuses* sends a reason and it arrives as `lobby_error`. A server
+that cannot decrypt what we sent has nothing to reply to at all - which is what
+a wrong key looks like - so the screen said "Knocking..." for as long as anybody
+was willing to watch it. Both a slow handshake and a hopeless one looked
+identical.
+
+After `GS_KNOCK_PATIENCE` seconds with no answer it now says so, and names the
+three things it is: the server is not running, the address is wrong, or the key
+is not the one the server prints when it starts. `gs_menu_lobby_unanswered` is a
+predicate for the same reason `gs_menu_lobby_can_race` is - it is a thing a test
+can call.
+
+In this case it was the third. The test harness had been handing the client a
+key from a server whose store had since been deleted, so it had minted a new
+one; and an hour-old server process was still holding the port, so the
+replacement never bound.
+
 ---
 
 ## Known risks
