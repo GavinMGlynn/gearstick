@@ -323,7 +323,16 @@ static void gs_start_race(gs_app *a) {
         // paint goes to the renderer rather than into the world, because a
         // colour cannot change where a car ends up and must not be able to.
         const gs_race_setup *set = &a->menu.setup;
-        a->world.gravity = set->gravity;
+
+        // **The dial is a multiple of Earth; `gravity` is an acceleration.**
+        // Assigning one to the other set a race's gravity to 1.0 tiles per
+        // second squared instead of Earth's 2.45 - so every race started from
+        // the setup screen ran at forty percent of the gravity it said it was
+        // at, and the records table it wrote could never be found again,
+        // because the screen looking it up made the same mistake differently.
+        // gs_world_init is the one place that knows the conversion; the
+        // editor's dials already went through it.
+        gs_world_init(&a->world, set->gravity);
         gs_world_set_mode(&a->world, (gs_mode)set->mode);
         gs_world_set_laps(&a->world, set->mode == (uint8_t)GS_MODE_RACE ? set->laps : 0);
 
@@ -1942,6 +1951,14 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             //
             // Not while settling: the finished race is still being agreed with
             // everybody else, and throwing that away loses the result.
+            // **Arriving at the lobby on purpose means waiting there.** The
+            // lobby starts a race the moment it is ready, which is right the
+            // first time somebody walks into it and wrong every time after:
+            // pressing "Back to the lobby" on the results put them straight
+            // into another race without being asked. Any menu-driven arrival
+            // holds; the Race button in the lobby is how somebody says go.
+            if (next == GS_SCREEN_LOBBY) a->lobby_hold = true;
+
             if (next == GS_SCREEN_LOBBY && a->net_started && !a->net_settling) {
                 a->net_started = false;
 

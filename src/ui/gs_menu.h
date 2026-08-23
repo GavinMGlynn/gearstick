@@ -156,6 +156,12 @@ typedef struct gs_menu {
     // "look after these".
     bool tracks_for_race;
 
+    // **Where Back goes from the records table.** It went to the title from
+    // wherever it was opened, so looking up a time from the results screen
+    // threw away the results. Records is a thing you glance at and come back
+    // from, which means it has to know where "back" is.
+    gs_screen records_from;
+
     // **What the tracks screen is asking the frontend to do.** The menu owns
     // none of this: it cannot open the construction set, it cannot talk to a
     // server, and it should not learn how - so it raises a request and the

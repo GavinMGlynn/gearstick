@@ -639,7 +639,10 @@ static gs_screen gs_title(gs_menu *m) {
             next = GS_SCREEN_TRACKS;
         }
         if (gs_wide_button("Profile", 34.0f)) next = GS_SCREEN_PROFILES;
-        if (gs_wide_button("Records", 34.0f)) next = GS_SCREEN_RECORDS;
+        if (gs_wide_button("Records", 34.0f)) {
+            m->records_from = GS_SCREEN_TITLE;
+            next = GS_SCREEN_RECORDS;
+        }
         if (gs_wide_button("Exit", 34.0f)) m->quit = true;
 
         ImGui_Dummy((ImVec2){ 0.0f, 14.0f });
@@ -1001,9 +1004,13 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         // --- What there is to beat, before the race rather than after it.
         gs_heading("TO BEAT");
 
+        // The same conditions a race under these dials would have. Built the
+        // way a race builds them rather than by hand: setting `gravity` from
+        // the dial directly stores a multiple of Earth where an acceleration
+        // belongs, and a table looked up under conditions no race ever had is
+        // a table that is always empty.
         gs_world probe;
-        gs_world_init(&probe, GS_ONE);
-        probe.gravity = m->setup.gravity;
+        gs_world_init(&probe, m->setup.gravity);
         const gs_record *best = gs_records_best_lap(&m->records, gs_track_hash(t),
                                                     gs_conditions_hash(&probe));
         if (best != nullptr) {
@@ -1167,9 +1174,16 @@ static gs_screen gs_results_screen(gs_menu *m) {
         if (ImGui_ButtonEx("Setup", (ImVec2){ 110.0f, 40.0f })) next = GS_SCREEN_SETUP;
         ImGui_EndDisabled();
         ImGui_SameLine();
-        if (ImGui_ButtonEx("Records", (ImVec2){ 110.0f, 40.0f })) next = GS_SCREEN_RECORDS;
+        if (ImGui_ButtonEx("Records", (ImVec2){ 110.0f, 40.0f })) {
+            m->records_from = GS_SCREEN_RESULTS;
+            next = GS_SCREEN_RECORDS;
+        }
         ImGui_SameLine();
-        if (ImGui_ButtonEx("Title", (ImVec2){ 110.0f, 40.0f })) next = GS_SCREEN_TITLE;
+        // "Title" is what the screen is called in the code and means nothing to
+        // anybody looking at it. It is the main menu, so it says so.
+        if (ImGui_ButtonEx("Main menu", (ImVec2){ 140.0f, 40.0f })) {
+            next = GS_SCREEN_TITLE;
+        }
         gs_panel_measure(m);
     }
     ImGui_End();
@@ -1180,9 +1194,9 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
     gs_screen next = GS_SCREEN_RECORDS;
     // Counted before the window opens, so the panel is the height of its table
     // rather than the height of the biggest table it could ever hold.
+    // Built the way a race builds it - see the note on the other one of these.
     gs_world probe;
-    gs_world_init(&probe, GS_ONE);
-    probe.gravity = m->setup.gravity;
+    gs_world_init(&probe, m->setup.gravity);
     uint64_t conditions = gs_conditions_hash(&probe);
 
     const gs_record *rows[16];
@@ -1249,7 +1263,10 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
         ImGui_Dummy((ImVec2){ 0.0f, 10.0f });
         ImGui_Separator();
         ImGui_Spacing();
-        if (ImGui_ButtonEx("Back", (ImVec2){ 120.0f, 38.0f })) next = GS_SCREEN_TITLE;
+        if (ImGui_ButtonEx("Back", (ImVec2){ 120.0f, 38.0f })) {
+            next = m->records_from != GS_SCREEN_COUNT ? m->records_from
+                                                      : GS_SCREEN_TITLE;
+        }
         gs_panel_measure(m);
     }
     ImGui_End();
