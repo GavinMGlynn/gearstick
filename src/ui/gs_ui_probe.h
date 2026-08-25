@@ -64,6 +64,14 @@ int gs_ui_probe_count(void);
 // whether or not a keyboard could have got to it.
 void gs_ui_probe_press(uint32_t id);
 
+// **Put ImGui back to a standing start, so one press cannot colour the next.**
+// A walk restores the menu it is standing in by copying a value back over it,
+// and that is the whole of the menu's state - but it is not the whole of the
+// state on screen. A combo left open, or an item still held down, lives in
+// ImGui's context rather than in gs_menu, and would otherwise be carried into
+// the next thing pressed and read as its doing.
+void gs_ui_probe_settle(void);
+
 #ifdef __cplusplus
 }
 #endif

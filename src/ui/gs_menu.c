@@ -1853,9 +1853,23 @@ gs_screen gs_menu_back(const gs_menu *m, bool editing) {
 // FNV-1a, because the only property wanted here is that different states give
 // different numbers. Nothing is stored under this hash and nothing travels, so
 // none of the reasons to reach for something stronger apply.
+// **Eight bytes at a time, because this runs over six hundred kilobytes of menu
+// on every step of a walk.** A byte at a time measured at 1.18 ms a call and was
+// 87% of what walking the front end cost; a word at a time is the same hash for
+// the purpose it has and is not the bottleneck any more. It reads whatever
+// order the machine stores its words in, which would matter if this number ever
+// travelled or was written down - it does neither.
 static uint64_t gs_fnv(uint64_t h, const void *p, size_t n) {
     const uint8_t *b = (const uint8_t *)p;
-    for (size_t i = 0; i < n; i++) {
+    size_t i = 0;
+
+    for (; i + sizeof(uint64_t) <= n; i += sizeof(uint64_t)) {
+        uint64_t word;
+        memcpy(&word, b + i, sizeof word);
+        h ^= word;
+        h *= 0x100000001b3ULL;
+    }
+    for (; i < n; i++) {
         h ^= (uint64_t)b[i];
         h *= 0x100000001b3ULL;
     }

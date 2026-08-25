@@ -95,6 +95,13 @@ void gs_ui_probe_press(uint32_t id)
     }
 }
 
+void gs_ui_probe_settle(void)
+{
+    if (ImGui::GetCurrentContext() == nullptr) return;
+    ImGui::ClosePopupsExceptModals();
+    ImGui::ClearActiveID();
+}
+
 // --- The hooks themselves. Declared by imgui_internal.h, called by imgui.cpp
 //     when TestEngineHookItems is on, and by nothing at all when it is not.
 

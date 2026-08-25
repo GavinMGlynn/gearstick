@@ -4186,6 +4186,266 @@ TEST(every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The walk, going as deep as the front end does
+// ---------------------------------------------------------------------------
+//
+// **Breadth-first over states rather than one press from a fresh menu.** The
+// map above knows the first move out of every screen and nothing after it, so a
+// fault that needs two presses to reach - pick a track, then race - is not
+// something it can see at all.
+//
+// A state is a menu, and a menu is 600 kilobytes, so states are not kept: what
+// is kept is the *path* to one, and a path is replayed to stand in it again.
+// That is affordable now only because a frame costs a layout rather than a
+// rasterisation. The hash is what says whether a state is somewhere new.
+
+#define GS_WALK_STATES 4096
+#define GS_WALK_DEPTH  96
+#define GS_WALK_SLOTS  16384        // a power of two, comfortably over the states
+
+typedef struct gs_walk_path {
+    uint32_t press[GS_WALK_DEPTH];
+    int      len;
+    uint64_t hash;                  // what standing here hashed to when found
+} gs_walk_path;
+
+#define GS_WALK_CTRLS 4096          // a power of two, ids offered anywhere
+
+typedef struct gs_walk {
+    uint64_t     slot[GS_WALK_SLOTS];
+    uint32_t     offered[GS_WALK_CTRLS];
+    uint32_t     pressed[GS_WALK_CTRLS];
+    uint32_t     never[GS_WALK_CTRLS];
+    int          n_offered, n_pressed, n_never;
+    gs_walk_path queue[GS_WALK_STATES];
+    int          head, tail;
+    int          states;
+    int          edges;
+    int          deepest;
+    int          did_nothing;
+    bool         ran_out;
+} gs_walk;
+
+// Open addressing, and a zero slot means empty - so a hash of zero is nudged
+// rather than lost.
+static bool gs_walk_seen(gs_walk *w, uint64_t h) {
+    if (h == 0) h = 1;
+    size_t i = (size_t)h & (GS_WALK_SLOTS - 1);
+    while (w->slot[i] != 0) {
+        if (w->slot[i] == h) return true;
+        i = (i + 1) & (GS_WALK_SLOTS - 1);
+    }
+    w->slot[i] = h;
+    w->states++;
+    return false;
+}
+
+// The same, for control ids. A zero id never happens - ImGui does not mint one -
+// so zero can mean empty here too.
+static bool gs_walk_mark(uint32_t *tab, uint32_t id, int *count) {
+    size_t i = (size_t)id & (GS_WALK_CTRLS - 1);
+    while (tab[i] != 0) {
+        if (tab[i] == id) return true;
+        i = (i + 1) & (GS_WALK_CTRLS - 1);
+    }
+    tab[i] = id;
+    (*count)++;
+    return false;
+}
+
+// Stand where a path leads, from the seed.
+static void gs_walk_to(gs_ui *ui, gs_menu *m, const gs_menu *seed, gs_screen from,
+                       const gs_walk_path *p, gs_track *t, SDL_Renderer *ren) {
+    *m = *seed;
+    m->screen = from;
+    gs_ui_probe_settle();
+    gs_ui_begin(ui, m, t, ren);
+
+    for (int i = 0; i < p->len; i++) {
+        gs_ui_probe_press(p->press[i]);
+        gs_ui_frame(ui);
+        gs_ui_frame(ui);
+    }
+}
+
+// **What a state *is*, for the purpose of walking it.**
+//
+// Not the menu's bytes. Walking those does not terminate and cannot: the front
+// end offers thirty-two tracks against eight vehicles against sixteen colours
+// against four player slots, so the states a menu can hold run to the millions
+// and a walk over them covers a vanishing fraction however long it is left. A
+// measured run bore that out - the title screen alone was still going after
+// nine and a half minutes and 1.8 million presses.
+//
+// What a walk is actually for is the controls and where they lead, so a state
+// here is **what the front end is showing and what it will let you press**: the
+// screen, every control on it, and whether each one is live or dead. Two menus
+// offering the same controls in the same conditions are the same place to be
+// standing, whichever of the thirty-two tracks is highlighted - and *that*
+// space is finite, which is what lets a walk finish and claim it covered it.
+//
+// Which track, which vehicle, which colour and how many players are covered as
+// values rather than as states. That is a separate item and it is in the plan.
+static uint64_t gs_shape(uint64_t h, const void *p, size_t n) {
+    const uint8_t *b = (const uint8_t *)p;
+    for (size_t i = 0; i < n; i++) {
+        h ^= (uint64_t)b[i];
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
+// What the state being stood in has on it.
+static int gs_walk_controls(gs_ui *ui, gs_ui_item *into, int cap) {
+    gs_ui_probe_start(into, cap);
+    gs_ui_probe_frame();
+    gs_ui_frame(ui);
+    int n = gs_ui_probe_count();
+    gs_ui_probe_stop();
+    return n;
+}
+
+// The screen and everything it is offering, as one number.
+static uint64_t gs_walk_shape_of(gs_ui *ui, const gs_menu *m, gs_ui_item *items,
+                                 int cap, int *out_n, gs_walk *w, bool *anything_new) {
+    const int n = gs_walk_controls(ui, items, cap);
+    const int held = n < cap ? n : cap;
+
+    uint64_t h = 0xcbf29ce484222325ULL;
+    const int screen = (int)m->screen;
+    h = gs_shape(h, &screen, sizeof screen);
+    for (int i = 0; i < held; i++) {
+        h = gs_shape(h, &items[i].id, sizeof items[i].id);
+        h = gs_shape(h, &items[i].disabled, sizeof items[i].disabled);
+        h = gs_shape(h, &items[i].reachable, sizeof items[i].reachable);
+    }
+    // **What counts as offered is what could be pressed.** A control drawn dead
+    // in every state it appears in, or one nav can never land on, is not a gap
+    // in the walk - it is counted separately so that the coverage number means
+    // what it says.
+    if (w != nullptr) {
+        for (int i = 0; i < held; i++) {
+            if (items[i].reachable && !items[i].disabled) {
+                gs_walk_mark(w->offered, items[i].id, &w->n_offered);
+            } else {
+                gs_walk_mark(w->never, items[i].id, &w->n_never);
+            }
+        }
+    }
+
+    // **Somewhere worth standing is somewhere offering a control nobody has
+    // pressed yet.** Novelty on its own does not converge: deleting the
+    // fourteenth track offers a shorter list than deleting the thirteenth did,
+    // for ever, and every one of those is the same Delete button doing the same
+    // thing. What is being covered here is the controls, so what makes a state
+    // worth queueing is a control on it that has not been pressed.
+    if (anything_new != nullptr) {
+        *anything_new = false;
+        for (int i = 0; i < held && w != nullptr; i++) {
+            if (!items[i].reachable || items[i].disabled) continue;
+            size_t at = (size_t)items[i].id & (GS_WALK_CTRLS - 1);
+            bool found = false;
+            while (w->pressed[at] != 0) {
+                if (w->pressed[at] == items[i].id) { found = true; break; }
+                at = (at + 1) & (GS_WALK_CTRLS - 1);
+            }
+            if (!found) { *anything_new = true; break; }
+        }
+    }
+
+    if (out_n != nullptr) *out_n = n;
+    return h;
+}
+
+static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
+                           SDL_Renderer *ren, gs_screen from, gs_walk *w) {
+    static gs_menu m;
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+
+    w->head = 0;
+    w->tail = 0;
+    w->queue[w->tail].len  = 0;
+    w->queue[w->tail].hash = 0;
+    w->tail++;
+
+    {
+        static gs_ui_item seed_items[GS_UI_MAX_ITEMS];
+        gs_walk_to(ui, &m, seed, from, &w->queue[0], t, ren);
+        w->queue[0].hash = gs_menu_hash(&m);
+        bool unused = false;
+        gs_walk_seen(w, gs_walk_shape_of(ui, &m, seed_items, GS_UI_MAX_ITEMS,
+                                         nullptr, w, &unused));
+    }
+
+    while (w->head < w->tail) {
+        const gs_walk_path here = w->queue[w->head++];
+
+        gs_walk_to(ui, &m, seed, from, &here, t, ren);
+
+        // **A path leads back to the state it was found in.** If it does not,
+        // something in the front end answers differently to the same presses,
+        // and a walk that cannot return to a state cannot claim to have
+        // covered what is past it.
+        CHECK(gs_menu_hash(&m) == here.hash);
+
+        if (here.len > w->deepest) w->deepest = here.len;
+
+        const int n = gs_walk_controls(ui, items, GS_UI_MAX_ITEMS);
+        CHECK(n <= GS_UI_MAX_ITEMS);
+        const int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
+
+        for (int i = 0; i < held; i++) {
+            if (!items[i].reachable || items[i].disabled) continue;
+
+            // **There is one way to stand in a state, and this is it.**
+            // Copying the menu back would be cheaper and would not be the same
+            // act: a menu is the whole of its own state but not the whole of
+            // the state on screen, and pressing from a restored copy after a
+            // different number of frames is not what pressing after walking
+            // here does. Replaying costs frames, and frames are cheap now.
+            gs_walk_to(ui, &m, seed, from, &here, t, ren);
+
+            gs_ui_probe_press(items[i].id);
+            gs_ui_frame(ui);
+            gs_ui_frame(ui);
+            w->edges++;
+            gs_walk_mark(w->pressed, items[i].id, &w->n_pressed);
+
+            const uint64_t h = gs_menu_hash(&m);
+
+            // **A press that changed nothing at all is worth knowing about**,
+            // and it is not somewhere new to stand.
+            if (h == here.hash) {
+                w->did_nothing++;
+                continue;
+            }
+
+            static gs_ui_item after[GS_UI_MAX_ITEMS];
+            bool worth_standing = false;
+            const uint64_t shape = gs_walk_shape_of(ui, &m, after,
+                                                    GS_UI_MAX_ITEMS, nullptr,
+                                                    w, &worth_standing);
+            if (gs_walk_seen(w, shape)) continue;
+            if (!worth_standing) continue;
+
+            // **Running out is a failure that says so, never a quiet stop.** A
+            // walk that hits its ceiling and carries on regardless reports
+            // coverage of a front end it did not finish looking at.
+            if (here.len >= GS_WALK_DEPTH || w->tail >= GS_WALK_STATES) {
+                w->ran_out = true;
+                continue;
+            }
+
+            gs_walk_path next = here;
+            next.press[next.len] = items[i].id;
+            next.len++;
+            next.hash = h;
+            w->queue[w->tail++] = next;
+        }
+    }
+}
+
 TEST(a_menu_knows_a_state_it_has_already_been_in) {
     (void)ren;      // no pixels in this one: it is arithmetic on a value
 
@@ -4356,6 +4616,75 @@ TEST(a_menu_knows_a_state_it_has_already_been_in) {
     CHECK(gs_menu_hash(&a) == base);
     a.track_progress = 0.0f;
     a.knocking_for   = 0.0f;
+}
+
+TEST(the_walk_goes_as_deep_as_the_front_end_does) {
+    // **Not a map of first moves.** Every state the front end can be got into
+    // from each screen, by pressing every control on it, and then every control
+    // on everything that led to - until nothing new comes back.
+    static gs_menu seed;
+    static gs_track t;
+    gs_panel_menu(&seed, &t);
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    gs_ui ui;
+    static gs_walk w;
+    int states = 0;
+    int edges  = 0;
+
+    // **One set of books across every seed.** From any screen you can reach the
+    // others, so eight walks with eight sets of notes cover the same graph
+    // eight times over - the same 639 controls, seven more times. What each
+    // seed is really being asked is whether it can reach anything the ones
+    // before it could not, and that question needs the notes kept.
+    SDL_memset(w.slot, 0, sizeof w.slot);
+    SDL_memset(w.offered, 0, sizeof w.offered);
+    SDL_memset(w.pressed, 0, sizeof w.pressed);
+    SDL_memset(w.never, 0, sizeof w.never);
+    w.n_offered = 0;
+    w.n_pressed = 0;
+    w.n_never   = 0;
+    w.states    = 0;
+
+    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+        const gs_screen from = gs_every_screen[i];
+
+        const int had_states  = w.states;
+        const int had_pressed = w.n_pressed;
+
+        w.edges   = 0;
+        w.deepest = 0;
+        w.did_nothing = 0;
+        w.ran_out = false;
+
+        gs_walk_screen(&ui, &seed, &t, ren, from, &w);
+
+        printf("  WALK from %d: %d new offerings, %d new controls, "
+               "%d presses, %d deep, %d idle\n",
+               (int)from, w.states - had_states, w.n_pressed - had_pressed,
+               w.edges, w.deepest, w.did_nothing);
+
+        CHECK(!w.ran_out);
+        edges += w.edges;
+    }
+    states = w.states;
+
+    printf("  WALK total: %d offerings, %d presses, "
+           "%d of %d pressable controls pressed, %d never pressable\n",
+           states, edges, w.n_pressed, w.n_offered, w.n_never);
+
+    // **The claim, asserted rather than believed.** Every control the front end
+    // offered in a state where it could be pressed, was pressed. Not a sample
+    // of them and not most of them - if one is left, this is red.
+    CHECK(w.n_pressed == w.n_offered);
+
+    // **It went further than one press.** The map above found the first move
+    // out of eight screens; anything at all beyond that is more than it had.
+    CHECK(states > (int)SDL_arraysize(gs_every_screen));
+    CHECK(edges > 0);
 }
 
 TEST(every_control_is_known_by_name_and_answers_to_it) {
@@ -4722,6 +5051,7 @@ int main(void) {
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
     run_every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real(ren);
     run_a_menu_knows_a_state_it_has_already_been_in(ren);
+    run_the_walk_goes_as_deep_as_the_front_end_does(ren);
     run_every_control_is_known_by_name_and_answers_to_it(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);

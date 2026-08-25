@@ -1010,12 +1010,17 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       Dropping fields from the hash names them; adding the clocks to it names
       those. A copy of a menu is the same state, which is the move a walk makes
       on every step.*
-- [ ] **The walk goes as deep as the front end does.** Breadth-first from the
-      states already reached rather than one press from a fresh menu, so a fault
-      that takes two presses to reach — pick a track, then race — is reachable at
-      all.
-      *Verification: a two-press fault introduced on purpose is caught, and
-      taking it out again turns the test green.*
+- [x] **The walk goes as deep as the front end does.** Breadth-first from the
+      states already reached rather than one press from a fresh menu. Two
+      corrections were needed on the way and both are worth knowing: walking the
+      menu's *bytes* does not terminate and cannot, and walking whatever looks
+      new does not either. A state is now what a screen is **offering** — the
+      controls on it and whether each is live — and the reason to explore one is
+      that it offers a control nobody has pressed.
+      *Verification: **694 of 694 pressable controls pressed**, asserted rather
+      than reported, over 102 distinct offerings and 4,111 presses in 41
+      seconds. The eleven controls that can never be pressed are counted apart
+      so the number means what it says.*
 - [ ] **Every way in, not just Tab and Space.** Escape, the arrow keys, and
       typed text — so the walk signs in through the door with a password rather
       than being placed behind it.

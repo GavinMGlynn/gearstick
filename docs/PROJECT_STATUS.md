@@ -3774,6 +3774,61 @@ the one the fresh menu holds; and the editor, which is not a `gs_screen`.
   that what it covered equals what exists rather than leaving the reader to
   assume it.
 
+### The walk, going as deep as the front end does
+
+**Done, and the number is 694 of 694.** Every control the front end offers in a
+state where it can be pressed, is pressed — asserted by the test, not reported
+by it. Eleven more are counted separately as never pressable: drawn dead in
+every state they appear in, or items nav can never land on.
+
+Getting there needed two corrections that are the substance of this item.
+
+**Walking the menu's bytes does not terminate and cannot.** The front end offers
+32 tracks against 8 vehicles against 16 colours against 4 player slots, so the
+values a `gs_menu` can hold run to the millions; a walk over them covers a
+vanishing fraction however long it is left. Measured rather than assumed: keyed
+on `gs_menu_hash`, the title screen alone was still going after nine and a half
+minutes and roughly 1.8 million presses. So a state is now **what the front end
+is showing and what it will let you press** — the screen, every control on it,
+and whether each is live or dead. Two menus offering the same controls in the
+same conditions are the same place to be standing, whichever of the 32 tracks
+happens to be highlighted. That space is finite, and it came to 102 offerings.
+
+**Novelty on its own does not converge either.** With offerings as the key, the
+walk found `track number 13 → Delete → track number 14 → Delete → …`, emptying
+the library one track at a time: every shorter list is a genuinely new offering,
+and all of it is one Delete button doing one thing. So the reason to queue a
+state is no longer that it is new but that **it offers a control nobody has
+pressed yet**. That converges by construction — each visit presses something for
+the first time, and the controls are finite — and it turns the exhaustive claim
+into something a `CHECK` can hold.
+
+Two smaller things, both measured:
+
+- **A state is stood in by replaying the path to it, and that is not the same as
+  copying the menu back.** The first attempt did the cheap thing and the
+  determinism check caught it: a menu is the whole of its own state but not the
+  whole of the state on screen — ImGui's focus, active item and open popups live
+  outside it — so the same control pressed after a different number of frames
+  does a different thing. Replay is now the only way to stand anywhere, and
+  `gs_ui_probe_settle` puts ImGui back to a standing start between presses.
+- **The seeds share one set of books.** From any screen you can reach the
+  others, so eight seeds with eight sets of notes covered the same graph eight
+  times: 27,702 presses to learn what 4,111 now learn. Seeds 2, 6, 7 and 8 add
+  nothing at all, which is itself the proof the front end is connected; login
+  adds its own 13 because it is a closed door until the walk can type.
+
+The hash was 87% of the cost at 1.18 ms a call — FNV a byte at a time over a
+617 KB menu, twice per edge. Eight bytes at a time took it to 0.18 ms and a
+press to 0.32 ms all in. It reads words in whatever order the machine stores
+them, which would matter if this number ever travelled or was written down; it
+does neither.
+
+**Left for the items after this one:** 1,424 presses changed nothing at all.
+That is expected for a control pressed in a state where it has nothing to do,
+and it is *not* yet the check that no control does nothing in every state it
+appears in — that is a separate plan item and this counts what it will need.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
