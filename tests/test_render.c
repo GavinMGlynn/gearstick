@@ -4523,6 +4523,15 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
         // covered what is past it.
         CHECK(gs_menu_hash(&m) == here.hash);
 
+        // **The state this path leads to, taken before anything else is
+        // drawn.** An earlier attempt took it after the enumeration frame
+        // below, which is one frame further on than the path describes - so
+        // every check that it was the same state failed, and the conclusion
+        // drawn was that restoring does not work. Restoring works; snapshotting
+        // a frame late does not.
+        static gs_menu at;
+        at = m;
+
         if (here.len > w->deepest) w->deepest = here.len;
 
         const int n = gs_walk_controls(ui, items, GS_UI_MAX_ITEMS);
@@ -4568,15 +4577,16 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
         }
 
         for (int i = 0; i < n_acts; i++) {
-            // **There is one way to stand in a state, and it is to walk here
-            // again.** Copying the menu back and letting ImGui settle would
-            // cost one memcpy instead of the whole path, and it was tried: the
-            // assertion that it lands in the state it left fails, every time,
-            // on every screen. A menu is the whole of its own state and not the
-            // whole of the state on screen. So the path is replayed, which
-            // costs its depth, and that cost is why the walk below is bounded
-            // to one state per offering rather than eight.
-            gs_walk_to(ui, &m, seed, from, &here, t, ren);
+            // **Back to the state this path leads to.** Replaying the whole
+            // path for every control on it costs the depth of the path each
+            // time, which is what a walk with a form in it turns into. This is
+            // one memcpy - and it is only sound if what comes out is the state
+            // that was left, which is what the check below is for. A menu is
+            // the whole of its own state and not the whole of the state on
+            // screen, so ImGui is put back to a standing start as well.
+            m = at;
+            gs_ui_probe_settle();
+            CHECK(gs_menu_hash(&m) == here.hash);
 
             gs_act_do(ui, &acts[i]);
             w->edges++;

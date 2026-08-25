@@ -3859,13 +3859,23 @@ Three things had to change and each was a wrong idea failing loudly:
   door walk keys on the offering plus the scratch fields — `profiles`,
   `records` and `library` left out of both, being all of the combinatorics and
   none of the navigation.
-- **Restoring a menu is not standing in a state.** Replaying a path costs its
-  depth on every action, so the obvious saving is one memcpy and a couple of
-  settling frames. The assertion that this lands in the state it left fails on
-  every screen, every time. Replay stays, and that cost is exactly why the
-  coverage walk gets one state per offering where the door walk gets eight.
+- **Restoring a menu is standing in a state — the first attempt at it was
+  snapshotted a frame late.** Replaying a path costs its depth on every action,
+  so the obvious saving is one memcpy. That was tried, the assertion that it
+  lands in the state it left failed on every screen, and the conclusion drawn
+  here was that a menu is not the whole of the state on screen. **That
+  conclusion was wrong.** The snapshot was being taken after the enumeration
+  frame, which is one frame further on than the path describes, so it could
+  never have matched. Taken immediately after the replay it matches every time.
 
-Cost: the renderer suite is 110 s, inside its 180 s budget. The coverage walk is
+  Restoring is now what the walk does, with `gs_menu_hash(&m) == here.hash`
+  asserted on **every action** rather than assumed - so the soundness of it is
+  checked roughly 12,700 times a run instead of argued about. The renderer suite
+  went from 110 s to 30 s for identical coverage: 727 of 727 controls, 12,714
+  actions. ImGui is still put back to a standing start between actions with
+  `gs_ui_probe_settle`, which is the part of the original reasoning that held.
+
+Cost: the renderer suite is 30 s. The coverage walk is
 `6,175 states, 12,714 actions, 727 of 727 pressable controls pressed, 11 never
 pressable`, with 5,915 states declined because their offering had already been
 entered.
