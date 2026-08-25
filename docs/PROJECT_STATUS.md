@@ -3829,6 +3829,56 @@ That is expected for a control pressed in a state where it has nothing to do,
 and it is *not* yet the check that no control does nothing in every state it
 appears in — that is a separate plan item and this counts what it will need.
 
+### Every way in: the walk opens the door itself
+
+**Done.** The walk can press Escape and the arrows, and it can type. Seeded
+signed out at the login screen with nothing filled in and no screen handed to
+it, it reaches the title in two moves: `44 states, 237 actions (75 typed), 2
+deep, 13 of 13 pressed, 0 capped`.
+
+**The door wants a name and a password typed, not a driver picked.** That is not
+what the walk was built expecting, and it is the sort of thing only a walk that
+has to open a door for itself turns up: the first attempts failed with
+`pick=-1` and *"that name and password do not match"*, because the vocabulary
+held the password and not the name. A walk can only try what it has been told
+exists — the words it knows are the driver's name, the right password and a
+wrong one, and that last one is there so that getting in is not something that
+happens to anything typed at it.
+
+Three things had to change and each was a wrong idea failing loudly:
+
+- **Coverage cannot be the reason to explore.** Requiring that a state offer a
+  control nobody had pressed converges beautifully and stops one press outside
+  the door: signing in is three controls, all of which have been pressed by the
+  time the sequence matters. Novelty drives the walk; coverage is what it
+  reports.
+- **The offering alone cannot see a form being filled in.** The login screen
+  draws the same controls whatever has been typed, so keying states on what is
+  on offer makes the sign-in sequence unreachable *in principle*. There are now
+  two keys for two questions: the coverage walk keys on the offering, and the
+  door walk keys on the offering plus the scratch fields — `profiles`,
+  `records` and `library` left out of both, being all of the combinatorics and
+  none of the navigation.
+- **Restoring a menu is not standing in a state.** Replaying a path costs its
+  depth on every action, so the obvious saving is one memcpy and a couple of
+  settling frames. The assertion that this lands in the state it left fails on
+  every screen, every time. Replay stays, and that cost is exactly why the
+  coverage walk gets one state per offering where the door walk gets eight.
+
+Cost: the renderer suite is 110 s, inside its 180 s budget. The coverage walk is
+`6,175 states, 12,714 actions, 727 of 727 pressable controls pressed, 11 never
+pressable`, with 5,915 states declined because their offering had already been
+entered.
+
+**The weakness in that number, stated plainly.** `727 of 727` is 100% of what
+this walk saw. A richer alphabet saw 758 and also said 100%. The denominator is
+self-referential, so `CHECK(pressed == offered)` is necessary and nowhere near
+sufficient — it is joined by `CHECK(n_offered >= 727)`, pinned the way the
+golden replay is pinned: raising it is the front end growing, lowering it is a
+deliberate act that wants a note here saying which controls stopped being
+reachable. The real fix is a count taken without asking a walk what it found,
+and that is the last item of Phase 17.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

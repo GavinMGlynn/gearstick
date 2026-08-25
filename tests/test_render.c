@@ -4204,16 +4204,68 @@ TEST(every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real) {
 #define GS_WALK_DEPTH  96
 #define GS_WALK_SLOTS  16384        // a power of two, comfortably over the states
 
+// **What a walk can do, which is more than press things.** Tab and Space reach
+// the controls; they do not reach Escape, they do not move a slider, and they
+// cannot type a password - so a door that needs one is a door a press-only walk
+// is carried through rather than opens.
+//
+// The words are not arbitrary text. What a password box has to be tried with is
+// the right password and a wrong one; typing rubbish into it at length is a
+// bigger walk that learns nothing the wrong one does not.
+static const char *const gs_walk_words[] = {
+    "gavin",                // the seeded driver's name: the door wants both
+    "a good one",           // and the password that goes with it
+    "not the password",
+};
+
+static const ImGuiKey gs_walk_keys[] = {
+    ImGuiKey_Escape,        // the way out of screens that have no button for it
+    ImGuiKey_LeftArrow,
+    ImGuiKey_RightArrow,
+    ImGuiKey_UpArrow,
+    ImGuiKey_DownArrow,
+};
+
+typedef struct gs_act {
+    uint32_t id;        // a control to press, or 0
+    int16_t  word;      // which word to type into it afterwards, or -1
+    uint16_t key;       // a key to send afterwards, or 0
+} gs_act;
+
 typedef struct gs_walk_path {
-    uint32_t press[GS_WALK_DEPTH];
+    gs_act   act[GS_WALK_DEPTH];
     int      len;
     uint64_t hash;                  // what standing here hashed to when found
 } gs_walk_path;
 
 #define GS_WALK_CTRLS 4096          // a power of two, ids offered anywhere
 
+// **How many different states are explored per offering.**
+//
+// Keying the walk on the offering alone converges and cannot open the front
+// door: the login form draws the same controls whatever has been typed into it,
+// so picking a driver, typing a password and pressing the button are three acts
+// that never change what is on screen until the last one works. A walk that
+// only queues new-looking screens never does the second of them.
+//
+// Keying on the menu itself reaches everything and never finishes - millions of
+// values, measured at 1.8 million presses without ending.
+//
+// So: states are told apart by the menu, and **each distinct offering is
+// entered from at most this many of them**. Enough for a sequence to be walked
+// through, far short of every value the fields behind it can hold. What is
+// skipped by the bound is counted and printed rather than passed over.
+#define GS_WALK_PER_SHAPE 8      // what a walk asking about sequences wants
+
+typedef struct gs_shape_seen {
+    uint64_t shape;
+    int      count;
+} gs_shape_seen;
+
 typedef struct gs_walk {
     uint64_t     slot[GS_WALK_SLOTS];
+    gs_shape_seen shape[GS_WALK_SLOTS];
+    int          capped;
     uint32_t     offered[GS_WALK_CTRLS];
     uint32_t     pressed[GS_WALK_CTRLS];
     uint32_t     never[GS_WALK_CTRLS];
@@ -4224,7 +4276,14 @@ typedef struct gs_walk {
     int          edges;
     int          deepest;
     int          did_nothing;
+    int          typed;
     bool         ran_out;
+    bool         fine;              // tell states apart by what has been typed
+    int          words;             // how many of the words to try in each box
+    int          per_shape;         // how many states may share one offering
+    gs_screen    stop_at;           // give up the moment this is reached...
+    bool         stop_set;          // ...if anybody asked for one
+    bool         reached[GS_SCREEN_COUNT];
 } gs_walk;
 
 // Open addressing, and a zero slot means empty - so a hash of zero is nudged
@@ -4241,6 +4300,24 @@ static bool gs_walk_seen(gs_walk *w, uint64_t h) {
     return false;
 }
 
+// How many times this offering has been entered, and take one more if there is
+// room. Zero is the empty marker, so a shape hashing to zero is nudged.
+static bool gs_walk_room(gs_walk *w, uint64_t shape) {
+    if (shape == 0) shape = 1;
+    size_t i = (size_t)shape & (GS_WALK_SLOTS - 1);
+    while (w->shape[i].shape != 0) {
+        if (w->shape[i].shape == shape) {
+            if (w->shape[i].count >= w->per_shape) return false;
+            w->shape[i].count++;
+            return true;
+        }
+        i = (i + 1) & (GS_WALK_SLOTS - 1);
+    }
+    w->shape[i].shape = shape;
+    w->shape[i].count = 1;
+    return true;
+}
+
 // The same, for control ids. A zero id never happens - ImGui does not mint one -
 // so zero can mean empty here too.
 static bool gs_walk_mark(uint32_t *tab, uint32_t id, int *count) {
@@ -4254,6 +4331,25 @@ static bool gs_walk_mark(uint32_t *tab, uint32_t id, int *count) {
     return false;
 }
 
+// One thing a walk can do: press a control, type at it, send a key - in that
+// order, because typing goes to whatever the press just put the caret in.
+static void gs_act_do(gs_ui *ui, const gs_act *a) {
+    if (a->id != 0) {
+        gs_ui_probe_press(a->id);
+        gs_ui_frame(ui);
+        gs_ui_frame(ui);
+    }
+    if (a->word >= 0) {
+        gs_ui_probe_type(gs_walk_words[a->word]);
+        gs_ui_frame(ui);
+        gs_ui_frame(ui);
+        gs_ui_key(ui, ImGuiKey_Enter);      // a typed box is committed, as a person would
+    }
+    if (a->key != 0) {
+        gs_ui_key(ui, (ImGuiKey)a->key);
+    }
+}
+
 // Stand where a path leads, from the seed.
 static void gs_walk_to(gs_ui *ui, gs_menu *m, const gs_menu *seed, gs_screen from,
                        const gs_walk_path *p, gs_track *t, SDL_Renderer *ren) {
@@ -4262,11 +4358,7 @@ static void gs_walk_to(gs_ui *ui, gs_menu *m, const gs_menu *seed, gs_screen fro
     gs_ui_probe_settle();
     gs_ui_begin(ui, m, t, ren);
 
-    for (int i = 0; i < p->len; i++) {
-        gs_ui_probe_press(p->press[i]);
-        gs_ui_frame(ui);
-        gs_ui_frame(ui);
-    }
+    for (int i = 0; i < p->len; i++) gs_act_do(ui, &p->act[i]);
 }
 
 // **What a state *is*, for the purpose of walking it.**
@@ -4306,15 +4398,56 @@ static int gs_walk_controls(gs_ui *ui, gs_ui_item *into, int cap) {
     return n;
 }
 
+// **The menu, less the three things that make it explode.**
+//
+// `profiles`, `records` and `library` are the bulk of a menu and the whole of
+// its combinatorics: thirty-two tracks, sixteen drivers, a table of times. Walk
+// on those and there is no end. Everything else - which screen, what is picked,
+// what has been typed into which box, which flags a form has set - is small,
+// and is exactly what decides where a press goes next.
+//
+// Leaving the big three out is also what stops the Delete chain: emptying the
+// library changes the library and nothing else a walk steers by, so the
+// fourteenth deletion is not a new place to be.
+static uint64_t gs_walk_menu_key(const gs_menu *m) {
+    const uint8_t *b = (const uint8_t *)m;
+    uint64_t h = 0xcbf29ce484222325ULL;
+
+    h = gs_shape(h, b, offsetof(gs_menu, profiles));
+    h = gs_shape(h, b + offsetof(gs_menu, chosen),
+                 offsetof(gs_menu, lobby) - offsetof(gs_menu, chosen));
+    h = gs_shape(h, b + offsetof(gs_menu, lobby_slot),
+                 offsetof(gs_menu, track_progress) - offsetof(gs_menu, lobby_slot));
+    h = gs_shape(h, b + offsetof(gs_menu, server_text),
+                 offsetof(gs_menu, panel) - offsetof(gs_menu, server_text));
+    return h;
+}
+
 // The screen and everything it is offering, as one number.
 static uint64_t gs_walk_shape_of(gs_ui *ui, const gs_menu *m, gs_ui_item *items,
-                                 int cap, int *out_n, gs_walk *w, bool *anything_new) {
+                                 int cap, int *out_n, gs_walk *w, bool *anything_new,
+                                 bool fine) {
     const int n = gs_walk_controls(ui, items, cap);
     const int held = n < cap ? n : cap;
 
-    uint64_t h = 0xcbf29ce484222325ULL;
-    const int screen = (int)m->screen;
-    h = gs_shape(h, &screen, sizeof screen);
+    // **Which question is being asked decides how finely states are told
+    // apart**, and both questions are real.
+    //
+    //  - *Was every control pressed?* Then a state is what is on offer, and
+    //    which of thirty-two tracks is highlighted is not part of it. That
+    //    converges, and it is the walk that covers the front end.
+    //  - *Can the front end be got into at all?* Then what has been typed into
+    //    which box is the entire question, and the offering is identical the
+    //    whole way through signing in. That does not converge over the whole
+    //    front end - it is bounded instead by stopping the moment it is in.
+    uint64_t h;
+    if (fine) {
+        h = gs_walk_menu_key(m);
+    } else {
+        h = 0xcbf29ce484222325ULL;
+        const int screen = (int)m->screen;
+        h = gs_shape(h, &screen, sizeof screen);
+    }
     for (int i = 0; i < held; i++) {
         h = gs_shape(h, &items[i].id, sizeof items[i].id);
         h = gs_shape(h, &items[i].disabled, sizeof items[i].disabled);
@@ -4374,8 +4507,9 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
         gs_walk_to(ui, &m, seed, from, &w->queue[0], t, ren);
         w->queue[0].hash = gs_menu_hash(&m);
         bool unused = false;
-        gs_walk_seen(w, gs_walk_shape_of(ui, &m, seed_items, GS_UI_MAX_ITEMS,
-                                         nullptr, w, &unused));
+        gs_walk_seen(w, w->queue[0].hash);
+        gs_walk_room(w, gs_walk_shape_of(ui, &m, seed_items, GS_UI_MAX_ITEMS,
+                                         nullptr, w, &unused, w->fine));
     }
 
     while (w->head < w->tail) {
@@ -4395,22 +4529,63 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
         CHECK(n <= GS_UI_MAX_ITEMS);
         const int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
 
+        // **Everything this state can be done to.** Every live control pressed;
+        // every box that takes text pressed and then typed into, with each word
+        // the walk knows; and the keys that belong to no control at all - Escape
+        // above all, which is the way off screens that were never given a
+        // button for it.
+        static gs_act acts[GS_UI_MAX_ITEMS * 3 + 8];
+        int n_acts = 0;
         for (int i = 0; i < held; i++) {
             if (!items[i].reachable || items[i].disabled) continue;
+            acts[n_acts].id = items[i].id;
+            acts[n_acts].word = -1;
+            acts[n_acts].key = 0;
+            n_acts++;
+            if (!items[i].typable) continue;
 
-            // **There is one way to stand in a state, and this is it.**
-            // Copying the menu back would be cheaper and would not be the same
-            // act: a menu is the whole of its own state but not the whole of
-            // the state on screen, and pressing from a restored copy after a
-            // different number of frames is not what pressing after walking
-            // here does. Replaying costs frames, and frames are cheap now.
+            // **How many words a box is tried with depends on what is being
+            // asked.** Opening the door needs the right name, the right
+            // password and a wrong one, because which of them was typed is the
+            // whole question. Pressing every control does not: a box is pressed
+            // by being typed into once, and trying three strings in every box
+            // on every screen multiplies the states without covering one more
+            // control. What is *in* the box is the dials item, not this one.
+            const int words = w->words > 0 ? w->words : 1;
+            for (int k = 0; k < words &&
+                            k < (int)SDL_arraysize(gs_walk_words); k++) {
+                acts[n_acts].id = items[i].id;
+                acts[n_acts].word = (int16_t)k;
+                acts[n_acts].key = 0;
+                n_acts++;
+            }
+        }
+        for (size_t k = 0; k < SDL_arraysize(gs_walk_keys); k++) {
+            acts[n_acts].id = 0;
+            acts[n_acts].word = -1;
+            acts[n_acts].key = (uint16_t)gs_walk_keys[k];
+            n_acts++;
+        }
+
+        for (int i = 0; i < n_acts; i++) {
+            // **There is one way to stand in a state, and it is to walk here
+            // again.** Copying the menu back and letting ImGui settle would
+            // cost one memcpy instead of the whole path, and it was tried: the
+            // assertion that it lands in the state it left fails, every time,
+            // on every screen. A menu is the whole of its own state and not the
+            // whole of the state on screen. So the path is replayed, which
+            // costs its depth, and that cost is why the walk below is bounded
+            // to one state per offering rather than eight.
             gs_walk_to(ui, &m, seed, from, &here, t, ren);
 
-            gs_ui_probe_press(items[i].id);
-            gs_ui_frame(ui);
-            gs_ui_frame(ui);
+            gs_act_do(ui, &acts[i]);
             w->edges++;
-            gs_walk_mark(w->pressed, items[i].id, &w->n_pressed);
+            if (acts[i].word >= 0) w->typed++;
+            if (acts[i].id != 0) {
+                gs_walk_mark(w->pressed, acts[i].id, &w->n_pressed);
+            }
+            if (m.screen < GS_SCREEN_COUNT) w->reached[m.screen] = true;
+            if (w->stop_set && w->reached[w->stop_at]) return;
 
             const uint64_t h = gs_menu_hash(&m);
 
@@ -4425,9 +4600,24 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
             bool worth_standing = false;
             const uint64_t shape = gs_walk_shape_of(ui, &m, after,
                                                     GS_UI_MAX_ITEMS, nullptr,
-                                                    w, &worth_standing);
-            if (gs_walk_seen(w, shape)) continue;
-            if (!worth_standing) continue;
+                                                    w, &worth_standing, w->fine);
+            // **Somewhere not stood in before is worth standing in, full
+            // stop.** An earlier version also demanded the place offer a
+            // control nobody had pressed, which converges and is wrong: signing
+            // in is picking a driver, then typing, then pressing a button, and
+            // every one of those controls has been pressed already by the time
+            // it matters. Requiring novelty *of controls* stops the walk one
+            // press outside the door it was written to open. What a state
+            // offers that nobody has pressed is the report, not the reason.
+            (void)worth_standing;
+
+            // Somewhere not stood in before, by the menu rather than by what is
+            // drawn - and only while this offering has room for another one.
+            if (gs_walk_seen(w, h)) continue;
+            if (!gs_walk_room(w, shape)) {
+                w->capped++;
+                continue;
+            }
 
             // **Running out is a failure that says so, never a quiet stop.** A
             // walk that hits its ceiling and carries on regardless reports
@@ -4438,7 +4628,7 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
             }
 
             gs_walk_path next = here;
-            next.press[next.len] = items[i].id;
+            next.act[next.len] = acts[i];
             next.len++;
             next.hash = h;
             w->queue[w->tail++] = next;
@@ -4618,6 +4808,79 @@ TEST(a_menu_knows_a_state_it_has_already_been_in) {
     a.knocking_for   = 0.0f;
 }
 
+TEST(the_walk_signs_in_through_the_door_rather_than_being_put_behind_it) {
+    // **The front end has one way in and it is not a button.** Everything the
+    // walk covers lives behind a password, and every state it has been shown so
+    // far it was *placed* in - seeded already signed in, because a walk that can
+    // only press things cannot get past a box that wants text. A door nobody
+    // can open is a door nobody has tested.
+    static gs_menu seed;
+    static gs_track t;
+    gs_panel_menu(&seed, &t);
+
+    // Signed out, at the door, with nothing filled in - and a driver in the
+    // roster whose password the walk knows one of, and one wrong one.
+    seed.signed_in = -1;
+    seed.screen    = GS_SCREEN_LOGIN;
+    seed.login_pick = -1;
+    seed.login_password[0] = '\0';
+    seed.login_confirm[0]  = '\0';
+    seed.login_code[0]     = '\0';
+    seed.login_error[0]    = '\0';
+    seed.login_making      = false;
+    seed.login_wants_code  = false;
+    seed.login_setting     = false;
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    gs_ui ui;
+    static gs_walk w;
+    SDL_memset(w.slot, 0, sizeof w.slot);
+    SDL_memset(w.shape, 0, sizeof w.shape);
+    w.capped = 0;
+    SDL_memset(w.offered, 0, sizeof w.offered);
+    SDL_memset(w.pressed, 0, sizeof w.pressed);
+    SDL_memset(w.never, 0, sizeof w.never);
+    SDL_memset(w.reached, 0, sizeof w.reached);
+    w.n_offered = 0;
+    w.n_pressed = 0;
+    w.n_never   = 0;
+    w.states    = 0;
+    w.edges     = 0;
+    w.typed     = 0;
+    w.deepest   = 0;
+    w.did_nothing = 0;
+    w.ran_out   = false;
+
+    // Told apart by what has been typed, and finished the moment it is inside:
+    // what is being asked here is whether the door opens, not what is behind it.
+    w.fine      = true;
+    w.words     = (int)SDL_arraysize(gs_walk_words);
+    w.per_shape = GS_WALK_PER_SHAPE;
+    w.stop_at  = GS_SCREEN_TITLE;
+    w.stop_set = true;
+
+    gs_walk_screen(&ui, &seed, &t, ren, GS_SCREEN_LOGIN, &w);
+
+    printf("  DOOR: %d states, %d actions (%d typed), %d deep, "
+           "%d of %d pressed, %d capped\n",
+           w.states, w.edges, w.typed, w.deepest, w.n_pressed, w.n_offered,
+           w.capped);
+
+    CHECK(!w.ran_out);
+
+    // **It got in, and nobody let it in.** No screen was handed to it and no
+    // state was set behind the door: it picked a driver, typed a password that
+    // happened to be right, and pressed the button.
+    CHECK(w.reached[GS_SCREEN_TITLE]);
+
+    // And the wrong password is in the walk too, so getting in is not something
+    // that happens to anything typed at it.
+    CHECK(w.typed > 0);
+}
+
 TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // **Not a map of first moves.** Every state the front end can be got into
     // from each screen, by pressing every control on it, and then every control
@@ -4648,6 +4911,15 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     w.n_pressed = 0;
     w.n_never   = 0;
     w.states    = 0;
+    w.typed     = 0;
+    // **One state per offering.** Every extra one is the whole path replayed
+    // again for every control on it, and what this walk is counting is the
+    // controls rather than the values behind them.
+    w.fine      = false;
+    w.words     = 1;
+    w.per_shape = 1;
+    w.stop_set  = false;
+    SDL_memset(w.reached, 0, sizeof w.reached);
 
     for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
         const gs_screen from = gs_every_screen[i];
@@ -4672,14 +4944,32 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     }
     states = w.states;
 
-    printf("  WALK total: %d offerings, %d presses, "
+    printf("  WALK capped %d states at %d per offering\n", w.capped,
+           w.per_shape);
+    printf("  WALK total: %d states, %d actions (%d typed), "
            "%d of %d pressable controls pressed, %d never pressable\n",
-           states, edges, w.n_pressed, w.n_offered, w.n_never);
+           states, edges, w.typed, w.n_pressed, w.n_offered, w.n_never);
 
     // **The claim, asserted rather than believed.** Every control the front end
     // offered in a state where it could be pressed, was pressed. Not a sample
     // of them and not most of them - if one is left, this is red.
     CHECK(w.n_pressed == w.n_offered);
+
+    // **And the number it is out of cannot quietly shrink.** The line above is
+    // necessary and nowhere near sufficient, because the denominator is what
+    // *this walk* reached: a walk that sees less still reports all of it. A
+    // narrower alphabet measured 727 controls where a wider one measured 758,
+    // and both said 100%.
+    //
+    // So the count is pinned, the way the golden replay is pinned. Moving it up
+    // is the ordinary result of the front end growing. **Moving it down is a
+    // deliberate act and wants a line in PROJECT_STATUS.md saying which
+    // controls stopped being reachable and why**, because the alternative is a
+    // green tick over a front end nobody is walking any more.
+    //
+    // The honest fix is a count taken without asking a walk what it found, and
+    // that is the last item of Phase 17 rather than this one.
+    CHECK(w.n_offered >= 727);
 
     // **It went further than one press.** The map above found the first move
     // out of eight screens; anything at all beyond that is more than it had.
@@ -5051,6 +5341,7 @@ int main(void) {
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
     run_every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real(ren);
     run_a_menu_knows_a_state_it_has_already_been_in(ren);
+    run_the_walk_signs_in_through_the_door_rather_than_being_put_behind_it(ren);
     run_the_walk_goes_as_deep_as_the_front_end_does(ren);
     run_every_control_is_known_by_name_and_answers_to_it(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);

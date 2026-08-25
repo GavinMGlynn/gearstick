@@ -95,6 +95,12 @@ void gs_ui_probe_press(uint32_t id)
     }
 }
 
+void gs_ui_probe_type(const char *text)
+{
+    if (ImGui::GetCurrentContext() == nullptr || text == nullptr) return;
+    ImGui::GetIO().AddInputCharactersUTF8(text);
+}
+
 void gs_ui_probe_settle(void)
 {
     if (ImGui::GetCurrentContext() == nullptr) return;
@@ -131,13 +137,19 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext *, ImGuiID id, const ImRect &,
     }
     it->disabled  = (flags & ImGuiItemFlags_Disabled) != 0;
     it->reachable = (flags & ImGuiItemFlags_NoNav) == 0;
+    it->typable   = false;
 }
 
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext *, ImGuiID id, const char *label,
-                                  ImGuiItemStatusFlags)
+                                  ImGuiItemStatusFlags flags)
 {
     gs_ui_item *it = gs_slot(id);
-    if (it != nullptr && label != nullptr) gs_name(it, label);
+    if (it == nullptr) return;
+    if (label != nullptr) gs_name(it, label);
+
+    // ImGui says which items take text of their own accord - a box, or a slider
+    // that can be typed into rather than dragged.
+    it->typable = (flags & ImGuiItemStatusFlags_Inputable) != 0;
 }
 
 void ImGuiTestEngineHook_Log(ImGuiContext *, const char *, ...) {}

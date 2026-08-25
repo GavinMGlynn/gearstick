@@ -41,6 +41,7 @@ typedef struct gs_ui_item {
 
     bool     disabled;            // drawn, but refusing to be pressed
     bool     reachable;           // the keyboard can land on it
+    bool     typable;             // a box that takes text rather than a press
 } gs_ui_item;
 
 #ifdef __cplusplus
@@ -63,6 +64,11 @@ int gs_ui_probe_count(void);
 // Press a control by id on the next frame - wherever it sits in the order, and
 // whether or not a keyboard could have got to it.
 void gs_ui_probe_press(uint32_t id);
+
+// **Type at whatever is taking text.** A password is not something a walk can
+// press its way past, and a front end whose door needs one is a front end a
+// press-only walk gets carried through rather than opens.
+void gs_ui_probe_type(const char *text);
 
 // **Put ImGui back to a standing start, so one press cannot colour the next.**
 // A walk restores the menu it is standing in by copying a value back over it,

@@ -1021,11 +1021,14 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       than reported, over 102 distinct offerings and 4,111 presses in 41
       seconds. The eleven controls that can never be pressed are counted apart
       so the number means what it says.*
-- [ ] **Every way in, not just Tab and Space.** Escape, the arrow keys, and
-      typed text — so the walk signs in through the door with a password rather
-      than being placed behind it.
-      *Verification: the walk starts signed out on the login screen, with no
-      screen handed to it, and reaches the title under its own steam.*
+- [x] **Every way in, not just Tab and Space.** Escape, the arrow keys and typed
+      text are all things a walk can do now. The door turned out to want a name
+      *and* a password typed, not a driver picked off a list, which is the sort
+      of thing only a walk that has to open it for itself finds out.
+      *Verification: seeded signed out at the login screen with no screen handed
+      to it, the walk types the driver's name, types a password that happens to
+      be the right one, and arrives at the title — in two moves, with a wrong
+      password in its vocabulary too.*
 - [ ] **The conditions the buttons are under.** Six places in the menu draw a
       control that is dead in some states and live in others, and a walk from
       one starting state never presses them. The walk starts from a seeded set
@@ -1087,12 +1090,15 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       leaves a track identical byte for byte to the one it began with.*
 - [ ] **The walk counts what it covered and fails if anything was missed.**
       This is the item the rest of the phase is for: coverage that is asserted
-      rather than believed. Every control on every screen, in every state the
-      walk reached, either pressed or named as unreachable with a reason — and a
-      control nobody pressed is a failure, not a gap somebody notices later.
-      *Verification: the test prints what it covered and the total it was
-      measured against; adding a button to any screen and not walking it turns
-      the tree red on the next run.*
+      rather than believed. Half of it is done and the half that is missing is
+      the important half — `pressed == offered` is asserted, but **the number it
+      is out of is what the walk itself reached**, so a walk that sees less
+      still reports all of it. One alphabet measured 727 controls where a wider
+      one measured 758, and both said 100%. The count has to come from
+      somewhere other than a walk asking itself. Until it does, the 727 is
+      pinned like the golden replay, and lowering it is a deliberate act.
+      *Verification: a control added to a screen and not walked turns the tree
+      red on the next run, without anybody adding a case for it.*
 
 ## Tails
 
