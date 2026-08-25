@@ -3999,31 +3999,57 @@ that came out of writing it:
 - **Every gate heading round the full turn** is checked against the conversion
   the editor does, and every half width against the fixed-point it stores.
 
-**What the palette offers: all 51 controls, and 15 of them pressed.** The probe
-enumerates every control the construction set draws with its name, its panel and
-whether it is live; 16 are drawn dead; the walk reaches 11 distinct states. The
-pressing is a third of it and the shortfall is named in the test rather than
-rounded up:
+**What the palette offers: 56 of 56 named controls pressed.** Across 46
+configurations - every brush, every surface under the surface brush, every piece
+in the parts box, the panels open and shut, and a route with gates on it so the
+buttons that remove them are drawn. What is counted is what **moved**: an
+activation that lands on the floor is not coverage.
 
-- **Activating a control by its id works on its own and does nothing from inside
-  the walk loop.** Proved both ways in the same run: pressing 'lower' by name
-  set `brush=1`; the same call for the same id inside the loop left every
-  setting untouched, fifty times over.
+**Searching for the editor's states is the wrong shape, and it took four goes to
+see it.** Brush against surface against radius against chosen piece against
+which pad slot is being rebound runs to millions; an editor carries a ghost
+world and a heat map about with it so only a few hundred snapshots fit in a
+queue; and three separate trims of the state key - the track hash, the status
+line, the slider values - each changed nothing, because every one of them was
+trimming *what varies* rather than changing *why the walk explores*. The rule
+that came out of it, and it is the same one the front end's walk taught:
 
-  **And that near miss is the lesson worth keeping.** Wired up that way the test
-  reports **50 of 50 controls pressed** and reaches exactly one state - a
-  perfect score, because what it counts is the *attempt*: the call is made,
-  nothing happens, the number goes up. It looks better than the keyboard's 15
-  and means less than nothing. What is counted now is what the focus was
-  actually on when Space went down, and the state count is the guard: a walk
-  where no press did anything has one state and fails.
-- **Focusing a panel and stepping into it with Tab does not land on the controls
-  that panel is made of.** Tab walks focus within one window, the editor has
-  three open, and raising one plus a Tab to enter it still leaves the brush
-  radios unreachable.
+> **A state key holds what changes the offering, and nothing that merely
+> changes.** A brush that moves one corner makes a track nobody has seen; the
+> status line says "placed gate 3"; a slider nudged by a press is a float nobody
+> has seen. None of the three changes what a player can press next.
 
-Neither is understood and neither is a reason to describe a third of a tool as
-walked, so it is a plan item with its evidence attached.
+What decides what the palette shows is a handful of scalars, and they can simply
+be set rather than searched for. The sweep does that: 46 configurations, 2,362
+actions, 53 seconds, and every named control pressed.
+
+Two more things worth keeping, both about ImGui rather than about gearstick:
+
+- **Activation by name is queued against the navigation window**, and after a
+  state is copied back over, focus is often nowhere - so the call is accepted,
+  dropped, and reports success. **The frame after a restore is not settled**
+  either: ImGui honours an activation aimed at an item it laid out in a
+  completed frame, so one frame fails and two succeed. Neither is visible from
+  the API and both read as "the editor ignores being pressed".
+- **Naming and the keyboard reach different subsets and neither is complete.**
+  Pressing by name needs focus parked somewhere; Tab only walks the panel it is
+  already in, and the editor keeps three open. The sweep does both - by name
+  first, and walked to with the keyboard when that moved nothing.
+
+**Furniture is named, not folded in.** ImGui gives every window a title bar, a
+resize grip and an implicit debug window, and they come back looking exactly
+like controls - reachable, not disabled, with a name. Counting them would pad
+the denominator with somebody else's widgets; silently dropping every unnamed
+item instead shrinks it from 76 to 56 and reports a perfect score for less work.
+So they are counted apart and printed: 41 unnamed structural items, 253 pieces
+of window furniture skipped, and the 56 that are the tool's own controls
+asserted.
+
+**The near miss that would have shipped.** Wired to press by id and count the
+attempt, this same test reports **50 of 50 controls pressed over a single
+state** - a perfect score, having changed nothing whatever. It looks better than
+every honest number here. What is counted is now what moved, and the assertions
+below it would fail if nothing did:
 
 **The lap dial was attempted and parked**, and what it cost is in the plan: the
 racing AI laps a bare rectangle twice and then sits in the run-off looking

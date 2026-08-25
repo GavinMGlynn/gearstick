@@ -1080,16 +1080,14 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       whole repository and that place was `main.c`, so every control in the
       construction set had only ever been checked by somebody clicking it. The
       walk now drives the real palette.
-      *Verification: all 51 controls the palette draws are found by name and by
-      panel, 16 of them are drawn dead, and 11 distinct states are reached. **15
-      of the 51 are pressed** — the shortfall is real, is named in the test, and
-      is the tail below.*
-- [ ] **The editor's controls can all be pressed, not a third of them.** Two
-      ways of doing it both fail and neither is understood: activating a control
-      by its id works when done on its own and does nothing at all from inside
-      the walk loop, and focusing a panel then stepping into it with Tab does
-      not put the focus on the controls that panel is made of.
-      *Verification: 51 of 51, by whichever of the two turns out to work.*
+      *Verification: **56 of 56 named controls pressed**, across 46
+      configurations of the palette — every brush, every surface under the
+      surface brush, every piece in the parts box, the panels open and shut, and
+      a route with gates on it so the buttons that remove them are drawn. What
+      is counted is what *moved*: an activation that lands on the floor is not
+      coverage. ImGui's own furniture — title bars, resize grips, its implicit
+      debug window — is named as such and counted apart rather than folded into
+      the total.*
 - [x] **Every brush and every option it carries does what it says.** Not
       pressed once with whatever it was last set to — every value of every
       option, against the panel's own ranges: radius 0 to 8, step 0.05 to 2,

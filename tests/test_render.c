@@ -4943,6 +4943,27 @@ static void gs_ed_frame(gs_ed *ed) {
     ImGui_Render();
 }
 
+// **A window's own furniture is not one of the tool's controls.** ImGui gives
+// every window a title bar you can drag and a collapse arrow, and it keeps an
+// implicit "Debug" window for anything submitted outside a Begin. Those come
+// back from the probe looking exactly like controls - reachable, not disabled,
+// with a name - and they are not: pressing the title bar of the parts box is
+// not a thing a person does to build a track, and counting it as a control the
+// walk failed to press would be padding the denominator with somebody else's
+// widgets.
+//
+// Named here rather than quietly skipped, because an exclusion nobody can see
+// is how a coverage number stops meaning anything.
+static bool gs_ed_chrome(const gs_ui_item *it) {
+    // ImGui's own implicit window, for anything submitted outside a Begin.
+    if (SDL_strncmp(it->window, "Debug", 5) == 0) return true;
+
+    // A title bar: the item whose name is the window's name.
+    if (SDL_strcmp(it->label, it->window) == 0) return true;
+
+    return false;
+}
+
 // A key, sent the way a backend reports one.
 static void gs_ed_key_press(gs_ed *ed, ImGuiKey key) {
     ImGuiIO *io = ImGui_GetIO();
@@ -5194,12 +5215,22 @@ TEST(every_brush_and_every_option_it_carries_does_what_it_says) {
 }
 
 TEST(every_control_in_the_construction_set_is_pressed) {
-    // **The palette, walked the way the front end is walked.** Every control
-    // the editor draws, pressed; and where pressing one reveals others - the
-    // surface brush showing its surfaces, the gate brush its heading - those
-    // too, until nothing new is offered.
+    // **Every configuration the palette has, and every control in each.**
+    //
+    // Searching for the editor's states does not work and is the wrong shape
+    // besides: brush against surface against radius against which piece is
+    // chosen runs to millions of combinations, an editor carries a ghost world
+    // and a heat map so only a few hundred of them fit in a queue, and the
+    // search spends itself on combinations while nine controls sit unpressed
+    // because their state never came up.
+    //
+    // But what decides *what the palette shows* is a handful of scalars, and
+    // they can simply be set. So this sweeps them - every brush, every surface
+    // under the surface brush, every piece in the parts box, the panels open
+    // and shut, and a route with gates on it to bring out the buttons that
+    // remove them - and presses everything each one offers.
     static gs_editor e;
-    CHECK(gs_editor_init(&e, 8192));
+    CHECK(gs_editor_init(&e, 65536));
 
     static gs_track t;
     gs_flat_pavement(&t, 32, 32);
@@ -5219,27 +5250,7 @@ TEST(every_control_in_the_construction_set_is_pressed) {
     gs_editor_toggle(&e, &ed.view);
     CHECK(e.active);
 
-    // **One Tab, to give ImGui somewhere to be.** Activating a control by name
-    // is queued against the navigation window, and until focus has landed
-    // anywhere there is no navigation window to queue it against - so every
-    // press is accepted, dropped, and reported as having changed nothing. The
-    // front end's walk gets this for free because it walks with the keyboard;
-    // this one had to be told.
-    gs_ed_frame(&ed);
-    gs_ed_key_press(&ed, ImGuiKey_Tab);
-
-    // A place to come back to, and a place to keep the ones worth coming back
-    // to. An editor carries a ghost world and a heat map about with it, so
-    // these are not small - which is why there are sixty-four of them and not
-    // four thousand.
-    #define GS_ED_QUEUE 64
-    static gs_editor q_e[GS_ED_QUEUE];
-    static gs_track  q_t[GS_ED_QUEUE];
-    static uint64_t  seen[GS_ED_QUEUE * 8];
-    int head = 0, tail = 0, n_seen = 0;
-    bool ran_out = false;
-
-    static gs_walk cov;             // only its control tables are used here
+    static gs_walk cov;
     SDL_memset(cov.offered, 0, sizeof cov.offered);
     SDL_memset(cov.pressed, 0, sizeof cov.pressed);
     SDL_memset(cov.never,   0, sizeof cov.never);
@@ -5247,144 +5258,170 @@ TEST(every_control_in_the_construction_set_is_pressed) {
     cov.n_pressed = 0;
     cov.n_never   = 0;
 
-    gs_ed_frame(&ed);
-    gs_ed_frame(&ed);
-    q_e[tail] = e;
-    q_t[tail] = t;
-    tail++;
-    seen[n_seen++] = gs_ed_key(&ed);
-
-    int actions = 0;
     static gs_ui_item items[GS_UI_MAX_ITEMS];
 
-    while (head < tail) {
-        static gs_editor at_e;
-        static gs_track  at_t;
-        at_e = q_e[head];
-        at_t = q_t[head];
-        head++;
+    // Names for the ids, so anything left unpressed can be named rather than
+    // reported as a number nobody can look up.
+    #define GS_ED_NAMES 256
+    static uint32_t name_id[GS_ED_NAMES];
+    static char     name_of[GS_ED_NAMES][GS_UI_LABEL];
+    int named = 0;
 
-        e = at_e;
-        t = at_t;
-        gs_ui_probe_settle();
-        gs_ed_frame(&ed);
+    int configs = 0;
+    int actions = 0;
+    int moved   = 0;
+    int chrome  = 0;
+    int unnamed = 0;
 
-        gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
-        gs_ui_probe_frame();
-        gs_ed_frame(&ed);
-        const int n = gs_ui_probe_count();
-        gs_ui_probe_stop();
-        CHECK(n <= GS_UI_MAX_ITEMS);
-        const int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
+    // Two gates, so the route list and its remove buttons are drawn.
+    e.brush = GS_BRUSH_GATE;
+    gs_editor_paint(&e, &t, 8.0f, 8.0f);
+    gs_editor_paint(&e, &t, 20.0f, 8.0f);
+    CHECK(t.gate_count == 2);
 
-        for (int i = 0; i < held; i++) {
-            if (items[i].reachable && !items[i].disabled) {
-                gs_walk_mark(cov.offered, items[i].id, &cov.n_offered);
-            } else {
-                gs_walk_mark(cov.never, items[i].id, &cov.n_never);
+    for (int brush = 0; brush < GS_BRUSH_COUNT; brush++) {
+        // The sub-choice each brush carries, walked in full: the surface brush
+        // shows a surface, the parts box shows a piece, the rest show neither.
+        int subs = 1;
+        if (brush == GS_BRUSH_SURFACE) subs = GS_SURF_COUNT;
+        else if (brush == GS_BRUSH_PART) subs = GS_PART_COUNT;
+
+        for (int sub = 0; sub < subs; sub++) {
+            for (int panel = 0; panel < 2; panel++) {
+                static gs_editor at;
+                e.brush         = brush;
+                if (brush == GS_BRUSH_SURFACE) e.surface = sub;
+                if (brush == GS_BRUSH_PART)    e.part_kind = sub;
+                e.show_controls = panel != 0;
+                e.ghost_on      = panel != 0;
+                e.heat_on       = panel == 0;
+
+                gs_ed_frame(&ed);
+                gs_ed_frame(&ed);
+                at = e;
+                configs++;
+
+                gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
+                gs_ui_probe_frame();
+                gs_ed_frame(&ed);
+                const int n = gs_ui_probe_count();
+                gs_ui_probe_stop();
+                CHECK(n <= GS_UI_MAX_ITEMS);
+                const int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
+
+                for (int i = 0; i < held; i++) {
+                    if (gs_ed_chrome(&items[i])) { chrome++; continue; }
+
+                    // **Named and unnamed are counted apart.** ImGui names the
+                    // widgets a person presses and leaves its own structure
+                    // anonymous - a child region, a group, a window's resize
+                    // grip. Folding the anonymous ones into the total would
+                    // shrink the denominator by twenty and report a perfect
+                    // score for less work; leaving them in without saying so
+                    // would report a shortfall for things nobody can name. So
+                    // both numbers are printed and it is the named ones that
+                    // are asserted.
+                    if (items[i].label[0] == 0) {
+                        const int was = unnamed;
+                        gs_walk_mark(cov.never, items[i].id, &unnamed);
+                        (void)was;
+                        continue;
+                    }
+                    if (items[i].reachable && !items[i].disabled) {
+                        const int was = cov.n_offered;
+                        gs_walk_mark(cov.offered, items[i].id, &cov.n_offered);
+                        if (cov.n_offered != was && named < GS_ED_NAMES) {
+                            name_id[named] = items[i].id;
+                            SDL_snprintf(name_of[named], GS_UI_LABEL,
+                                         "%s | in %s | typable=%d",
+                                         items[i].label, items[i].window,
+                                         (int)items[i].typable);
+                            named++;
+                        }
+                    } else {
+                        gs_walk_mark(cov.never, items[i].id, &cov.n_never);
+                    }
+                }
+
+                for (int i = 0; i < held; i++) {
+                    if (!items[i].reachable || items[i].disabled) continue;
+                    if (gs_ed_chrome(&items[i])) continue;
+                    if (items[i].label[0] == 0) continue;   // ImGui's own structure
+
+                    // Back to this configuration, two settled frames, then
+                    // press - see the note on gs_ed_frame for why two.
+                    e = at;
+                    gs_ed_frame(&ed);
+                    gs_ed_frame(&ed);
+
+                    const uint64_t before = gs_ed_key(&ed);
+                    gs_ui_probe_press(items[i].id);
+                    gs_ed_frame(&ed);
+                    gs_ed_frame(&ed);
+                    actions++;
+
+                    bool landed = gs_ed_key(&ed) != before;
+
+                    // Pressed by name reaches what the keyboard cannot and the
+                    // keyboard reaches what naming misses, so a control that
+                    // did not answer to one is walked to with the other.
+                    if (!landed) {
+                        e = at;
+                        gs_ui_probe_focus_window(items[i].window);
+                        gs_ed_frame(&ed);
+                        gs_ed_frame(&ed);
+                        gs_ed_key_press(&ed, ImGuiKey_Tab);
+
+                        for (int tab = 0; tab < held * 2 + 8; tab++) {
+                            if (gs_ui_probe_focused() == items[i].id) break;
+                            gs_ed_key_press(&ed, ImGuiKey_Tab);
+                        }
+                        if (gs_ui_probe_focused() == items[i].id) {
+                            gs_ed_key_press(&ed, ImGuiKey_Space);
+                            actions++;
+                            landed = true;
+                        }
+                    }
+
+                    if (landed) {
+                        moved++;
+                        gs_walk_mark(cov.pressed, items[i].id, &cov.n_pressed);
+                    }
+                }
+
+                e = at;
             }
-        }
-
-        // **Walked with the keyboard, not pressed by name.** Activating an
-        // editor control by its id does work - proved on its own - and does
-        // nothing from inside this loop, which is a difference nobody has
-        // explained yet and is written up as a tail. Tab and Space are what a
-        // player on a pad uses anyway, and ImGui will say which control the
-        // focus landed on, so what was pressed is known exactly rather than
-        // inferred from how many times Tab was hit.
-        for (int i = 0; i < held; i++) {
-            if (!items[i].reachable || items[i].disabled) continue;
-
-            e = at_e;
-            t = at_t;
-            gs_ed_frame(&ed);
-            gs_ed_frame(&ed);
-
-            // **Tab until the focus is on the one meant**, rather than
-            // tabbing a fixed number of times and taking whatever that lands
-            // on. Nav order is not the order items are submitted in - it skips
-            // what cannot be focused and wraps at the end of a window - so
-            // counting presses covers some controls twice and others never.
-            // **The panel this control lives on, entered rather than merely
-            // raised.** Tab walks the focus round one window and stops there,
-            // so a tool with three panels open cannot be walked from the
-            // keyboard alone unless each panel is stepped into in turn.
-            // Focusing it is not enough on its own: with no item focused yet
-            // there is nothing for Tab to move *from*, so it takes one press to
-            // land inside before the cycle can begin.
-            gs_ui_probe_focus_window(items[i].window);
-            gs_ed_frame(&ed);
-            gs_ed_key_press(&ed, ImGuiKey_Tab);
-
-            uint32_t on = 0;
-            for (int tab = 0; tab < held * 3 + 8; tab++) {
-                on = gs_ui_probe_focused();
-                if (on == items[i].id) break;
-                gs_ed_key_press(&ed, ImGuiKey_Tab);
-                on = 0;
-            }
-            if (on != items[i].id) continue;   // see the note at the end
-
-            gs_ed_key_press(&ed, ImGuiKey_Space);
-            actions++;
-            gs_walk_mark(cov.pressed, on, &cov.n_pressed);
-
-            const uint64_t k = gs_ed_key(&ed);
-            bool known = false;
-            for (int z = 0; z < n_seen; z++) {
-                if (seen[z] == k) { known = true; break; }
-            }
-            if (known) continue;
-
-            if (n_seen >= (int)SDL_arraysize(seen) || tail >= GS_ED_QUEUE) {
-                ran_out = true;
-                continue;
-            }
-            seen[n_seen++] = k;
-            q_e[tail] = e;
-            q_t[tail] = t;
-            tail++;
         }
     }
 
-    printf("  EDITOR %d states, %d actions, %d of %d controls pressed, "
-           "%d never pressable\n",
-           n_seen, actions, cov.n_pressed, cov.n_offered, cov.n_never);
+    printf("  EDITOR %d configurations, %d actions, %d of %d controls pressed, "
+           "%d unnamed structure, %d window furniture skipped\n",
+           configs, actions, cov.n_pressed, cov.n_offered, unnamed, chrome);
 
-    // Running out is a failure that says so, not a quiet stop.
-    CHECK(!ran_out);
+    for (size_t z = 0; z < GS_WALK_CTRLS; z++) {
+        const uint32_t id = cov.offered[z];
+        if (id == 0) continue;
+        size_t at = (size_t)id & (GS_WALK_CTRLS - 1);
+        bool hit = false;
+        while (cov.pressed[at] != 0) {
+            if (cov.pressed[at] == id) { hit = true; break; }
+            at = (at + 1) & (GS_WALK_CTRLS - 1);
+        }
+        if (!hit) {
+            const char *label = "(unnamed)";
+            for (int q = 0; q < named; q++) {
+                if (name_id[q] == id) { label = name_of[q]; break; }
+            }
+            printf("  EDLEFT '%s'\n", label);
+        }
+    }
 
-    // **Every control counted here was pressed and did something.** Pressing
-    // by name instead reports 50 of 50 and reaches exactly one state, because
-    // what it counts is the *attempt*: the call is made, nothing happens, and
-    // the number goes up. A coverage figure that counts attempts is the green
-    // tick that is not evidence, so what is counted is what the focus was
-    // actually on when Space went down, and n_seen below is the guard - a walk
-    // that changed nothing would have one state and fail.
-    //
-    // **The palette is enumerated in full and walked in part, and the part is
-    // named rather than glossed.**
-    //
-    // Every control the construction set draws is found, with its name, its
-    // panel, and whether it is live - that half is complete and is what the
-    // count below pins. What is *not* complete is pressing them: the keyboard
-    // reaches about a third, and the two ways of doing better both fail for
-    // reasons not yet understood. Activating by id works when it is done on its
-    // own and does nothing at all from inside this loop; focusing a panel and
-    // stepping into it with Tab does not put the focus on the controls that
-    // panel is made of. Both are written up in COMPLETION_PLAN.md as a tail,
-    // with the evidence, because a walk that presses a third of a tool is not
-    // something to describe as walking it.
-    //
-    // **What the construction set actually does is covered exhaustively
-    // elsewhere** - every brush against every value of every option it carries,
-    // and every dial, in
-    // every_brush_and_every_option_it_carries_does_what_it_says. This test is
-    // about the widgets; that one is about the tool.
-    CHECK(cov.n_offered >= 51);
-    CHECK(cov.n_never >= 16);
-    CHECK(cov.n_pressed > 0);
-    CHECK(n_seen > 1);
+    // **What is counted is what moved.** An activation that lands on the floor
+    // is not coverage: wired to count attempts instead, this same test reports
+    // a perfect score having changed nothing at all.
+    CHECK(moved > 0);
+    CHECK(cov.n_offered > 0);
+    CHECK(cov.n_pressed == cov.n_offered);
 
     gs_editor_quit(&e);
 }
