@@ -309,6 +309,46 @@ target_include_directories(gearstick_ui PUBLIC
     src/ui/dcimgui
     src/ui/dcimgui/backends)
 target_link_libraries(gearstick_ui PUBLIC ${GS_SDL})
+
+# **The item hooks, on in every build.** Dear ImGui reports every item it adds
+# to whoever registers for it; that is how a test can ask a screen what is on it
+# instead of pressing Tab until something happens. The define only compiles the
+# call sites in - each one is `if (g.TestEngineHookItems)` against a flag that
+# is false unless a test turned it on, so the game pays a predictable branch per
+# widget and nothing else. It does not change ImGui's structures, so there is no
+# ABI question. The hooks themselves are ours, in gearstick_ui_probe, and the
+# game links them because imgui.cpp names them whether or not anybody listens.
+target_compile_definitions(gearstick_ui PUBLIC IMGUI_ENABLE_TEST_ENGINE)
+
+# The one first-party file in the tree that has to be C++, so it cannot go
+# through gs_configure() - that set carries -Wstrict-prototypes and
+# -Wmissing-prototypes, which GCC rejects for C++ and -Werror then makes fatal.
+# The rest of the set is applied here by hand rather than dropped: it is our
+# code, and vendored code being exempt is not a licence for ours to be.
+add_library(gearstick_ui_probe STATIC src/ui/gs_ui_probe.cpp)
+target_include_directories(gearstick_ui_probe
+    PUBLIC src
+    PRIVATE ext/imgui ext/imgui/backends)
+target_compile_definitions(gearstick_ui_probe PRIVATE IMGUI_ENABLE_TEST_ENGINE)
+if(MSVC)
+    target_compile_options(gearstick_ui_probe PRIVATE /W4 /utf-8)
+    if(GEARSTICK_WERROR)
+        target_compile_options(gearstick_ui_probe PRIVATE /WX)
+    endif()
+else()
+    target_compile_options(gearstick_ui_probe PRIVATE
+        -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion
+        -Wpointer-arith -Wunused-parameter -Wdouble-promotion)
+    if(GEARSTICK_WERROR)
+        target_compile_options(gearstick_ui_probe PRIVATE -Werror)
+    endif()
+endif()
+if(GEARSTICK_ASAN AND NOT MSVC)
+    target_compile_options(gearstick_ui_probe PRIVATE
+        -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(gearstick_ui_probe PRIVATE -fsanitize=address,undefined)
+endif()
+target_link_libraries(gearstick_ui PUBLIC gearstick_ui_probe)
 set_target_properties(gearstick_ui PROPERTIES C_VISIBILITY_PRESET hidden)
 
 # ---------------------------------------------------------------------------
@@ -645,9 +685,9 @@ if(GEARSTICK_TESTS)
     add_test(NAME gearstick_render COMMAND gearstick_render_tests)
     # No display, no audio device, no pads - and the software renderer, so the
     # pixels are the same ones on every platform's CI.
-    gs_sanitizer_env(_lsan)
+    gs_sanitizer_env(_sanitizers)
     set_tests_properties(gearstick_render PROPERTIES
-        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIO_DRIVER=dummy;${_lsan}"
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIO_DRIVER=dummy;${_sanitizers}"
         TIMEOUT 180)
 
     # A track through a real file, not just a buffer: the format is what a

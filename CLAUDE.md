@@ -60,6 +60,19 @@ line — physics that runs per frame is a desync with extra steps.
 - **A test that only sometimes tests its rule is worse than no test**, because
   the green tick is not evidence. Build the situation explicitly rather than
   depending on what a generator happened to produce.
+- **Cover every scenario, not a representative sample of them.** The standard is
+  100%: every control, every dial value, every combination, every state a screen
+  can be in. Sampling is what has been done up to now and it is why faults keep
+  reaching a person clicking around instead of a red tree. **Do not size the
+  claim to fit a slow test — fix the test.** The bound that makes exhaustive look
+  unaffordable is nearly always a step doing work it does not need: rasterising
+  a frame to read back a menu, or replaying a path it could have snapshotted.
+  Make the step cheap, then walk all of it.
+- **Coverage is asserted, not believed.** A test that walks a space states how
+  big the space is and how much of it it covered, and fails when those differ —
+  so a control added next month and never walked turns the tree red by itself.
+  Anything genuinely left out is named in the test, with its reason, where the
+  next person will read it.
 - **Commit each finished item and push.**
 - **Every commit that lands an item updates both living docs in that same
   commit**: `docs/PROJECT_STATUS.md` (what now works, with its verification) and

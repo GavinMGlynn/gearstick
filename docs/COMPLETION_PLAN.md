@@ -939,6 +939,149 @@ asked.
       does not start racing, and one left in the lobby does — both checked
       against a real server, and the check fails if the rule is removed.*
 
+## Phase 17 — The front end, walked by machine
+
+Every navigation fault this week was found by somebody sitting and clicking: the
+results screen that put itself back, the Race button that did nothing, the
+editor you could not get out of. The front end is the last part of the game
+still checked by hand, and a person only walks the paths they think of.
+
+A walk exists and it is one move deep: from a fresh menu placed on each screen
+it presses Tab *n* times, presses Space, and writes down where that lands. It
+would have caught this week's faults and it is worth keeping. **It is not
+coverage of the paths through the front end and is not to be described as one.**
+What is wanted is a walker that signs in for itself, presses on from where it
+got to, and keeps going until it has seen every state the front end can be in —
+and the front end includes the construction set, which is where nearly all of
+the combinations are.
+
+**The standard here is every scenario, not a representative sample of them.**
+Where a sample has been taken so far the game has been shipped with faults a
+person then found by clicking, which is the whole reason this phase exists. So
+no item below bounds what is covered in order to fit a budget. The budget is
+what gets fixed: a step that costs eight milliseconds because it rasterises a
+1280x720 frame is what makes exhaustive look unaffordable, and that step does
+not need to draw anything at all. Make the step cheap, then walk everything.
+
+- [x] **A frame that is drawn is presented.** SDL hands back the draw commands
+      and vertices it has queued only when the renderer is presented or flushed,
+      so a test that drew forty thousand frames and presented none of them grew
+      without bound — and took the machine down rather than failing.
+      *Verification: the render suite now holds flat at about 450 MB where it
+      used to climb past 2 GB, and every renderer test passes.*
+- [x] **A test with a runaway in it fails instead of taking the machine.**
+      Sanitized tests run under a two-gigabyte ceiling.
+      *Verification: the same test, before its fix, stops itself and names the
+      limit it hit, instead of ending the session and leaving no log.*
+- [x] **A step of the walk stops costing a drawn frame.** Every keypress was
+      rasterising two full frames through the software renderer under
+      sanitizers, and a walk that only lays a menu out and reads it back needs
+      no pixels at all. The walk's frame now stops at the layout.
+      *Verification: the renderer suite went from seven minutes forty to twelve
+      seconds and says exactly what it said before — the same tests, all
+      passing. It fits its three-minute budget with room to spare, where before
+      it did not finish at all.*
+- [x] **A destination that is not a screen fails the test.** The walk's
+      description had claimed this all along while the code quietly dropped such
+      a destination — the same condition that filtered out a screen leading to
+      itself was swallowing it.
+      *Verification: a button rigged to name a screen that does not exist turns
+      the test red and names it; putting the button back turns it green. That is
+      how we know the check is checking.*
+- [x] **Controls are known by name, not by how many Tabs away they are.** Dear
+      ImGui already reports every item it draws and can be told to press one by
+      name; those hooks are now wired up, so a screen can be asked what is on it
+      — including the controls drawn dead and the ones the keyboard skips, which
+      a Tab walk can never see at all.
+      *Verification: a button inserted at the very top of the title screen added
+      itself to the map and left all 190 other controls with the names they
+      already had. Pressing by name reaches every screen that pressing Tab
+      reached, and dropping the names turns the test red.*
+- [ ] **A menu state can be recognised when it comes round again.** A walk that
+      keeps going needs to know where it has already been. A menu is a plain
+      value apart from one borrowed pointer at `lobby`, so this is a hash over
+      the bytes a control can change.
+      *Verification: two menus differing only in something no control can reach
+      hash alike; signing in, changing screen or picking a track do not.*
+- [ ] **The walk goes as deep as the front end does.** Breadth-first from the
+      states already reached rather than one press from a fresh menu, so a fault
+      that takes two presses to reach — pick a track, then race — is reachable at
+      all.
+      *Verification: a two-press fault introduced on purpose is caught, and
+      taking it out again turns the test green.*
+- [ ] **Every way in, not just Tab and Space.** Escape, the arrow keys, and
+      typed text — so the walk signs in through the door with a password rather
+      than being placed behind it.
+      *Verification: the walk starts signed out on the login screen, with no
+      screen handed to it, and reaches the title under its own steam.*
+- [ ] **The conditions the buttons are under.** Six places in the menu draw a
+      control that is dead in some states and live in others, and a walk from
+      one starting state never presses them. The walk starts from a seeded set
+      instead: signed out and in, online and offline, a library empty and full,
+      a track picked and not, results present and absent.
+      *Verification: the destination of a button that only lights up once a
+      track is picked appears in the map.*
+- [ ] **Every value of every dial, not three interesting ones.** Laps from one
+      to twenty, every mode, every gravity preset and the brush that is not a
+      preset, every vehicle and every colour — the model is small and
+      predictable on purpose, which is exactly what makes walking all of it
+      affordable rather than clever.
+      *Verification: the walk enumerates each dial's full range and presses
+      every value in it; a value added to a dial and left unhandled turns the
+      test red without anybody adding a case.*
+- [ ] **The number of players changes what the setup screen *is*, so the walk
+      changes with it.** One to four players is one to four rows on the grid,
+      each with a driver, a vehicle and a colour of its own, and a guest is not
+      a roster driver — so the control set is different at every count rather
+      than merely longer.
+      *Verification: every control at every player count appears in the map, and
+      dropping from four players to two leaves nothing behind that a press can
+      still reach.*
+- [ ] **What the walk proves, said as properties.** No screen without a way off
+      it — including the two exempt today; the title reachable from everywhere;
+      every screen reachable from the title; and no control that does nothing at
+      all in every state it can be pressed in.
+      *Verification: each property fails on its own when the rule behind it is
+      taken out.*
+- [ ] **The editor is walked by machine as well.** It is not a `gs_screen`, so
+      the walk cannot currently see it at all — and it is the half of the game
+      with the most ways to be wrong.
+      *Verification: the walk reaches the editor through New and Edit on the
+      tracks screen and leaves it again, without being placed there.*
+- [ ] **Every brush and every option it carries is pressed.** Elevation, the
+      surfaces, gravity and gates each carry settings of their own — the step,
+      which surface, how strong, which way a gate faces — and pressing each
+      brush once with whatever it was last set to is not coverage of any of it.
+      *Verification: the map names every brush-and-setting pair there is, and a
+      setting that quietly stops taking effect turns the test red.*
+- [ ] **Brushes are walked in combination, exhaustively.** Ice on a slope,
+      gravity under a ramp, a gate on ground that moves afterwards: the faults
+      worth finding are in what one brush did to what another had already done,
+      and a sample of those combinations is a sample of the faults. An edit is
+      simulation work on a plain value, so it costs microseconds once the walk
+      is not drawing — there is no reason to sample it.
+      *Verification: the walk states how many brush-and-setting combinations
+      exist and how many it applied, and those two numbers are equal.*
+- [ ] **Building a track is walked end to end.** New, shape the ground, paint a
+      surface, set the gravity, place a route, name it, save it, come back to it
+      and race it — performed as one sequence by the machine, not as a set of
+      tests that each start halfway through.
+      *Verification: the track the walk builds loads, validates, and is raced to
+      a finish that the simulation agrees is a finish.*
+- [ ] **Undo is walked against the combinations, not against single edits.**
+      Every edit the walk makes goes into the history, and the history is what
+      makes an editor safe to experiment in.
+      *Verification: any prefix of the walk's edits, undone back to the start,
+      leaves a track identical byte for byte to the one it began with.*
+- [ ] **The walk counts what it covered and fails if anything was missed.**
+      This is the item the rest of the phase is for: coverage that is asserted
+      rather than believed. Every control on every screen, in every state the
+      walk reached, either pressed or named as unreachable with a reason — and a
+      control nobody pressed is a failure, not a gap somebody notices later.
+      *Verification: the test prints what it covered and the total it was
+      measured against; adding a button to any screen and not walking it turns
+      the tree red on the next run.*
+
 ## Tails
 
 Found while implementing something else. Added when found, not when remembered.
@@ -1483,3 +1626,12 @@ worth as much as what was decided about it.
 - [x] **A door nobody answers says so.** A wrong key means the server cannot
       decrypt what we sent and has nothing to reply to, so the lobby knocked
       silently forever. It now names the three things it could be.
+- [ ] **The tracks screen puts a whole library between you and its buttons.**
+      *(Found walking the front end by machine — see Phase 17.)* A pad reaches
+      Back only after stepping through every track somebody owns. Escape leaves,
+      so it is a long walk rather than a trap, but it is why the walk needs
+      seventy-two steps and why that screen is exempt from the no-trap check.
+- [ ] **Login and tracks are exempt from the no-trap check.** *(Same walk.)*
+      Login because getting out of it needs a typed password, tracks for the
+      reason above. Both exemptions close when the walk can type and press
+      Escape — Phase 17.

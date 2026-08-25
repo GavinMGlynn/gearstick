@@ -48,15 +48,27 @@ function(gs_configure target)
     endif()
 endfunction()
 
-# The suppressions LeakSanitizer needs to be useful, as an environment setting.
+# What a sanitized test needs in its environment: the leak suppressions, and a
+# ceiling on how much memory it is allowed to want.
 #
-# Without it a sanitized run of anything that opens an audio device reports two
-# allocations inside SDL's PulseAudio backend, and a report that is noisy on a
-# clean tree is a report nobody reads. See cmake/lsan.supp for what is in it and
-# why each entry is somebody else's leak.
+# Without the suppressions a sanitized run of anything that opens an audio
+# device reports two allocations inside SDL's PulseAudio backend, and a report
+# that is noisy on a clean tree is a report nobody reads. See cmake/lsan.supp
+# for what is in it and why each entry is somebody else's leak.
+#
+# **The ceiling is there because a test with a runaway in it must fail rather
+# than take the machine.** A frame drawn and never presented leaves its draw
+# commands on SDL's queue, so a test that drew forty thousand of them grew
+# without bound - and on a laptop running the tree inside a VM the first thing
+# to die was the VM, which reports nothing, keeps no log and loses the session.
+# Two gigabytes is far above anything here (the heaviest test peaks near four
+# hundred megabytes) and far below the room a developer machine has, so it
+# turns "the box went away" into a named test that failed.
 function(gs_sanitizer_env out)
     if(GEARSTICK_ASAN AND NOT MSVC)
-        set(${out} "LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/cmake/lsan.supp"
+        set(${out}
+            "LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/cmake/lsan.supp"
+            "ASAN_OPTIONS=hard_rss_limit_mb=2048"
             PARENT_SCOPE)
     else()
         set(${out} "" PARENT_SCOPE)

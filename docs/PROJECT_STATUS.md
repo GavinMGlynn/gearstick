@@ -3600,6 +3600,147 @@ replacement never bound.
 
 ---
 
+## Walking the front end by machine, 2026-08-23
+
+**What is true today: the front end is walked one move deep, and that walk
+passes.** It is not coverage of the paths through the front end, the editor is
+not in it at all, and neither is to be described otherwise. Phase 17 of the
+completion plan is the work to make it one; this section is the detail behind
+those items.
+
+### The crash that stopped it
+
+Two sessions died on 2026-08-23 with the terminal falling straight back to
+PowerShell. It looked like WSL breaking and it was not. `gearstick_render_tests`
+allocated at about 37 MB a second without bound; the WSL VM here gets 15.5 GB,
+and when it runs out the whole VM goes rather than the process — no Linux OOM
+message, no Windows bugcheck, and `journalctl` is volatile-only here so the
+previous boot leaves nothing to read. Both deaths were within minutes of
+starting that binary — one from a rebuild-and-run, one from `ctest -R
+gearstick_render`.
+
+Reproduced under a 3 GB cgroup cap it reached 2.5 GB still climbing, inside
+`every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real`. ASan's live
+memory profile named the holder exactly: 805 MB in **two** allocations under
+`SDL_AllocateRenderVertices`, and 391 MB in **4.4 million** allocations under
+`AllocateRenderCommand`, both below
+`ImGui_ImplSDLRenderer3_RenderDrawData`. That is SDL's render command queue.
+`FlushRenderCommands` (`ext/sdl/src/render/SDL_render.c:310`) is what recycles
+the commands and resets `vertex_data_used`, and it runs on present or on an
+explicit flush. `gs_ui_frame` drew and never presented, so all forty-odd
+thousand frames of the walk stayed queued. The other tests in that file are
+presentless too and get away with it because `SDL_RenderReadPixels` flushes;
+this one reads no pixels.
+
+The fix is one line in `gs_ui_frame` — `SDL_RenderPresent(ui->ren)`, which is
+what the game itself does at `src/frontend/game/main.c:2057`. After it: memory
+flat at about 455 MB, peak 557 MB, every renderer test passing, 7:40 wall clock.
+`gs_sanitizer_env` in `cmake/CompilerWarnings.cmake` now also sets
+`ASAN_OPTIONS=hard_rss_limit_mb=2048`, so the next runaway of this kind stops
+itself and says so instead of ending the session.
+
+**Still red on time, not on memory:** `ctest -R gearstick_render` reports
+`***Timeout 180.11 sec`. The suite needs 7:40 and the test property allows 180.
+
+### What the walk covers, exactly
+
+`gs_ui_exits` takes each of the eight screens in `gs_every_screen` — every
+`gs_screen` except `GS_SCREEN_RACE`, correctly, since that is not a panel — and
+for *n* from 0 to 71 starts from a **fresh** menu on that screen, presses Tab
+*n* times, presses Space, and records the destination if the screen changed.
+Two things are then asserted and only two: `CHECK(found > 0)` for every screen
+but `GS_SCREEN_LOGIN` and `GS_SCREEN_TRACKS`, and a breadth-first `CHECK(home)`
+that the title is reachable, with the same two exempt.
+
+The third property its own comment claims — that no exit lands on a screen that
+is not a screen — **is now asserted**, and was not before: `m.screen <
+GS_SCREEN_COUNT` appeared in `gs_ui_exits` only as a filter, so an out-of-range
+destination was dropped in silence by the same condition that filtered out a
+screen leading to itself. A `CHECK` now runs before that filter. Verified by
+injection rather than by reading it: one control in `gs_menu.c` rigged to return
+`GS_SCREEN_COUNT + 1` turns the walk red and names it, and restoring the control
+turns it green.
+
+What it therefore does not cover: anything two presses deep, because the menu is
+reset every iteration on purpose; anything reachable only from a different
+starting state, and there are six `ImGui_BeginDisabled` sites in `gs_menu.c`
+whose controls are dead in the one state it uses; anything needing Escape, the
+arrow keys, the mouse or typed text; any control past the seventy-second Tab;
+any control whose fault does not change the screen; every player count except
+the one the fresh menu holds; and the editor, which is not a `gs_screen`.
+
+### Notes for the exhaustive walk
+
+- **Nothing in this walk needs pixels, and it no longer asks for any.** Done:
+  `gs_ui_frame` now runs the two backend `NewFrame` calls, `ImGui_NewFrame`,
+  `gs_menu_frame` and `ImGui_Render`, and stops there. `SDL_RenderClear`,
+  `cImGui_ImplSDLRenderer3_RenderDrawData` and the `SDL_RenderPresent` that had
+  been added to stop the queue growing are all gone — with nothing drawn there
+  is no queue to grow. `ImGui_Render` stays because ending the frame is what
+  settles focus for the next one; it builds draw data in memory that nobody
+  reads. **The renderer suite went from 7:40 to 12.37s**, every test still
+  passing and saying the same thing, which is a 37x step and the difference
+  between "a sample is all we can afford" and "walk the whole thing". The tests
+  that do want pixels use `gs_panel_of` and a frame of their own, untouched.
+- **The cost model, which is what made a sample look sensible.** Per screen the walk draws
+  `72 x 4 + 2 x (71 x 72 / 2)` = 5,400 frames, so 43,200 across eight screens,
+  at roughly 8 ms each — a software-rendered 1280x720 ImGui frame under ASan.
+  Reaching the *n*th control by pressing Tab *n* times is the quadratic term and
+  it is also what makes the map say "the fifth control" instead of naming a
+  button. Addressing controls by their ImGui ID fixes the cost and the staleness
+  together. `imgui_internal.h` is where nav focus can be set directly; it is
+  vendored and pinned, so using it is a decision to take rather than a risk to
+  carry.
+- **Controls are enumerated and pressed by name. Done.** `src/ui/gs_ui_probe`
+  implements the four hooks Dear ImGui's own test engine registers —
+  `ImGuiTestEngineHook_ItemAdd`, `_ItemInfo`, `_Log` and
+  `ImGuiTestEngine_FindItemDebugLabel` — and nothing else: no test engine, no
+  new submodule, about 120 lines of C++ behind a C header. `IMGUI_ENABLE_TEST_ENGINE`
+  is defined for the whole `gearstick_ui` target, which compiles in call sites
+  of the form `if (g.TestEngineHookItems)` against a flag that is false unless a
+  test sets it, so the game pays one predictable branch per widget. The define
+  does not appear in any `#ifdef` inside `ImGuiContext`, so there is no ABI
+  question; it gates declarations and macros only.
+
+  What comes back per item is the ImGui id, the label, the owning window, and
+  whether it was disabled or unreachable by nav. **The id is the identity** — a
+  hash of how the control was made and of the id stack it was made in, not of
+  where it sits — which is what makes a map keyed on it survive an edit.
+  Measured, not assumed: a `ImGui_Button` inserted above everything else on the
+  title screen added two entries to the map (itself and one structural item) and
+  left all 190 pre-existing controls on the same ids.
+
+  `ImGui::ActivateItemByID` presses one directly, which costs one frame instead
+  of the *n* frames of tabbing to the nth control — the second half of what made
+  exhaustive look unaffordable. It also presses what the keyboard cannot reach.
+
+  ImGui names the widgets a person presses and leaves its own structural items
+  anonymous — table cells, child regions, groups — so the test asserts a name on
+  the ones that matter: **a control that moves a player between screens must be
+  named.** Verified by injection: making the label hook drop its labels turns
+  the walk red, restoring it turns it green. The probe is first-party, so it
+  carries the project's warning set by hand rather than going through
+  `gs_configure()` — that set has `-Wstrict-prototypes` and
+  `-Wmissing-prototypes` in it, which GCC rejects for C++ and `-Werror` then
+  makes fatal. ImGui's own headers are included inside a `#pragma GCC
+  diagnostic push/ignored` for the conversion warnings, which is narrower than
+  exempting the file and keeps our own code strict.
+- **Recognising a state already seen.** `gs_menu` is a plain value with one
+  exception — `const gs_lobby *lobby` — so a hash over its bytes needs that
+  member skipped or followed, or two identical menus will hash differently. That
+  hash is what turns a walk that goes deeper into one that terminates.
+- **The player count is a dimension, not a value.** One to four players is one
+  to four grid rows, each carrying a driver, a vehicle and a colour, so the set
+  of controls differs at each count rather than merely growing.
+- **The editor is where the combinations live, and they are all walked.** The
+  standard for this phase is every scenario, not a sample — see the Discipline
+  section of `CLAUDE.md`. An edit is simulation work on a plain value with no
+  drawing in it, so once the walk stops rasterising, a combination costs
+  microseconds and there is nothing to trade away. Anything that genuinely
+  cannot be reached is named in the test with its reason, and the walk asserts
+  that what it covered equals what exists rather than leaving the reader to
+  assume it.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

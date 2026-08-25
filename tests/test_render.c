@@ -28,6 +28,7 @@
 #include "ui/gs_menu.h"
 #include "ui/gs_hud.h"
 #include "ui/gs_style.h"
+#include "ui/gs_ui_probe.h"
 #include "core/gs_ai.h"
 #include "dcimgui.h"
 #include "backends/dcimgui_impl_sdl3.h"
@@ -3918,10 +3919,343 @@ static void gs_panel_menu(gs_menu *m, gs_track *t) {
     m->track_progress = 0.5f;
 }
 
+// ---------------------------------------------------------------------------
+// Driving the front end the way a person does
+//
+// **"These types of issues are pretty basic... can we formally test all the
+// paths through the UI. It is inefficient for me to trace all of these
+// behaviours."** Every navigation fault found by hand this week was a decision
+// buried in drawing code where nothing could reach it: a Race button offered
+// before the server had answered, a results screen that put itself back on
+// screen, Back from the records table throwing away the results behind it.
+// None of them is subtle. All of them needed somebody to sit and click.
+//
+// So the menu is driven here by *keyboard navigation*, which Dear ImGui already
+// supports and which reaches every control a player can reach. Focus is moved
+// with Tab and the arrows and a control is activated with Space, exactly as
+// somebody walking the panel with a pad would - so what is tested is the real
+// screen, the real buttons and the real conditions on them, rather than a model
+// of them that can drift.
+//
+// No new dependency: ImGuiIO_AddKeyEvent is what a backend uses to report a
+// keystroke, and a test is just another backend.
+
+typedef struct gs_ui {
+    gs_menu  *m;
+    gs_track *t;
+    SDL_Renderer *ren;
+} gs_ui;
+
+// One frame of the real menu, with whatever input has been queued.
+//
+// **Nothing here is drawn, on purpose.** What a walk needs from a frame is the
+// layout, where the focus went and what a press did to the menu - and all three
+// are settled by the time the draw data has been built. Rasterising that draw
+// data through the software renderer cost about eight milliseconds a frame,
+// which is the whole reason walking the front end exhaustively looked
+// unaffordable; it also queued commands SDL only hands back on a present, which
+// is how a test came to take the machine down instead of failing. Laying out
+// costs microseconds and queues nothing. The tests that want pixels have
+// gs_panel_of and a frame of their own.
+static void gs_ui_frame(gs_ui *ui) {
+    cImGui_ImplSDLRenderer3_NewFrame();
+    cImGui_ImplSDL3_NewFrame();
+    ImGui_NewFrame();
+
+    gs_screen next = gs_menu_frame(ui->m, ui->t);
+    ui->m->screen = next;
+
+    // Not optional even with nobody drawing: ImGui_Render is what ends the
+    // frame, and ending the frame is what settles focus for the next one.
+    ImGui_Render();
+}
+
+static void gs_ui_begin(gs_ui *ui, gs_menu *m, gs_track *t, SDL_Renderer *ren) {
+    ui->m = m;
+    ui->t = t;
+    ui->ren = ren;
+
+    // Keyboard nav, so focus can be walked. The game itself enables the pad;
+    // this is the same navigation reached by a different key.
+    ImGui_GetIO()->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    // A couple of frames to settle: ImGui needs one to lay a window out before
+    // anything in it can take focus.
+    gs_ui_frame(ui);
+    gs_ui_frame(ui);
+}
+
+static void gs_ui_key(gs_ui *ui, ImGuiKey key) {
+    ImGuiIO *io = ImGui_GetIO();
+    ImGuiIO_AddKeyEvent(io, key, true);
+    gs_ui_frame(ui);
+    ImGuiIO_AddKeyEvent(io, key, false);
+    gs_ui_frame(ui);
+}
+
+// **Where every control on a screen leads.** Focus is walked forward `n` times
+// from a fresh start and then activated, for every `n` a panel could have - so
+// what comes back is the set of destinations the screen's controls actually
+// reach, without the test needing to know what any of them is called.
+//
+// That is the map these bugs were hiding in. A screen whose only exits are
+// itself is a trap; a screen with no exits at all is a worse one; and a control
+// that lands somewhere nobody expected shows up here as a destination nobody
+// wrote down.
+// Enough to walk past a full library and still reach the buttons under it. The
+// tracks screen puts thirty-two selectable rows before its controls, so a
+// smaller number here reports "no way off this screen" when the way off is
+// simply further down the order than the walk went - which is worth knowing
+// about for a player on a pad, and is not the same thing as a trap.
+#define GS_UI_MAX_STEPS 72
+
+static int gs_ui_exits(gs_ui *ui, gs_menu *fresh, gs_track *t, SDL_Renderer *ren,
+                       gs_screen from, bool *reached) {
+    for (int i = 0; i < GS_SCREEN_COUNT; i++) reached[i] = false;
+
+    int found = 0;
+    for (int steps = 0; steps < GS_UI_MAX_STEPS; steps++) {
+        // A clean menu every time, so one activation cannot colour the next -
+        // signing out, say, would change what every later press did.
+        gs_menu m = *fresh;
+        m.screen = from;
+        gs_ui_begin(ui, &m, t, ren);
+
+        for (int i = 0; i < steps; i++) gs_ui_key(ui, ImGuiKey_Tab);
+        gs_ui_key(ui, ImGuiKey_Space);
+
+        // **A control that lands somewhere that is not a screen fails here.**
+        // This is one of the three things the walk was written to prove and it
+        // was the one not being proved: the same condition that filtered
+        // self-transitions out was quietly dropping an out-of-range
+        // destination, so a button that set a screen number nothing draws
+        // would have passed.
+        CHECK(m.screen < GS_SCREEN_COUNT);
+
+        if (m.screen != from && m.screen < GS_SCREEN_COUNT) {
+            if (!reached[m.screen]) {
+                reached[m.screen] = true;
+                found++;
+            }
+        }
+    }
+    return found;
+}
+
+// **What one frame of a screen actually drew, by name.** Not what Tab can get
+// to - everything, including the controls drawn dead and the ones nav skips,
+// because a screen's controls are what it has and not what a keyboard is
+// willing to visit.
+#define GS_UI_MAX_ITEMS 512
+
+static int gs_ui_controls(gs_ui *ui, gs_menu *fresh, gs_track *t,
+                          SDL_Renderer *ren, gs_screen from, gs_ui_item *into,
+                          int cap) {
+    gs_menu m = *fresh;
+    m.screen = from;
+    gs_ui_begin(ui, &m, t, ren);
+
+    gs_ui_probe_start(into, cap);
+    gs_ui_probe_frame();
+    gs_ui_frame(ui);
+    int n = gs_ui_probe_count();
+    gs_ui_probe_stop();
+    return n;
+}
+
+// The same map gs_ui_exits builds, built by pressing each control by its name
+// instead of by counting Tabs to it. One frame per control rather than n.
+static void gs_ui_exits_by_name(gs_ui *ui, gs_menu *fresh, gs_track *t,
+                                SDL_Renderer *ren, gs_screen from,
+                                const gs_ui_item *items, int n, bool *reached) {
+    for (int i = 0; i < GS_SCREEN_COUNT; i++) reached[i] = false;
+
+    for (int i = 0; i < n; i++) {
+        if (!items[i].reachable || items[i].disabled) continue;
+
+        gs_menu m = *fresh;
+        m.screen = from;
+        gs_ui_begin(ui, &m, t, ren);
+
+        gs_ui_probe_press(items[i].id);
+        gs_ui_frame(ui);
+        gs_ui_frame(ui);
+
+        if (m.screen != from && m.screen < GS_SCREEN_COUNT) {
+            // **A control that leads somewhere has a name.** This is the half
+            // of "known by name" worth asserting: ImGui leaves its own
+            // structural items anonymous - table cells, child regions, groups -
+            // and those are welcome to be, because nobody wrote them and
+            // nothing follows from pressing them. A control that moves a player
+            // between screens is one somebody wrote, and a map that has to call
+            // it 4128762891 is a map nobody can read.
+            CHECK(items[i].label[0] != 0);
+
+            reached[m.screen] = true;
+        }
+    }
+}
+
 static const gs_screen gs_every_screen[] = {
     GS_SCREEN_LOGIN, GS_SCREEN_TITLE, GS_SCREEN_PROFILES, GS_SCREEN_SETUP,
     GS_SCREEN_RESULTS, GS_SCREEN_RECORDS, GS_SCREEN_LOBBY, GS_SCREEN_TRACKS,
 };
+
+TEST(every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real) {
+    // **The test that should have existed before any of this week's
+    // navigation faults.** Every one of them was a decision buried in drawing
+    // code where nothing could reach it, and every one needed a person to sit
+    // and click to find. What is walked here is the real menu, with the real
+    // buttons, activated the way a player with a pad activates them.
+    //
+    // Three properties, and they are the ones that were broken:
+    //
+    //  - every screen has at least one control that leaves it, or it is a trap;
+    //  - no exit lands on a screen that is not a screen;
+    //  - the title is reachable from everywhere, so there is always a way home.
+    static gs_menu fresh;
+    static gs_track t;
+    gs_panel_menu(&fresh, &t);
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    gs_ui ui;
+    bool reached[GS_SCREEN_COUNT];
+
+    // Who leads where, so the second half can ask about the whole graph rather
+    // than one screen at a time.
+    static bool edges[GS_SCREEN_COUNT][GS_SCREEN_COUNT];
+    for (int a = 0; a < GS_SCREEN_COUNT; a++) {
+        for (int b = 0; b < GS_SCREEN_COUNT; b++) edges[a][b] = false;
+    }
+
+    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+        gs_screen from = gs_every_screen[i];
+        int found = gs_ui_exits(&ui, &fresh, &t, ren, from, reached);
+
+        // **Not a trap.** A screen you can reach and cannot leave is the worst
+        // thing a front end can do, and it is what the results screen became
+        // when it kept putting itself back.
+        // **Two screens are allowed no button that changes screen**, and both
+        // for reasons written down rather than discovered:
+        //
+        //  - the sign-in door leaves by signing in, which needs a password
+        //    typed, or by quitting, which is not a screen at all;
+        //  - the tracks screen puts a whole library of selectable rows before
+        //    its buttons, so a pad reaches Back only after walking every track
+        //    somebody owns. That is a real complaint about that screen and it
+        //    is written up as one - but it is a long walk rather than a trap,
+        //    and Escape leaves it either way.
+        bool may_have_none = from == GS_SCREEN_LOGIN || from == GS_SCREEN_TRACKS;
+        if (!may_have_none) CHECK(found > 0);
+
+        for (int to = 0; to < GS_SCREEN_COUNT; to++) {
+            edges[from][to] = reached[to];
+        }
+    }
+
+    // **Home is always reachable.** Breadth-first from every screen: if the
+    // title cannot be got to, somebody is stuck wherever they are.
+    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+        bool seen[GS_SCREEN_COUNT] = { false };
+        gs_screen queue[GS_SCREEN_COUNT];
+        int head = 0, tail = 0;
+
+        queue[tail++] = gs_every_screen[i];
+        seen[gs_every_screen[i]] = true;
+
+        if (gs_every_screen[i] == GS_SCREEN_LOGIN ||
+            gs_every_screen[i] == GS_SCREEN_TRACKS) {
+            continue;      // see above
+        }
+
+        bool home = false;
+        while (head < tail) {
+            gs_screen at = queue[head++];
+            if (at == GS_SCREEN_TITLE) { home = true; break; }
+            for (int to = 0; to < GS_SCREEN_COUNT; to++) {
+                if (!edges[at][to] || seen[to]) continue;
+                seen[to] = true;
+                queue[tail++] = (gs_screen)to;
+            }
+        }
+        CHECK(home);
+    }
+}
+
+TEST(every_control_is_known_by_name_and_answers_to_it) {
+    // **The end of counting Tabs.** The walk above knows a control as "the
+    // fifth thing on this screen", which stops being true the day somebody
+    // inserts a fourth, and it can only find the controls the keyboard visits -
+    // so a control drawn dead in the one state the walk uses is a control the
+    // walk has never heard of. Neither is something to claim coverage from.
+    //
+    // Dear ImGui reports every item it adds, and can be told to press one by
+    // id. So a screen can be asked what is on it, and each of those pressed by
+    // name - one frame each rather than one frame per Tab on the way there.
+    static gs_menu fresh;
+    static gs_track t;
+    gs_panel_menu(&fresh, &t);
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    gs_ui ui;
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+    static gs_ui_item again[GS_UI_MAX_ITEMS];
+
+    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+        gs_screen from = gs_every_screen[i];
+
+        int n = gs_ui_controls(&ui, &fresh, &t, ren, from, items,
+                               GS_UI_MAX_ITEMS);
+        CHECK(n > 0);
+
+        // **Room for all of them, or the count is a lie.** A screen with more
+        // controls than there was space for is not a screen half covered, it is
+        // a coverage number that quietly means something else.
+        CHECK(n <= GS_UI_MAX_ITEMS);
+        int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
+
+        // **Nothing is nameless and nothing is known by its position.** The
+        // id is the identity - ImGui's hash of how the control was made, so it
+        // survives a redraw and survives an insertion above it. The label is
+        // for the person reading the map, and ImGui gives one for every widget
+        // a person presses; the items it does not name are the structural ones
+        // it adds around them, and those are placed by their window instead.
+        for (int k = 0; k < held; k++) {
+            CHECK(items[k].id != 0);
+            CHECK(items[k].window[0] != 0);
+        }
+
+        // **Drawn twice, the same screen names the same controls.** An id that
+        // moved between redraws would make a map keyed on it worthless.
+        int n2 = gs_ui_controls(&ui, &fresh, &t, ren, from, again,
+                                GS_UI_MAX_ITEMS);
+        CHECK(n2 == n);
+        for (int k = 0; k < held && k < n2; k++) {
+            CHECK(again[k].id == items[k].id);
+            CHECK(SDL_strcmp(again[k].label, items[k].label) == 0);
+        }
+
+
+        // **Pressed by name, a control does what it did when tabbed to.** The
+        // set found by name is allowed to be larger - that is the point, it can
+        // reach what the keyboard cannot - but it may not be missing anything
+        // the old walk found, or naming controls has lost something.
+        bool by_tab[GS_SCREEN_COUNT];
+        bool by_name[GS_SCREEN_COUNT];
+        gs_ui_exits(&ui, &fresh, &t, ren, from, by_tab);
+        gs_ui_exits_by_name(&ui, &fresh, &t, ren, from, items, held, by_name);
+
+        for (int to = 0; to < GS_SCREEN_COUNT; to++) {
+            if (by_tab[to]) CHECK(by_name[to]);
+        }
+    }
+}
 
 TEST(no_screen_is_drawn_bigger_than_the_window_it_is_in) {
     gs_imgui_start(gs_win, ren);
@@ -4213,6 +4547,8 @@ int main(void) {
     run_the_hud_says_what_lap_it_is_and_changes_when_the_lap_does(ren);
     run_the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
+    run_every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real(ren);
+    run_every_control_is_known_by_name_and_answers_to_it(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
     run_the_condition_bar_stays_inside_the_hud(ren);

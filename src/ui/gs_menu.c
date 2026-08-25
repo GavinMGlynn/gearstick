@@ -56,6 +56,12 @@ void gs_menu_init(gs_menu *m) {
     m->share_with = -1;
     m->code_for = -1;
 
+    // **Not zero.** GS_SCREEN_LOGIN *is* zero, so a records screen that had
+    // never been told where it came from sent Back to the sign-in door - which
+    // is the front end throwing somebody out for glancing at a lap time. The
+    // screen-graph test found this within an hour of the field being added.
+    m->records_from = GS_SCREEN_TITLE;
+
     m->setup.players = 2;
     m->setup.mode = (uint8_t)GS_MODE_RACE;
     m->setup.laps = 3;
@@ -1264,8 +1270,12 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
         ImGui_Separator();
         ImGui_Spacing();
         if (ImGui_ButtonEx("Back", (ImVec2){ 120.0f, 38.0f })) {
-            next = m->records_from != GS_SCREEN_COUNT ? m->records_from
-                                                      : GS_SCREEN_TITLE;
+            // The title is the safe answer for anything that is not a screen
+            // somebody could have arrived from.
+            bool sane = m->records_from == GS_SCREEN_TITLE ||
+                        m->records_from == GS_SCREEN_RESULTS ||
+                        m->records_from == GS_SCREEN_SETUP;
+            next = sane ? m->records_from : GS_SCREEN_TITLE;
         }
         gs_panel_measure(m);
     }
