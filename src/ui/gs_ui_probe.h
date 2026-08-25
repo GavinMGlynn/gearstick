@@ -70,6 +70,18 @@ void gs_ui_probe_press(uint32_t id);
 // press-only walk gets carried through rather than opens.
 void gs_ui_probe_type(const char *text);
 
+// **Which control the keyboard is on**, as ImGui's own id for it - so a walk
+// that moves focus with Tab can say what it just pressed rather than counting
+// how many times it pressed Tab and hoping the order has not changed.
+uint32_t gs_ui_probe_focused(void);
+
+// **Bring a panel to the front, by name.** Tab moves focus *within* a window
+// and stops at its end: a tool with three panels open cannot be walked from the
+// keyboard alone, which is not a fault in the tool - a player reaches for the
+// mouse - but is a wall for anything walking it. Returns false if no window of
+// that name is open.
+bool gs_ui_probe_focus_window(const char *name);
+
 // **Put ImGui back to a standing start, so one press cannot colour the next.**
 // A walk restores the menu it is standing in by copying a value back over it,
 // and that is the whole of the menu's state - but it is not the whole of the

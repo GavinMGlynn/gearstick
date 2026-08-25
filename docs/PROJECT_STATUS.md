@@ -3965,6 +3965,73 @@ The floor is still pinned at 727 rather than raised to 730 - a floor is there to
 catch the walk seeing *less*, and pinning it to the last measurement each time
 turns a tripwire into a ratchet that reports whatever it just did.
 
+### The construction set, walked and measured
+
+**Nothing had ever pressed a button in the editor.** `gs_editor_frame` was
+called in one place in the whole repository and that place was `main.c`; the
+editor tests that exist drive `gs_editor_paint` and set `e->brush` by hand,
+which measures the brush engine and says nothing about the palette a player
+chooses a brush with. Both halves are now covered, and they are covered by
+different tests because they are different claims.
+
+**What the tool does: 5,563 option values, every one of them.** Against the
+panel's own ranges - radius 0 to 8, step 0.05 to 2, gravity 0 to 3.9, gate
+heading 0 to 359, half width 0.5 to 8, every surface, every piece in the parts
+box, and the four dials. The continuous ones are walked at a hundredth, which is
+finer than the panel displays and finer than a mouse can land on. Four things
+that came out of writing it:
+
+- **Heights are kept in 256ths of a tile**, so "the ground moves by exactly the
+  step" is only exactly true for steps that land on that grid. The check is to
+  the storage's own resolution, and the direction is checked separately at every
+  step, because those are two different ways for a brush to be wrong.
+- **A straight, a corner and a crossroads dropped on flat pavement are a no-op**
+  - correctly. They lay level road of their own surface and the ground already
+  was that, so the tool says "dropped a straight" and the track is byte for byte
+  what it was. The first version of the test called that a bug. Parts are now
+  dropped onto ground that has been roughed up and painted something else, and
+  what is asserted is that the history gained an entry, because a piece that
+  reports itself dropped and records nothing is a piece nobody can undo.
+- **The editor's gravity dial goes through `gs_world_init`**, which converts a
+  multiple of Earth into an acceleration. Asserting the raw number would have
+  passed a version of the bug that once made every race from the setup screen
+  run at forty percent of the gravity it claimed.
+- **Every gate heading round the full turn** is checked against the conversion
+  the editor does, and every half width against the fixed-point it stores.
+
+**What the palette offers: all 51 controls, and 15 of them pressed.** The probe
+enumerates every control the construction set draws with its name, its panel and
+whether it is live; 16 are drawn dead; the walk reaches 11 distinct states. The
+pressing is a third of it and the shortfall is named in the test rather than
+rounded up:
+
+- **Activating a control by its id works on its own and does nothing from inside
+  the walk loop.** Proved both ways in the same run: pressing 'lower' by name
+  set `brush=1`; the same call for the same id inside the loop left every
+  setting untouched, fifty times over.
+
+  **And that near miss is the lesson worth keeping.** Wired up that way the test
+  reports **50 of 50 controls pressed** and reaches exactly one state - a
+  perfect score, because what it counts is the *attempt*: the call is made,
+  nothing happens, the number goes up. It looks better than the keyboard's 15
+  and means less than nothing. What is counted now is what the focus was
+  actually on when Space went down, and the state count is the guard: a walk
+  where no press did anything has one state and fails.
+- **Focusing a panel and stepping into it with Tab does not land on the controls
+  that panel is made of.** Tab walks focus within one window, the editor has
+  three open, and raising one plus a Tab to enter it still leaves the brush
+  radios unreachable.
+
+Neither is understood and neither is a reason to describe a third of a tool as
+walked, so it is a plan item with its evidence attached.
+
+**The lap dial was attempted and parked**, and what it cost is in the plan: the
+racing AI laps a bare rectangle twice and then sits in the run-off looking
+exactly like a stuck lap counter; a generated circuit ends the race inside a
+minute; and a hand-written shuttle driver leaves the field under either sign of
+either steering rule, so the heading convention wants establishing before the
+next attempt.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

@@ -101,6 +101,22 @@ void gs_ui_probe_type(const char *text)
     ImGui::GetIO().AddInputCharactersUTF8(text);
 }
 
+bool gs_ui_probe_focus_window(const char *name)
+{
+    if (ImGui::GetCurrentContext() == nullptr || name == nullptr) return false;
+    ImGuiWindow *w = ImGui::FindWindowByName(name);
+    if (w == nullptr) return false;
+    ImGui::FocusWindow(w);
+    ImGui::SetNavWindow(w);
+    return true;
+}
+
+uint32_t gs_ui_probe_focused(void)
+{
+    const ImGuiContext *ctx = ImGui::GetCurrentContext();
+    return (ctx != nullptr) ? (uint32_t)ctx->NavId : 0u;
+}
+
 void gs_ui_probe_settle(void)
 {
     if (ImGui::GetCurrentContext() == nullptr) return;

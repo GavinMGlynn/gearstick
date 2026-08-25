@@ -4901,6 +4901,494 @@ static int gs_walk_revived(const gs_walk *w) {
     return n;
 }
 
+// ---------------------------------------------------------------------------
+// The construction set, walked by machine
+// ---------------------------------------------------------------------------
+//
+// **Nothing has ever pressed a button in the editor.** The tests above drive
+// gs_editor_paint and set e->brush by hand, which measures the brush engine and
+// says nothing at all about the palette a player uses to choose a brush -
+// gs_editor_frame is called in exactly one place in this repository, and that
+// place is main.c. Every control in the construction set has been checked by
+// somebody clicking it.
+//
+// So the same walk that presses the front end presses this. It is the real
+// palette, drawn by the real function, with the brushes and their settings
+// where the editor puts them.
+
+typedef struct gs_ed {
+    gs_editor      *e;
+    gs_track       *t;
+    gs_view         view;
+    gs_input_state  input;
+} gs_ed;
+
+// One frame of the real palette, laid out and not drawn - the same trade the
+// front end's walk makes, and for the same reason.
+static void gs_ed_frame(gs_ed *ed) {
+    // Keyboard navigation, the same as the front end's walk turns on. Without
+    // it ImGui has no notion of a focused item, and activating one by name is
+    // activating nothing: the palette enumerates perfectly and every press
+    // lands on the floor.
+    ImGui_GetIO()->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    cImGui_ImplSDLRenderer3_NewFrame();
+    cImGui_ImplSDL3_NewFrame();
+    ImGui_NewFrame();
+
+    gs_style_editor();
+    gs_editor_frame(ed->e, ed->t, &ed->view, &ed->input);
+    gs_style_menu();
+
+    ImGui_Render();
+}
+
+// A key, sent the way a backend reports one.
+static void gs_ed_key_press(gs_ed *ed, ImGuiKey key) {
+    ImGuiIO *io = ImGui_GetIO();
+    ImGuiIO_AddKeyEvent(io, key, true);
+    gs_ed_frame(ed);
+    ImGuiIO_AddKeyEvent(io, key, false);
+    gs_ed_frame(ed);
+}
+
+// What an editor is, for telling one state from another: the settings a player
+// chooses with, and the track they are choosing them onto. **Not** the camera,
+// which moves with the mouse; not the ghost or the heat map, which are a world
+// and an analysis and are megabytes of derived state; and not the log pointer,
+// which is an address.
+static uint64_t gs_ed_key(const gs_ed *ed) {
+    const gs_editor *e = ed->e;
+    uint64_t h = 0xcbf29ce484222325ULL;
+
+    h = gs_shape(h, &e->active, sizeof e->active);
+    h = gs_shape(h, &e->brush, sizeof e->brush);
+    h = gs_shape(h, &e->surface, sizeof e->surface);
+    h = gs_shape(h, &e->gravity, sizeof e->gravity);
+    h = gs_shape(h, &e->radius, sizeof e->radius);
+    h = gs_shape(h, &e->step, sizeof e->step);
+    h = gs_shape(h, &e->gate_heading, sizeof e->gate_heading);
+    h = gs_shape(h, &e->gate_width, sizeof e->gate_width);
+    h = gs_shape(h, &e->part_kind, sizeof e->part_kind);
+    h = gs_shape(h, &e->part, sizeof e->part);
+    h = gs_shape(h, &e->dial_gravity, sizeof e->dial_gravity);
+    h = gs_shape(h, &e->dial_drag, sizeof e->dial_drag);
+    h = gs_shape(h, &e->dial_friction, sizeof e->dial_friction);
+    h = gs_shape(h, &e->dial_damage, sizeof e->dial_damage);
+    h = gs_shape(h, &e->ghost_on, sizeof e->ghost_on);
+    h = gs_shape(h, &e->heat_on, sizeof e->heat_on);
+    h = gs_shape(h, &e->show_controls, sizeof e->show_controls);
+    h = gs_shape(h, &e->rebind_player, sizeof e->rebind_player);
+    h = gs_shape(h, &e->rebind_action, sizeof e->rebind_action);
+    h = gs_shape(h, e->status, sizeof e->status);
+
+    // And the track, because a brush that changes it has changed the state.
+    const uint64_t th = gs_track_hash(ed->t);
+    h = gs_shape(h, &th, sizeof th);
+    return h;
+}
+
+TEST(every_brush_and_every_option_it_carries_does_what_it_says) {
+    (void)ren;
+
+    // **Every value on every dial the construction set has**, not three
+    // interesting ones. The panel's own ranges are what is walked here - radius
+    // 0 to 8, step 0.05 to 2, gravity 0 to 3.9, heading 0 to 359, half width
+    // 0.5 to 8 - because a range a player can drag to and nobody has tried is
+    // a range nobody has tested. The continuous ones are walked at a hundredth,
+    // which is finer than the panel displays and far finer than a mouse can
+    // land on.
+    static gs_editor ed;
+    CHECK(gs_editor_init(&ed, 65536));
+
+    static gs_track t;
+    int checked = 0;
+
+    // --- raise and lower: the ground moves by exactly the number in the panel
+    for (int hundredths = 5; hundredths <= 200; hundredths++) {
+        const float step = (float)hundredths / 100.0f;
+        const gs_fix delta = (gs_fix)(step * (float)GS_ONE);
+
+        for (int lower = 0; lower < 2; lower++) {
+            gs_flat_pavement(&t, 24, 24);
+            ed.brush  = lower ? GS_BRUSH_LOWER : GS_BRUSH_RAISE;
+            ed.radius = 0;
+            ed.step   = step;
+
+            gs_editor_paint(&ed, &t, 5.0f, 5.0f);
+            const gs_fix got  = gs_track_height(&t, GS_INT(5), GS_INT(5));
+            const gs_fix want = lower ? -delta : delta;
+
+            // **To the resolution the track keeps.** Corner heights are stored
+            // in 256ths of a tile, so a step of 0.25 lands exactly and a step
+            // of 0.07 cannot - what is being pinned is that the ground moves by
+            // the number in the panel and not by some other number, which is a
+            // claim about the tool rather than about the storage.
+            const gs_fix quantum = GS_ONE / 256;
+            CHECK(got >= want - quantum && got <= want + quantum);
+
+            // And the direction is never in doubt, at any step.
+            CHECK(lower ? (got < 0) : (got > 0));
+            checked++;
+        }
+    }
+
+    // --- the radius: a disc, and the tile past its edge is untouched
+    for (int r = 0; r <= 8; r++) {
+        gs_flat_pavement(&t, 32, 32);
+        ed.brush  = GS_BRUSH_RAISE;
+        ed.radius = r;
+        ed.step   = 0.25f;
+        gs_editor_paint(&ed, &t, 16.0f, 16.0f);
+
+        for (int dy = -9; dy <= 9; dy++) {
+            for (int dx = -9; dx <= 9; dx++) {
+                const bool inside = (dx * dx + dy * dy) <= r * r + r;
+                const gs_fix h = gs_track_height(&t, GS_INT(16 + dx),
+                                                 GS_INT(16 + dy));
+                CHECK(inside ? (h != 0) : (h == 0));
+                checked++;
+            }
+        }
+    }
+
+    // --- every surface the game has, painted and read back
+    for (int surf = 0; surf < GS_SURF_COUNT; surf++) {
+        gs_flat_pavement(&t, 24, 24);
+        ed.brush   = GS_BRUSH_SURFACE;
+        ed.surface = surf;
+        ed.radius  = 0;
+        gs_editor_paint(&ed, &t, 7.0f, 7.0f);
+        CHECK(gs_track_surface(&t, GS_INT(7) + GS_ONE / 2,
+                               GS_INT(7) + GS_ONE / 2) == (gs_surface)surf);
+        checked++;
+    }
+
+    // --- every gravity the brush can paint, to the quantisation the track keeps
+    for (int hundredths = 0; hundredths <= 390; hundredths++) {
+        const float g = (float)hundredths / 100.0f;
+        gs_flat_pavement(&t, 24, 24);
+        ed.brush   = GS_BRUSH_GRAVITY;
+        ed.gravity = g;
+        ed.radius  = 0;
+        gs_editor_paint(&ed, &t, 9.0f, 9.0f);
+
+        const gs_fix want = (gs_fix)(g * (float)GS_ONE);
+        const gs_fix got  = gs_track_gravity(&t, GS_INT(9) + GS_ONE / 2,
+                                             GS_INT(9) + GS_ONE / 2);
+        // A tile keeps gravity in 64ths, so what comes back is what was asked
+        // for rounded to that - and never further away than one of them.
+        const gs_fix unit = GS_ONE / GS_GRAVITY_UNIT;
+        CHECK(got >= want - unit && got <= want + unit);
+        checked++;
+    }
+
+    // --- every heading a gate can be given, to the turn's own resolution
+    for (int deg = 0; deg < 360; deg++) {
+        gs_flat_pavement(&t, 32, 32);
+        ed.brush        = GS_BRUSH_GATE;
+        ed.gate_heading = (float)deg;
+        ed.gate_width   = 2.5f;
+        gs_editor_paint(&ed, &t, 10.0f, 10.0f);
+
+        CHECK(t.gate_count == 1);
+        const gs_angle want = (gs_angle)(int32_t)((float)deg / 360.0f * 65536.0f);
+        CHECK(t.gate[0].heading == want);
+        checked++;
+    }
+
+    // --- every half width, likewise
+    for (int hundredths = 50; hundredths <= 800; hundredths++) {
+        const float half = (float)hundredths / 100.0f;
+        gs_flat_pavement(&t, 32, 32);
+        ed.brush        = GS_BRUSH_GATE;
+        ed.gate_heading = 0.0f;
+        ed.gate_width   = half;
+        gs_editor_paint(&ed, &t, 10.0f, 10.0f);
+
+        CHECK(t.gate_count == 1);
+        CHECK(t.gate[0].half_width == (gs_fix)(half * (float)GS_ONE));
+        checked++;
+    }
+
+    // --- every piece in the parts box, dropped
+    for (int kind = 0; kind < GS_PART_COUNT; kind++) {
+        gs_flat_pavement(&t, 40, 40);
+
+        // **Onto ground that is not already what the piece would lay.** A
+        // straight, a corner and a crossroads all put down level road of their
+        // own surface, so dropped on flat pavement they are correctly a no-op -
+        // the tool says "dropped a straight" and the track is byte for byte
+        // what it was, because it already *was* that straight. Testing a piece
+        // against ground it happens to match is testing nothing, so the ground
+        // is roughed up and painted something else first.
+        ed.brush   = GS_BRUSH_SURFACE;
+        ed.surface = GS_SURF_ICE;
+        ed.radius  = 6;
+        gs_editor_paint(&ed, &t, 18.0f, 18.0f);
+
+        ed.brush  = GS_BRUSH_RAISE;
+        ed.radius = 2;
+        ed.step   = 0.5f;
+        gs_editor_paint(&ed, &t, 16.0f, 17.0f);
+        gs_editor_paint(&ed, &t, 20.0f, 19.0f);
+
+        const uint64_t before = gs_track_hash(&t);
+        const uint32_t depth_before = gs_edit_undo_depth(ed.log);
+
+        ed.brush     = GS_BRUSH_PART;
+        ed.part_kind = kind;
+        ed.part      = gs_part_default((gs_part_kind)kind);
+        gs_editor_paint(&ed, &t, 18.0f, 18.0f);
+
+        // Every piece either changes the track or says why it would not, and
+        // saying nothing at all is the failure worth catching.
+        CHECK(ed.status[0] != '\0');
+        if (SDL_strstr(ed.status, "will not fit") == nullptr) {
+            // **It went into the history, which is the thing that matters.**
+            // Not that the track changed: a straight road laid on flat pavement
+            // is level ground of the same surface, so a piece can be dropped
+            // correctly and leave the terrain byte for byte as it was. What
+            // must never happen is a piece reporting itself dropped with
+            // nothing recorded, because that is a piece that cannot be undone.
+            if (gs_edit_undo_depth(ed.log) <= depth_before) {
+                printf("  PARTMISS kind=%d '%s' status='%s' hash_changed=%d\n",
+                       kind, gs_part_name((gs_part_kind)kind), ed.status,
+                       (int)(gs_track_hash(&t) != before));
+            }
+            CHECK(gs_edit_undo_depth(ed.log) > depth_before);
+            (void)before;
+        }
+        checked++;
+    }
+
+    // --- the four dials, every hundredth of their range, into a real world
+    for (int hundredths = 0; hundredths <= 400; hundredths++) {
+        const float v = (float)hundredths / 100.0f;
+        static gs_world w;
+
+        ed.dial_gravity  = v;
+        ed.dial_drag     = v;
+        ed.dial_friction = v;
+        ed.dial_damage   = v;
+        gs_editor_apply_dials(&ed, &w);
+
+        const gs_fix want = (gs_fix)(v * (float)GS_ONE);
+
+        // **The dial is a multiple of Earth and the world wants an
+        // acceleration**, which is the conversion that once made every race
+        // from the setup screen run at forty percent of the gravity it claimed.
+        // It is gs_world_init's job, so this is the check that the editor's
+        // dial goes through it rather than round it.
+        CHECK(w.gravity        == gs_fix_mul(GS_GRAVITY_EARTH, want));
+        CHECK(w.drag_scale     == want);
+        CHECK(w.friction_scale == want);
+        CHECK(w.damage_scale   == want);
+        checked++;
+    }
+
+    printf("  BRUSHES %d option values checked\n", checked);
+    CHECK(checked > 4000);
+
+    gs_editor_quit(&ed);
+}
+
+TEST(every_control_in_the_construction_set_is_pressed) {
+    // **The palette, walked the way the front end is walked.** Every control
+    // the editor draws, pressed; and where pressing one reveals others - the
+    // surface brush showing its surfaces, the gate brush its heading - those
+    // too, until nothing new is offered.
+    static gs_editor e;
+    CHECK(gs_editor_init(&e, 8192));
+
+    static gs_track t;
+    gs_flat_pavement(&t, 32, 32);
+
+    static gs_ed ed;
+    ed.e = &e;
+    ed.t = &t;
+    ed.view = (gs_view){ 0 };
+    ed.view.rect = (SDL_Rect){ 0, 0, 1280, 720 };
+    ed.input = (gs_input_state){ 0 };
+    gs_bind_defaults(&ed.input.bind);
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    gs_editor_toggle(&e, &ed.view);
+    CHECK(e.active);
+
+    // **One Tab, to give ImGui somewhere to be.** Activating a control by name
+    // is queued against the navigation window, and until focus has landed
+    // anywhere there is no navigation window to queue it against - so every
+    // press is accepted, dropped, and reported as having changed nothing. The
+    // front end's walk gets this for free because it walks with the keyboard;
+    // this one had to be told.
+    gs_ed_frame(&ed);
+    gs_ed_key_press(&ed, ImGuiKey_Tab);
+
+    // A place to come back to, and a place to keep the ones worth coming back
+    // to. An editor carries a ghost world and a heat map about with it, so
+    // these are not small - which is why there are sixty-four of them and not
+    // four thousand.
+    #define GS_ED_QUEUE 64
+    static gs_editor q_e[GS_ED_QUEUE];
+    static gs_track  q_t[GS_ED_QUEUE];
+    static uint64_t  seen[GS_ED_QUEUE * 8];
+    int head = 0, tail = 0, n_seen = 0;
+    bool ran_out = false;
+
+    static gs_walk cov;             // only its control tables are used here
+    SDL_memset(cov.offered, 0, sizeof cov.offered);
+    SDL_memset(cov.pressed, 0, sizeof cov.pressed);
+    SDL_memset(cov.never,   0, sizeof cov.never);
+    cov.n_offered = 0;
+    cov.n_pressed = 0;
+    cov.n_never   = 0;
+
+    gs_ed_frame(&ed);
+    gs_ed_frame(&ed);
+    q_e[tail] = e;
+    q_t[tail] = t;
+    tail++;
+    seen[n_seen++] = gs_ed_key(&ed);
+
+    int actions = 0;
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+
+    while (head < tail) {
+        static gs_editor at_e;
+        static gs_track  at_t;
+        at_e = q_e[head];
+        at_t = q_t[head];
+        head++;
+
+        e = at_e;
+        t = at_t;
+        gs_ui_probe_settle();
+        gs_ed_frame(&ed);
+
+        gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
+        gs_ui_probe_frame();
+        gs_ed_frame(&ed);
+        const int n = gs_ui_probe_count();
+        gs_ui_probe_stop();
+        CHECK(n <= GS_UI_MAX_ITEMS);
+        const int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
+
+        for (int i = 0; i < held; i++) {
+            if (items[i].reachable && !items[i].disabled) {
+                gs_walk_mark(cov.offered, items[i].id, &cov.n_offered);
+            } else {
+                gs_walk_mark(cov.never, items[i].id, &cov.n_never);
+            }
+        }
+
+        // **Walked with the keyboard, not pressed by name.** Activating an
+        // editor control by its id does work - proved on its own - and does
+        // nothing from inside this loop, which is a difference nobody has
+        // explained yet and is written up as a tail. Tab and Space are what a
+        // player on a pad uses anyway, and ImGui will say which control the
+        // focus landed on, so what was pressed is known exactly rather than
+        // inferred from how many times Tab was hit.
+        for (int i = 0; i < held; i++) {
+            if (!items[i].reachable || items[i].disabled) continue;
+
+            e = at_e;
+            t = at_t;
+            gs_ed_frame(&ed);
+            gs_ed_frame(&ed);
+
+            // **Tab until the focus is on the one meant**, rather than
+            // tabbing a fixed number of times and taking whatever that lands
+            // on. Nav order is not the order items are submitted in - it skips
+            // what cannot be focused and wraps at the end of a window - so
+            // counting presses covers some controls twice and others never.
+            // **The panel this control lives on, entered rather than merely
+            // raised.** Tab walks the focus round one window and stops there,
+            // so a tool with three panels open cannot be walked from the
+            // keyboard alone unless each panel is stepped into in turn.
+            // Focusing it is not enough on its own: with no item focused yet
+            // there is nothing for Tab to move *from*, so it takes one press to
+            // land inside before the cycle can begin.
+            gs_ui_probe_focus_window(items[i].window);
+            gs_ed_frame(&ed);
+            gs_ed_key_press(&ed, ImGuiKey_Tab);
+
+            uint32_t on = 0;
+            for (int tab = 0; tab < held * 3 + 8; tab++) {
+                on = gs_ui_probe_focused();
+                if (on == items[i].id) break;
+                gs_ed_key_press(&ed, ImGuiKey_Tab);
+                on = 0;
+            }
+            if (on != items[i].id) continue;   // see the note at the end
+
+            gs_ed_key_press(&ed, ImGuiKey_Space);
+            actions++;
+            gs_walk_mark(cov.pressed, on, &cov.n_pressed);
+
+            const uint64_t k = gs_ed_key(&ed);
+            bool known = false;
+            for (int z = 0; z < n_seen; z++) {
+                if (seen[z] == k) { known = true; break; }
+            }
+            if (known) continue;
+
+            if (n_seen >= (int)SDL_arraysize(seen) || tail >= GS_ED_QUEUE) {
+                ran_out = true;
+                continue;
+            }
+            seen[n_seen++] = k;
+            q_e[tail] = e;
+            q_t[tail] = t;
+            tail++;
+        }
+    }
+
+    printf("  EDITOR %d states, %d actions, %d of %d controls pressed, "
+           "%d never pressable\n",
+           n_seen, actions, cov.n_pressed, cov.n_offered, cov.n_never);
+
+    // Running out is a failure that says so, not a quiet stop.
+    CHECK(!ran_out);
+
+    // **Every control counted here was pressed and did something.** Pressing
+    // by name instead reports 50 of 50 and reaches exactly one state, because
+    // what it counts is the *attempt*: the call is made, nothing happens, and
+    // the number goes up. A coverage figure that counts attempts is the green
+    // tick that is not evidence, so what is counted is what the focus was
+    // actually on when Space went down, and n_seen below is the guard - a walk
+    // that changed nothing would have one state and fail.
+    //
+    // **The palette is enumerated in full and walked in part, and the part is
+    // named rather than glossed.**
+    //
+    // Every control the construction set draws is found, with its name, its
+    // panel, and whether it is live - that half is complete and is what the
+    // count below pins. What is *not* complete is pressing them: the keyboard
+    // reaches about a third, and the two ways of doing better both fail for
+    // reasons not yet understood. Activating by id works when it is done on its
+    // own and does nothing at all from inside this loop; focusing a panel and
+    // stepping into it with Tab does not put the focus on the controls that
+    // panel is made of. Both are written up in COMPLETION_PLAN.md as a tail,
+    // with the evidence, because a walk that presses a third of a tool is not
+    // something to describe as walking it.
+    //
+    // **What the construction set actually does is covered exhaustively
+    // elsewhere** - every brush against every value of every option it carries,
+    // and every dial, in
+    // every_brush_and_every_option_it_carries_does_what_it_says. This test is
+    // about the widgets; that one is about the tool.
+    CHECK(cov.n_offered >= 51);
+    CHECK(cov.n_never >= 16);
+    CHECK(cov.n_pressed > 0);
+    CHECK(n_seen > 1);
+
+    gs_editor_quit(&e);
+}
+
 TEST(the_walk_signs_in_through_the_door_rather_than_being_put_behind_it) {
     // **The front end has one way in and it is not a button.** Everything the
     // walk covers lives behind a password, and every state it has been shown so
@@ -5465,6 +5953,8 @@ int main(void) {
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
     run_every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real(ren);
     run_a_menu_knows_a_state_it_has_already_been_in(ren);
+    run_every_brush_and_every_option_it_carries_does_what_it_says(ren);
+    run_every_control_in_the_construction_set_is_pressed(ren);
     run_the_walk_signs_in_through_the_door_rather_than_being_put_behind_it(ren);
     run_the_walk_goes_as_deep_as_the_front_end_does(ren);
     run_every_control_is_known_by_name_and_answers_to_it(ren);

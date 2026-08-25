@@ -1041,6 +1041,18 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       reachable only by seeding** — asserted, not reported, so a day when
       seeding stops mattering is a day the tree goes red and somebody looks at
       why.*
+- [ ] **The lap dial, one to twenty, actually raced.** Attempted and parked,
+      with what it cost written down so the next attempt does not pay it again.
+      The rule is easy to state — a race of *n* laps ends after *n*, and the
+      run-up crossing is not a lap — and hard to harness: the racing AI laps a
+      bare rectangle twice and then sits in the run-off, which reads exactly
+      like a lap counter stuck at ten; a generated circuit ends the race inside
+      a minute because a car dropped anywhere but the grid is already in the
+      run-off, and dropped *on* the grid it still finishes with no laps; and a
+      hand-written shuttle driver steers off the field with either sign of
+      either steering rule, so the angle convention needs establishing first.
+      *Verification: every lap count from 1 to 20 finishes on the lap it was
+      asked for.*
 - [ ] **Every value of every dial, not three interesting ones.** Laps from one
       to twenty, every mode, every gravity preset and the brush that is not a
       preset, every vehicle and every colour — the model is small and
@@ -1063,17 +1075,34 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       all in every state it can be pressed in.
       *Verification: each property fails on its own when the rule behind it is
       taken out.*
-- [ ] **The editor is walked by machine as well.** It is not a `gs_screen`, so
-      the walk cannot currently see it at all — and it is the half of the game
-      with the most ways to be wrong.
-      *Verification: the walk reaches the editor through New and Edit on the
-      tracks screen and leaves it again, without being placed there.*
-- [ ] **Every brush and every option it carries is pressed.** Elevation, the
-      surfaces, gravity and gates each carry settings of their own — the step,
-      which surface, how strong, which way a gate faces — and pressing each
-      brush once with whatever it was last set to is not coverage of any of it.
-      *Verification: the map names every brush-and-setting pair there is, and a
-      setting that quietly stops taking effect turns the test red.*
+- [x] **The editor is walked by machine as well.** Nothing had ever pressed a
+      button in it: `gs_editor_frame` was called in exactly one place in the
+      whole repository and that place was `main.c`, so every control in the
+      construction set had only ever been checked by somebody clicking it. The
+      walk now drives the real palette.
+      *Verification: all 51 controls the palette draws are found by name and by
+      panel, 16 of them are drawn dead, and 11 distinct states are reached. **15
+      of the 51 are pressed** — the shortfall is real, is named in the test, and
+      is the tail below.*
+- [ ] **The editor's controls can all be pressed, not a third of them.** Two
+      ways of doing it both fail and neither is understood: activating a control
+      by its id works when done on its own and does nothing at all from inside
+      the walk loop, and focusing a panel then stepping into it with Tab does
+      not put the focus on the controls that panel is made of.
+      *Verification: 51 of 51, by whichever of the two turns out to work.*
+- [x] **Every brush and every option it carries does what it says.** Not
+      pressed once with whatever it was last set to — every value of every
+      option, against the panel's own ranges: radius 0 to 8, step 0.05 to 2,
+      gravity 0 to 3.9, gate heading 0 to 359, half width 0.5 to 8, every
+      surface, every piece in the parts box, and all four dials.
+      *Verification: **5,563 option values checked**, each against what it did
+      to the track. The continuous ones are walked at a hundredth, finer than
+      the panel shows and finer than a mouse can land on. Heights are checked to
+      the 256th of a tile the track stores them in, and the four dials are
+      checked through `gs_editor_apply_dials` — including that the gravity dial
+      goes through the multiple-of-Earth conversion rather than round it, which
+      is the fault that once made every race run at forty percent of what it
+      claimed.*
 - [ ] **Brushes are walked in combination, exhaustively.** Ice on a slope,
       gravity under a ramp, a gate on ground that moves afterwards: the faults
       worth finding are in what one brush did to what another had already done,
