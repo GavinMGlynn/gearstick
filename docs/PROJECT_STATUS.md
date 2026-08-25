@@ -3879,6 +3879,41 @@ deliberate act that wants a note here saying which controls stopped being
 reachable. The real fix is a count taken without asking a walk what it found,
 and that is the last item of Phase 17.
 
+### The pipeline, red since the icon landed
+
+Three failures, none of them in the front-end work that exposed them, and all
+three the same shape: **a change that was green on one machine and had never
+been near CI.** Thirteen commits sat unpushed; the first push ran the pipeline
+against all of them at once.
+
+- **`ext/sdl_image` was in `.gitmodules` and in none of the lists that check
+  submodules out.** Four lists across `ci.yml` and `package.yml`, plus the
+  README's clone line - so following the README on a fresh clone failed at
+  configure with `ext/sdl_image is empty`, exactly as the runner did. That list
+  is the thing that keeps the README honest, and it was the thing that was
+  wrong.
+- **SDL_image was decoding PNG through libpng.** On the RHEL job that fails
+  configure: libpng is found by name, libpng needs zlib, and RHEL's zlib ships a
+  CMake config advertising `/usr/lib64/libz.a` which is not in the package. The
+  error names neither libpng nor zlib nor gearstick - it is `find_package(PNG)`
+  four frames down inside `ext/sdl_image`. **The note above that setting had
+  predicted this failure and named its one-line fix**, `SDLIMAGE_PNG_LIBPNG
+  OFF`, which is the only reason it cost minutes. PNG now goes through the stb
+  decoder that comes with SDL_image and needs no system library at all.
+- **The shipped library was stale.** `assets/server/gearstick.db` is a
+  generated artefact and CI rebuilds it to check that it is what the tools
+  produce. It was not: `51ff86e` took `GS_LIBRARY_VERSION` to 2 and added a
+  `builtin` flag, and the database was never rebuilt after it. Reproduced
+  against CI's own build rather than the local one - the pinned SQLite
+  amalgamation, not the system's, because identical rows laid out by two
+  versions are two different files. The generators are deterministic: two runs
+  byte-identical, so the diff was staleness and not flakiness.
+
+The renderer suite's ctest budget goes from three minutes to ten in the same
+change. It was three from when the heaviest thing in it photographed a frame; it
+now walks the whole front end under sanitizers, 111 s here, and the runners are
+slower than this machine.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

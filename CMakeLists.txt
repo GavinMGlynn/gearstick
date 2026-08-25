@@ -223,12 +223,18 @@ endif()
 # libtiff, libwebp and libavif as well; every one of those is a system
 # dependency for formats the game does not read. One picture, one format.
 #
-# PNG goes through libpng, which is asked for by name. The alternative is
-# SDL_image's built-in stb decoder, which needs no system library at all - and
-# that is the safer default, because libpng drags in zlib and a system zlib
-# advertising a static library it does not actually ship fails the configure
-# with an error naming neither of them. If this ever stops configuring on a
-# machine, SDLIMAGE_PNG_LIBPNG OFF is the one-line way back to stb.
+# **PNG goes through stb, which needs no system library at all**, and it does so
+# because the alternative stopped configuring exactly the way the note here said
+# it would. libpng is asked for by name; libpng drags in zlib; and RHEL's zlib
+# ships a CMake config advertising /usr/lib64/libz.a which is not in the
+# package. The error names neither libpng nor zlib nor us - it is
+# `find_package(PNG)` inside ext/sdl_image, four frames down, complaining about
+# a static library nobody asked for.
+#
+# The prediction and its one-line fix were written down before it happened,
+# which is the only reason this cost minutes rather than an afternoon. It is
+# also the whole of "prefer no dependency to a small one" in one build failure:
+# one picture, one format, and a decoder that comes with the decoder.
 #
 # Nothing saves images. The game reads one file and writes none.
 
@@ -245,7 +251,7 @@ set(SDLIMAGE_DEPS_SHARED OFF CACHE BOOL "" FORCE)
 set(SDLIMAGE_VENDORED    OFF CACHE BOOL "" FORCE)
 
 set(SDLIMAGE_PNG        ON  CACHE BOOL "" FORCE)
-set(SDLIMAGE_PNG_LIBPNG ON  CACHE BOOL "" FORCE)   # see the note above
+set(SDLIMAGE_PNG_LIBPNG OFF CACHE BOOL "" FORCE)   # stb - see the note above
 set(SDLIMAGE_PNG_SAVE   OFF CACHE BOOL "" FORCE)
 
 foreach(gs_format AVIF BMP GIF JPG JXL LBM PCX PNM QOI SVG TGA TIF WEBP XCF XPM XV ANI CUR ICO)
