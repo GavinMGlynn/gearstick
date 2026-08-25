@@ -1029,13 +1029,18 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       to it, the walk types the driver's name, types a password that happens to
       be the right one, and arrives at the title — in two moves, with a wrong
       password in its vocabulary too.*
-- [ ] **The conditions the buttons are under.** Six places in the menu draw a
-      control that is dead in some states and live in others, and a walk from
-      one starting state never presses them. The walk starts from a seeded set
-      instead: signed out and in, online and offline, a library empty and full,
-      a track picked and not, results present and absent.
-      *Verification: the destination of a button that only lights up once a
-      track is picked appears in the map.*
+- [x] **The conditions the buttons are under.** The walk now starts from seven
+      menus rather than one — everything, signed out, offline, an empty library,
+      no track picked, no results yet, alone in the lobby — sharing one set of
+      books so each is asked only what it can reach that the others could not.
+      **The answer is smaller than expected and is the interesting part**: six
+      of the seven add nothing, because the walk can press its way into most of
+      those conditions by itself. The one that pays is *offline*, which is a
+      thing no button can change.
+      *Verification: 730 of 730 pressable controls pressed, of which **3 are
+      reachable only by seeding** — asserted, not reported, so a day when
+      seeding stops mattering is a day the tree goes red and somebody looks at
+      why.*
 - [ ] **Every value of every dial, not three interesting ones.** Laps from one
       to twenty, every mode, every gravity preset and the brush that is not a
       preset, every vehicle and every colour — the model is small and

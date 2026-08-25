@@ -3924,6 +3924,47 @@ change. It was three from when the heaviest thing in it photographed a frame; it
 now walks the whole front end under sanitizers, 111 s here, and the runners are
 slower than this machine.
 
+### The conditions the buttons are under
+
+**Done, and the result is small enough to be worth stating carefully.** The walk
+starts from seven menus instead of one, sharing a single set of books so that
+each seed is only ever asked what it reaches that the ones before it did not:
+
+| seed | new states | new controls |
+|---|---|---|
+| everything | 6,179 | 727 |
+| signed out | 6 | 0 |
+| **offline** | **4,741** | **3** |
+| an empty library | 56 | 0 |
+| no track picked | 88 | 0 |
+| no results yet | 101 | 0 |
+| alone in the lobby | 135 | 0 |
+
+730 of 730 pressable controls pressed, 12 never pressable, 25,110 actions, 44 s.
+
+**Six of the seven seeds add no controls at all, and that is a good result
+rather than a wasted one.** It says the walk can press its way into most of
+these conditions by itself: it can sign out, it can deselect a track, it can
+empty a library one Delete at a time. The seed that pays is *offline* - and
+offline is precisely the condition **no button can change**, because whether
+this copy of the game was pointed at a server is decided before the front end
+draws anything. That is the shape of what seeding is for, and it was not obvious
+before the numbers came back.
+
+Two things the run also settles:
+
+- **Six controls are drawn dead in one state and pressed in another.** That is
+  the conditional half of the front end being exercised rather than skipped.
+- **3 of the 730 are reachable only by seeding**, and that is asserted rather
+  than printed: `CHECK(w.n_offered > alone)`. If it ever comes back zero, either
+  the seeds have stopped differing or the front end has stopped putting
+  conditions on its buttons, and both want looking at rather than passing
+  quietly.
+
+The floor is still pinned at 727 rather than raised to 730 - a floor is there to
+catch the walk seeing *less*, and pinning it to the last measurement each time
+turns a tripwire into a ratchet that reports whatever it just did.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

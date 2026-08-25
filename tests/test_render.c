@@ -4818,6 +4818,89 @@ TEST(a_menu_knows_a_state_it_has_already_been_in) {
     a.knocking_for   = 0.0f;
 }
 
+// ---------------------------------------------------------------------------
+// The conditions the buttons are under
+// ---------------------------------------------------------------------------
+//
+// **A control drawn dead is a control a walk never presses**, and gs_panel_menu
+// builds the front end at its fullest on purpose - signed in, online, a full
+// library with a track picked, a finished race to show and a lobby with
+// everybody in it. It was written that way to measure panels at the size they
+// go wrong at, and as a place to walk from it is the one state where almost
+// nothing is disabled.
+//
+// So the walk starts from each of these in turn, sharing one set of books. Each
+// is the full menu with one thing taken away, because what is being looked for
+// is the control that only appears, or only wakes up, when something is absent.
+typedef void (*gs_seed_fn)(gs_menu *m);
+
+static void gs_seed_everything(gs_menu *m) { (void)m; }
+
+static void gs_seed_signed_out(gs_menu *m) {
+    m->signed_in = -1;
+    m->login_pick = -1;
+    m->login_password[0] = '\0';
+    m->login_name[0] = '\0';
+}
+
+static void gs_seed_offline(gs_menu *m) {
+    m->online = false;
+    m->lobby  = nullptr;
+}
+
+static void gs_seed_empty_library(gs_menu *m) {
+    m->library.count = 0;
+    m->picked = -1;
+    m->chosen = -1;
+}
+
+static void gs_seed_nothing_picked(gs_menu *m) {
+    m->picked = -1;
+    m->chosen = -1;
+}
+
+static void gs_seed_no_results(gs_menu *m) {
+    m->result_count = 0;
+}
+
+static void gs_seed_alone_in_the_lobby(gs_menu *m) {
+    gs_panel_lobby.count = 1;
+    for (int i = 1; i < GS_PROTO_MAX_PLAYERS; i++) {
+        gs_panel_lobby.player[i].present = false;
+    }
+    m->lobby = &gs_panel_lobby;
+}
+
+static const struct {
+    const char *name;
+    gs_seed_fn  set;
+} gs_seeds[] = {
+    { "everything",          gs_seed_everything },
+    { "signed out",          gs_seed_signed_out },
+    { "offline",             gs_seed_offline },
+    { "an empty library",    gs_seed_empty_library },
+    { "no track picked",     gs_seed_nothing_picked },
+    { "no results yet",      gs_seed_no_results },
+    { "alone in the lobby",  gs_seed_alone_in_the_lobby },
+};
+
+// How many controls were drawn dead somewhere and pressed somewhere else. This
+// is the number this whole idea is for: it is exactly the set that a walk from
+// one starting state cannot reach, and it is zero without seeding.
+static int gs_walk_revived(const gs_walk *w) {
+    int n = 0;
+    for (size_t i = 0; i < GS_WALK_CTRLS; i++) {
+        const uint32_t id = w->never[i];
+        if (id == 0) continue;
+        size_t at = (size_t)id & (GS_WALK_CTRLS - 1);
+        while (w->pressed[at] != 0) {
+            if (w->pressed[at] == id) { n++; break; }
+            at = (at + 1) & (GS_WALK_CTRLS - 1);
+        }
+    }
+    return n;
+}
+
 TEST(the_walk_signs_in_through_the_door_rather_than_being_put_behind_it) {
     // **The front end has one way in and it is not a button.** Everything the
     // walk covers lives behind a password, and every state it has been shown so
@@ -4907,6 +4990,7 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     static gs_walk w;
     int states = 0;
     int edges  = 0;
+    int alone  = 0;         // what the first seed found on its own
 
     // **One set of books across every seed.** From any screen you can reach the
     // others, so eight walks with eight sets of notes cover the same graph
@@ -4931,26 +5015,35 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     w.stop_set  = false;
     SDL_memset(w.reached, 0, sizeof w.reached);
 
-    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
-        const gs_screen from = gs_every_screen[i];
+    for (size_t sd = 0; sd < SDL_arraysize(gs_seeds); sd++) {
+        // The full menu with one thing taken away, rebuilt each time so that
+        // what the last seed's walk did to it cannot carry over.
+        gs_panel_menu(&seed, &t);
+        gs_seeds[sd].set(&seed);
 
-        const int had_states  = w.states;
-        const int had_pressed = w.n_pressed;
+        const int seed_states  = w.states;
+        const int seed_pressed = w.n_pressed;
+        int seed_edges = 0;
 
-        w.edges   = 0;
-        w.deepest = 0;
-        w.did_nothing = 0;
-        w.ran_out = false;
+        for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+            const gs_screen from = gs_every_screen[i];
 
-        gs_walk_screen(&ui, &seed, &t, ren, from, &w);
+            w.edges   = 0;
+            w.deepest = 0;
+            w.did_nothing = 0;
+            w.ran_out = false;
 
-        printf("  WALK from %d: %d new offerings, %d new controls, "
-               "%d presses, %d deep, %d idle\n",
-               (int)from, w.states - had_states, w.n_pressed - had_pressed,
-               w.edges, w.deepest, w.did_nothing);
+            gs_walk_screen(&ui, &seed, &t, ren, from, &w);
 
-        CHECK(!w.ran_out);
-        edges += w.edges;
+            CHECK(!w.ran_out);
+            seed_edges += w.edges;
+        }
+
+        printf("  SEED %-20s %4d new states, %3d new controls, %5d actions\n",
+               gs_seeds[sd].name, w.states - seed_states,
+               w.n_pressed - seed_pressed, seed_edges);
+        edges += seed_edges;
+        if (sd == 0) alone = w.n_offered;
     }
     states = w.states;
 
@@ -4980,6 +5073,27 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // The honest fix is a count taken without asking a walk what it found, and
     // that is the last item of Phase 17 rather than this one.
     CHECK(w.n_offered >= 727);
+
+    // **The controls that are dead in one state and live in another.** This is
+    // the number the seeding is for, and it is what a walk from a single
+    // starting state cannot reach by any amount of pressing: the front end
+    // draws six of its controls disabled under conditions, and until the walk
+    // was started from a menu where those conditions differ, their destinations
+    // were not in the map at all.
+    const int revived = gs_walk_revived(&w);
+    printf("  WALK %d controls dead in one state and pressed in another; "
+           "%d of %d found only by seeding\n",
+           revived, w.n_offered - alone, w.n_offered);
+    CHECK(revived > 0);
+
+    // **Seeding reached controls that no amount of pressing from one starting
+    // state could.** This is the claim, and it is the one worth asserting: the
+    // walk from the full menu presses everything the full menu offers, and the
+    // front end still has controls it does not draw live until something is
+    // *absent*. If this ever comes back zero, either the seeds have stopped
+    // differing from each other or the front end has stopped having conditions
+    // on its buttons - and both of those want looking at rather than passing.
+    CHECK(w.n_offered > alone);
 
     // **It went further than one press.** The map above found the first move
     // out of eight screens; anything at all beyond that is more than it had.
