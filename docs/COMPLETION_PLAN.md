@@ -1041,18 +1041,21 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       reachable only by seeding** — asserted, not reported, so a day when
       seeding stops mattering is a day the tree goes red and somebody looks at
       why.*
-- [ ] **The lap dial, one to twenty, actually raced.** Attempted and parked,
-      with what it cost written down so the next attempt does not pay it again.
-      The rule is easy to state — a race of *n* laps ends after *n*, and the
-      run-up crossing is not a lap — and hard to harness: the racing AI laps a
-      bare rectangle twice and then sits in the run-off, which reads exactly
-      like a lap counter stuck at ten; a generated circuit ends the race inside
-      a minute because a car dropped anywhere but the grid is already in the
-      run-off, and dropped *on* the grid it still finishes with no laps; and a
-      hand-written shuttle driver steers off the field with either sign of
-      either steering rule, so the angle convention needs establishing first.
-      *Verification: every lap count from 1 to 20 finishes on the lap it was
-      asked for.*
+- [x] **The lap dial, one to twenty, actually raced.** Every value the slider
+      offers, each one driven to its finish. The car is held on full lock at a
+      steady speed rather than driven by the racing AI, because what is under
+      test is the lap rule and not the AI — which laps a bare rectangle twice
+      and then sits in the run-off, reading exactly like a lap counter stuck at
+      ten.
+      *Verification: all twenty finish on the lap they were asked for, and the
+      crossings come to one more than the laps every time — which is the run-up
+      to the line, and the off-by-one that would end a three-lap race after
+      two.*
+- [x] **The rest of the setup screen's dials reach the race.** Every mode, every
+      player count the grid has room for, every vehicle.
+      *Verification: 12 values, against a race built from them — each car on its
+      own grid slot with no two in the same place, and each vehicle arriving as
+      the one that was chosen and driving under its own power.*
 - [ ] **Every value of every dial, not three interesting ones.** Laps from one
       to twenty, every mode, every gravity preset and the brush that is not a
       preset, every vehicle and every colour — the model is small and

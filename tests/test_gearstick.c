@@ -3676,6 +3676,155 @@ TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
     CHECK(w.winner == 0);
 }
 
+TEST(every_other_dial_on_the_setup_screen_reaches_the_race) {
+    // **The rest of what the setup screen chooses**, walked in full rather than
+    // at whatever it happened to be left on: every mode, every player count the
+    // grid has room for, and every vehicle in the parts list - against a race
+    // actually built from them.
+    int checked = 0;
+
+    static gs_track t;
+    gs_track_init(&t, 40, 24, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    }
+    gs_track_add_gate(&t, GS_INT(8), GS_INT(12), 0, GS_INT(8));
+    gs_track_add_gate(&t, GS_INT(30), GS_INT(12), 32768, GS_INT(8));
+
+    // **Every mode.** A race is won by arriving first and a demolition by being
+    // the last one moving, and which of those it is has to survive being set.
+    for (int mode = 0; mode < 2; mode++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, mode == 0 ? GS_MODE_RACE : GS_MODE_DESTRUCTION);
+        CHECK(w.mode == (uint8_t)(mode == 0 ? GS_MODE_RACE : GS_MODE_DESTRUCTION));
+        CHECK(!w.over);
+        CHECK(w.winner == GS_NO_WINNER);
+        checked++;
+    }
+
+    // **Every player count the grid has room for**, each car on its own slot
+    // and no two in the same place - four cars stacked on one square is a
+    // four-car pile-up before the lights go out.
+    for (uint8_t players = 1; players <= GS_MAX_CARS; players++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, GS_MODE_RACE);
+
+        for (uint8_t i = 0; i < players; i++) {
+            gs_fix x, y;
+            gs_angle heading;
+            gs_track_grid(&t, i, &x, &y, &heading);
+            gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, x, y, heading);
+        }
+        CHECK(w.car_count == players);
+
+        for (uint8_t a = 0; a < players; a++) {
+            CHECK(w.car[a].active);
+            for (uint8_t b = (uint8_t)(a + 1u); b < players; b++) {
+                CHECK(w.car[a].x != w.car[b].x || w.car[a].y != w.car[b].y);
+            }
+        }
+        checked++;
+    }
+
+    // **Every vehicle**, and the car that arrives is the one that was chosen -
+    // with that vehicle's numbers, not the first entry's.
+    for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, GS_MODE_RACE);
+        gs_world_add_car(&w, &t, v, GS_INT(8), GS_INT(12), 0);
+
+        CHECK(w.car_count == 1);
+        CHECK(w.car[0].vehicle == v);
+        CHECK(w.car[0].active);
+        CHECK(!w.car[0].wrecked);
+        CHECK(w.car[0].damage == 0);
+        CHECK(gs_vehicles[v].name != nullptr);
+        CHECK(gs_vehicles[v].power > 0);
+        CHECK(gs_vehicles[v].top > 0);
+
+        // It drives, under its own power, in the direction it is pointed.
+        for (uint32_t i = 0; i < GS_TICK_HZ * 3u; i++) {
+            gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+            gs_world_step(&w, &t, in);
+        }
+        CHECK(w.car[0].x > GS_INT(8));
+        checked++;
+    }
+
+    printf("  DIALS %d setup values checked\n", checked);
+    CHECK(checked == 2 + GS_MAX_CARS + GS_VEH_COUNT);
+}
+
+TEST(every_lap_count_the_dial_offers_is_the_race_that_is_run) {
+    // **One to twenty, which is the whole of the lap dial**, and until now
+    // exactly one value of it had ever been raced. The rule is easy to say and
+    // easy to get wrong by one: a car starts *behind* the line and crosses it
+    // on the way out, so that first crossing is the run up to the line and not
+    // a lap anybody drove. Getting it wrong ends a three-lap race after two.
+    //
+    // **Driven on a constant lock rather than by the racing AI.** What is under
+    // test is the lap rule, and the AI is not part of it - on a bare rectangle
+    // it laps twice, wanders into the run-off and sits there, which reads
+    // exactly like a lap counter stuck at ten. A car held on full lock drives a
+    // circle and will do it all day, which is all this needs. The throttle is
+    // held to a speed rather than pinned down, because a car that keeps
+    // accelerating turns wider every lap and spirals off the edge of the world.
+    for (uint16_t want = 1; want <= 20; want++) {
+        static gs_track t;
+        gs_track_init(&t, 64, 64, GS_SURF_PAVEMENT);
+        for (uint8_t y = 0; y <= t.h; y++) {
+            for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+        }
+
+        // Two gates on the circle the car will drive, wide enough that it goes
+        // through them rather than past them.
+        gs_track_add_gate(&t, GS_INT(32), GS_INT(32), 0, GS_INT(4));
+        // **Facing the way the car will be going when it gets there.** Half a
+        // circle later it is travelling in the opposite direction, and a gate
+        // is a line with a side to it - pointed the same way as the first, the
+        // car sails past the back of it and the lap never completes.
+        gs_track_add_gate(&t, GS_INT(22), GS_INT(46), 32768, GS_INT(4));
+        t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, GS_MODE_RACE);
+        gs_world_set_laps(&w, want);
+        CHECK(gs_world_laps_needed(&w, &t) == want);
+
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR,
+                         GS_INT(32), GS_INT(32), 0);
+
+        // A lap of this circle is about seventeen seconds, so twenty of them is
+        // under six minutes; this allows fifteen and expects to stop long
+        // before it.
+        for (uint32_t i = 0; i < GS_TICK_HZ * 60u * 15u && !w.over; i++) {
+            const gs_fix vx = w.car[0].vx;
+            const gs_fix vy = w.car[0].vy;
+            const gs_fix speed_sq = gs_fix_mul(vx, vx) + gs_fix_mul(vy, vy);
+
+            gs_input in[GS_MAX_CARS] = { 0 };
+            in[0] = (gs_input)((speed_sq < GS_INT(16) ? (unsigned)GS_IN_ACCEL : 0u) |
+                               (unsigned)GS_IN_RIGHT);
+            gs_world_step(&w, &t, in);
+        }
+
+        CHECK(w.over);
+        CHECK(w.winner == 0);
+        CHECK(w.car[0].finish_tick > 0);
+
+        // **Finished on the lap it was asked for, not near it.** This is the
+        // check that fails if the run-up crossing is ever counted as a lap.
+        CHECK(gs_car_laps_done(&t, &w.car[0]) == want);
+
+        // And the crossings are one ahead of the laps, for the same reason.
+        CHECK(w.car[0].laps == (uint16_t)(want + 1u));
+    }
+}
+
 TEST(a_race_with_no_lap_target_never_ends) {
     static gs_track t;
     gs_track_init(&t, 40, 16, GS_SURF_PAVEMENT);
@@ -6695,6 +6844,8 @@ int main(void) {
     run_the_race_that_sets_a_record_is_the_race_that_reports_it();
     run_a_race_that_is_over_stays_over_until_a_new_one_replaces_it();
     run_a_race_ends_when_everybody_has_finished_and_the_first_one_wins();
+    run_every_other_dial_on_the_setup_screen_reaches_the_race();
+    run_every_lap_count_the_dial_offers_is_the_race_that_is_run();
     run_a_race_with_no_lap_target_never_ends();
     run_a_replay_carries_what_race_it_was();
     run_the_analyser_gives_the_same_answer_twice();

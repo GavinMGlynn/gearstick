@@ -4051,12 +4051,41 @@ state** - a perfect score, having changed nothing whatever. It looks better than
 every honest number here. What is counted is now what moved, and the assertions
 below it would fail if nothing did:
 
-**The lap dial was attempted and parked**, and what it cost is in the plan: the
-racing AI laps a bare rectangle twice and then sits in the run-off looking
-exactly like a stuck lap counter; a generated circuit ends the race inside a
-minute; and a hand-written shuttle driver leaves the field under either sign of
-either steering rule, so the heading convention wants establishing before the
-next attempt.
+### The dials the race is set up with
+
+**Every lap count from one to twenty, raced to its finish**, and the crossings
+come to one more than the laps every time - the run-up to the line, and the
+off-by-one that ends a three-lap race after two.
+
+Getting a car round twenty laps took four harnesses and the first three are
+worth knowing about:
+
+- **The racing AI laps a bare rectangle twice and then sits in the run-off.**
+  For twenty-five minutes of simulated time, still `active`, lap counter frozen
+  at ten. It reads exactly like a bug in lap counting and is a car parked on the
+  grass.
+- **A generated circuit ends the race inside a minute.** A car dropped anywhere
+  but the grid is already off the road; dropped *on* the grid by
+  `gs_track_grid` it still finishes with no laps at all.
+- **A hand-written shuttle driver leaves the field under either sign of either
+  steering rule**, because the conventions were guessed. They were then measured
+  instead: heading 0 is +x, the angle increases towards +y, and **RIGHT
+  increases the heading while LEFT decreases it**.
+
+What works is a car held on **full lock at a steady speed**. Constant throttle is
+a spiral rather than a circle - a faster car turns wider - so the throttle is
+held to a speed and the lock never moves, which will lap all day inside a
+64-square field. Two gates on that circle, and **the far one faces the way the
+car will be going when it gets there**: half a circle later it is travelling in
+the opposite direction, and pointed like the first gate the car sails past the
+back of it and the lap never completes. That last one cost an hour and looked
+like a stuck counter too.
+
+**And the rest of the setup screen**: every mode, every player count the grid
+has room for, every vehicle - 12 values against a race actually built from them,
+checking that each car gets its own grid slot with no two in the same place, and
+that each vehicle arrives as the one that was chosen and drives under its own
+power.
 
 ## Known risks
 
