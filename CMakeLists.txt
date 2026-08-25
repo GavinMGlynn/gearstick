@@ -688,7 +688,13 @@ if(GEARSTICK_TESTS)
     gs_sanitizer_env(_sanitizers)
     set_tests_properties(gearstick_render PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIO_DRIVER=dummy;${_sanitizers}"
-        TIMEOUT 180)
+        # **Ten minutes, because this suite walks the whole front end.** It was
+        # three, from when the heaviest thing here photographed a frame. It now
+        # presses every control the front end offers, in every state it can find
+        # one in, under sanitizers - 111 seconds on the machine this was written
+        # on, and CI's machines are slower than that. A budget that fits locally
+        # and not on the runner is a red tree that says nothing about the code.
+        TIMEOUT 600)
 
     # A track through a real file, not just a buffer: the format is what a
     # shared track travels in, so "it round-trips in memory" is not the claim

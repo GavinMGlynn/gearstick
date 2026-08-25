@@ -127,7 +127,8 @@ Needs CMake 3.28+, Ninja, and a C23 compiler: GCC 14+, Clang 19+, AppleClang 16+
 or MSVC 19.39+. Targets Linux x86_64, Windows x64 and macOS arm64, all 64-bit.
 
 ```sh
-git submodule update --init --depth 1 ext/sdl ext/imgui ext/sdl_net
+git submodule update --init --depth 1 \
+    ext/sdl ext/imgui ext/sdl_net ext/libsodium ext/sdl_image
 cmake --preset linux-release
 cmake --build --preset linux-release
 ctest --preset linux-release

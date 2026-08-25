@@ -29,7 +29,14 @@ env:
   # is a separate library from SDL because networking is a separate library from
   # SDL, and no distribution packages the SDL3 version yet, so the submodule is
   # not merely a convenience here.
-  CI_SUBMODULES: ext/sdl ext/imgui ext/sdl_net ext/libsodium
+  #
+  # ext/sdl_image decodes one PNG: the window's icon. It went in with the icon
+  # and this line did not, which is why every build after it failed at configure
+  # with "ext/sdl_image is empty" - **a submodule added anywhere is a submodule
+  # added here, in all four lists, and in the README's clone line.**
+  #
+  # ext/libsodium is the handshake the server and client authenticate with.
+  CI_SUBMODULES: ext/sdl ext/imgui ext/sdl_net ext/libsodium ext/sdl_image
 
 jobs:
   linux-debian:
@@ -269,7 +276,7 @@ jobs:
         # that does not expand it, and a silently empty list checks out no
         # submodules at all and fails several minutes later in the configure.
         # **Add anything new here as well as to CI_SUBMODULES above.**
-        run: git submodule update --init --depth 1 ext/sdl ext/imgui ext/sdl_net ext/libsodium
+        run: git submodule update --init --depth 1 ext/sdl ext/imgui ext/sdl_net ext/libsodium ext/sdl_image
 
       - uses: ilammy/msvc-dev-cmd@v1
         with: { arch: x64 }

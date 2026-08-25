@@ -42,7 +42,7 @@ env:
   # ext/dear_bindings: it generates the C API and the result is committed, so
   # building needs the header but not the generator. That asymmetry is the whole
   # point of committing the bindings, and this line is where it shows.
-  CI_SUBMODULES: ext/sdl ext/imgui ext/sdl_net ext/libsodium
+  CI_SUBMODULES: ext/sdl ext/imgui ext/sdl_net ext/libsodium ext/sdl_image
 
 jobs:
   linux:
@@ -247,7 +247,7 @@ jobs:
         with: { submodules: false }
       # Spelled out rather than $CI_SUBMODULES: this job runs under a shell that
       # does not expand it. Add anything new here as well as above.
-      - run: git submodule update --init --depth 1 ext/sdl ext/imgui ext/sdl_net ext/libsodium
+      - run: git submodule update --init --depth 1 ext/sdl ext/imgui ext/sdl_net ext/libsodium ext/sdl_image
 
       - uses: ilammy/msvc-dev-cmd@v1
         with: { arch: x64 }
