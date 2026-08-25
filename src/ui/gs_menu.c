@@ -7,7 +7,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 // The gravity buttons, the same set the construction set offers, because a
 // player who learned "Mars" in the editor should find "Mars" here.
@@ -1846,6 +1848,43 @@ gs_screen gs_menu_back(const gs_menu *m, bool editing) {
     default:
         return GS_SCREEN_TITLE;
     }
+}
+
+// FNV-1a, because the only property wanted here is that different states give
+// different numbers. Nothing is stored under this hash and nothing travels, so
+// none of the reasons to reach for something stronger apply.
+static uint64_t gs_fnv(uint64_t h, const void *p, size_t n) {
+    const uint8_t *b = (const uint8_t *)p;
+    for (size_t i = 0; i < n; i++) {
+        h ^= (uint64_t)b[i];
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
+uint64_t gs_menu_hash(const gs_menu *m) {
+    const uint8_t *b = (const uint8_t *)m;
+    uint64_t h = 0xcbf29ce484222325ULL;
+
+    // Everything up to the borrowed lobby pointer.
+    h = gs_fnv(h, b, offsetof(gs_menu, lobby));
+
+    // Then what the lobby screen owns itself, up to the two clocks.
+    h = gs_fnv(h, b + offsetof(gs_menu, lobby_slot),
+               offsetof(gs_menu, track_progress) - offsetof(gs_menu, lobby_slot));
+
+    // Then the rest, up to the panel measurement.
+    h = gs_fnv(h, b + offsetof(gs_menu, server_text),
+               offsetof(gs_menu, panel) - offsetof(gs_menu, server_text));
+
+    // And the message itself rather than where it is kept. The terminator goes
+    // in so that a message and that message with something appended cannot
+    // collide, and the no-message case is a byte of its own rather than
+    // nothing at all.
+    const char *e = m->lobby_error;
+    h = gs_fnv(h, e != nullptr ? e : "", e != nullptr ? strlen(e) + 1 : 1);
+
+    return h;
 }
 
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {

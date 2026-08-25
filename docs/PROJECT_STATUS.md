@@ -3725,10 +3725,43 @@ the one the fresh menu holds; and the editor, which is not a `gs_screen`.
   makes fatal. ImGui's own headers are included inside a `#pragma GCC
   diagnostic push/ignored` for the conversion warnings, which is narrower than
   exempting the file and keeps our own code strict.
-- **Recognising a state already seen.** `gs_menu` is a plain value with one
-  exception — `const gs_lobby *lobby` — so a hash over its bytes needs that
-  member skipped or followed, or two identical menus will hash differently. That
-  hash is what turns a walk that goes deeper into one that terminates.
+- **Recognising a state already seen. Done: `gs_menu_hash`.** The plan had said
+  `gs_menu` was a plain value with one borrowed pointer in it. It has **two** —
+  `const gs_lobby *lobby` and `const char *lobby_error` — and three more fields
+  that have no business in a state hash, which is what the work turned up:
+
+  - `lobby` is skipped. It is a view of the frontend's state, not the menu's:
+    two menus pointed at the same lobby are in the same state, and a different
+    lobby is something to seed a walk with rather than something a press finds.
+  - `lobby_error` is hashed **by its message, with its terminator, and not by
+    its pointer**. The text is what a player reads and is therefore state; the
+    address it happens to sit at is not, and hashing that would make one message
+    read as two states.
+  - `track_progress` and `knocking_for` are skipped because they advance with
+    the clock. Hashing a clock makes every frame a state nobody has been in,
+    which is exactly as useful as no hash at all.
+  - `panel` is skipped: it is a measurement written *by* drawing, an output
+    rather than an input, and it moves when the window is resized.
+
+  Everything else is in by byte range rather than field by field, so a field
+  added to `gs_menu` is hashed the day it is added rather than the day somebody
+  remembers to add it. FNV-1a; nothing is stored under this hash and nothing
+  travels, so the reasons to reach for something stronger do not apply.
+
+  **All 52 fields are classified in the test and each is proved by flipping a
+  byte in it** — the 48 that are state have to move the number, the four that
+  are not have to leave it alone. Both directions are verified by injection:
+  truncating the hash's first range prints `NOT IN THE STATE: chosen` and the
+  seven fields after it, and hashing the whole struct instead prints `IN THE
+  STATE AND SHOULD NOT BE: lobby, track_progress, knocking_for, panel`.
+
+  One thing the work turned up that is worth keeping: **two rosters built from
+  scratch do not hash alike**, because making a driver mints a random salt for
+  their password. That is correct rather than a fault, and it is the proof the
+  hash reaches deeper than the fields a screen draws. The property a walk needs
+  is the weaker one, and it is the one asserted: *a copy of a state is that
+  state*, which also pins that struct assignment carries the padding the hash
+  reads.
 - **The player count is a dimension, not a value.** One to four players is one
   to four grid rows, each carrying a driver, a vehicle and a colour, so the set
   of controls differs at each count rather than merely growing.

@@ -997,12 +997,19 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       itself to the map and left all 190 other controls with the names they
       already had. Pressing by name reaches every screen that pressing Tab
       reached, and dropping the names turns the test red.*
-- [ ] **A menu state can be recognised when it comes round again.** A walk that
-      keeps going needs to know where it has already been. A menu is a plain
-      value apart from one borrowed pointer at `lobby`, so this is a hash over
-      the bytes a control can change.
-      *Verification: two menus differing only in something no control can reach
-      hash alike; signing in, changing screen or picking a track do not.*
+- [x] **A menu state can be recognised when it comes round again.** `gs_menu_hash`
+      is one number for the state a menu is in, and what it leaves out is the
+      design: the borrowed view of the lobby, the panel measurement taken while
+      drawing, and the two values that advance with the clock rather than with
+      anything anybody pressed — hashing those would make every frame somewhere
+      new, which is the same as having no hash at all. A lobby error counts by
+      its message and not by where the message is stored.
+      *Verification: all 52 fields are classified in the test, not a sample of
+      them, and each is proved by flipping a byte in it — the ones that are
+      state must move the number and the four that are not must leave it alone.
+      Dropping fields from the hash names them; adding the clocks to it names
+      those. A copy of a menu is the same state, which is the move a walk makes
+      on every step.*
 - [ ] **The walk goes as deep as the front end does.** Breadth-first from the
       states already reached rather than one press from a fresh menu, so a fault
       that takes two presses to reach — pick a track, then race — is reachable at

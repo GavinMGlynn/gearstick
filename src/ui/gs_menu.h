@@ -227,6 +227,31 @@ void gs_menu_init(gs_menu *m);
 // Draw the current screen. Returns the screen to be on next frame, which is the
 // same one unless something was clicked. `t` is the track a race would be on,
 // for showing its records and its name.
+// **What state this menu is in, as one number.**
+//
+// A walk that presses on from where it got to has to know when it has arrived
+// somewhere it has already been, or it walks forever. A menu is a plain value,
+// so this is a hash of it - but not of all of it, and what is left out is the
+// point:
+//
+//  - **`lobby` is a borrowed view of the frontend's state, not the menu's.**
+//    Two menus pointed at the same lobby are in the same state; a different
+//    lobby is a different thing to seed a walk with, not something a press can
+//    discover.
+//  - **`lobby_error` is hashed by its message, not by its pointer.** The text
+//    is what a player sees and is therefore state; where it happens to be
+//    stored is not, and hashing the pointer would make the same message read as
+//    two different states.
+//  - **`track_progress` and `knocking_for` advance with the clock**, not with
+//    anything anybody pressed. Hashing them would make every frame a state
+//    nobody had been in before, which is the same as having no hash at all.
+//  - **`panel` is a measurement of the last frame drawn**, an output rather
+//    than an input, and it moves when the window is resized.
+//
+// Everything else is in, by byte and by construction rather than field by
+// field, so a field added to this struct is hashed the day it is added.
+uint64_t gs_menu_hash(const gs_menu *m);
+
 gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
 
 // **Where "back" goes from here, in one callable place.** Escape is the way out

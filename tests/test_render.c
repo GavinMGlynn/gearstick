@@ -10,6 +10,7 @@
 // Everything here runs under the dummy video driver and the software renderer,
 // so it needs no display and runs anywhere CI does.
 
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -4185,6 +4186,178 @@ TEST(every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real) {
     }
 }
 
+TEST(a_menu_knows_a_state_it_has_already_been_in) {
+    (void)ren;      // no pixels in this one: it is arithmetic on a value
+
+    // **The thing that lets a walk stop.** Pressing on from where you got to
+    // means arriving back somewhere sooner or later, and a walk that cannot
+    // tell walks forever. So a menu comes down to one number - and what is
+    // deliberately left out of that number is the whole design, because a hash
+    // that includes a clock makes every frame somewhere new, which is the same
+    // as having no hash at all.
+    static gs_menu a;
+    static gs_menu b;
+    static gs_track t;
+    gs_panel_menu(&a, &t);
+
+    // **A copy of a state is that state.** This is the move a walk makes on
+    // every step - take the menu it is standing in, copy it, press something -
+    // so it is the property the whole thing rests on. It is also the check that
+    // the padding between fields is not being read as content, because a struct
+    // assignment is not obliged to carry padding across.
+    b = a;
+    CHECK(gs_menu_hash(&b) == gs_menu_hash(&a));
+
+    // **Two rosters built from scratch are *not* the same state**, and that is
+    // right rather than a fault: making a driver mints a random salt for their
+    // password, so two rosters that read the same on screen differ where it
+    // counts. The hash sees that, which is the proof it is looking deeper than
+    // the fields a screen happens to draw.
+    static gs_menu fresh_again;
+    gs_panel_menu(&fresh_again, &t);
+    CHECK(gs_menu_hash(&fresh_again) != gs_menu_hash(&a));
+
+    const uint64_t base = gs_menu_hash(&a);
+
+    // **Every field of gs_menu, and which side of the line it falls on.** Not a
+    // sample of them - all of them, so that a field nobody thought about is a
+    // failing test rather than a state the walk cannot tell apart.
+    static const struct {
+        size_t      at;
+        const char *name;
+        bool        is_state;
+    } fields[] = {
+        { offsetof(gs_menu, screen), "screen", true },
+        { offsetof(gs_menu, profiles), "profiles", true },
+        { offsetof(gs_menu, records), "records", true },
+        { offsetof(gs_menu, library), "library", true },
+        { offsetof(gs_menu, chosen), "chosen", true },
+        { offsetof(gs_menu, store_dirty), "store_dirty", true },
+        { offsetof(gs_menu, setup), "setup", true },
+        { offsetof(gs_menu, result), "result", true },
+        { offsetof(gs_menu, result_count), "result_count", true },
+        { offsetof(gs_menu, new_name), "new_name", true },
+        { offsetof(gs_menu, new_colour), "new_colour", true },
+        { offsetof(gs_menu, new_vehicle), "new_vehicle", true },
+        { offsetof(gs_menu, editing), "editing", true },
+        { offsetof(gs_menu, picking_for), "picking_for", true },
+        { offsetof(gs_menu, status), "status", true },
+        { offsetof(gs_menu, signed_in), "signed_in", true },
+        { offsetof(gs_menu, login_pick), "login_pick", true },
+        { offsetof(gs_menu, login_password), "login_password", true },
+        { offsetof(gs_menu, login_confirm), "login_confirm", true },
+        { offsetof(gs_menu, login_code), "login_code", true },
+        { offsetof(gs_menu, login_name), "login_name", true },
+        { offsetof(gs_menu, login_making), "login_making", true },
+        { offsetof(gs_menu, login_wants_code), "login_wants_code", true },
+        { offsetof(gs_menu, login_setting), "login_setting", true },
+        { offsetof(gs_menu, focus_form), "focus_form", true },
+        { offsetof(gs_menu, server_password), "server_password", true },
+        { offsetof(gs_menu, server_code), "server_code", true },
+        { offsetof(gs_menu, server_login_pending), "server_login_pending", true },
+        { offsetof(gs_menu, online), "online", true },
+        { offsetof(gs_menu, race_requested), "race_requested", true },
+        { offsetof(gs_menu, tracks_for_race), "tracks_for_race", true },
+        { offsetof(gs_menu, records_from), "records_from", true },
+        { offsetof(gs_menu, edit_requested), "edit_requested", true },
+        { offsetof(gs_menu, new_requested), "new_requested", true },
+        { offsetof(gs_menu, publish_requested), "publish_requested", true },
+        { offsetof(gs_menu, withdraw_requested), "withdraw_requested", true },
+        { offsetof(gs_menu, share_with), "share_with", true },
+        { offsetof(gs_menu, share_on), "share_on", true },
+        { offsetof(gs_menu, quit), "quit", true },
+        { offsetof(gs_menu, lobby_slot), "lobby_slot", true },
+        { offsetof(gs_menu, lobby_ready), "lobby_ready", true },
+        { offsetof(gs_menu, server_text), "server_text", true },
+        { offsetof(gs_menu, picked), "picked", true },
+        { offsetof(gs_menu, take), "take", true },
+        { offsetof(gs_menu, track_name), "track_name", true },
+        { offsetof(gs_menu, name_for), "name_for", true },
+        { offsetof(gs_menu, track_code), "track_code", true },
+        { offsetof(gs_menu, code_for), "code_for", true },
+        { offsetof(gs_menu, lobby), "lobby", false },
+        { offsetof(gs_menu, track_progress), "track_progress", false },
+        { offsetof(gs_menu, knocking_for), "knocking_for", false },
+        { offsetof(gs_menu, panel), "panel", false },
+    };
+
+    uint8_t *bytes = (uint8_t *)&a;
+    for (size_t i = 0; i < SDL_arraysize(fields); i++) {
+        bytes[fields[i].at] = (uint8_t)(bytes[fields[i].at] ^ 0xFFu);
+        const uint64_t moved = gs_menu_hash(&a);
+        bytes[fields[i].at] = (uint8_t)(bytes[fields[i].at] ^ 0xFFu);
+
+        if (fields[i].is_state) {
+            if (moved == base) printf("  NOT IN THE STATE: %s\n", fields[i].name);
+            CHECK(moved != base);
+        } else {
+            if (moved != base) printf("  IN THE STATE AND SHOULD NOT BE: %s\n",
+                                      fields[i].name);
+            CHECK(moved == base);
+        }
+
+        // And putting it back is the state it was, not merely a state.
+        CHECK(gs_menu_hash(&a) == base);
+    }
+
+    // **The message, not the address it is kept at.** A lobby error is what a
+    // player reads, so it is state; the pointer to it is not, and hashing that
+    // would make one message read as two different states depending on where it
+    // happened to be stored.
+    static char locked[]  = "the door is locked";
+    static char elsewhere[] = "the door is locked";
+    static char missing[] = "there is no door";
+
+    a.lobby_error = locked;
+    const uint64_t said = gs_menu_hash(&a);
+    CHECK(said != base);
+
+    a.lobby_error = elsewhere;
+    CHECK(gs_menu_hash(&a) == said);
+
+    a.lobby_error = missing;
+    CHECK(gs_menu_hash(&a) != said);
+
+    a.lobby_error = nullptr;
+    CHECK(gs_menu_hash(&a) == base);
+
+    // **And the states a walk actually moves between are different states.**
+    // The byte flips above prove the fields are in the number; these are the
+    // moves a person makes, spelled out as the things that must never collide.
+    const gs_screen was_screen  = a.screen;
+    const int       was_signed  = a.signed_in;
+    const int       was_chosen  = a.chosen;
+    const uint8_t   was_players = a.setup.players;
+
+    a.screen = (was_screen == GS_SCREEN_TRACKS) ? GS_SCREEN_TITLE
+                                                : GS_SCREEN_TRACKS;
+    CHECK(gs_menu_hash(&a) != base);
+    a.screen = was_screen;
+    CHECK(gs_menu_hash(&a) == base);
+
+    a.signed_in = was_signed + 1;
+    CHECK(gs_menu_hash(&a) != base);
+    a.signed_in = was_signed;
+    CHECK(gs_menu_hash(&a) == base);
+
+    a.chosen = was_chosen + 1;
+    CHECK(gs_menu_hash(&a) != base);
+    a.chosen = was_chosen;
+    CHECK(gs_menu_hash(&a) == base);
+
+    a.setup.players = (uint8_t)(was_players + 1u);
+    CHECK(gs_menu_hash(&a) != base);
+    a.setup.players = was_players;
+    CHECK(gs_menu_hash(&a) == base);
+
+    // And the two that tick on their own do not, however far they have got.
+    a.track_progress = 0.5f;
+    a.knocking_for   = 9.0f;
+    CHECK(gs_menu_hash(&a) == base);
+    a.track_progress = 0.0f;
+    a.knocking_for   = 0.0f;
+}
+
 TEST(every_control_is_known_by_name_and_answers_to_it) {
     // **The end of counting Tabs.** The walk above knows a control as "the
     // fifth thing on this screen", which stops being true the day somebody
@@ -4548,6 +4721,7 @@ int main(void) {
     run_the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
     run_every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real(ren);
+    run_a_menu_knows_a_state_it_has_already_been_in(ren);
     run_every_control_is_known_by_name_and_answers_to_it(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
