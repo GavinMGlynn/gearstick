@@ -1083,17 +1083,27 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       which is left by typing a password and is proved by the door test next to
       it, and the results screen, which is arrived at by finishing a race and
       which no button leads to — correctly.*
-- [ ] **No control does nothing everywhere.** A control that never changed
-      anything in any state it was pressed in is either dead code or a button
-      that lies about being one. Doing nothing *sometimes* is ordinary — a Back
-      that is already back, a row already selected.
-      *Two things stand in the way and both were found by trying it: a table's
-      column headings and cell text come back from the probe looking exactly
-      like controls, so real ones want telling apart by something better than a
-      name; and a gravity preset on the setup screen came out of 26,000 presses
-      having never changed anything, which is either a dead button or a walk
-      that only pressed it while it was already chosen. That wants finding out
-      before anything is asserted.*
+- [x] **No control does nothing everywhere.** Every control changed something,
+      somewhere. Ten looked dead and nine of them were the walk's fault rather
+      than the front end's — a preset already chosen, a row already picked, a
+      slider that is moved rather than pressed, a box typed with what was
+      already in it — so a control that did nothing is now taken back to where
+      it did nothing and tried against **every other control on that screen**,
+      with the arrow keys, and with every word the walk knows.
+      *Verification: **0 of 569 controls do nothing everywhere**, with 9 woken
+      by being retried properly, in 256 extra presses. One is excused by name
+      and it is the share code, a read-only box you copy a track out of — and
+      the excuse is itself asserted, so the day it can be typed into, the tree
+      goes red rather than quietly covering for whatever goes dead next. A
+      button rigged to do nothing is named and turns the tree red.*
+- [ ] **The walk can scroll.** It cannot, and until now that was invisible:
+      a table hands ImGui every row it holds and ImGui drops the ones off the
+      bottom, so the walk was pressing rows that had already returned and
+      counting each as covered. Those presses are gone and the rows are counted
+      where they can be seen — **86 controls drawn and out of reach**, which is
+      most of a track library.
+      *Verification: the tail of a full library is pressed, and the count of
+      controls out of reach goes to nothing.*
 - [x] **The editor is walked by machine as well.** Nothing had ever pressed a
       button in it: `gs_editor_frame` was called in exactly one place in the
       whole repository and that place was `main.c`, so every control in the

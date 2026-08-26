@@ -4263,6 +4263,29 @@ typedef struct gs_shape_seen {
     int      count;
 } gs_shape_seen;
 
+// **A control, as something a person could be told about.** The walk knows an
+// id, which is a hash and says nothing to anybody; a report naming what it
+// found has to say "the Earth button on the setup screen". Kept beside the
+// counts rather than looked up afterwards, because the screen a control was
+// drawn on is gone by the time the walk ends.
+typedef struct gs_walk_named {
+    uint32_t id;
+    char     label[GS_UI_LABEL];
+    char     window[GS_UI_WINDOW];
+    int      presses;       // how many times the walk did something to it
+    bool     visible;       // was on screen at least once, rather than clipped
+    bool     heading;       // was a table's column heading every time it appeared
+
+    // **Where it was standing the last time pressing it did nothing.** A
+    // control that never changes anything has to be tried again somewhere, and
+    // somewhere is a path plus the two things that make a path mean anything:
+    // the seed menu it was walked from and the screen it started on.
+    gs_walk_path where;
+    int          seed;
+    gs_screen    from;
+    bool         idled;         // there is a state in `where` worth going back to
+} gs_walk_named;
+
 typedef struct gs_walk {
     uint64_t     slot[GS_WALK_SLOTS];
     gs_shape_seen shape[GS_WALK_SLOTS];
@@ -4270,7 +4293,28 @@ typedef struct gs_walk {
     uint32_t     offered[GS_WALK_CTRLS];
     uint32_t     pressed[GS_WALK_CTRLS];
     uint32_t     never[GS_WALK_CTRLS];
-    int          n_offered, n_pressed, n_never;
+
+    // **Drawn, and out of sight where it was drawn.** Kept apart from `never`,
+    // which means drawn dead or unreachable by the keyboard. Folding the two
+    // together turns "six controls are dead in one state and live in another"
+    // - the number the seeding exists for - into three hundred and seventy
+    // four, most of them a table row that was simply scrolled past.
+    uint32_t     unseen[GS_WALK_CTRLS];
+    int          n_offered, n_pressed, n_never, n_unseen;
+
+    // **What a press did, as against that it happened.** `pressed` is a fact
+    // about the walk. `moved` is a fact about the front end: pressing this
+    // control changed the menu, from somewhere, at least once. A control
+    // offered and pressed and never in here did nothing every single time.
+    uint32_t     moved[GS_WALK_CTRLS];
+    int          n_moved;
+    gs_walk_named named[GS_WALK_CTRLS];
+
+    // **Which seed and which screen this walk is running from.** Written by the
+    // caller and carried, so that a state can be stood in again after the walk
+    // has finished: a path is only a path from the menu it started at.
+    int          seed_at;
+    gs_screen    seed_from;
     gs_walk_path queue[GS_WALK_STATES];
     int          head, tail;
     int          states;
@@ -4334,6 +4378,84 @@ static bool gs_walk_mark(uint32_t *tab, uint32_t id, int *count) {
     }
     tab[i] = id;
     (*count)++;
+    return false;
+}
+
+// Is it in there already, without putting it in. The same table, asked rather
+// than told.
+static bool gs_walk_has(const uint32_t *tab, uint32_t id) {
+    size_t i = (size_t)id & (GS_WALK_CTRLS - 1);
+    while (tab[i] != 0) {
+        if (tab[i] == id) return true;
+        i = (i + 1) & (GS_WALK_CTRLS - 1);
+    }
+    return false;
+}
+
+// What this control is called, kept the first time it is seen. The two flags
+// accumulate over every sighting rather than recording the first: a row clipped
+// out of sight in one state and on screen in another **is** on screen, and a
+// heading is only a heading if it was one every time.
+static void gs_walk_note(gs_walk *w, const gs_ui_item *it) {
+    size_t i = (size_t)it->id & (GS_WALK_CTRLS - 1);
+    while (w->named[i].id != 0) {
+        if (w->named[i].id == it->id) {
+            if (it->visible) w->named[i].visible = true;
+            if (!it->heading) w->named[i].heading = false;
+            // **A name learned later is still its name.** ImGui reports a
+            // label when the widget runs, and a widget clipped out of sight
+            // returns before it gets that far - so the first sighting of a
+            // scrolled-away row is nameless and every later one is not. Keeping
+            // the first would file half the library under "unnamed structure".
+            if (w->named[i].label[0] == '\0' && it->label[0] != '\0') {
+                SDL_strlcpy(w->named[i].label, it->label,
+                            sizeof w->named[i].label);
+            }
+            return;
+        }
+        i = (i + 1) & (GS_WALK_CTRLS - 1);
+    }
+    w->named[i].id = it->id;
+    SDL_strlcpy(w->named[i].label, it->label, sizeof w->named[i].label);
+    SDL_strlcpy(w->named[i].window, it->window, sizeof w->named[i].window);
+    w->named[i].presses = 0;
+    w->named[i].visible = it->visible;
+    w->named[i].heading = it->heading;
+    w->named[i].idled   = false;
+}
+
+// The record for an id, or nothing if the walk never saw it.
+static gs_walk_named *gs_walk_named_of(gs_walk *w, uint32_t id) {
+    size_t i = (size_t)id & (GS_WALK_CTRLS - 1);
+    while (w->named[i].id != 0) {
+        if (w->named[i].id == id) return &w->named[i];
+        i = (i + 1) & (GS_WALK_CTRLS - 1);
+    }
+    return nullptr;
+}
+
+// **A window's own furniture is not one of the front end's controls.** ImGui
+// gives every window a title bar you can drag and a collapse arrow, and it
+// keeps an implicit "Debug" window for anything submitted outside a Begin.
+// Those come back from the probe looking exactly like controls - reachable, not
+// disabled, with a name - and they are not: pressing the title bar of the parts
+// box is not a thing a person does to build a track, and counting it as a
+// control the walk failed to press would be padding the denominator with
+// somebody else's widgets.
+//
+// Taken by name and window rather than by item, because both walks ask it: the
+// editor's, of what it is about to press, and the menu's, of what it wrote
+// down. One list, or it is two lists that disagree by next month.
+//
+// Named here rather than quietly skipped, because an exclusion nobody can see
+// is how a coverage number stops meaning anything.
+static bool gs_chrome(const char *label, const char *window) {
+    // ImGui's own implicit window, for anything submitted outside a Begin.
+    if (SDL_strncmp(window, "Debug", 5) == 0) return true;
+
+    // A title bar: the item whose name is the window's name.
+    if (SDL_strcmp(label, window) == 0) return true;
+
     return false;
 }
 
@@ -4460,15 +4582,25 @@ static uint64_t gs_walk_shape_of(gs_ui *ui, const gs_menu *m, gs_ui_item *items,
         h = gs_shape(h, &items[i].reachable, sizeof items[i].reachable);
     }
     // **What counts as offered is what could be pressed.** A control drawn dead
-    // in every state it appears in, or one nav can never land on, is not a gap
-    // in the walk - it is counted separately so that the coverage number means
-    // what it says.
+    // in every state it appears in, one nav can never land on, or one scrolled
+    // out of sight is not a gap in the walk - it is counted separately so that
+    // the coverage number means what it says.
+    //
+    // **Scrolled out of sight belongs in that list and was missing from it.**
+    // A table submits every row it holds and ImGui drops the ones off-screen,
+    // so the fourteenth track in a list showing ten came back looking exactly
+    // like a control - and the walk pressed it, and the press did nothing,
+    // because the row had already returned. Every one of those was a press that
+    // could not happen counted as a press that did.
     if (w != nullptr) {
         for (int i = 0; i < held; i++) {
-            if (items[i].reachable && !items[i].disabled) {
-                gs_walk_mark(w->offered, items[i].id, &w->n_offered);
-            } else {
+            gs_walk_note(w, &items[i]);
+            if (!items[i].reachable || items[i].disabled) {
                 gs_walk_mark(w->never, items[i].id, &w->n_never);
+            } else if (!items[i].visible) {
+                gs_walk_mark(w->unseen, items[i].id, &w->n_unseen);
+            } else {
+                gs_walk_mark(w->offered, items[i].id, &w->n_offered);
             }
         }
     }
@@ -4482,7 +4614,7 @@ static uint64_t gs_walk_shape_of(gs_ui *ui, const gs_menu *m, gs_ui_item *items,
     if (anything_new != nullptr) {
         *anything_new = false;
         for (int i = 0; i < held && w != nullptr; i++) {
-            if (!items[i].reachable || items[i].disabled) continue;
+            if (!items[i].reachable || items[i].disabled || !items[i].visible) continue;
             size_t at = (size_t)items[i].id & (GS_WALK_CTRLS - 1);
             bool found = false;
             while (w->pressed[at] != 0) {
@@ -4554,10 +4686,12 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
         int n_acts = 0;
         for (int i = 0; i < held; i++) {
             if (!items[i].reachable || items[i].disabled) continue;
+            if (!items[i].visible) continue;      // it has already returned
             acts[n_acts].id = items[i].id;
             acts[n_acts].word = -1;
             acts[n_acts].key = 0;
             n_acts++;
+
             if (!items[i].typable) continue;
 
             // **How many words a box is tried with depends on what is being
@@ -4600,6 +4734,8 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
             if (acts[i].word >= 0) w->typed++;
             if (acts[i].id != 0) {
                 gs_walk_mark(w->pressed, acts[i].id, &w->n_pressed);
+                gs_walk_named *nm = gs_walk_named_of(w, acts[i].id);
+                if (nm != nullptr) nm->presses++;
             }
             if (m.screen < GS_SCREEN_COUNT) w->reached[m.screen] = true;
             if (here.screen < GS_SCREEN_COUNT && m.screen < GS_SCREEN_COUNT &&
@@ -4614,8 +4750,35 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
             // and it is not somewhere new to stand.
             if (h == here.hash) {
                 w->did_nothing++;
+
+                // Where it was standing when it did nothing, kept so that a
+                // control which does nothing *everywhere* can be tried again
+                // here rather than described as dead on this evidence. The
+                // last one wins, and one is all that is needed: what makes the
+                // difference is what else is on the screen, and that is the
+                // same wherever this control is drawn.
+                if (acts[i].id != 0 && acts[i].word < 0 && acts[i].key == 0 &&
+                    !gs_walk_has(w->moved, acts[i].id)) {
+                    gs_walk_named *nm = gs_walk_named_of(w, acts[i].id);
+                    if (nm != nullptr) {
+                        nm->where = here;
+                        nm->seed  = w->seed_at;
+                        nm->from  = w->seed_from;
+                        nm->idled = true;
+                    }
+                }
                 continue;
             }
+
+            // **And one that changed something is worth knowing about by
+            // name.** Typing counts as the box doing something - that is what a
+            // box is for, and only a box is ever typed into - so what is
+            // credited is the act that was aimed at a control. A bare key
+            // belongs to no control and is aimed at nobody.
+            if (acts[i].id != 0) {
+                gs_walk_mark(w->moved, acts[i].id, &w->n_moved);
+            }
+
 
             static gs_ui_item after[GS_UI_MAX_ITEMS];
             bool worth_standing = false;
@@ -4919,6 +5082,125 @@ static const struct {
     { "a guest racing",      gs_seed_a_guest_racing },
 };
 
+// **Tried again, properly, before anything is called dead.**
+//
+// A control that changed nothing every time the walk pressed it is one of two
+// things and they look identical from where the walk stood: a button that does
+// nothing, or a button pressed only in the state where it had nothing to do.
+// Earth on a setup screen already set to Earth is the second, and so is a
+// library row that is already the row picked; both are *ordinary*, and the walk
+// cannot tell them from the first, because standing in one state per offering
+// is what lets it finish at all.
+//
+// So the ones that never moved are taken back to a state they did nothing in
+// and tried in the three ways that make the difference, exhaustively:
+//
+//   - **after every other control on the screen**, one at a time. That is what
+//     turns a lit radio button off, what picks a different row, and what puts
+//     something in a box worth undoing. Every one of them, not a guess at which
+//     one matters.
+//   - **with the arrow keys**, because a slider is not pressed, it is moved,
+//     and a person moves it by landing on it and using the arrows.
+//   - **with every word the walk knows**, because typing a driver's own name
+//     into the box that already holds it changes nothing, and the box is not
+//     the thing at fault.
+//
+// This costs about the controls on one screen, twice, per control tried - and
+// it is paid only for the handful that did nothing. The alternative is a walk
+// that stands in every state of every offering, which was measured: it does not
+// finish in ten minutes where this finishes in one.
+static bool gs_walk_retry(gs_ui *ui, gs_track *t, SDL_Renderer *ren,
+                          const gs_walk_named *nm, int *acted, const char **how)
+{
+    static gs_menu seed, m, at;
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+
+    gs_panel_menu(&seed, t);
+    gs_seeds[nm->seed].set(&seed);
+    gs_walk_to(ui, &m, &seed, nm->from, &nm->where, t, ren);
+    at = m;
+
+    const int n = gs_walk_controls(ui, items, GS_UI_MAX_ITEMS);
+    const int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
+
+    // **Measured against where this walk actually landed, not against the hash
+    // written down during the first one.**
+    //
+    // A seed menu cannot be built twice the same. Its driver has a password,
+    // and a password is stored as a hash over a *random salt* - so two menus
+    // built from the same instructions differ in those bytes and in nothing
+    // else, and every state hash taken from them differs too. Insisting on the
+    // recorded number would fail every retry, and it did.
+    //
+    // What is checked instead is the thing that actually matters: **the control
+    // is on the screen this landed on**. That is what makes the retry a retry
+    // rather than a press somewhere else, and it is a stronger statement than a
+    // hash, which could match while the control had gone.
+    const uint64_t base = gs_menu_hash(&m);
+
+    bool typable = false, here = false;
+    for (int i = 0; i < held; i++) {
+        if (items[i].id != nm->id) continue;
+        here    = true;
+        typable = items[i].typable;
+    }
+    if (!here) {
+        printf("  RETRY '%s' is not on the screen its path leads back to\n",
+               nm->label);
+        return false;
+    }
+
+    // --- the arrows, for the things that are moved rather than pressed
+    static const ImGuiKey arrows[] = {
+        ImGuiKey_LeftArrow, ImGuiKey_RightArrow,
+        ImGuiKey_UpArrow,   ImGuiKey_DownArrow,
+    };
+    for (size_t k = 0; k < SDL_arraysize(arrows); k++) {
+        m = at;
+        gs_ui_probe_settle();
+        const gs_act a = { nm->id, -1, (uint16_t)arrows[k] };
+        gs_act_do(ui, &a);
+        (*acted)++;
+        if (gs_menu_hash(&m) != base) { *how = "an arrow key"; return true; }
+    }
+
+    // --- every word, for the things that take text
+    if (typable) {
+        for (size_t k = 0; k < SDL_arraysize(gs_walk_words); k++) {
+            m = at;
+            gs_ui_probe_settle();
+            const gs_act a = { nm->id, (int16_t)k, 0 };
+            gs_act_do(ui, &a);
+            (*acted)++;
+            if (gs_menu_hash(&m) != base) { *how = "typing"; return true; }
+        }
+    }
+
+    // --- and after each of the others in turn
+    for (int i = 0; i < held; i++) {
+        if (items[i].id == nm->id) continue;
+        if (!items[i].reachable || items[i].disabled || !items[i].visible) continue;
+
+        m = at;
+        gs_ui_probe_settle();
+        const gs_act first = { items[i].id, -1, 0 };
+        gs_act_do(ui, &first);
+        (*acted)++;
+
+        // What the other control left behind, which is what this press is
+        // measured against - not the state we started in, or the sibling's own
+        // work would be credited to the control being retried.
+        const uint64_t between = gs_menu_hash(&m);
+
+        const gs_act then = { nm->id, -1, 0 };
+        gs_act_do(ui, &then);
+        (*acted)++;
+        if (gs_menu_hash(&m) != between) { *how = "after another control"; return true; }
+    }
+
+    return false;
+}
+
 // How many controls were drawn dead somewhere and pressed somewhere else. This
 // is the number this whole idea is for: it is exactly the set that a walk from
 // one starting state cannot reach, and it is zero without seeding.
@@ -4976,27 +5258,6 @@ static void gs_ed_frame(gs_ed *ed) {
     gs_style_menu();
 
     ImGui_Render();
-}
-
-// **A window's own furniture is not one of the tool's controls.** ImGui gives
-// every window a title bar you can drag and a collapse arrow, and it keeps an
-// implicit "Debug" window for anything submitted outside a Begin. Those come
-// back from the probe looking exactly like controls - reachable, not disabled,
-// with a name - and they are not: pressing the title bar of the parts box is
-// not a thing a person does to build a track, and counting it as a control the
-// walk failed to press would be padding the denominator with somebody else's
-// widgets.
-//
-// Named here rather than quietly skipped, because an exclusion nobody can see
-// is how a coverage number stops meaning anything.
-static bool gs_ed_chrome(const gs_ui_item *it) {
-    // ImGui's own implicit window, for anything submitted outside a Begin.
-    if (SDL_strncmp(it->window, "Debug", 5) == 0) return true;
-
-    // A title bar: the item whose name is the window's name.
-    if (SDL_strcmp(it->label, it->window) == 0) return true;
-
-    return false;
 }
 
 // A key, sent the way a backend reports one.
@@ -5692,7 +5953,7 @@ TEST(every_control_in_the_construction_set_is_pressed) {
                 const int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
 
                 for (int i = 0; i < held; i++) {
-                    if (gs_ed_chrome(&items[i])) { chrome++; continue; }
+                    if (gs_chrome(items[i].label, items[i].window)) { chrome++; continue; }
 
                     // **Named and unnamed are counted apart.** ImGui names the
                     // widgets a person presses and leaves its own structure
@@ -5727,7 +5988,7 @@ TEST(every_control_in_the_construction_set_is_pressed) {
 
                 for (int i = 0; i < held; i++) {
                     if (!items[i].reachable || items[i].disabled) continue;
-                    if (gs_ed_chrome(&items[i])) continue;
+                    if (gs_chrome(items[i].label, items[i].window)) continue;
                     if (items[i].label[0] == 0) continue;   // ImGui's own structure
 
                     // Back to this configuration, two settled frames, then
@@ -5908,9 +6169,14 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     SDL_memset(w.offered, 0, sizeof w.offered);
     SDL_memset(w.pressed, 0, sizeof w.pressed);
     SDL_memset(w.never, 0, sizeof w.never);
+    SDL_memset(w.unseen, 0, sizeof w.unseen);
+    SDL_memset(w.moved, 0, sizeof w.moved);
+    SDL_memset(w.named, 0, sizeof w.named);
     w.n_offered = 0;
     w.n_pressed = 0;
     w.n_never   = 0;
+    w.n_unseen  = 0;
+    w.n_moved   = 0;
     w.states    = 0;
     w.typed     = 0;
     // **One state per offering.** Every extra one is the whole path replayed
@@ -5940,6 +6206,8 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
             w.deepest = 0;
             w.did_nothing = 0;
             w.ran_out = false;
+            w.seed_at   = (int)sd;
+            w.seed_from = from;
 
             gs_walk_screen(&ui, &seed, &t, ren, from, &w);
 
@@ -5957,9 +6225,22 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
 
     printf("  WALK capped %d states at %d per offering\n", w.capped,
            w.per_shape);
+    // **Drawn and never within reach.** Scrolled out of sight in every state
+    // the walk stood in, so no press of it could ever have landed. This walk
+    // has no way to scroll: nav moves the highlight and the table follows it,
+    // but nothing here drags a scrollbar or turns a wheel, so a library longer
+    // than the panel is tall keeps its tail to itself.
+    int out_of_reach = 0;
+    for (size_t i = 0; i < GS_WALK_CTRLS; i++) {
+        const uint32_t id = w.unseen[i];
+        if (id != 0 && !gs_walk_has(w.offered, id)) out_of_reach++;
+    }
+
     printf("  WALK total: %d states, %d actions (%d typed), "
-           "%d of %d pressable controls pressed, %d never pressable\n",
-           states, edges, w.typed, w.n_pressed, w.n_offered, w.n_never);
+           "%d of %d pressable controls pressed, %d never pressable, "
+           "%d drawn but scrolled out of reach\n",
+           states, edges, w.typed, w.n_pressed, w.n_offered, w.n_never,
+           out_of_reach);
 
     // **The claim, asserted rather than believed.** Every control the front end
     // offered in a state where it could be pressed, was pressed. Not a sample
@@ -5988,7 +6269,17 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // it because the front end genuinely grew is the point of it; raising it
     // because the last run happened to measure more is how a tripwire quietly
     // becomes a ratchet.
-    CHECK(w.n_offered >= 750);
+    //
+    // **Moved down to 663 on 2026-08-26, which is the deliberate act this
+    // comment demands, and it is a correction rather than a loss.** Eighty-seven
+    // of those 750 were table rows scrolled out of sight. A table submits every
+    // row it holds and ImGui drops the ones off-screen before the widget runs,
+    // so the walk was pressing rows that had already returned and counting each
+    // one as a control it had covered. They are not covered and never were:
+    // this walk cannot scroll, so the library below the eleventh track is drawn
+    // and unreachable. They are counted with the controls that can never be
+    // pressed, where they can be seen, and reaching them is its own item.
+    CHECK(w.n_offered >= 663);
 
     // **The controls that are dead in one state and live in another.** This is
     // the number the seeding is for, and it is what a walk from a single
@@ -6099,6 +6390,104 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
         }
         printf("  WALK %d unreachable from the title\n", unreachable);
         CHECK(unreachable == 0);
+    }
+
+    // **No control does nothing everywhere.**
+    //
+    // A control that never changed anything, in any state it was pressed in, is
+    // either dead code or a button that lies about being one. Doing nothing
+    // *sometimes* is ordinary and is not what this asks: a Back that is already
+    // back, a row already picked, a preset already chosen.
+    //
+    // Four things come back from the probe looking exactly like controls and
+    // are not, and each is told apart by what ImGui itself says rather than by
+    // a list of names here that would go stale the day a column is renamed.
+    // They are counted, not dropped: an exclusion that starts swallowing real
+    // controls shows up as a number that moved.
+    // **The one control that does nothing and is right to.** The share code is
+    // a box you copy a track out of, drawn read-only - so nothing anybody does
+    // to it can change anything, and the button that does the copying is beside
+    // it. ImGui does not report read-only as an item flag when it arrives as an
+    // input-text flag, so this one is named. Named, and *asserted used*: an
+    // exemption nobody needs any more turns the tree red rather than sitting
+    // there covering for whatever becomes inert next.
+    static const struct {
+        const char *label;
+        const char *window;         // matched by prefix: the child id moves
+        const char *why;
+        bool        found;
+    } excused_start[] = {
+        { "##code", "Tracks/detail",
+          "read-only: a box to copy the track out of", false },
+    };
+    static bool excused_used[SDL_arraysize(excused_start)];
+    SDL_memset(excused_used, 0, sizeof excused_used);
+
+    {
+        int inert = 0, controls = 0, chrome = 0, unnamed = 0;
+        int headings = 0, clipped = 0, woken = 0, tries = 0;
+        for (size_t i = 0; i < GS_WALK_CTRLS; i++) {
+            const uint32_t id = w.offered[i];
+            if (id == 0) continue;
+            gs_walk_named *nm = gs_walk_named_of(&w, id);
+
+            if (nm == nullptr || nm->label[0] == '\0')          { unnamed++; continue; }
+            if (gs_chrome(nm->label, nm->window))               { chrome++; continue; }
+            if (nm->heading)                                    { headings++; continue; }
+            if (!nm->visible)                                   { clipped++; continue; }
+
+            controls++;
+            if (gs_walk_has(w.moved, id)) continue;
+
+            // It did nothing everywhere the walk stood. That is not an answer
+            // yet - go back and try it properly.
+            const char *how = "";
+            if (nm->idled && gs_walk_retry(&ui, &t, ren, nm, &tries, &how)) {
+                printf("  WOKE  %-24s %-26s by %s\n", nm->label, nm->window, how);
+                woken++;
+                continue;
+            }
+
+            bool excused = false;
+            for (size_t k = 0; k < SDL_arraysize(excused_start); k++) {
+                if (SDL_strcmp(nm->label, excused_start[k].label) != 0) continue;
+                if (SDL_strncmp(nm->window, excused_start[k].window,
+                                SDL_strlen(excused_start[k].window)) != 0) continue;
+                printf("  EXCUSED %-22s %-26s %s\n",
+                       nm->label, nm->window, excused_start[k].why);
+                excused_used[k] = true;
+                excused = true;
+                break;
+            }
+            if (excused) continue;
+
+            printf("  INERT %-24s %-26s %d presses\n",
+                   nm->label, nm->window, nm->presses);
+            inert++;
+        }
+        printf("  WALK %d of %d controls did nothing every time; %d unnamed "
+               "structure, %d window furniture, %d column headings, %d clipped "
+               "out of sight\n",
+               inert, controls, unnamed, chrome, headings, clipped);
+        printf("  WALK %d woken by being retried properly, in %d actions\n",
+               woken, tries);
+
+        // **No control does nothing everywhere**, save the one named above.
+        CHECK(inert == 0);
+
+        // And every control that had to be woken was woken by the retry rather
+        // than by luck: nine of them here, and a front end where none of them
+        // needs waking is a front end with no radio buttons and no sliders in
+        // it, which would want looking at.
+        CHECK(woken > 0);
+
+        for (size_t k = 0; k < SDL_arraysize(excused_start); k++) {
+            if (!excused_used[k]) {
+                printf("  STALE EXCUSE '%s' does something now, or has gone\n",
+                       excused_start[k].label);
+            }
+            CHECK(excused_used[k]);
+        }
     }
 
     const int revived = gs_walk_revived(&w);

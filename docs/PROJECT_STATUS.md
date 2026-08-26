@@ -4225,18 +4225,89 @@ box it meets - that the door opens is proved next to it by the walk that carries
 the vocabulary for it. The results screen is arrived at by *finishing a race*:
 no button anywhere leads to it and none should.
 
-**The fourth property is not asserted yet, and that is deliberate.** "No control
-does nothing everywhere" is a good rule and trying it turned up two things
-first:
+### No control does nothing everywhere
 
-- A table's column headings and the text in its cells - `by`, `best lap`,
-  `machine`, the name of a track - come back from the probe looking exactly like
-  controls. Telling real ones apart wants something better than a name.
-- **A gravity preset on the setup screen came out of 26,000 presses having never
-  changed anything.** That is either a button that does nothing or a walk that
-  only ever pressed it while it was already chosen. Which of the two it is wants
-  finding out, and asserting zero today would bury it as surely as asserting
-  nothing at all.
+The fourth property, and the one that needed the most finding out. A control
+that never changed anything in any state it was pressed in is either dead code
+or a button that lies about being one - and doing nothing *sometimes* is
+ordinary, so the question is only about controls that did nothing *every* time.
+
+`0 of 569 controls do nothing everywhere.`
+
+**What is a control, and what is ImGui's furniture.** Of the 663 items the walk
+can press, 94 are not controls and each is told apart by what ImGui itself says
+rather than by a list of names that would go stale the day a column is renamed:
+72 are unnamed structure - the child regions, groups and cells ImGui builds
+around the widgets a person presses - 12 are window furniture, which is the
+editor walk's own rule, `gs_chrome`, now shared by both walks instead of copied,
+and 10 are table column headings, which sort nothing here because none of these
+tables is sortable. The counts are printed, so an exclusion that starts
+swallowing real controls shows up as a number that moved.
+
+**Ten controls looked dead. Nine were the walk's fault.** The walk stands in one
+state per offering, which is what lets it finish - and a radio button is inert
+in exactly the state where it is already the one chosen. "Earth does nothing"
+and "the walk only ever pressed Earth while Earth was lit" are the same
+measurement from there, and no amount of pressing tells them apart. Standing in
+every state of every offering does tell them apart, and was measured: it does
+not finish in ten minutes where this finishes in one.
+
+So a control that did nothing everywhere is taken back to a state it did nothing
+in and tried again, three ways, exhaustively:
+
+- **after every other control on that screen**, one at a time - which is what
+  turns a lit preset off, picks a different row, and puts something in a box
+  worth undoing;
+- **with the arrow keys**, because a slider is not pressed, it is moved;
+- **with every word the walk knows**, because typing a driver's own name into
+  the box that already holds it changes nothing and the box is not at fault.
+
+Nine woke up, in 256 presses: `Earth` and `baja bug` and four `untitled` library
+rows after another control, `##players` by an arrow key, `undo` after another
+control, and the driver `name` box by being typed something other than its own
+name. The retry measures against the state it lands in rather than the hash
+written down during the walk, because a seed menu cannot be built twice the
+same - its driver has a password, a password is stored over a random salt, and
+every state hash taken from it differs. What is checked instead is that the
+control is on the screen the path led back to, which is the stronger statement.
+
+**One is excused, by name, and the excuse is asserted.** The share code on the
+tracks screen is a box you copy a track out of, drawn read-only, so nothing
+anybody does to it can change anything - and ImGui does not report read-only as
+an item flag when it arrives as an input-text flag, so there is nothing to tell
+it apart by. If it ever stops being inert the excuse goes stale and the tree
+goes red, rather than sitting there covering for whatever goes dead next.
+
+Both halves are proved by taking them out: a button rigged to do nothing is
+named and turns the test red, and removing the read-only flag from the share
+code turns it red the other way.
+
+### The walk was crediting itself with presses that could not happen
+
+A table submits every row it holds and ImGui drops the ones outside the clip
+rectangle before the widget runs - so a library of thirty-two tracks comes back
+from the probe as thirty-two rows whatever the panel is tall enough to show. The
+walk pressed all of them. A press on a row that has already returned sets a flag
+nothing reads, and every one of those counted as a control covered.
+
+The probe now applies ImGui's own clip test, down to the four ids it keeps alive
+off-screen so a control does not die under the hand using it, and the walk
+neither presses a clipped item nor counts it as offered.
+
+- **The pinned count moves down from 750 to 663**, which is the deliberate act
+  the comment beside it demands. Eighty-seven of those 750 were rows scrolled
+  out of sight.
+- **86 controls are drawn and out of reach**, counted where they can be seen.
+  This walk has no way to scroll - nothing here drags a scrollbar or turns a
+  wheel - so a library longer than the panel is tall keeps its tail to itself.
+  That is a new item in the plan.
+- **The walk got cheaper and truer at once**: 6,264 states and 18,979 presses
+  where it was 11,825 and 26,290, and the same 100% over a denominator that no
+  longer includes things nobody can press.
+- **Controls reachable only by seeding went from 23 to 192**, and for a good
+  reason: a seed that empties the library or leaves no track picked takes the
+  detail panel away, and the table underneath grows tall enough to show rows
+  that are otherwise below the fold.
 
 ## Known risks
 

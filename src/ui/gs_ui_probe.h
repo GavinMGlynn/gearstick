@@ -51,6 +51,9 @@ typedef struct gs_ui_item {
     // never reads, because the item returns early. Counting one as a control
     // the walk pressed is counting a press that did not happen, which is how a
     // denominator quietly fills with things nobody can reach.
+    //
+    // This is ImGui's own test and not a likeness of it, down to the four ids
+    // it keeps alive off-screen.
     bool     visible;
 
     // **A table's column heading is not a control.** ImGui submits the heading

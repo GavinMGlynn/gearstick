@@ -158,9 +158,16 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext *, ImGuiID id, const ImRect &bb,
     it->heading   = false;
 
     // The hook runs before ImGui's own clipping test, which is what makes a
-    // scrolled-away table row look like a control. The same test, made here.
-    if (ctx != nullptr && ctx->CurrentWindow != nullptr) {
-        it->visible = bb.Overlaps(ctx->CurrentWindow->ClipRect);
+    // scrolled-away table row look like a control. **ImGui's rule, copied
+    // rather than approximated**: an item outside the clip rectangle is
+    // dropped, *unless* it is the one being interacted with or the one the
+    // keyboard is on - those stay live so a control does not die under the
+    // hand that is using it. An approximation here would report a focused item
+    // as unpressable and lose a real control from the count.
+    if (ctx != nullptr && ctx->CurrentWindow != nullptr &&
+        !bb.Overlaps(ctx->CurrentWindow->ClipRect)) {
+        it->visible = id == ctx->ActiveId || id == ctx->ActiveIdPreviousFrame ||
+                      id == ctx->NavId    || id == ctx->NavActivateId;
     }
 
     // Inside the row a table opened with ImGuiTableRowFlags_Headers, which is
