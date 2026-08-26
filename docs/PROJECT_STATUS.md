@@ -4150,6 +4150,37 @@ pairwise sweep the first brush leaves it exactly so surprisingly often. The
 assertion is therefore tied to whether the track actually changed, not to
 whether the tool said "dropped".
 
+### The loop, closed
+
+**A track built from nothing, undone, redone, saved, reloaded and won.** Every
+test around this one starts halfway through - holding an editor and a track
+somebody already made, asking one question about one brush. What none of them
+asked is whether the *loop* closes.
+
+The sequence is the one a player performs: a blank 64-square field, a ridge
+raised a strip at a time, ice painted **onto the ridge** rather than beside it, a
+low-gravity pocket over that, and a route. Then:
+
+- **The validator refuses it before the route and accepts it after** -
+  `GS_TRACK_NO_START` becomes `GS_TRACK_OK`, which is the difference between a
+  field with scenery on it and a track.
+- **Every prefix of the build survives undo and redo.** Not just the two ends:
+  each undo is written down and each redo has to reproduce that exact state in
+  reverse. Checking only that all the way back is blank and all the way forward
+  is the finished track would pass an editor that got the middle wrong in a way
+  that cancelled out.
+- **What comes back off the disk is what was built**, hash for hash - the ice on
+  the ridge, the gravity over it, both gates.
+- **And it is raced.** Two laps on the reloaded track, won, with a finish tick
+  the simulation agrees is a finish.
+
+One behaviour pinned on the way, and it is deliberate rather than a fault:
+**loading a track clears the history.** `gs_editor_load` says why in a line -
+the steps in it describe edits to a track that is no longer here - so undo
+cannot walk back past a load into somebody else's track. The first version of
+this test assumed the opposite, undid nothing, and reported a hundred and
+forty-seven corners still standing.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

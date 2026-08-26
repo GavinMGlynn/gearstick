@@ -1119,11 +1119,14 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       tests that each start halfway through.
       *Verification: the track the walk builds loads, validates, and is raced to
       a finish that the simulation agrees is a finish.*
-- [ ] **Undo is walked against the combinations, not against single edits.**
-      Every edit the walk makes goes into the history, and the history is what
-      makes an editor safe to experiment in.
-      *Verification: any prefix of the walk's edits, undone back to the start,
-      leaves a track identical byte for byte to the one it began with.*
+- [x] **Undo is walked against the whole build, not against single edits.**
+      The ridge, the ice over it, the gravity over that and the route — taken
+      back in order and put back again.
+      *Verification: **every prefix**, not just the ends. Each undo is written
+      down and each redo has to reproduce that exact state in reverse, so an
+      editor that got the middle wrong in a way that cancelled out still fails.
+      All the way back is a blank field with no gates; all the way forward
+      hashes identical to what was built.*
 - [ ] **The walk counts what it covered and fails if anything was missed.**
       This is the item the rest of the phase is for: coverage that is asserted
       rather than believed. Half of it is done and the half that is missing is

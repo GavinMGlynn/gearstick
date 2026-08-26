@@ -5079,6 +5079,174 @@ static void gs_brush_set(gs_editor *e, const gs_brush_cfg *c) {
     e->radius       = 0;
 }
 
+TEST(a_track_is_built_from_nothing_and_raced_without_leaving_the_editor) {
+    (void)ren;
+
+    // **The whole loop, performed once as a sequence.** New, shape the ground,
+    // paint a surface onto the shape, put a low-gravity pocket over the jump,
+    // lay a route, save it, come back to it, and race what came back until
+    // somebody takes the flag.
+    //
+    // The tests around this one each start halfway through: they hold an editor
+    // and a track already made and ask one question about one brush. What
+    // nothing asked before is whether the *loop* closes - whether a track built
+    // with the tools a player has is a track that validates, survives being
+    // written and read, and can be won.
+    static gs_editor ed;
+    CHECK(gs_editor_init(&ed, 65536));
+
+    // --- New. The size the editor's New gives you, and flat. -----------------
+    static gs_track t;
+    gs_track_init(&t, 64, 64, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    }
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_NO_START);
+
+    // --- Shape the ground: a ridge to jump, raised a strip at a time. --------
+    ed.brush  = GS_BRUSH_RAISE;
+    ed.radius = 1;
+    ed.step   = 0.35f;
+    gs_edit_begin(ed.log);
+    for (float x = 40.0f; x <= 44.0f; x += 1.0f) {
+        for (float y = 30.0f; y <= 48.0f; y += 1.0f) gs_editor_paint(&ed, &t, x, y);
+    }
+    gs_edit_end(ed.log);
+    CHECK(gs_track_height(&t, GS_INT(42), GS_INT(39)) > 0);
+
+    // --- Paint a surface onto the shape, which is the interesting order. -----
+    ed.brush   = GS_BRUSH_SURFACE;
+    ed.surface = GS_SURF_ICE;
+    ed.radius  = 2;
+    gs_edit_begin(ed.log);
+    gs_editor_paint(&ed, &t, 42.0f, 39.0f);
+    gs_edit_end(ed.log);
+    CHECK(gs_track_surface(&t, GS_INT(42) + GS_ONE / 2,
+                           GS_INT(39) + GS_ONE / 2) == GS_SURF_ICE);
+    CHECK(gs_track_height(&t, GS_INT(42), GS_INT(39)) > 0);   // still a ridge
+
+    // --- A low-gravity pocket over it, which is the feature this game is for.
+    ed.brush   = GS_BRUSH_GRAVITY;
+    ed.gravity = 0.35f;
+    ed.radius  = 3;
+    gs_edit_begin(ed.log);
+    gs_editor_paint(&ed, &t, 42.0f, 39.0f);
+    gs_edit_end(ed.log);
+    CHECK(gs_track_gravity(&t, GS_INT(42) + GS_ONE / 2,
+                           GS_INT(39) + GS_ONE / 2) < GS_ONE);
+
+    // --- A route: two gates on the circle a car will drive round. ------------
+    ed.brush        = GS_BRUSH_GATE;
+    ed.gate_width   = 4.0f;
+    ed.gate_heading = 0.0f;
+    gs_editor_paint(&ed, &t, 32.0f, 32.0f);
+    ed.gate_heading = 180.0f;
+    gs_editor_paint(&ed, &t, 22.0f, 46.0f);
+    CHECK(t.gate_count == 2);
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+
+    // **It is a track now**, and the validator agrees - which it did not before
+    // the route went on.
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+    const uint64_t built = gs_track_hash(&t);
+
+    // --- Undone all the way back to the blank field, and redone. ------------
+    //
+    // **Every edit in the sequence, taken back in order and put back again.**
+    // This is the property that makes an editor safe to experiment in, and it
+    // is checked against the whole build rather than against one stroke: the
+    // ridge, the ice over it, the gravity over that, and the route.
+    const uint32_t depth = gs_edit_undo_depth(ed.log);
+    CHECK(depth > 0);
+    CHECK(depth < 512);
+
+    // **Every prefix of the build, not just the whole of it.** Undo one step at
+    // a time and write down what the track was at each; then redo, and every
+    // one of those states has to come back in reverse. Checking only that all
+    // the way back is blank and all the way forward is the finished track would
+    // pass an editor that got the middle wrong in a way that cancelled out.
+    static uint64_t was[512];
+    uint32_t n = 0;
+    was[n++] = gs_track_hash(&t);
+    while (gs_edit_undo_depth(ed.log) > 0) {
+        CHECK(gs_edit_undo(ed.log, &t));
+        CHECK(n < SDL_arraysize(was));
+        was[n++] = gs_track_hash(&t);
+    }
+
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            CHECK(gs_track_height(&t, GS_INT(x), GS_INT(y)) == 0);
+        }
+    }
+    CHECK(t.gate_count == 0);
+
+    while (gs_edit_redo_depth(ed.log) > 0) {
+        CHECK(gs_edit_redo(ed.log, &t));
+        CHECK(n >= 2);
+        n--;
+        CHECK(gs_track_hash(&t) == was[n - 1]);
+    }
+
+    // **Put back, it is the same track it was** - which the hash is the whole
+    // check for, because a track's identity is its content.
+    CHECK(gs_track_hash(&t) == built);
+    CHECK(gs_edit_undo_depth(ed.log) == depth);
+
+    // --- Save it, and get it back. ------------------------------------------
+    CHECK(gs_editor_save(&ed, &t));
+
+    static gs_track back;
+    gs_track_init(&back, 8, 8, GS_SURF_PAVEMENT);   // deliberately not the same
+    CHECK(gs_editor_load(&ed, &back));
+
+    // **What comes back is what was built**, corner for corner and gate for
+    // gate - the hash is the whole check, because a track's identity is its
+    // content.
+    CHECK(gs_track_hash(&back) == built);
+    CHECK(back.w == t.w && back.h == t.h);
+    CHECK(back.gate_count == 2);
+    CHECK(gs_track_validate(&back).problem == GS_TRACK_OK);
+    CHECK(gs_track_surface(&back, GS_INT(42) + GS_ONE / 2,
+                           GS_INT(39) + GS_ONE / 2) == GS_SURF_ICE);
+    CHECK(gs_track_gravity(&back, GS_INT(42) + GS_ONE / 2,
+                           GS_INT(39) + GS_ONE / 2) < GS_ONE);
+
+    // --- And race it, on the track that came back off the disk. --------------
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 2);
+    gs_world_add_car(&w, &back, (uint8_t)GS_VEH_SPRINT_CAR,
+                     GS_INT(32), GS_INT(32), 0);
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * 60u * 15u && !w.over; i++) {
+        const gs_fix vx = w.car[0].vx;
+        const gs_fix vy = w.car[0].vy;
+        const gs_fix speed_sq = gs_fix_mul(vx, vx) + gs_fix_mul(vy, vy);
+
+        gs_input in[GS_MAX_CARS] = { 0 };
+        in[0] = (gs_input)((speed_sq < GS_INT(16) ? (unsigned)GS_IN_ACCEL : 0u) |
+                           (unsigned)GS_IN_RIGHT);
+        gs_world_step(&w, &back, in);
+    }
+
+    // **Won, on a track that did not exist when this test started.**
+    CHECK(w.over);
+    CHECK(w.winner == 0);
+    CHECK(w.car[0].finish_tick > 0);
+    CHECK(gs_car_laps_done(&back, &w.car[0]) == 2);
+
+    // **And loading cleared the history**, which is deliberate and worth
+    // pinning: the steps in it describe edits to a track that is no longer
+    // here, so undo cannot walk back past a load into somebody else's track.
+    CHECK(gs_edit_undo_depth(ed.log) == 0);
+    CHECK(gs_edit_redo_depth(ed.log) == 0);
+
+    gs_editor_quit(&ed);
+}
+
 TEST(one_brush_never_undoes_what_another_one_did) {
     (void)ren;
 
@@ -6169,6 +6337,7 @@ int main(void) {
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
     run_every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real(ren);
     run_a_menu_knows_a_state_it_has_already_been_in(ren);
+    run_a_track_is_built_from_nothing_and_raced_without_leaving_the_editor(ren);
     run_one_brush_never_undoes_what_another_one_did(ren);
     run_every_brush_and_every_option_it_carries_does_what_it_says(ren);
     run_every_control_in_the_construction_set_is_pressed(ren);
