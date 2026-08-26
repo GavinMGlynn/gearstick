@@ -473,7 +473,14 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
         ImGui_SliderFloat("step (tiles)", &e->step, 0.05f, 2.0f);
     } else if (e->brush == GS_BRUSH_SURFACE) {
         gs_name_surfaces();
-        ImGui_ComboChar("surface", &e->surface, gs_surface_names, GS_SURF_COUNT);
+        // **Two controls called "surface" in one panel are one control.** The
+        // brush above is a radio button with that label, and an ImGui id is a
+        // hash of the label within the window - so the box and the button that
+        // chooses it shared an id, and activating either reached whichever came
+        // first. The text after the `##` is not drawn; it is there to tell them
+        // apart.
+        ImGui_ComboChar("surface##ground", &e->surface, gs_surface_names,
+                        GS_SURF_COUNT);
     } else if (e->brush == GS_BRUSH_PART) {
         ImGui_TextUnformatted("the parts box is over on the right.");
     } else if (e->brush == GS_BRUSH_GATE) {
@@ -739,8 +746,16 @@ static void gs_controls_panel(gs_editor *e, gs_input_state *input) {
             char label[96], id[128];
             gs_bind_label(&input->bind, p, (gs_action)a, label, sizeof label);
 
+            // **Three hashes, not two.** An ImGui id is a hash of the whole
+            // label unless `###` says otherwise, and this label changes the
+            // moment the button is pressed - so with `##` the button a person
+            // just clicked became a *different* button, losing the focus and
+            // the active state mid-interaction, and every walk over the panel
+            // saw two controls where there is one: the one it could press and
+            // one that only exists while waiting, which pressing again asks the
+            // same question. `###` keeps the identity and lets the words move.
             bool waiting = e->rebind_player == (int)p && e->rebind_action == a;
-            SDL_snprintf(id, sizeof id, "%-11s %s##%u_%d",
+            SDL_snprintf(id, sizeof id, "%-11s %s###%u_%d",
                          gs_action_name((gs_action)a),
                          waiting ? "press something..." : label, p, a);
 

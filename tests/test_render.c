@@ -4248,6 +4248,11 @@ static const char *const gs_walk_words[] = {
     "gavin",                // the seeded driver's name: the door wants both
     "a good one",           // and the password that goes with it
     "not the password",
+    // **A number, because one box on the door takes nothing else.** The code a
+    // server asks for is six digits and the box filters everything that is not
+    // one, so a walk carrying only words types into it and nothing arrives -
+    // which reads exactly like a box that does not work.
+    "123456",
 };
 
 static const ImGuiKey gs_walk_keys[] = {
@@ -5172,6 +5177,34 @@ static void gs_seed_alone_in_the_lobby(gs_menu *m) {
     m->lobby = &gs_panel_lobby;
 }
 
+// **The conditions the last four buttons are under.** Each of these draws a
+// control that no other starting state does, and each was found by counting the
+// controls the screens name and seeing which of them the walk had never met.
+static void gs_seed_a_lobby_ready_to_race(gs_menu *m) {
+    m->lobby_ready    = true;
+    m->track_progress = 1.0f;
+}
+
+static void gs_seed_a_driver_with_no_password(gs_menu *m) {
+    m->signed_in     = -1;
+    m->login_pick    = 0;
+    m->login_setting = true;
+    SDL_strlcpy(m->login_name, "gavin", sizeof m->login_name);
+}
+
+static void gs_seed_a_server_asking_for_a_code(gs_menu *m) {
+    m->signed_in        = -1;
+    m->login_pick       = -1;
+    m->login_wants_code = true;
+    SDL_strlcpy(m->login_name, "gavin", sizeof m->login_name);
+}
+
+static void gs_seed_a_track_that_shipped(gs_menu *m) {
+    if (m->library.count == 0) return;
+    m->library.entry[0].builtin = true;
+    m->picked = 0;
+}
+
 static const struct {
     const char *name;
     gs_seed_fn  set;
@@ -5188,6 +5221,10 @@ static const struct {
     { "three players",       gs_seed_three_players },
     { "four players",        gs_seed_four_players },
     { "a guest racing",      gs_seed_a_guest_racing },
+    { "a lobby ready to race", gs_seed_a_lobby_ready_to_race },
+    { "no password yet",     gs_seed_a_driver_with_no_password },
+    { "asked for a code",    gs_seed_a_server_asking_for_a_code },
+    { "a track that shipped", gs_seed_a_track_that_shipped },
 };
 
 // **A window, put back where it was.** To the top - ImGui keeps a window's
@@ -5477,6 +5514,193 @@ static bool gs_walk_reach(gs_ui *ui, gs_track *t, SDL_Renderer *ren,
     return got;
 }
 
+// **What is inside a box that opens.**
+//
+// A combo carries its values in a popup, and a popup is ImGui's state rather
+// than the menu's: opening one changes nothing the walk can see, so the press
+// reads as having done nothing and the entries inside are never enumerated,
+// never pressed and never counted. That is how "guest", "first past the flag"
+// and "last one driving" came to be drawn by a screen the walk had covered
+// entirely.
+//
+// It cannot be fixed by walking harder. The walk stands in a state by copying
+// the menu back and settling ImGui, and settling closes popups - which it has
+// to, or a path leads somewhere different depending on what was left open. So
+// the insides are swept afterwards, like the rows below a fold: go back, open
+// it, and press what appeared, one at a time from the same starting state.
+static void gs_walk_open(gs_ui *ui, gs_track *t, SDL_Renderer *ren, gs_walk *w,
+                         const gs_walk_named *nm, int *acted)
+{
+    static gs_menu seed, m, at;
+    static gs_ui_item shut[GS_UI_MAX_ITEMS];
+    static gs_ui_item open[GS_UI_MAX_ITEMS];
+
+    gs_panel_menu(&seed, t);
+    gs_seeds[nm->seed].set(&seed);
+    gs_walk_to(ui, &m, &seed, nm->from, &nm->where, t, ren);
+    at = m;
+    gs_walk_wind(ui, nm->window, nm->tick, -1.0f, acted);
+
+    const int n_shut = gs_walk_controls(ui, shut, GS_UI_MAX_ITEMS);
+    const int held_shut = n_shut < GS_UI_MAX_ITEMS ? n_shut : GS_UI_MAX_ITEMS;
+
+    const gs_act press = { nm->id, -1, 0 };
+    gs_act_do(ui, &press);
+    (*acted)++;
+
+    const int n_open = gs_walk_controls(ui, open, GS_UI_MAX_ITEMS);
+    const int held_open = n_open < GS_UI_MAX_ITEMS ? n_open : GS_UI_MAX_ITEMS;
+
+    for (int i = 0; i < held_open; i++) {
+        if (!open[i].reachable || open[i].disabled || !open[i].visible) continue;
+
+        bool was_there = false;
+        for (int k = 0; k < held_shut && !was_there; k++) {
+            if (shut[k].id == open[i].id) was_there = true;
+        }
+        if (was_there) continue;
+
+        gs_walk_note(w, &open[i]);
+        gs_walk_mark(w->offered, open[i].id, &w->n_offered);
+        if (gs_walk_has(w->pressed, open[i].id)) continue;
+
+        // From the same state every time, opened again: picking one entry
+        // shuts the box, and the next entry has to be reached from where the
+        // first was.
+        m = at;
+        gs_ui_probe_settle();
+        gs_walk_wind(ui, nm->window, nm->tick, -1.0f, acted);
+        gs_act_do(ui, &press);
+        (*acted)++;
+
+        const uint64_t before = gs_menu_hash(&m);
+        const gs_act pick = { open[i].id, -1, 0 };
+        gs_act_do(ui, &pick);
+        (*acted)++;
+
+        gs_walk_mark(w->pressed, open[i].id, &w->n_pressed);
+        if (gs_menu_hash(&m) != before) {
+            gs_walk_mark(w->moved, open[i].id, &w->n_moved);
+            continue;
+        }
+
+        // **It changed nothing, which on a list of values usually means it was
+        // already the value.** The same answer as everywhere else: pick a
+        // different one first, then come back for this one. Every other entry
+        // is tried, because which of them differs from this one is not
+        // something anybody here knows.
+        for (int j = 0; j < held_open && !gs_walk_has(w->moved, open[i].id); j++) {
+            if (j == i) continue;
+            if (!open[j].reachable || open[j].disabled || !open[j].visible) continue;
+
+            m = at;
+            gs_ui_probe_settle();
+            gs_walk_wind(ui, nm->window, nm->tick, -1.0f, acted);
+            gs_act_do(ui, &press);
+            const gs_act other = { open[j].id, -1, 0 };
+            gs_act_do(ui, &other);
+            (*acted) += 2;
+
+            const uint64_t between = gs_menu_hash(&m);
+            gs_act_do(ui, &press);
+            const gs_act again = { open[i].id, -1, 0 };
+            gs_act_do(ui, &again);
+            (*acted) += 2;
+
+            if (gs_menu_hash(&m) != between) {
+                gs_walk_mark(w->moved, open[i].id, &w->n_moved);
+            }
+        }
+    }
+
+    m = at;
+    gs_ui_probe_settle();
+}
+
+// **Where a coverage number comes from when it does not come from the walk.**
+//
+// `pressed == offered` is necessary and nowhere near sufficient, because the
+// number it is out of is *what this walk reached*: a walk that sees less
+// reports all of what it saw and calls it complete. One alphabet measured 727
+// controls where a wider one measured 758, and both said a hundred percent.
+//
+// The screens name their own controls, in the file that draws them, and that
+// text does not care what any walk got to. So the labels are read out of the
+// source and every one of them has to have been seen by the walk - which makes
+// a control added to a screen and never reached a red tree on the next run,
+// with nobody adding a case for it.
+//
+// The calls read are the ones Dear ImGui reports a name for. The three that
+// draw a list or a swatch - `BeginCombo`, `Combo` and `ColorButton` - are not
+// among them: none tells the hook its label, which is why the machine choosing
+// a paint sees sixty-four identical nameless squares and why the box that picks
+// a ground comes back anonymous. Requiring their names would be requiring
+// something the probe cannot supply. What is inside them is covered instead, by
+// the sweep that opens them and by every value of every dial being pressed.
+static const char *const gs_named_calls[] = {
+    "ImGui_Button(",       "ImGui_ButtonEx(",    "ImGui_SelectableEx(",
+    "ImGui_InputText(",    "ImGui_InputTextEx(", "ImGui_SliderInt(",
+    "ImGui_SliderFloat(",  "ImGui_Checkbox(",    "ImGui_RadioButtonIntPtr(",
+    "gs_wide_button(",     "gs_go_button(",
+};
+
+#define GS_SOURCE_LABELS 256
+
+// Every string literal in the first argument of every naming call in a file.
+//
+// The first argument and no further, because that is where a label goes and the
+// ones after it are format strings and hints. All the literals in it rather
+// than the first, because a label is sometimes a choice - `builtin ? "Edit a
+// copy" : "Edit"` draws one of two and the screen has both. A first argument
+// with no literal in it at all is a label built at runtime, and there is
+// nothing here to check it against.
+static int gs_labels_in_source(const char *path, char out[][GS_UI_LABEL], int cap)
+{
+    size_t len = 0;
+    void *raw = SDL_LoadFile(path, &len);
+    if (raw == nullptr) return -1;
+    const char *src = (const char *)raw;
+
+    int n = 0;
+    for (size_t c = 0; c < SDL_arraysize(gs_named_calls); c++) {
+        const char *call = gs_named_calls[c];
+        const size_t call_len = SDL_strlen(call);
+
+        for (const char *at = SDL_strstr(src, call); at != nullptr;
+             at = SDL_strstr(at + call_len, call)) {
+            const char *p = at + call_len;
+            int depth = 0;
+
+            while (*p != '\0') {
+                if (*p == '(') { depth++; p++; continue; }
+                if (*p == ')') { if (depth == 0) break; depth--; p++; continue; }
+                if (*p == ',' && depth == 0) break;
+
+                if (*p != '"') { p++; continue; }
+
+                const char *from = ++p;
+                while (*p != '\0' && *p != '"') p += (*p == '\\' && p[1] != '\0') ? 2 : 1;
+                const size_t got = (size_t)(p - from);
+                if (*p == '"') p++;
+                if (got == 0 || got > GS_UI_LABEL - 1) continue;
+
+                char label[GS_UI_LABEL];
+                SDL_memcpy(label, from, got);
+                label[got] = '\0';
+
+                bool already = false;
+                for (int k = 0; k < n; k++) {
+                    if (SDL_strcmp(out[k], label) == 0) { already = true; break; }
+                }
+                if (!already && n < cap) SDL_strlcpy(out[n++], label, GS_UI_LABEL);
+            }
+        }
+    }
+
+    SDL_free(raw);
+    return n;
+}
+
 // How many controls were drawn dead somewhere and pressed somewhere else. This
 // is the number this whole idea is for: it is exactly the set that a walk from
 // one starting state cannot reach, and it is zero without seeding.
@@ -5548,6 +5772,16 @@ static void gs_ed_frame(gs_ed *ed) {
     ImGui_Render();
 }
 
+// What the editor is showing, the same question the walk asks of a menu.
+static int gs_walk_controls_ed(gs_ed *ed, gs_ui_item *into, int cap) {
+    gs_ui_probe_start(into, cap);
+    gs_ui_probe_frame();
+    gs_ed_frame(ed);
+    const int n = gs_ui_probe_count();
+    gs_ui_probe_stop();
+    return n;
+}
+
 // A key, sent the way a backend reports one.
 static void gs_ed_key_press(gs_ed *ed, ImGuiKey key) {
     ImGuiIO *io = ImGui_GetIO();
@@ -5555,6 +5789,21 @@ static void gs_ed_key_press(gs_ed *ed, ImGuiKey key) {
     gs_ed_frame(ed);
     ImGuiIO_AddKeyEvent(io, key, false);
     gs_ed_frame(ed);
+}
+
+// The wheel, over one of the editor's panels: to the top, then down a tick.
+static float gs_ed_wind(gs_ed *ed, const char *window, float want) {
+    float now = 0.0f, max = 0.0f;
+    if (!gs_ui_probe_scroll_at(window, &now, &max)) return -1.0f;
+    if (max <= 0.0f) return now;
+    if (want >= 0.0f && SDL_fabsf(now - want) < 0.5f) return now;
+
+    for (int i = 0; i < 200 && now > 0.0f; i++) {
+        gs_ui_probe_wheel(window, 1.0f);
+        gs_ed_frame(ed);
+        gs_ui_probe_scroll_at(window, &now, &max);
+    }
+    return now;
 }
 
 // What an editor is, for telling one state from another: the settings a player
@@ -5592,6 +5841,57 @@ static uint64_t gs_ed_key(const gs_ed *ed) {
     h = gs_shape(h, &th, sizeof th);
     return h;
 }
+
+// **One attempt at one control**, which is two attempts.
+//
+// Pressed by name first: that reaches what the keyboard cannot, including
+// controls no Tab order visits. If nothing changed, the keyboard is walked to
+// it instead and Space sent - because some controls do not answer to being
+// activated by name, and a slider answers to neither by *moving*: a person
+// lands on it and uses the arrows, so arriving on it is what counts as having
+// reached it.
+//
+// Restores the configuration first, **and the track with it**, so one attempt
+// cannot depend on the last. Leaving the track alone was quietly wrong: the
+// first press of a gate's remove button took the gate away and every later
+// attempt in that configuration was made against a route with one fewer gate on
+// it - so the second remove button was offered, never removed anything, and
+// counted as a control the walk had failed to press.
+static bool gs_ed_attempt(gs_ed *ed, const gs_editor *at, const gs_track *at_t,
+                          const gs_ui_item *it, int fanout, int *actions)
+{
+    *ed->e = *at;
+    *ed->t = *at_t;
+    gs_ed_frame(ed);
+    gs_ed_frame(ed);
+
+    const uint64_t before = gs_ed_key(ed);
+    gs_ui_probe_press(it->id);
+    gs_ed_frame(ed);
+    gs_ed_frame(ed);
+    (*actions)++;
+
+    if (gs_ed_key(ed) != before) return true;
+
+    *ed->e = *at;
+    *ed->t = *at_t;
+    gs_ui_probe_focus_window(it->window);
+    gs_ed_frame(ed);
+    gs_ed_frame(ed);
+    gs_ed_key_press(ed, ImGuiKey_Tab);
+
+    for (int tab = 0; tab < fanout * 2 + 8; tab++) {
+        if (gs_ui_probe_focused() == it->id) break;
+        gs_ed_key_press(ed, ImGuiKey_Tab);
+    }
+    if (gs_ui_probe_focused() != it->id) return false;
+
+    gs_ed_key_press(ed, ImGuiKey_Space);
+    (*actions)++;
+    return true;
+}
+
+
 
 // Which of the track's fields a brush is *for*. The parts box is the one that
 // writes several: a piece lays ground, its own surface, and where it is a piece
@@ -6190,6 +6490,12 @@ TEST(every_control_in_the_construction_set_is_pressed) {
     cov.n_never   = 0;
 
     static gs_ui_item items[GS_UI_MAX_ITEMS];
+    static gs_ui_item below[GS_UI_MAX_ITEMS];
+
+    // The panels the construction set puts on screen, for winding through.
+    static const char *const gs_ed_panels[] = {
+        "Construction set", "Parts box", "Controls",
+    };
 
     // Names for the ids, so anything left unpressed can be named rather than
     // reported as a number nobody can look up.
@@ -6220,6 +6526,7 @@ TEST(every_control_in_the_construction_set_is_pressed) {
         for (int sub = 0; sub < subs; sub++) {
             for (int panel = 0; panel < 2; panel++) {
                 static gs_editor at;
+                static gs_track at_track;
                 e.brush         = brush;
                 if (brush == GS_BRUSH_SURFACE) e.surface = sub;
                 if (brush == GS_BRUSH_PART)    e.part_kind = sub;
@@ -6227,9 +6534,20 @@ TEST(every_control_in_the_construction_set_is_pressed) {
                 e.ghost_on      = panel != 0;
                 e.heat_on       = panel == 0;
 
+                // **Open, because a walk that presses everything presses the
+                // arrow that folds a panel shut.** ImGui remembers that under
+                // the window's name for the rest of the process, so one
+                // configuration folding the palette leaves every configuration
+                // after it walking a title bar.
+                for (size_t p = 0; p < SDL_arraysize(gs_ed_panels); p++) {
+                    if (gs_ui_probe_unfold(gs_ed_panels[p])) gs_ed_frame(&ed);
+                    gs_ed_wind(&ed, gs_ed_panels[p], -1.0f);
+                }
+
                 gs_ed_frame(&ed);
                 gs_ed_frame(&ed);
                 at = e;
+                at_track = t;
                 configs++;
 
                 gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
@@ -6258,19 +6576,28 @@ TEST(every_control_in_the_construction_set_is_pressed) {
                         (void)was;
                         continue;
                     }
+                    // **Named whether or not it can be pressed.** A control
+                    // the palette draws dead in every configuration walked -
+                    // the heat map, until an analysis has been run - is still a
+                    // control the palette draws, and the count taken from the
+                    // source asks whether it was *met*, not whether it moved.
+                    bool fresh = false;
                     if (items[i].reachable && !items[i].disabled) {
                         const int was = cov.n_offered;
                         gs_walk_mark(cov.offered, items[i].id, &cov.n_offered);
-                        if (cov.n_offered != was && named < GS_ED_NAMES) {
-                            name_id[named] = items[i].id;
-                            SDL_snprintf(name_of[named], GS_UI_LABEL,
-                                         "%s | in %s | typable=%d",
-                                         items[i].label, items[i].window,
-                                         (int)items[i].typable);
-                            named++;
-                        }
+                        fresh = cov.n_offered != was;
                     } else {
+                        const int was = cov.n_never;
                         gs_walk_mark(cov.never, items[i].id, &cov.n_never);
+                        fresh = cov.n_never != was;
+                    }
+                    if (fresh && named < GS_ED_NAMES) {
+                        name_id[named] = items[i].id;
+                        SDL_snprintf(name_of[named], GS_UI_LABEL,
+                                     "%s | in %s | typable=%d",
+                                     items[i].label, items[i].window,
+                                     (int)items[i].typable);
+                        named++;
                     }
                 }
 
@@ -6279,48 +6606,84 @@ TEST(every_control_in_the_construction_set_is_pressed) {
                     if (gs_chrome(items[i].label, items[i].window)) continue;
                     if (items[i].label[0] == 0) continue;   // ImGui's own structure
 
-                    // Back to this configuration, two settled frames, then
-                    // press - see the note on gs_ed_frame for why two.
-                    e = at;
-                    gs_ed_frame(&ed);
-                    gs_ed_frame(&ed);
-
-                    const uint64_t before = gs_ed_key(&ed);
-                    gs_ui_probe_press(items[i].id);
-                    gs_ed_frame(&ed);
-                    gs_ed_frame(&ed);
-                    actions++;
-
-                    bool landed = gs_ed_key(&ed) != before;
-
-                    // Pressed by name reaches what the keyboard cannot and the
-                    // keyboard reaches what naming misses, so a control that
-                    // did not answer to one is walked to with the other.
-                    if (!landed) {
-                        e = at;
-                        gs_ui_probe_focus_window(items[i].window);
-                        gs_ed_frame(&ed);
-                        gs_ed_frame(&ed);
-                        gs_ed_key_press(&ed, ImGuiKey_Tab);
-
-                        for (int tab = 0; tab < held * 2 + 8; tab++) {
-                            if (gs_ui_probe_focused() == items[i].id) break;
-                            gs_ed_key_press(&ed, ImGuiKey_Tab);
-                        }
-                        if (gs_ui_probe_focused() == items[i].id) {
-                            gs_ed_key_press(&ed, ImGuiKey_Space);
-                            actions++;
-                            landed = true;
-                        }
-                    }
-
-                    if (landed) {
+                    if (gs_ed_attempt(&ed, &at, &at_track, &items[i], held,
+                                      &actions)) {
                         moved++;
                         gs_walk_mark(cov.pressed, items[i].id, &cov.n_pressed);
                     }
                 }
 
+                // **And what is below the fold of each panel.** The palette
+                // is taller than the room it has: four of its buttons - save,
+                // load, and the two that move a track as text - are past the
+                // bottom of it, and so is the button that puts the controls
+                // back to their defaults. A walk that only presses what it can
+                // see had never met any of them, and said it had covered the
+                // construction set.
+                //
+                // Only what has not been pressed yet, so the second
+                // configuration onwards costs the winding and nothing else.
+                for (size_t p = 0; p < SDL_arraysize(gs_ed_panels); p++) {
+                    float now = 0.0f, max = 0.0f;
+                    if (!gs_ui_probe_scroll_at(gs_ed_panels[p], &now, &max)) continue;
+                    if (max <= 0.0f) continue;
+
+                    gs_ed_wind(&ed, gs_ed_panels[p], -1.0f);
+                    gs_ui_probe_scroll_at(gs_ed_panels[p], &now, &max);
+
+                    for (int step = 0; step < 40; step++) {
+                        const int sn = gs_walk_controls_ed(&ed, below, GS_UI_MAX_ITEMS);
+                        const int sheld = sn < GS_UI_MAX_ITEMS ? sn : GS_UI_MAX_ITEMS;
+
+                        for (int i = 0; i < sheld; i++) {
+                            if (!below[i].reachable || below[i].disabled) continue;
+                            if (!below[i].visible) continue;
+                            if (below[i].label[0] == 0) continue;
+                            if (gs_chrome(below[i].label, below[i].window)) continue;
+
+                            const int was = cov.n_offered;
+                            gs_walk_mark(cov.offered, below[i].id, &cov.n_offered);
+                            if (cov.n_offered != was && named < GS_ED_NAMES) {
+                                name_id[named] = below[i].id;
+                                SDL_snprintf(name_of[named], GS_UI_LABEL,
+                                             "%s | in %s | typable=%d",
+                                             below[i].label, below[i].window,
+                                             (int)below[i].typable);
+                                named++;
+                            }
+                            if (gs_walk_has(cov.pressed, below[i].id)) continue;
+
+                            const float where = now;
+                            e = at;
+                            gs_ed_frame(&ed);
+                            gs_ed_wind(&ed, gs_ed_panels[p], -1.0f);
+                            for (int back = 0; back < 40; back++) {
+                                float at_now = 0.0f, at_max = 0.0f;
+                                gs_ui_probe_scroll_at(gs_ed_panels[p], &at_now, &at_max);
+                                if (at_now >= where - 0.5f) break;
+                                gs_ui_probe_wheel(gs_ed_panels[p], -1.0f);
+                                gs_ed_frame(&ed);
+                            }
+
+                            if (gs_ed_attempt(&ed, &at, &at_track, &below[i],
+                                              sheld, &actions)) {
+                                moved++;
+                                gs_walk_mark(cov.pressed, below[i].id, &cov.n_pressed);
+                            }
+                        }
+
+                        if (now >= max) break;
+                        gs_ui_probe_wheel(gs_ed_panels[p], -1.0f);
+                        gs_ed_frame(&ed);
+                        gs_ui_probe_scroll_at(gs_ed_panels[p], &now, &max);
+                    }
+                    e = at;
+                    t = at_track;
+                    gs_ed_frame(&ed);
+                }
+
                 e = at;
+                t = at_track;
             }
         }
     }
@@ -6345,6 +6708,34 @@ TEST(every_control_in_the_construction_set_is_pressed) {
             }
             printf("  EDLEFT '%s'\n", label);
         }
+    }
+
+    // **And the count that does not come from this walk either.** The palette
+    // names its controls in the file that draws it, and that text does not care
+    // what any walk reached - so every label `gs_editor.c` writes down has to
+    // have been met here.
+    {
+        static char wanted[GS_SOURCE_LABELS][GS_UI_LABEL];
+        const int n_wanted = gs_labels_in_source(GS_SOURCE_UI "/gs_editor.c",
+                                                 wanted, GS_SOURCE_LABELS);
+        CHECK(n_wanted > 0);
+        CHECK(n_wanted < GS_SOURCE_LABELS);
+
+        int missing = 0;
+        for (int i = 0; i < n_wanted; i++) {
+            const size_t len = SDL_strlen(wanted[i]);
+            bool seen = false;
+            for (int q = 0; q < named && !seen; q++) {
+                if (SDL_strncmp(name_of[q], wanted[i], len) != 0) continue;
+                if (name_of[q][len] == ' ' || name_of[q][len] == '\0') seen = true;
+            }
+            if (seen) continue;
+            printf("  NEVER WALKED '%s', which gs_editor.c draws\n", wanted[i]);
+            missing++;
+        }
+        printf("  EDITOR %d of %d controls named in gs_editor.c were reached\n",
+               n_wanted - missing, n_wanted);
+        CHECK(missing == 0);
     }
 
     // **What is counted is what moved.** An activation that lands on the floor
@@ -6522,14 +6913,15 @@ static bool gs_ed_drag(gs_ed *ed, float x0, float y0, float x1, float y1, int st
     return true;
 }
 
-// What the editor is showing, the same question the walk asks of a menu.
-static int gs_walk_controls_ed(gs_ed *ed, gs_ui_item *into, int cap) {
-    gs_ui_probe_start(into, cap);
-    gs_ui_probe_frame();
-    gs_ed_frame(ed);
-    const int n = gs_ui_probe_count();
-    gs_ui_probe_stop();
-    return n;
+// Is this named control on screen at all?
+static bool gs_ed_has_named(gs_ed *ed, const char *label) {
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+    const int n = gs_walk_controls_ed(ed, items, GS_UI_MAX_ITEMS);
+    for (int i = 0; i < n && i < GS_UI_MAX_ITEMS; i++) {
+        if (!items[i].visible || items[i].disabled || !items[i].reachable) continue;
+        if (SDL_strcmp(items[i].label, label) == 0) return true;
+    }
+    return false;
 }
 
 // Press a named control in the editor's panels.
@@ -6610,6 +7002,15 @@ TEST(a_track_is_built_named_saved_and_raced_by_pressing_and_dragging) {
     gs_ed_frame(&ed);
     gs_ed_frame(&ed);
 
+    // Whatever ran before this may have folded a panel shut or wound it to the
+    // bottom; ImGui remembers both by name for the rest of the process, and a
+    // palette scrolled past its own first row has no "raise" button on it.
+    if (gs_ui_probe_unfold("Construction set")) gs_ed_frame(&ed);
+    if (gs_ui_probe_unfold("Parts box")) gs_ed_frame(&ed);
+    gs_ed_wind(&ed, "Construction set", -1.0f);
+    gs_ed_wind(&ed, "Parts box", -1.0f);
+    gs_ed_frame(&ed);
+
     // --- **Shape the ground**, with the brush chosen off the palette. --------
     CHECK(gs_ed_press_named(&ed, "raise"));
     CHECK(e.brush == GS_BRUSH_RAISE);
@@ -6635,17 +7036,22 @@ TEST(a_track_is_built_named_saved_and_raced_by_pressing_and_dragging) {
     // The surface list is a combo, which ImGui does not name; it is found by
     // opening things until the surfaces turn up, and the surfaces are named.
     //
-    //     **Two controls on this panel are called "surface"** - the brush and
-    //     the list of grounds it paints - so which is which is settled by
-    //     pressing each and seeing which one offers ice.
+    //     **The list of grounds has no name.** ImGui reports a label for a
+    //     button, a slider and a box and none at all for a combo, so the box
+    //     that picks a ground is one of the anonymous items on the panel. Which
+    //     one is settled by opening each in turn and seeing which offers ice -
+    //     and one of the anonymous ones is the arrow that folds the palette
+    //     away, which takes every other control off the screen, so the palette
+    //     is put back when that happens.
     {
-        static uint32_t both[GS_UI_MAX_ITEMS];
+        static uint32_t nameless[GS_UI_MAX_ITEMS];
         int count = 0;
         const int n = gs_walk_controls_ed(&ed, items, GS_UI_MAX_ITEMS);
         for (int i = 0; i < n && i < GS_UI_MAX_ITEMS; i++) {
             if (!items[i].visible || items[i].disabled || !items[i].reachable) continue;
-            if (SDL_strcmp(items[i].label, "surface") != 0) continue;
-            both[count++] = items[i].id;
+            if (items[i].label[0] != '\0') continue;
+            if (SDL_strcmp(items[i].window, "Construction set") != 0) continue;
+            nameless[count++] = items[i].id;
         }
         CHECK(count >= 1);
 
@@ -6653,16 +7059,25 @@ TEST(a_track_is_built_named_saved_and_raced_by_pressing_and_dragging) {
         for (int i = 0; i < count && !picked; i++) {
             gs_ui_probe_settle();
             gs_ed_frame(&ed);
-            gs_ui_probe_press(both[i]);
+            gs_ui_probe_press(nameless[i]);
             gs_ed_frame(&ed);
             gs_ed_frame(&ed);
-            if (!gs_ed_press_named(&ed, gs_surfaces[GS_SURF_ICE].name)) continue;
-            picked = e.surface == (int)GS_SURF_ICE;
+
+            if (gs_ed_press_named(&ed, gs_surfaces[GS_SURF_ICE].name)) {
+                picked = e.surface == (int)GS_SURF_ICE;
+                continue;
+            }
+            if (!gs_ed_has_named(&ed, "raise")) {
+                gs_ui_probe_press(nameless[i]);     // fold it back open
+                gs_ed_frame(&ed);
+                gs_ed_frame(&ed);
+            }
         }
         gs_ui_probe_settle();
         gs_ed_frame(&ed);
         CHECK(picked);
         CHECK(e.brush == GS_BRUSH_SURFACE);
+        CHECK(gs_ed_has_named(&ed, "raise"));
     }
     CHECK(gs_ed_drag(&ed, 20.0f, 16.0f, 20.0f, 24.0f, 8));
     CHECK(gs_track_surface(&t, GS_INT(20) + GS_ONE / 2,
@@ -7191,6 +7606,29 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     printf("  WALK %d controls wound onto the screen with the wheel, in %d "
            "actions; %d still out of reach\n", wound, wheeling, out_of_reach);
 
+    // **And what is inside anything that opens.** Every control that never
+    // changed the menu is opened once more where it stood, in case what it does
+    // is show something rather than change something.
+    {
+        static uint32_t quiet[GS_WALK_CTRLS];
+        int n_quiet = 0, opening = 0;
+        for (size_t i = 0; i < GS_WALK_CTRLS; i++) {
+            const uint32_t id = w.offered[i];
+            if (id == 0 || gs_walk_has(w.moved, id)) continue;
+            quiet[n_quiet++] = id;
+        }
+
+        const int had = w.n_offered;
+        for (int i = 0; i < n_quiet; i++) {
+            gs_walk_named *nm = gs_walk_named_of(&w, quiet[i]);
+            if (nm == nullptr || !nm->idled) continue;
+            gs_walk_open(&ui, &t, ren, &w, nm, &opening);
+        }
+        printf("  WALK %d controls opened rather than pressed, %d more controls "
+               "found inside them, in %d actions\n",
+               n_quiet, w.n_offered - had, opening);
+    }
+
     // **Nothing is laid out off the edge of a panel that cannot scroll.** The
     // tracks screen did exactly that with nothing chosen: the box under THIS
     // ONE was given a height of zero, which in ImGui means every pixel that is
@@ -7257,7 +7695,7 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     //
     // That is what a floor is for: a tripwire against the number quietly
     // falling, not a claim that two walks visit the same places.
-    CHECK(w.n_offered >= 750);
+    CHECK(w.n_offered >= 765);
 
     // **The controls that are dead in one state and live in another.** This is
     // the number the seeding is for, and it is what a walk from a single
@@ -7487,6 +7925,31 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
             }
             CHECK(excused_used[k]);
         }
+    }
+
+    // **The denominator, taken from the screens rather than from the walk.**
+    {
+        static char wanted[GS_SOURCE_LABELS][GS_UI_LABEL];
+        const int n_wanted = gs_labels_in_source(GS_SOURCE_UI "/gs_menu.c",
+                                                 wanted, GS_SOURCE_LABELS);
+        CHECK(n_wanted > 0);
+        CHECK(n_wanted < GS_SOURCE_LABELS);      // or the list was truncated
+
+        int missing = 0;
+        for (int i = 0; i < n_wanted; i++) {
+            bool seen = false;
+            for (size_t k = 0; k < GS_WALK_CTRLS && !seen; k++) {
+                if (w.named[k].id == 0) continue;
+                if (SDL_strcmp(w.named[k].label, wanted[i]) == 0) seen = true;
+            }
+            if (seen) continue;
+            printf("  NEVER WALKED '%s', which gs_menu.c draws\n", wanted[i]);
+            missing++;
+        }
+
+        printf("  WALK %d of %d controls named in gs_menu.c were reached\n",
+               n_wanted - missing, n_wanted);
+        CHECK(missing == 0);
     }
 
     const int revived = gs_walk_revived(&w);

@@ -4352,6 +4352,61 @@ two drivers itself, which is what the claim was always about.
 
 **Stopping the wheel from working puts all 86 back and turns the tree red.**
 
+### The count that does not come from the walk
+
+`46 of 46` controls named in `gs_menu.c` were reached, and `30 of 30` in
+`gs_editor.c`.
+
+This is the item the rest of Phase 17 was for. `pressed == offered` was
+asserted, and it is nowhere near sufficient: **the number it is out of was what
+the walk itself reached**, so a walk that sees less reports all of what it saw
+and calls it complete. One alphabet measured 727 controls where a wider one
+measured 758, and both said a hundred percent.
+
+The screens name their own controls, in the source text, and that text does not
+care what any walk got to. So the labels are read out of the files that draw
+them - every string literal in the first argument of every call ImGui reports a
+name for - and every one of them has to have been met. A button added to a
+screen nobody can reach is named and turns the tree red, with nobody adding a
+case for it; that was checked by adding one.
+
+Three kinds of call are left out and the reason is the same for all three:
+`BeginCombo`, `Combo` and `ColorButton` never tell the hook their label, which
+is why the machine choosing a paint sees sixty-four identical nameless squares.
+What is inside them is covered by the sweep that opens them and by every value
+of every dial being pressed.
+
+**Turning it on found fourteen controls neither walk had ever met.**
+
+- **Four needed a state nobody had thought to seed.** A lobby ready to race
+  draws a Race button; a driver with no password yet draws SET IT AND SIGN IN; a
+  server asking for a code draws the box to type it into; a track that came with
+  the game draws Edit **a copy** rather than Edit. Four more seeds, and the walk
+  now starts from sixteen menus rather than twelve.
+- **Three were inside combo boxes nothing ever opened.** A popup is ImGui's
+  state and not the menu's, so opening one changes nothing the walk can see and
+  the press reads as having done nothing. It cannot be fixed by walking harder -
+  standing in a state means copying the menu back and settling ImGui, and
+  settling closes popups, which it has to. So the insides are swept afterwards,
+  like the rows below a fold: go back, open it, press what appeared. Eleven more
+  controls, and an entry that was already the chosen one is woken the same way
+  as everything else - by picking a different one first.
+- **Five were below the fold of the editor's own panels**: save, load, the two
+  buttons that move a track as text, and the one that puts the controls back to
+  their defaults. The construction set's walk had never turned a wheel.
+- **Two were the same control wearing two names**, and both were faults worth
+  fixing rather than test problems. The surface *brush* and the box that picks a
+  ground were both labelled "surface" in the same panel, and an ImGui id is a
+  hash of the label - so they shared one, and activating either reached whichever
+  came first. And the rebind buttons in the controls panel change their own
+  label the moment they are pressed, with `##` rather than `###`: the id changed
+  with the words, so the button a person had just clicked became a *different*
+  button, losing focus and active state mid-interaction, and every walk saw two
+  controls where there is one.
+
+**The pinned count is 765**, up from 750, and it is now a floor under a number
+that has somewhere else to come from.
+
 ### A track built by hand, and two panels that did not fit
 
 There was already a test that built a track from nothing and raced it, and every

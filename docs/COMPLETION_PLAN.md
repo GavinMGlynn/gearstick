@@ -1163,17 +1163,20 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       editor that got the middle wrong in a way that cancelled out still fails.
       All the way back is a blank field with no gates; all the way forward
       hashes identical to what was built.*
-- [ ] **The walk counts what it covered and fails if anything was missed.**
-      This is the item the rest of the phase is for: coverage that is asserted
-      rather than believed. Half of it is done and the half that is missing is
-      the important half — `pressed == offered` is asserted, but **the number it
-      is out of is what the walk itself reached**, so a walk that sees less
-      still reports all of it. One alphabet measured 727 controls where a wider
-      one measured 758, and both said 100%. The count has to come from
-      somewhere other than a walk asking itself. Until it does, the 727 is
-      pinned like the golden replay, and lowering it is a deliberate act.
-      *Verification: a control added to a screen and not walked turns the tree
-      red on the next run, without anybody adding a case for it.*
+- [x] **The walk counts what it covered and fails if anything was missed.**
+      The number is no longer the walk's own: the screens name their controls in
+      the files that draw them, and that text does not care what any walk
+      reached. Every label `gs_menu.c` and `gs_editor.c` write down has to have
+      been met.
+      *Verification: **46 of 46** in the front end and **30 of 30** in the
+      construction set. A button added to a screen nobody can reach is named and
+      turns the tree red, with no case added for it — checked by adding one.
+      Turning it on found **fourteen controls neither walk had ever met**: four
+      needed new starting states (a lobby ready to race, a driver with no
+      password, a server asking for a code, a track that came with the game),
+      three were inside combo boxes nothing ever opened, five were below the
+      fold of the editor's own panels, and two were the same control wearing two
+      names.*
 
 ## Phase 18 — Opponents worth racing
 

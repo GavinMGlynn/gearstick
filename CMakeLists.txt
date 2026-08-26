@@ -392,7 +392,13 @@ target_compile_definitions(gearstick_shell PRIVATE
 # tells people to press is what the game actually listens for. A guide that has
 # drifted from the code is worse than no guide: it sends somebody to press a key
 # that does nothing and lets them conclude the game is broken.
+# And where the screens themselves are, so a test can count the controls the
+# drawing code names and check the walk found every one of them. **The number a
+# walk is out of cannot come from the walk**: one that sees less reports all of
+# what it saw and calls it complete. The source text does not care what any walk
+# reached.
 target_compile_definitions(gearstick_shell PUBLIC
+    GS_SOURCE_UI="${CMAKE_CURRENT_SOURCE_DIR}/src/ui"
     GS_SOURCE_DOCS="${CMAKE_CURRENT_SOURCE_DIR}/docs"
     # The package name this platform actually produces, so a test can check the
     # release notes describe files that exist rather than files somebody

@@ -106,9 +106,11 @@ bool gs_ui_probe_wheel(const char *window, float ticks);
 // window.
 bool gs_ui_probe_scroll_at(const char *window, float *now, float *max);
 
-// Where a window ended up and whether it is folded shut.
-bool gs_ui_probe_window_box(const char *window, float *x, float *y,
-                            float *w, float *h, bool *collapsed);
+// **Unfold a window somebody folded shut.** A collapsed window draws its title
+// bar and nothing else, and ImGui remembers that under the window's name for
+// the rest of the process - so one walk pressing a collapse arrow leaves every
+// test after it walking a panel with nothing on it. True if it was folded.
+bool gs_ui_probe_unfold(const char *window);
 
 // **Which control the keyboard is on**, as ImGui's own id for it - so a walk
 // that moves focus with Tab can say what it just pressed rather than counting

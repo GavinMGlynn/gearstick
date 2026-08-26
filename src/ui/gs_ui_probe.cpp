@@ -137,17 +137,13 @@ bool gs_ui_probe_scroll_at(const char *window, float *now, float *max)
     return true;
 }
 
-bool gs_ui_probe_window_box(const char *name, float *x, float *y,
-                            float *w, float *h, bool *collapsed)
+bool gs_ui_probe_unfold(const char *name)
 {
     if (ImGui::GetCurrentContext() == nullptr || name == nullptr) return false;
     ImGuiWindow *win = ImGui::FindWindowByName(name);
     if (win == nullptr) return false;
-    if (x != nullptr) *x = win->Pos.x;
-    if (y != nullptr) *y = win->Pos.y;
-    if (w != nullptr) *w = win->Size.x;
-    if (h != nullptr) *h = win->Size.y;
-    if (collapsed != nullptr) *collapsed = win->Collapsed;
+    if (!win->Collapsed) return false;
+    ImGui::SetWindowCollapsed(win, false);
     return true;
 }
 
