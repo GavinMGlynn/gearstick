@@ -4352,6 +4352,43 @@ two drivers itself, which is what the claim was always about.
 
 **Stopping the wheel from working puts all 86 back and turns the tree red.**
 
+### Every value of every dial
+
+`106 of 106 values pressed`, on the screen rather than set in the struct behind
+it. The ranges are counted out of the game's own numbers - `GS_VEH_COUNT`
+machines, `GS_COLOUR_COUNT` paints, `GS_GRAVITY_PRESETS` planets, the grid's own
+`GS_MAX_CARS` rows, the roster's own count of drivers - so a ninth planet is
+walked the day it is added, and a screen that does not draw it turns the tree
+red without anybody adding a case.
+
+**Two planet lists became one.** The setup screen kept its own copy of the eight
+planets, and the simulation exports the list the construction set's palette
+draws from. They agreed to the last digit, which is how that sort of thing
+survives long enough to stop agreeing. The menu uses `gs_gravity_presets` now,
+and the test presses all eight in both places.
+
+**The controls are found by what they do, not by what they are called.** Dear
+ImGui reports a label for a button, a slider and a box, and none at all for a
+combo or a colour swatch: neither `BeginCombo` nor `ColorButton` tells the hook
+its name. So the machine picking the paint for car three sees sixty-four
+identical nameless squares. What it can see is what each one *did* - press it
+and the setup says which car and which colour - so that is how they are told
+apart, which has the useful property of not caring what any of them is renamed
+to.
+
+**Every value is pressed from a state it is not already in.** A row already
+painted red has a red swatch that changes nothing, and so does a dead one; the
+two readings are identical. So the grid is moved elsewhere first and the press
+has to do the work - a swatch is tried from two different starting colours, a
+machine from the next machine along, a planet from the next planet.
+
+Two things the walk cannot reach are covered here because they are dials rather
+than destinations: the lap slider is drawn **dead on a path**, since a path is
+raced once end to end, so the test lays a circuit before asking for twenty laps;
+and both sliders are driven by landing on them and stepping with the arrows,
+which is what a person without a mouse does and where a person with one ends up.
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

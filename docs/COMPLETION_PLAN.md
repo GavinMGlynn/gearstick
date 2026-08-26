@@ -1056,14 +1056,16 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       *Verification: 12 values, against a race built from them — each car on its
       own grid slot with no two in the same place, and each vehicle arriving as
       the one that was chosen and driving under its own power.*
-- [ ] **Every value of every dial, not three interesting ones.** Laps from one
-      to twenty, every mode, every gravity preset and the brush that is not a
-      preset, every vehicle and every colour — the model is small and
-      predictable on purpose, which is exactly what makes walking all of it
-      affordable rather than clever.
-      *Verification: the walk enumerates each dial's full range and presses
-      every value in it; a value added to a dial and left unhandled turns the
-      test red without anybody adding a case.*
+- [x] **Every value of every dial, not three interesting ones.** Laps one to
+      twenty, both modes, every player count, every planet — in the race setup
+      *and* in the construction set's palette, which are now one list of planets
+      instead of two that happened to agree — and every driver, machine and
+      colour on **every row of the grid**. Pressed on the screen, and each from
+      a state it was not already in, because a button that is already the one
+      chosen does nothing and so does a dead one.
+      *Verification: **106 of 106 values**, counted out of the game's own
+      numbers rather than a list in the test. Hiding one machine from the screen
+      names it missing on all four rows and turns the tree red.*
 - [x] **The number of players changes what the setup screen *is*, so the walk
       changes with it.** Seeded at one, two, three and four players, and with a
       guest in a seat — a guest is not a roster driver and does not draw the

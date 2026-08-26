@@ -6369,6 +6369,325 @@ TEST(the_walk_signs_in_through_the_door_rather_than_being_put_behind_it) {
     CHECK(w.typed > 0);
 }
 
+// The nth control on screen with this label, live and in sight, or zero.
+static uint32_t gs_dial_nth(gs_ui *ui, gs_ui_item *items, const char *label,
+                            int nth)
+{
+    const int n = gs_walk_controls(ui, items, GS_UI_MAX_ITEMS);
+    const int held = n < GS_UI_MAX_ITEMS ? n : GS_UI_MAX_ITEMS;
+    int seen = 0;
+    for (int i = 0; i < held; i++) {
+        if (!items[i].visible || items[i].disabled || !items[i].reachable) continue;
+        if (SDL_strcmp(items[i].label, label) != 0) continue;
+        if (seen++ == nth) return items[i].id;
+    }
+    return 0;
+}
+
+static void gs_dial_press(gs_ui *ui, uint32_t id) {
+    const gs_act a = { id, -1, 0 };
+    gs_act_do(ui, &a);
+}
+
+TEST(every_value_of_every_dial_is_pressed_not_three_interesting_ones) {
+    // **Every value of every dial the setup screen offers, pressed on the
+    // screen rather than set in the struct behind it - and the range walked is
+    // the one the game defines.**
+    //
+    // `GS_VEH_COUNT` machines, `GS_COLOUR_COUNT` paints, `GS_GRAVITY_PRESETS`
+    // planets, the grid's own `GS_MAX_CARS` rows and the roster's own count of
+    // drivers. Nothing here lists the values; it counts them out of the model,
+    // so a ninth planet or a fifth colour is walked the day it is added and a
+    // screen that does not draw it turns this red without anybody adding a
+    // case.
+    //
+    // **The controls are found by what they do, not by what they are called.**
+    // Dear ImGui reports a label for a button, a slider and a box, and reports
+    // none at all for a combo or a colour swatch: neither `BeginCombo` nor
+    // `ColorButton` tells the hook its name, so the machine picking the paint
+    // for car three sees sixty-four identical nameless squares. What it can see
+    // is what each one *did* - press it and the setup says which car and which
+    // colour - so that is how they are told apart. It has the useful property
+    // of not caring what any of them is renamed to.
+    static gs_menu m;
+    static gs_menu base;
+    static gs_track t;
+    gs_panel_menu(&m, &t);
+
+    // **A loop, because the lap dial is drawn dead on a path** - a path is
+    // raced once end to end, so the screen refuses to offer twenty laps of one.
+    // A dial that is disabled is not a dial with no values; it is a dial this
+    // test would otherwise skip in silence.
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+    CHECK(gs_track_is_circuit(&t));
+
+    m.setup.players = GS_MAX_CARS;      // every row of the grid drawn
+    m.setup.mode    = (uint8_t)GS_MODE_RACE;
+    m.screen        = GS_SCREEN_SETUP;
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    gs_ui ui;
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+    static gs_ui_item screen[GS_UI_MAX_ITEMS];
+    gs_ui_probe_settle();
+    gs_ui_begin(&ui, &m, &t, ren);
+    base = m;
+
+    bool mode_seen[2] = { false };
+    bool laps_seen[21] = { false };
+    bool players_seen[GS_MAX_CARS + 1] = { false };
+    bool gravity_seen[GS_GRAVITY_PRESETS] = { false };
+    static bool colour_seen[GS_MAX_CARS][GS_COLOUR_COUNT];
+    static bool vehicle_seen[GS_MAX_CARS][GS_VEH_COUNT];
+    static bool driver_seen[GS_MAX_CARS][GS_PROFILES_MAX + 1];
+    SDL_memset(colour_seen, 0, sizeof colour_seen);
+    SDL_memset(vehicle_seen, 0, sizeof vehicle_seen);
+    SDL_memset(driver_seen, 0, sizeof driver_seen);
+
+    // --- **Every planet.** The simulation's own list, which is also the list
+    //     the construction set's palette offers: one table, pressed in both
+    //     places. These are buttons and ImGui does name them.
+    //
+    //     **Started from a different planet every time**, because a button that
+    //     is already the one lit changes nothing, and "it did nothing" and "it
+    //     was already so" are the same reading. The dial is put somewhere else
+    //     first, so the press has work to do.
+    for (int g = 0; g < GS_GRAVITY_PRESETS; g++) {
+        const int away = (g + 1) % GS_GRAVITY_PRESETS;
+        m = base;
+        m.setup.gravity_preset = away;
+        m.setup.gravity        = gs_gravity_presets[away].scale;
+        gs_ui_probe_settle();
+
+        const uint32_t at = gs_dial_nth(&ui, items, gs_gravity_presets[g].name, 0);
+        CHECK(at != 0);
+        if (at == 0) continue;
+        gs_dial_press(&ui, at);
+        if (m.setup.gravity == gs_gravity_presets[g].scale &&
+            m.setup.gravity_preset == g) {
+            gravity_seen[g] = true;
+        }
+    }
+
+    // --- **Every lap count and every player count.** A slider is not pressed,
+    //     it is moved: landed on and stepped with the arrows, which is what a
+    //     person without a mouse does and where a person with one ends up.
+    m = base;
+    gs_ui_probe_settle();
+    {
+        const uint32_t laps = gs_dial_nth(&ui, items, "##laps", 0);
+        CHECK(laps != 0);
+        for (int i = 0; i < 40; i++) {
+            const gs_act a = { laps, -1, (uint16_t)ImGuiKey_LeftArrow };
+            gs_act_do(&ui, &a);
+        }
+        for (int i = 0; i < 40; i++) {
+            if (m.setup.laps <= 20) laps_seen[m.setup.laps] = true;
+            if (m.setup.laps >= 20) break;
+            const gs_act a = { laps, -1, (uint16_t)ImGuiKey_RightArrow };
+            gs_act_do(&ui, &a);
+        }
+    }
+
+    m = base;
+    gs_ui_probe_settle();
+    {
+        const uint32_t players = gs_dial_nth(&ui, items, "##players", 0);
+        CHECK(players != 0);
+        for (int i = 0; i < 20; i++) {
+            const gs_act a = { players, -1, (uint16_t)ImGuiKey_LeftArrow };
+            gs_act_do(&ui, &a);
+        }
+        for (int i = 0; i < 20; i++) {
+            if (m.setup.players <= GS_MAX_CARS) players_seen[m.setup.players] = true;
+            if (m.setup.players >= GS_MAX_CARS) break;
+            const gs_act a = { players, -1, (uint16_t)ImGuiKey_RightArrow };
+            gs_act_do(&ui, &a);
+        }
+    }
+
+    // --- **Everything else on the screen, pressed to find out what it is.**
+    //
+    // The nameless ones are the combos and the paint swatches. Each is pressed
+    // from the same starting state and judged by what it changed: a swatch says
+    // which car and which colour, and a combo says nothing at all but *opens*,
+    // and what is inside it is named.
+    m = base;
+    gs_ui_probe_settle();
+    const int on_screen = gs_walk_controls(&ui, screen, GS_UI_MAX_ITEMS);
+    const int held = on_screen < GS_UI_MAX_ITEMS ? on_screen : GS_UI_MAX_ITEMS;
+
+    //
+    //     **Every one of them is pressed from a state it is not already in**,
+    //     for the same reason the planets are: a row already painted red has a
+    //     red swatch that does nothing, and a dead swatch does nothing too. So
+    //     the grid is put somewhere else first and the press has to move it.
+    int combos = 0;
+    for (int i = 0; i < held; i++) {
+        if (!screen[i].visible || screen[i].disabled || !screen[i].reachable) continue;
+
+        // A swatch says which car and which colour by doing it - tried from two
+        // different starting colours, because it might be the one already on.
+        bool paint = false;
+        for (uint8_t start = 0; start < 2 && !paint; start++) {
+            m = base;
+            for (int r = 0; r < GS_MAX_CARS; r++) m.setup.colour[r] = start;
+            gs_ui_probe_settle();
+            gs_dial_press(&ui, screen[i].id);
+            for (int r = 0; r < GS_MAX_CARS; r++) {
+                if (m.setup.colour[r] == start) continue;
+                colour_seen[r][m.setup.colour[r]] = true;
+                paint = true;
+            }
+        }
+        if (paint) continue;
+
+        // Or a combo, which changes nothing by opening and carries its values
+        // inside it. Which combo it is, is which names turned up.
+        m = base;
+        gs_ui_probe_settle();
+        gs_dial_press(&ui, screen[i].id);
+
+        if (gs_dial_nth(&ui, items, gs_vehicle(0)->name, 0) != 0) {
+            combos++;
+            for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
+                const uint8_t away = (uint8_t)((v + 1u) % GS_VEH_COUNT);
+                m = base;
+                for (int r = 0; r < GS_MAX_CARS; r++) m.setup.vehicle[r] = away;
+                gs_ui_probe_settle();
+                gs_dial_press(&ui, screen[i].id);
+
+                const uint32_t at = gs_dial_nth(&ui, items, gs_vehicle(v)->name, 0);
+                CHECK(at != 0);
+                if (at == 0) continue;
+                gs_dial_press(&ui, at);
+                for (int r = 0; r < GS_MAX_CARS; r++) {
+                    if (m.setup.vehicle[r] == v) vehicle_seen[r][v] = true;
+                }
+            }
+            continue;
+        }
+
+        if (gs_dial_nth(&ui, items, "guest", 0) != 0) {
+            combos++;
+            const int drivers = (int)base.profiles.count + 1;   // guest included
+            for (int k = -1; k < (int)base.profiles.count; k++) {
+                const int8_t away = (int8_t)(((k + 1 + 1) % drivers) - 1);
+                m = base;
+                for (int r = 0; r < GS_MAX_CARS; r++) m.setup.profile[r] = away;
+                gs_ui_probe_settle();
+                gs_dial_press(&ui, screen[i].id);
+
+                const char *who = k < 0 ? "guest" : base.profiles.entry[k].name;
+                const uint32_t at = gs_dial_nth(&ui, items, who, 0);
+                CHECK(at != 0);
+                if (at == 0) continue;
+                gs_dial_press(&ui, at);
+                for (int r = 0; r < GS_MAX_CARS; r++) {
+                    if (m.setup.profile[r] == (int8_t)k) driver_seen[r][k + 1] = true;
+                }
+            }
+            continue;
+        }
+
+        if (gs_dial_nth(&ui, items, "first past the flag", 0) != 0) {
+            combos++;
+            static const struct { const char *entry; uint8_t mode; } modes[] = {
+                { "last one driving",    (uint8_t)GS_MODE_DESTRUCTION },
+                { "first past the flag", (uint8_t)GS_MODE_RACE },
+            };
+            for (size_t k = 0; k < SDL_arraysize(modes); k++) {
+                m = base;
+                m.setup.mode = (uint8_t)(modes[k].mode == (uint8_t)GS_MODE_RACE
+                                         ? GS_MODE_DESTRUCTION : GS_MODE_RACE);
+                gs_ui_probe_settle();
+                gs_dial_press(&ui, screen[i].id);
+
+                const uint32_t at = gs_dial_nth(&ui, items, modes[k].entry, 0);
+                CHECK(at != 0);
+                if (at == 0) continue;
+                gs_dial_press(&ui, at);
+                if (m.setup.mode == modes[k].mode) mode_seen[k] = true;
+            }
+        }
+    }
+
+    // --- **And the same eight planets in the construction set's palette**,
+    //     which is the reason they are one list rather than two that agree.
+    static gs_editor e;
+    CHECK(gs_editor_init(&e, 65536));
+    static gs_track et;
+    gs_flat_pavement(&et, 32, 32);
+
+    static gs_ed ed;
+    ed.e = &e;
+    ed.t = &et;
+    ed.view = (gs_view){ 0 };
+    ed.view.rect = (SDL_Rect){ 0, 0, 1280, 720 };
+    ed.input = (gs_input_state){ 0 };
+    gs_bind_defaults(&ed.input.bind);
+    gs_editor_toggle(&e, &ed.view);
+    CHECK(e.active);
+    e.show_controls = true;
+
+    bool palette_seen[GS_GRAVITY_PRESETS] = { false };
+    for (int g = 0; g < GS_GRAVITY_PRESETS; g++) {
+        e.dial_gravity = -1.0f;
+        gs_ed_frame(&ed);
+        gs_ed_frame(&ed);
+
+        gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
+        gs_ui_probe_frame();
+        gs_ed_frame(&ed);
+        const int n = gs_ui_probe_count();
+        gs_ui_probe_stop();
+
+        uint32_t at = 0;
+        for (int i = 0; i < n && i < GS_UI_MAX_ITEMS; i++) {
+            if (!items[i].visible || items[i].disabled || !items[i].reachable) continue;
+            if (SDL_strcmp(items[i].label, gs_gravity_presets[g].name) == 0) {
+                at = items[i].id;
+            }
+        }
+        CHECK(at != 0);
+        if (at == 0) continue;
+
+        gs_ui_probe_press(at);
+        gs_ed_frame(&ed);
+        gs_ed_frame(&ed);
+
+        const float want = gs_to_f(gs_gravity_presets[g].scale);
+        if (SDL_fabsf(e.dial_gravity - want) < 0.001f) palette_seen[g] = true;
+    }
+    gs_editor_quit(&e);
+
+    // --- **Counted out, and every one of them met.**
+    int met = 0, space = 0;
+    #define GS_DIAL_MET(what, ok, at) \
+        do { space++; if (ok) met++; \
+             else printf("  DIAL MISSED %s %d\n", what, at); } while (0)
+
+    for (int q = 0; q < 2; q++)                  GS_DIAL_MET("mode", mode_seen[q], q);
+    for (int q = 1; q <= 20; q++)                GS_DIAL_MET("laps", laps_seen[q], q);
+    for (int q = 1; q <= GS_MAX_CARS; q++)       GS_DIAL_MET("players", players_seen[q], q);
+    for (int q = 0; q < GS_GRAVITY_PRESETS; q++) GS_DIAL_MET("gravity", gravity_seen[q], q);
+    for (int q = 0; q < GS_GRAVITY_PRESETS; q++) GS_DIAL_MET("palette gravity", palette_seen[q], q);
+    for (int r = 0; r < GS_MAX_CARS; r++) {
+        for (int q = 0; q < GS_COLOUR_COUNT; q++) GS_DIAL_MET("colour", colour_seen[r][q], r * 100 + q);
+        for (int q = 0; q < GS_VEH_COUNT; q++)    GS_DIAL_MET("machine", vehicle_seen[r][q], r * 100 + q);
+        for (int q = 0; q <= (int)base.profiles.count; q++)
+            GS_DIAL_MET("driver", driver_seen[r][q], r * 100 + q);
+    }
+    #undef GS_DIAL_MET
+
+    printf("  DIALS %d of %d values pressed, over %d combos\n", met, space, combos);
+    CHECK(met == space);
+    CHECK(combos == 1 + 2 * GS_MAX_CARS);   // mode, and a driver and a machine per row
+}
+
 TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // **Not a map of first moves.** Every state the front end can be got into
     // from each screen, by pressing every control on it, and then every control
@@ -7131,6 +7450,7 @@ int main(void) {
     run_every_brush_and_every_option_it_carries_does_what_it_says(ren);
     run_every_control_in_the_construction_set_is_pressed(ren);
     run_the_walk_signs_in_through_the_door_rather_than_being_put_behind_it(ren);
+    run_every_value_of_every_dial_is_pressed_not_three_interesting_ones(ren);
     run_the_walk_goes_as_deep_as_the_front_end_does(ren);
     run_every_control_is_known_by_name_and_answers_to_it(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);

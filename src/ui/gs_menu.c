@@ -11,19 +11,12 @@
 #include <stdio.h>
 #include <string.h>
 
-// The gravity buttons, the same set the construction set offers, because a
-// player who learned "Mars" in the editor should find "Mars" here.
-static const struct { const char *name; gs_fix g; } gs_gravities[] = {
-    { "Ceres",   GS_RATIO(3, 100) },
-    { "Moon",    GS_RATIO(17, 100) },
-    { "Mars",    GS_RATIO(38, 100) },
-    { "Venus",   GS_RATIO(90, 100) },
-    { "Earth",   GS_ONE },
-    { "Saturn",  GS_RATIO(107, 100) },
-    { "Neptune", GS_RATIO(114, 100) },
-    { "Jupiter", GS_RATIO(253, 100) },
-};
-#define GS_GRAVITY_COUNT ((int)(sizeof gs_gravities / sizeof gs_gravities[0]))
+// The gravity buttons are **the simulation's own list**, which is also the list
+// the construction set's palette offers - so a player who learned "Mars" in the
+// editor finds the same Mars here, and finds it because it is the same eight
+// entries rather than because somebody kept two copies in step. This file had a
+// second copy of them for a while; it agreed to the last digit, which is how
+// that sort of thing survives long enough to stop agreeing.
 
 void gs_time_text(char *out, size_t cap, uint32_t ticks) {
     if (ticks == 0) {
@@ -905,7 +898,7 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         ImGui_BeginGroup();
         ImGui_TextUnformatted("gravity");
         ImGui_Spacing();
-        for (int g = 0; g < GS_GRAVITY_COUNT; g++) {
+        for (int g = 0; g < GS_GRAVITY_PRESETS; g++) {
             if (g % 4 != 0) ImGui_SameLine();
             ImGui_PushIDInt(3000 + g);
             bool on = m->setup.gravity_preset == g;
@@ -914,8 +907,8 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
                 gs_style_accent(&r, &gg, &b);
                 ImGui_PushStyleColorImVec4(ImGuiCol_Button, (ImVec4){ r, gg, b, 0.9f });
             }
-            if (ImGui_ButtonEx(gs_gravities[g].name, (ImVec2){ 76.0f, 0.0f })) {
-                m->setup.gravity = gs_gravities[g].g;
+            if (ImGui_ButtonEx(gs_gravity_presets[g].name, (ImVec2){ 76.0f, 0.0f })) {
+                m->setup.gravity = gs_gravity_presets[g].scale;
                 m->setup.gravity_preset = g;
             }
             if (on) ImGui_PopStyleColor();
