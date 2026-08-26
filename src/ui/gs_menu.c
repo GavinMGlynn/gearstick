@@ -62,6 +62,13 @@ void gs_menu_init(gs_menu *m) {
     m->setup.laps = 3;
     m->setup.gravity = GS_ONE;
     m->setup.gravity_preset = 4;                 // Earth
+    m->setup.skill = GS_AI_SKILL_DEFAULT;
+
+    // **The second car is somebody by default.** Starting a race and finding
+    // one car on the grid is the thing this exists to stop; the first slot is
+    // whoever is at the keyboard and the rest are the game until somebody says
+    // otherwise.
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) m->setup.computer[i] = i > 0;
 
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
         m->setup.profile[i] = -1;
@@ -898,9 +905,32 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
 
         int players = (int)m->setup.players;
         gs_field("drivers");
-        ImGui_SetNextItemWidth(200.0f);
+        ImGui_SetNextItemWidth(110.0f);
         ImGui_SliderInt("##players", &players, 1, GS_MAX_CARS);
         m->setup.players = (uint8_t)players;
+
+        // **How hard the ones nobody is driving push.** On the same line as how
+        // many there are, because the panel at four drivers is already as tall
+        // as the window will take: a row of its own put two pixels of it below
+        // the bottom edge, and raising the panel's height does not help - it is
+        // clamped to the window it cannot be moved out of. Drawn dead when
+        // nobody is being driven by the game, because a dial that changes
+        // nothing is worse than a dial that is not there.
+        bool any_computer = false;
+        for (uint8_t i = 0; i < m->setup.players; i++) {
+            if (m->setup.computer[i]) any_computer = true;
+        }
+
+        int skill = (int)m->setup.skill;
+        ImGui_SameLine();
+        ImGui_TextUnformatted("skill");
+        ImGui_SameLine();
+        ImGui_SetNextItemWidth(110.0f);
+        ImGui_BeginDisabled(!any_computer);
+        ImGui_SliderInt("##skill", &skill, 0, GS_AI_SKILL_STEPS);
+        ImGui_EndDisabled();
+        m->setup.skill = (uint8_t)skill;
+
         ImGui_EndGroup();
 
         ImGui_SameLine();
@@ -930,6 +960,7 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
                                    ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
         ImGui_Text("%.2f x Earth", (double)m->setup.gravity / (double)GS_ONE);
         ImGui_PopStyleColor();
+
         ImGui_EndGroup();
 
         // --- The grid, as a table. One row per driver, columns that line up,
@@ -953,18 +984,32 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
 
                 ImGui_TableSetColumnIndex(1);
                 ImGui_SetNextItemWidth(-1.0f);
-                if (ImGui_BeginCombo("##who",
-                                     gs_profile_name_of(m, m->setup.profile[i]), 0)) {
-                    if (ImGui_SelectableEx("guest", m->setup.profile[i] < 0, 0,
+                const char *who = m->setup.computer[i]
+                                      ? "computer"
+                                      : gs_profile_name_of(m, m->setup.profile[i]);
+                if (ImGui_BeginCombo("##who", who, 0)) {
+                    // **Nobody, and the game drives it.** First in the list
+                    // because it is what an empty slot should be: a race with a
+                    // seat spare is a race with somebody in it.
+                    if (ImGui_SelectableEx("computer", m->setup.computer[i], 0,
                                            (ImVec2){ 0.0f, 0.0f })) {
+                        m->setup.computer[i] = true;
+                    }
+                    if (ImGui_SelectableEx("guest",
+                                           !m->setup.computer[i] &&
+                                               m->setup.profile[i] < 0,
+                                           0, (ImVec2){ 0.0f, 0.0f })) {
                         m->setup.profile[i] = -1;
+                        m->setup.computer[i] = false;
                     }
                     for (uint8_t k = 0; k < m->profiles.count; k++) {
                         ImGui_PushIDInt(k);
                         if (ImGui_SelectableEx(m->profiles.entry[k].name,
-                                               m->setup.profile[i] == (int8_t)k, 0,
-                                               (ImVec2){ 0.0f, 0.0f })) {
+                                               !m->setup.computer[i] &&
+                                                   m->setup.profile[i] == (int8_t)k,
+                                               0, (ImVec2){ 0.0f, 0.0f })) {
                             m->setup.profile[i] = (int8_t)k;
+                            m->setup.computer[i] = false;
                             m->setup.colour[i] = m->profiles.entry[k].colour;
                             m->setup.vehicle[i] = m->profiles.entry[k].vehicle;
                         }
@@ -1954,6 +1999,37 @@ static uint64_t gs_now(void) {
     return (uint64_t)(now / 1000000000);
 }
 
+void gs_setup_build(const gs_race_setup *s, const gs_track *t, gs_world *w) {
+    // **The dial is a multiple of Earth; `gravity` is an acceleration.**
+    // Assigning one to the other set a race's gravity to 1.0 tiles per second
+    // squared instead of Earth's 2.45 - so every race started from the setup
+    // screen ran at forty percent of the gravity it said it was at, and the
+    // records table it wrote could never be found again, because the screen
+    // looking it up made the same mistake differently. gs_world_init is the one
+    // place that knows the conversion.
+    gs_world_init(w, s->gravity);
+    gs_world_set_mode(w, (gs_mode)s->mode);
+    gs_world_set_laps(w, s->mode == (uint8_t)GS_MODE_RACE ? s->laps : 0);
+
+    for (uint8_t i = 0; i < s->players && i < GS_MAX_CARS; i++) {
+        gs_fix sx, sy;
+        gs_angle facing;
+        gs_track_grid(t, i, &sx, &sy, &facing);
+        gs_world_add_car(w, t, s->vehicle[i], sx, sy, facing);
+    }
+}
+
+void gs_setup_drive(const gs_race_setup *s, const gs_world *w,
+                    const gs_track *t, gs_input *in) {
+    if (s == nullptr || w == nullptr || t == nullptr || in == nullptr) return;
+
+    const gs_fix margin = gs_ai_skill_margin((int)s->skill);
+    for (uint8_t i = 0; i < w->car_count && i < GS_MAX_CARS; i++) {
+        if (!s->computer[i]) continue;
+        in[i] = gs_ai_drive_at(w, t, i, margin);
+    }
+}
+
 void gs_menu_finish(gs_menu *m, const gs_world *w, const gs_track *t) {
     m->result_count = 0;
 
@@ -2000,8 +2076,14 @@ void gs_menu_finish(gs_menu *m, const gs_world *w, const gs_track *t) {
     // Submit, and update the people who were driving. Only profiles: a guest is
     // somebody who has not said who they are, and inventing a row for them
     // would fill the table with "guest".
+    //
+    // **And never the game's own cars.** An opponent is not a person and its
+    // time is not a record: a records table with the computer at the top of it
+    // is a table nobody can get on, and the setting it drove at is not written
+    // anywhere the table could say.
     for (uint8_t i = 0; i < m->result_count; i++) {
         gs_result_row *r = &m->result[i];
+        if (m->setup.computer[r->car]) continue;
         int8_t who = m->setup.profile[r->car];
         if (who < 0 || who >= (int8_t)m->profiles.count) continue;
 

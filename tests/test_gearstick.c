@@ -1943,6 +1943,228 @@ TEST(the_ai_steers_both_ways) {
     CHECK((dead_ahead & (gs_input)(GS_IN_LEFT | GS_IN_RIGHT)) == 0);
 }
 
+// How long a lap takes at a given point on the skill dial, in ticks. Timed
+// from the first crossing, so the standing start is not counted against it.
+static uint32_t gs_ai_lap_ticks(const gs_track *t, gs_fix gravity,
+                                uint8_t vehicle, int skill, uint32_t laps) {
+    gs_world w;
+    gs_world_init(&w, gravity);
+    gs_world_add_car(&w, t, vehicle, GS_INT(20), GS_INT(15), 0);
+
+    const gs_ai_style style = gs_ai_skill_style(skill);
+    uint64_t started = 0;
+    for (uint32_t i = 0; i < GS_TICK_HZ * 600u; i++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive_style(&w, t, 0, style), 0, 0, 0 };
+        gs_world_step(&w, t, in);
+        if (started == 0 && w.car[0].laps == 1) started = w.tick;
+        if (started != 0 && w.car[0].laps == 1 + laps) {
+            return (uint32_t)(w.tick - started);
+        }
+    }
+    return 0;
+}
+
+// How fast this driver arrives at the second gate, and how far off its centre.
+// Both are what a person watching would call the line into the corner.
+typedef struct gs_ai_entry {
+    gs_fix speed;       // when the gate is crossed
+    gs_fix offset;      // across the gate from its middle, absolute
+    uint32_t tick;
+} gs_ai_entry;
+
+static gs_ai_entry gs_ai_corner_entry(const gs_track *t, gs_fix gravity,
+                                      uint8_t vehicle, int skill) {
+    gs_world w;
+    gs_world_init(&w, gravity);
+    gs_world_add_car(&w, t, vehicle, GS_INT(20), GS_INT(15), 0);
+
+    const gs_ai_style style = gs_ai_skill_style(skill);
+    const uint8_t want = 2;              // the gate after the first corner
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * 200u; i++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive_style(&w, t, 0, style), 0, 0, 0 };
+        uint8_t was = w.car[0].next_gate;
+        gs_world_step(&w, t, in);
+        if (was == want - 1 && w.car[0].next_gate == want) {
+            const gs_gate *g = &t->gate[want - 1];
+            // Across the gate is at right angles to the way it faces.
+            gs_fix nx = -gs_sin(g->heading), ny = gs_cos(g->heading);
+            gs_fix off = gs_fix_mul(w.car[0].x - g->x, nx) +
+                         gs_fix_mul(w.car[0].y - g->y, ny);
+            return (gs_ai_entry){ gs_car_speed(&w.car[0]), gs_fix_abs(off),
+                                  (uint32_t)w.tick };
+        }
+    }
+    return (gs_ai_entry){ 0, 0, 0 };
+}
+
+// A ramp up onto a plateau, with a gate at each end - so the driver has a
+// reason to come down it at speed and something to launch off at the top. The
+// break where the slope meets the flat is what does the launching, which is the
+// same thing the jump tests above use.
+static void gs_ai_jump(gs_track *t) {
+    gs_build_ramp(t, 8, 12, GS_INT(1));
+    gs_track_add_gate(t, GS_INT(4), GS_INT(4), 0, GS_INT(3));
+    gs_track_add_gate(t, GS_INT(16), GS_INT(4), 0, GS_INT(3));
+}
+
+// Where the car comes down after the ramp, and how fast it left it.
+typedef struct gs_ai_flight { gs_fix take_off; gs_fix landed; } gs_ai_flight;
+
+static gs_ai_flight gs_ai_over_the_jump(const gs_track *t, int skill) {
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(4), 0);
+
+    const gs_ai_style style = gs_ai_skill_style(skill);
+    gs_ai_flight f = { 0, 0 };
+    bool flew = false;
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * 60u; i++) {
+        bool was_air = !w.car[0].grounded;
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive_style(&w, t, 0, style), 0, 0, 0 };
+        gs_world_step(&w, t, in);
+        bool is_air = !w.car[0].grounded;
+
+        if (!was_air && is_air && w.car[0].x > GS_INT(10)) {
+            f.take_off = gs_car_speed(&w.car[0]);
+            flew = true;
+        }
+        if (was_air && !is_air && flew) {
+            f.landed = w.car[0].x;
+            return f;
+        }
+    }
+    return f;
+}
+
+TEST(the_skill_dial_changes_how_they_drive_and_not_only_how_fast) {
+    // **A dial that only scales the top speed is a handicap, not a driver.**
+    //
+    // What it moves is where they lift, how much of the grip they ask for once
+    // they are in the corner, and how straight they hold it - so two settings a
+    // tenth of a second apart over a lap are still visibly doing different
+    // things at the same corner and over the same jump.
+    static gs_track pav, jump;
+    gs_circuit(&pav, GS_SURF_PAVEMENT);
+    gs_ai_jump(&jump);
+
+    static gs_ai_entry entry[GS_AI_SKILL_STEPS + 1];
+    static gs_ai_flight flight[GS_AI_SKILL_STEPS + 1];
+    static uint32_t lap[GS_AI_SKILL_STEPS + 1];
+
+    for (int sk = 0; sk <= GS_AI_SKILL_STEPS; sk++) {
+        entry[sk] = gs_ai_corner_entry(&pav, GS_ONE, (uint8_t)GS_VEH_STOCK_CAR, sk);
+        flight[sk] = gs_ai_over_the_jump(&jump, sk);
+        lap[sk] = gs_ai_lap_ticks(&pav, GS_ONE, (uint8_t)GS_VEH_STOCK_CAR, sk, 3);
+
+        CHECK(entry[sk].tick > 0);          // it got to the corner
+        CHECK(flight[sk].take_off > 0);     // and it left the ground
+        CHECK(flight[sk].landed > 0);       // and came back down
+        CHECK(lap[sk] > 0);
+    }
+
+    // **No two neighbours drive the same jump.** Not "the fast one is faster" -
+    // every adjacent pair on the dial leaves the ramp at a different speed and
+    // lands somewhere else, which is what makes it twenty-one drivers rather
+    // than one driver with twenty-one handicaps.
+    int same_take_off = 0, same_landing = 0;
+    for (int sk = 1; sk <= GS_AI_SKILL_STEPS; sk++) {
+        if (flight[sk].take_off == flight[sk - 1].take_off) same_take_off++;
+        if (flight[sk].landed == flight[sk - 1].landed) same_landing++;
+    }
+    CHECK(same_take_off == 0);
+    CHECK(same_landing == 0);
+
+    // **And the closest pair of all still differs.** Whichever two settings lap
+    // nearest each other - found rather than chosen, so it stays the hardest
+    // case when the numbers move.
+    int closest = 1;
+    for (int sk = 2; sk <= GS_AI_SKILL_STEPS; sk++) {
+        if (lap[sk - 1] - lap[sk] < lap[closest - 1] - lap[closest]) closest = sk;
+    }
+    const uint32_t gap = lap[closest - 1] - lap[closest];
+    printf("  STYLE closest pair is %d and %d, %u ticks apart over three laps; "
+           "they leave the ramp at %.3f and %.3f and land %.3f apart\n",
+           closest - 1, closest, gap,
+           (double)flight[closest - 1].take_off / 65536.0,
+           (double)flight[closest].take_off / 65536.0,
+           (double)gs_fix_abs(flight[closest].landed - flight[closest - 1].landed) /
+               65536.0);
+    CHECK(gap * 200u < lap[closest]);       // within half a percent of each other
+    CHECK(flight[closest].take_off != flight[closest - 1].take_off);
+    CHECK(flight[closest].landed != flight[closest - 1].landed);
+
+    // **Across the whole dial it is not subtle.** The quick one arrives at the
+    // corner several times faster than the timid one, and lands most of a tile
+    // further down the road.
+    printf("  STYLE corner entry %.3f at the bottom against %.3f at the top; "
+           "landing %.3f against %.3f\n",
+           (double)entry[0].speed / 65536.0,
+           (double)entry[GS_AI_SKILL_STEPS].speed / 65536.0,
+           (double)flight[0].landed / 65536.0,
+           (double)flight[GS_AI_SKILL_STEPS].landed / 65536.0);
+    CHECK(entry[GS_AI_SKILL_STEPS].speed > gs_fix_mul(entry[0].speed, GS_INT(5)));
+    CHECK(flight[GS_AI_SKILL_STEPS].landed - flight[0].landed > GS_HALF);
+}
+
+TEST(every_step_of_the_skill_dial_is_a_faster_lap_than_the_one_below_it) {
+    // **The dial is a dial, and it is checked as one.** Not three settings and
+    // not the two ends: every step of it, in four sets of conditions, each one
+    // strictly quicker than the step below - no ties anywhere, which is the
+    // difference between a dial and a dropdown with twenty-one identical
+    // entries on it.
+    //
+    // Four conditions rather than one because the driver is not tuned per
+    // track: pavement is where it is easy, dirt has two thirds of the grip,
+    // the Moon has a sixth of the weight, and a different machine has
+    // completely different numbers.
+    static gs_track pav, dirt;
+    gs_circuit(&pav, GS_SURF_PAVEMENT);
+    gs_circuit(&dirt, GS_SURF_DIRT);
+
+    static const struct {
+        const char *name;
+        gs_track   *track;
+        gs_fix      gravity;
+        uint8_t     vehicle;
+    } runs[] = {
+        { "pavement, Earth", &pav,  GS_ONE,             (uint8_t)GS_VEH_STOCK_CAR },
+        { "dirt, Earth",     &dirt, GS_ONE,             (uint8_t)GS_VEH_STOCK_CAR },
+        { "pavement, Moon",  &pav,  GS_RATIO(17, 100),  (uint8_t)GS_VEH_STOCK_CAR },
+        { "a dune buggy",    &pav,  GS_ONE,             (uint8_t)GS_VEH_DUNE_BUGGY },
+    };
+
+    int checked = 0;
+    for (size_t r = 0; r < (sizeof runs / sizeof runs[0]); r++) {
+        uint32_t last = 0;
+        for (int sk = 0; sk <= GS_AI_SKILL_STEPS; sk++) {
+            uint32_t lap = gs_ai_lap_ticks(runs[r].track, runs[r].gravity,
+                                           runs[r].vehicle, sk, 3);
+
+            // **Every setting gets round**, the timid one included. A driver
+            // who brakes far too early is still a driver; one that cannot
+            // complete a lap is a setting nobody should be offered.
+            if (lap == 0) printf("  STUCK at skill %d on %s\n", sk, runs[r].name);
+            CHECK(lap > 0);
+
+            if (sk > 0) {
+                if (lap >= last) {
+                    printf("  NOT FASTER skill %d on %s: %u against %u\n",
+                           sk, runs[r].name, lap, last);
+                }
+                CHECK(lap < last);
+            }
+            last = lap;
+            checked++;
+        }
+    }
+
+    printf("  DIAL %d settings timed, over %d sets of conditions\n",
+           checked, (int)(sizeof runs / sizeof runs[0]));
+    CHECK(checked == (GS_AI_SKILL_STEPS + 1) * (int)(sizeof runs / sizeof runs[0]));
+}
+
 TEST(the_ai_gets_round_a_circuit_it_has_never_seen) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_PAVEMENT);
@@ -2048,9 +2270,10 @@ TEST(the_same_corner_is_braked_for_differently_in_a_different_car) {
 }
 
 TEST(a_quicker_driver_carries_more_speed_through_the_same_corner) {
-    // Difficulty is one number: how much of the available grip the driver is
-    // willing to use. Not extra power, not rubber-banding, not cheating on the
-    // physics - the same thing that separates two people.
+    // Difficulty is confidence and nothing else: how much of the available grip
+    // the driver is willing to use, and how late they are willing to leave the
+    // braking. Not extra power, not rubber-banding, not cheating on the physics
+    // - the same things that separate two people.
     static gs_track t;
     gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
     gs_track_add_gate(&t, GS_INT(40), GS_INT(30), GS_QUARTER, GS_INT(5));
@@ -2063,8 +2286,9 @@ TEST(a_quicker_driver_carries_more_speed_through_the_same_corner) {
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(36), GS_INT(30), 0);
     w.car[0].vx = GS_INT(5);
 
-    gs_input careful = gs_ai_drive_at(&w, &t, 0, GS_AI_CAUTIOUS);
-    gs_input quick = gs_ai_drive_at(&w, &t, 0, GS_AI_QUICK);
+    gs_input careful = gs_ai_drive_style(&w, &t, 0, gs_ai_skill_style(0));
+    gs_input quick = gs_ai_drive_style(&w, &t, 0,
+                                       gs_ai_skill_style(GS_AI_SKILL_STEPS));
 
     CHECK((careful & GS_IN_BRAKE) != 0);
     CHECK((quick & GS_IN_BRAKE) == 0);
@@ -2072,9 +2296,20 @@ TEST(a_quicker_driver_carries_more_speed_through_the_same_corner) {
 
     // And the default sits between them rather than at one end, which is what
     // makes it worth racing rather than a formality in either direction.
-    CHECK(GS_AI_CAUTIOUS < GS_AI_NORMAL);
-    CHECK(GS_AI_NORMAL < GS_AI_QUICK);
-    CHECK(GS_AI_QUICK < GS_ONE);
+    // **The dial rises all the way and never reaches the limit.** Every step
+    // asks for more grip than the one below it, and the top of it still leaves
+    // something in hand - a driver exactly at the limit is a driver about to be
+    // over it, and the estimate it is working from is a chord approximation.
+    for (int s = 1; s <= GS_AI_SKILL_STEPS; s++) {
+        CHECK(gs_ai_skill_margin(s - 1) < gs_ai_skill_margin(s));
+    }
+    CHECK(gs_ai_skill_margin(GS_AI_SKILL_STEPS) < GS_ONE);
+
+    // And it is clamped rather than trusted: a setting off either end is the
+    // end it is off.
+    CHECK(gs_ai_skill_margin(-5) == gs_ai_skill_margin(0));
+    CHECK(gs_ai_skill_margin(GS_AI_SKILL_STEPS + 5) ==
+          gs_ai_skill_margin(GS_AI_SKILL_STEPS));
 }
 
 TEST(an_ai_race_is_deterministic_like_every_other_race) {
@@ -6375,30 +6610,48 @@ TEST(a_generated_race_can_actually_be_finished) {
     // What a player does is *finish*, so that is what is asked here: a whole
     // lap of a loop, or the arrival at the end of a path, with the race over
     // and the car timed.
+    // **And from every slot on the grid**, because an opponent starts wherever
+    // it is put. The slots are not the same place: they are staggered back from
+    // the line and across it, so the car in the last one has a different corner
+    // to make and different scenery to make it around. A driver that only
+    // works from pole is a driver that works in a demo.
+    int raced = 0;
     for (uint32_t seed = 1; seed <= 12; seed++) {
         gs_generate(&gs_gen_a, seed * 7919u);
 
-        gs_world w;
-        gs_world_init(&w, GS_ONE);
-        gs_world_set_mode(&w, GS_MODE_RACE);
-        gs_world_set_laps(&w, 1);
+        for (uint8_t slot = 0; slot < GS_MAX_CARS; slot++) {
+            gs_world w;
+            gs_world_init(&w, GS_ONE);
+            gs_world_set_mode(&w, GS_MODE_RACE);
+            gs_world_set_laps(&w, 1);
 
-        gs_fix sx = 0, sy = 0;
-        gs_angle facing = 0;
-        gs_track_grid(&gs_gen_a, 0, &sx, &sy, &facing);
-        gs_world_add_car(&w, &gs_gen_a, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
+            gs_fix sx = 0, sy = 0;
+            gs_angle facing = 0;
+            gs_track_grid(&gs_gen_a, slot, &sx, &sy, &facing);
+            gs_world_add_car(&w, &gs_gen_a, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
 
-        CHECK(gs_world_laps_needed(&w, &gs_gen_a) == 1);
+            CHECK(gs_world_laps_needed(&w, &gs_gen_a) == 1);
 
-        for (uint32_t i = 0; i < (uint32_t)GS_TICK_HZ * 180u; i++) {
-            gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &gs_gen_a, 0), 0, 0, 0 };
-            gs_world_step(&w, &gs_gen_a, in);
-            if (w.car[0].finish_tick != 0) break;
+            for (uint32_t i = 0; i < (uint32_t)GS_TICK_HZ * 180u; i++) {
+                gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &gs_gen_a, 0), 0, 0, 0 };
+                gs_world_step(&w, &gs_gen_a, in);
+                if (w.car[0].finish_tick != 0) break;
+            }
+
+            if (w.car[0].finish_tick == 0) {
+                printf("  STUCK seed %u from slot %u: %d laps, at %.1f,%.1f\n",
+                       seed, slot, gs_car_laps_done(&gs_gen_a, &w.car[0]),
+                       (double)w.car[0].x / 65536.0,
+                       (double)w.car[0].y / 65536.0);
+            }
+            CHECK(w.car[0].finish_tick != 0);
+            CHECK(gs_car_laps_done(&gs_gen_a, &w.car[0]) >= 1);
+            raced++;
         }
-
-        CHECK(w.car[0].finish_tick != 0);
-        CHECK(gs_car_laps_done(&gs_gen_a, &w.car[0]) >= 1);
     }
+
+    printf("  AI %d races finished: twelve tracks from every grid slot\n", raced);
+    CHECK(raced == 12 * GS_MAX_CARS);
 }
 
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
@@ -6815,6 +7068,8 @@ int main(void) {
     run_a_wreck_is_still_there_much_later_and_has_not_moved();
     run_the_ai_steers_both_ways();
     run_the_ai_gets_round_a_circuit_it_has_never_seen();
+    run_the_skill_dial_changes_how_they_drive_and_not_only_how_fast();
+    run_every_step_of_the_skill_dial_is_a_faster_lap_than_the_one_below_it();
     run_the_ai_gets_round_on_surfaces_and_vehicles_it_was_not_tuned_for();
     run_the_same_corner_is_braked_for_differently_under_different_gravity();
     run_the_same_corner_is_braked_for_differently_in_a_different_car();

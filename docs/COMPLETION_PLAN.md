@@ -1187,37 +1187,50 @@ finished and tested since Phase 8. But every car in a race takes its input from
 a pad: the AI drives only in headless self-play, the editor's background ghost
 and the demo. **A one-player race is one car going round on its own.**
 
-- [ ] **The empty grid slots can be filled with opponents.** A race set up for
-      four with one person at the keyboard is three cars nobody is driving; they
-      should be somebody.
-      *Verification: a one-player race started from the setup screen finishes
-      with more than one car having a time, and the winner is not always the
-      human.*
-- [ ] **Their skill is a dial, not three names.** One continuous setting from a
-      driver who brakes far too early to one who is quicker than you are — the
-      same treatment gravity got when it stopped being a dropdown.
-      *Verification: turning it up produces a faster lap on the same track and
-      the same car, every step of the way, with no two settings tying.*
-- [ ] **The dial changes how they drive, not just how fast.** Where they brake,
-      how much they will lean on a surface they do not trust, whether they take
-      a jump flat. A dial that only scales the top speed is a handicap, not a
-      driver.
-      *Verification: two settings that lap in similar times are still visibly
-      driving differently — different entry speeds into the same corner, and
-      different lines over the same jump.*
-- [ ] **An opponent finishes the tracks people actually build.** This is the
-      hard half and the reason the item is not just plumbing: put on a bare
-      rectangle with two gates, the driver as it stands laps twice and then sits
-      in the run-off for as long as it is left — found while walking the lap
-      dial, where it read exactly like a lap counter stuck at ten.
-      *Verification: an opponent completes every stock track and every track the
-      generator makes, from every grid slot, without getting stuck.*
-- [ ] **A race against opponents replays to the bit.** They are a pure function
-      of the world, so a recorded race with three of them in it must re-race
-      identically — otherwise every ghost and every shared replay of a race with
-      opponents in it is wrong.
-      *Verification: the golden replay gains a race with opponents in it, and it
-      hashes the same on all three platforms.*
+- [x] **The empty grid slots can be filled with opponents.** A seat on the grid
+      is the game's until somebody takes it: the driver list on the setup screen
+      offers *computer* alongside the guest and the roster, and it is what an
+      empty slot starts as.
+      *Verification: a race for four with nobody at the keyboard finishes with
+      three cars timed and an opponent winning it. What the setup screen means
+      is now a rule with a test over it rather than a paragraph in the client,
+      and the game's own cars stay out of the records — a table with the
+      computer at the top is a table nobody can get on.*
+- [x] **Their skill is a dial, not three names.** Twenty-one settings from a
+      driver who brakes far too early to one who is quicker than you are. The
+      three names that used to be the whole of it are now three points on it.
+      *Verification: **84 lap times, every step strictly quicker than the one
+      below it, with no ties** — in four sets of conditions, because the driver
+      is not tuned per track: pavement, dirt with two thirds of the grip, the
+      Moon with a sixth of the weight, and a different machine. Every setting
+      gets round; a timid driver is still a driver.*
+- [x] **The dial changes how they drive, not just how fast.** It moves three
+      things together, because they are the same confidence: how much of the
+      grip they ask for, **where they lift**, and how straight they hold it.
+      *Verification: the two closest settings on the whole dial lap 25 ticks
+      apart over three laps and still leave the same ramp at different speeds
+      and land in different places. Across the dial the timid one arrives at the
+      corner at a sixth of the speed and lands most of a tile shorter. No two
+      neighbours take the jump the same way.*
+- [x] **An opponent finishes the tracks people actually build.** The hard half,
+      and it turned up three real faults: a **hairpin was read as a straight**
+      (the geometry says a full reversal has no radius, and the code read that
+      as no corner), a **step too steep to climb was driven into** rather than
+      round, and a car **pinned against a cliff** sat there at full throttle for
+      the rest of the race because steering is something a moving car does.
+      *Verification: **88 races over the 22 tracks that ship, from every grid
+      slot, none stuck**, and 48 more over twelve generated tracks. Every
+      two-gate track in the game is that hairpin, which is why a bare rectangle
+      was where it showed.*
+- [x] **A race against opponents replays to the bit.** The golden replay has a
+      second race in it now: four opponents spread across the dial, on a circuit
+      none of them has seen, with no recorded inputs at all — the driving is
+      worked out again from the world each time.
+      *Verification: `gearstick_cli selftest --verify` races it, drives it a
+      second time and gets the identical world, replays the recording of it and
+      gets the same again, and compares the whole thing against a pinned hash.
+      That number moves for two reasons rather than one — the physics, and the
+      driver.*
 
 ## Tails
 

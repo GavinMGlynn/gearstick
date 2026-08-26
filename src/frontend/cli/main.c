@@ -81,6 +81,131 @@ static void selftest_world(gs_world *w, const gs_track *t) {
     gs_world_add_car(w, t, (uint8_t)GS_VEH_MOTORCYCLE, GS_INT(2), GS_INT(8), 0);
 }
 
+// ---------------------------------------------------------------------------
+// The opponents scenario
+//
+// **A race with nobody at the keyboard.** Four cars on the grid, each driven by
+// the game at a different point on the skill dial, on a circuit none of them
+// has seen. The driver is a pure function of the world, so this has to re-race
+// to the bit exactly as a recorded race does - and if it does not, every ghost
+// and every shared replay of a race with opponents in it is wrong.
+//
+// Fixed forever, like the scenario above it.
+// ---------------------------------------------------------------------------
+
+#define GS_OPPONENTS_TICKS 12000
+
+static void opponents_track(gs_track *t) {
+    gs_track_init(t, 60, 60, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t->h; y++) {
+        for (uint8_t x = 0; x <= t->w; x++) gs_track_set_corner(t, x, y, 0);
+    }
+    gs_track_add_gate(t, GS_INT(45), GS_INT(15), 0, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(45), GS_INT(45), GS_QUARTER, GS_INT(6));
+    gs_track_add_gate(t, GS_INT(15), GS_INT(45), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
+    gs_track_add_gate(t, GS_INT(15), GS_INT(15), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
+}
+
+// One driver per grid slot, spread across the dial so that a change to any part
+// of it moves this race.
+static const int gs_opponent_skill[GS_MAX_CARS] = { 0, 7, 14, GS_AI_SKILL_STEPS };
+
+static void opponents_world(gs_world *w, const gs_track *t) {
+    static const uint8_t machines[GS_MAX_CARS] = {
+        (uint8_t)GS_VEH_STOCK_CAR, (uint8_t)GS_VEH_DUNE_BUGGY,
+        (uint8_t)GS_VEH_SPRINT_CAR, (uint8_t)GS_VEH_BAJA_BUG,
+    };
+
+    gs_world_init(w, GS_ONE);
+    gs_world_set_mode(w, GS_MODE_RACE);
+    gs_world_set_laps(w, 2);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_fix sx = 0, sy = 0;
+        gs_angle facing = 0;
+        gs_track_grid(t, i, &sx, &sy, &facing);
+        gs_world_add_car(w, t, machines[i], sx, sy, facing);
+    }
+}
+
+static void opponents_inputs(const gs_world *w, const gs_track *t, gs_input *in) {
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        in[i] = gs_ai_drive_style(w, t, i, gs_ai_skill_style(gs_opponent_skill[i]));
+    }
+}
+
+static int cmd_opponents(bool verify) {
+    static gs_track t;
+    static gs_replay rec;
+    gs_world w;
+
+    opponents_track(&t);
+    opponents_world(&w, &t);
+    gs_replay_begin(&rec, &w, &t);
+
+    for (uint32_t i = 0; i < GS_OPPONENTS_TICKS; i++) {
+        gs_input in[GS_MAX_CARS];
+        opponents_inputs(&w, &t, in);
+        gs_replay_record(&rec, in);
+        gs_world_step(&w, &t, in);
+    }
+
+    const uint64_t world_hash = gs_world_hash(&w);
+    printf("race   %u ticks, four opponents at skill %d, %d, %d and %d\n",
+           GS_OPPONENTS_TICKS, gs_opponent_skill[0], gs_opponent_skill[1],
+           gs_opponent_skill[2], gs_opponent_skill[3]);
+    for (uint8_t i = 0; i < w.car_count; i++) {
+        const gs_car *c = &w.car[i];
+        printf("car %u  %-12s laps %2u  best %6.2fs  %s\n", i,
+               gs_vehicle(c->vehicle)->name, c->laps,
+               c->best_lap > 0 ? (double)c->best_lap / GS_TICK_HZ : 0.0,
+               c->finish_tick != 0 ? "finished" : "still going");
+    }
+    printf("world  hash 0x%016llx\n", (unsigned long long)world_hash);
+
+    // **Driven again from the same start, and it is the same race.** The
+    // driver reads the world and nothing else, so this is the claim that makes
+    // an opponent's ghost worth anything.
+    gs_world again;
+    opponents_world(&again, &t);
+    for (uint32_t i = 0; i < GS_OPPONENTS_TICKS; i++) {
+        gs_input in[GS_MAX_CARS];
+        opponents_inputs(&again, &t, in);
+        gs_world_step(&again, &t, in);
+    }
+    if (gs_world_hash(&again) != world_hash) {
+        printf("FAIL   the same race driven twice came out differently, so the\n"
+               "       driver is reading something that is not the world\n");
+        return 1;
+    }
+    printf("driven twice, identically\n");
+
+    // And what was recorded of it re-races, which is what a shared replay is.
+    gs_world back;
+    if (!gs_replay_playback(&rec, &t, &back)) {
+        printf("FAIL   the replay refused its own track\n");
+        return 1;
+    }
+    if (gs_world_hash(&back) != world_hash) {
+        printf("FAIL   the recorded race did not re-race to the same world\n");
+        return 1;
+    }
+    printf("replay %u ticks, re-races exactly\n", rec.meta.tick_count);
+
+    if (!verify) return 0;
+
+    if (world_hash != GS_OPPONENTS_WORLD_HASH) {
+        printf("FAIL   a race against opponents no longer ends where it did.\n"
+               "       Either the physics moved or the driver did, and every\n"
+               "       replay of a race with opponents in it is now wrong.\n"
+               "       want 0x%016llx\n       got  0x%016llx\n",
+               (unsigned long long)GS_OPPONENTS_WORLD_HASH,
+               (unsigned long long)world_hash);
+        return 1;
+    }
+    printf("OK     the opponents race is the one the golden hash was taken from\n");
+    return 0;
+}
+
 static int cmd_selftest(bool verify) {
     static gs_track t;
     static gs_replay rec;
@@ -196,6 +321,11 @@ static int cmd_selftest(bool verify) {
                (unsigned long long)world_hash);
         return 1;
     }
+
+    // **And a race nobody was driving**, which is a different kind of replay:
+    // the inputs are not recorded anywhere, they are worked out again from the
+    // world each time. See cmd_opponents.
+    if (cmd_opponents(verify) != 0) return 1;
 
     // The generator, folded over its first two hundred seeds. Same reason as
     // the two above and checked in the same place, so every platform in CI
@@ -607,10 +737,12 @@ static int cmd_pace(void) {
         { "dirt, Earth",     GS_SURF_DIRT,     GS_ONE },
         { "pavement, Moon",  GS_SURF_PAVEMENT, GS_RATIO(17, 100) },
     };
-    static const struct { const char *name; gs_fix margin; } paces[] = {
-        { "cautious", GS_AI_CAUTIOUS },
-        { "normal",   GS_AI_NORMAL },
-        { "quick",    GS_AI_QUICK },
+    // Three points on the dial rather than three kinds of driver: the bottom,
+    // the middle and the top of the same continuous setting.
+    static const struct { const char *name; int skill; } paces[] = {
+        { "cautious", 0 },
+        { "normal",   GS_AI_SKILL_DEFAULT },
+        { "quick",    GS_AI_SKILL_STEPS },
     };
 
     printf("%-18s %10s %10s %10s\n", "", "cautious", "normal", "quick");
@@ -624,7 +756,8 @@ static int cmd_pace(void) {
         printf("%-18s", conditions[i].name);
         for (int p = 0; p < 3; p++) {
             lap[p] = gs_lap_time(&t, (uint8_t)GS_VEH_STOCK_CAR,
-                                 conditions[i].gravity, paces[p].margin, 3);
+                                 conditions[i].gravity,
+                                 gs_ai_skill_margin(paces[p].skill), 3);
             if (lap[p] < 0) printf("%10s", "never");
             else printf("%9.2fs", lap[p]);
         }
@@ -942,6 +1075,7 @@ static int usage(void) {
     printf("gearstick_cli - the simulation, with nothing watching it\n\n"
            "  selftest [--verify]  race the fixed scenario and print its state "
            "hash\n"
+           "  opponents [--verify] race four opponents and print the state hash\n"
            "  track FILE           write a track, read it back, check it survived\n"
            "  validate             show what the route checker accepts and refuses\n"
            "  ai                   race the AI round a circuit in every condition\n"
@@ -967,6 +1101,10 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "selftest") == 0) {
         bool verify = argc > 2 && strcmp(argv[2], "--verify") == 0;
         return cmd_selftest(verify);
+    }
+    if (strcmp(argv[1], "opponents") == 0) {
+        bool verify = argc > 2 && strcmp(argv[2], "--verify") == 0;
+        return cmd_opponents(verify);
     }
     if (strcmp(argv[1], "track") == 0 && argc > 2) return cmd_track(argv[2]);
     if (strcmp(argv[1], "validate") == 0) return cmd_validate();

@@ -4523,6 +4523,105 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+## Opponents worth racing
+
+There was a driver in this game and no way to race it. `gs_ai_drive` has been
+finished and tested since Phase 8, and every car in a race took its input from a
+pad - so the AI drove in headless self-play, the editor's background ghost and
+the demo, and nowhere a player could see. **A one-player race was one car going
+round on its own.**
+
+### The empty seats
+
+A slot on the grid is the game's until somebody takes it. The driver list on the
+setup screen offers **computer** alongside the guest and the roster, and it is
+what an empty slot starts as - the second car is somebody by default, because
+starting a race and finding one car on the grid is the thing this exists to
+stop.
+
+What the setup screen *means* now lives where a test can reach it:
+`gs_setup_build` builds the race the screen describes and `gs_setup_drive` fills
+in the slots nobody is driving, both in `gs_menu.c` rather than in the client. A
+race for four with nobody at the keyboard finishes with three cars timed and an
+opponent winning it, and the parked car is left exactly as it came in - filling
+in a slot somebody is driving would be the game taking the wheel off them.
+
+The game's own cars stay out of the records. A table with the computer at the
+top of it is a table nobody can get on.
+
+### Skill is a dial
+
+Twenty-one settings, from a driver who brakes far too early to one who is
+quicker than you are. The three names that used to be the whole of it -
+cautious, normal, quick - are three points on it now, and the construction set
+and the race setup read the same list of planets for the same reason.
+
+`84 lap times, every step strictly quicker than the one below it, no ties`, in
+four sets of conditions: pavement, dirt with two thirds of the grip, the Moon
+with a sixth of the weight, and a different machine. The driver is not tuned per
+track, so a dial that only works on the track it was tuned on is not a dial.
+
+**It moves three things together, because they are the same confidence:**
+
+- **how much of the grip they ask for** in a corner, which is what it always
+  was;
+- **where they lift** - a fifth early at the bottom, on the sum at the top;
+- **how straight they hold it** - a wide dead band wanders and corrects late, a
+  narrow one keeps the car pointed.
+
+That is what makes it a driver rather than a handicap. The two closest settings
+on the whole dial lap 25 ticks apart over three laps and still leave the same
+ramp at different speeds and land in different places; across the dial the timid
+one arrives at the corner at a sixth of the speed. **No two neighbours take the
+jump the same way.**
+
+The braking margin is also what made the dial monotonic. With one knob, dirt had
+an inversion: a step up cost more in the slide than it gained on entry. With the
+lift point moving too, every step is quicker on every surface.
+
+### Three faults in the driver, found by racing what ships
+
+- **A hairpin was read as a straight.** The radius of a turn is
+  `leg·cos(half)/(2·sin(half))`, which goes to nothing as the corner approaches
+  a full reversal - and `cos(half)` reaches exactly zero at a hundred and eighty
+  degrees. That case was lumped in with "straight on, or as near as makes no
+  odds", so a driver arriving at a hairpin planned no braking at all, went
+  straight on at the gate, and spent the rest of the race looping back for it.
+  **Every track with two gates on it is that corner**, which is why a bare
+  rectangle with a start and a finish was where it showed.
+- **A step too steep to climb was driven into rather than round.** The ground is
+  authored per corner and nothing stops a whole tile of rise in one tile - the
+  parts box drops pieces like that and the generator makes them. The way to the
+  gate is now sampled ahead, and where it crosses a wall the aim turns away from
+  it an eighth of a turn at a time, nearest first, until it finds a way past.
+  Asked of the way to the gate rather than the way the car is pointing, because
+  a test on the heading changes its mind every time the car turns and the two
+  then argue until the race ends.
+- **A car pinned against a cliff stayed there.** Steering is something a moving
+  car does, so full power into a three-tile face held it at nought point nought
+  one tiles a second for three minutes. It backs off now - with the wheel the
+  other way, because reversing turns the nose the opposite way and the first
+  version of this oscillated off the wall and back into it.
+
+`88 races over the 22 tracks that ship, from every grid slot, none stuck`, and
+48 more over twelve generated tracks. Every slot, because the grid is staggered
+back from the line and across it, and the car in the last one has a different
+first corner to make.
+
+### And it replays to the bit
+
+The golden replay has a second race in it: four opponents spread across the
+dial, on a circuit none of them has seen, with **no recorded inputs at all** -
+the driving is worked out again from the world each time. `gearstick_cli
+selftest --verify` races it, drives it a second time and gets the identical
+world, replays the recording of it and gets the same again, and compares the lot
+against a pinned hash.
+
+That number moves for two reasons rather than one. The physics, like the number
+above it - and *the driver*, because an opponent is a pure function of the world
+and a change to where it lifts is a change to every race anybody recorded
+against it.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

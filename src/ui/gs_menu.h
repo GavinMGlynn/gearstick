@@ -18,6 +18,7 @@
 #ifndef GS_MENU_H
 #define GS_MENU_H
 
+#include "core/gs_ai.h"
 #include "core/gs_library.h"
 #include "core/gs_share.h"
 #include "core/gs_profile.h"
@@ -64,6 +65,17 @@ typedef struct gs_race_setup {
     int8_t   profile[GS_MAX_CARS];  // index into the roster, or -1 for a guest
     uint8_t  vehicle[GS_MAX_CARS];
     uint8_t  colour[GS_MAX_CARS];
+
+    // **Whose car is this, if it is nobody's.** A race set up for four with one
+    // person at the keyboard used to be three cars nobody was driving, sitting
+    // on the grid while the fourth went round on its own. A slot marked here is
+    // driven by the game, at the skill below.
+    bool     computer[GS_MAX_CARS];
+
+    // How hard they push, from a driver who brakes far too early to one who is
+    // quicker than you are. A point on `gs_ai_skill_margin`'s dial rather than
+    // a name.
+    uint8_t  skill;
 
     uint8_t  mode;                  // gs_mode
     uint16_t laps;
@@ -334,6 +346,19 @@ bool gs_menu_take_server_login(gs_menu *m, char *password, size_t cap,
 // Which track the library screen wants raced next, or -1. Cleared by reading
 // it, so a choice is acted on once rather than every frame.
 int gs_menu_take_choice(gs_menu *m);
+
+// **Build the race the setup screen describes.** The dials, the machines and
+// the grid - written here rather than in the client so that "what the setup
+// screen means" is a rule with a test over it rather than a paragraph in a
+// frontend nothing can reach. The paint is not in it: a colour cannot change
+// where a car ends up and must not be able to, so it goes to the renderer.
+void gs_setup_build(const gs_race_setup *s, const gs_track *t, gs_world *w);
+
+// **What the cars nobody is driving would press, this tick.** Fills in only the
+// slots marked as the game's; the rest are left exactly as they came in, which
+// is whatever the pads and the keyboard said.
+void gs_setup_drive(const gs_race_setup *s, const gs_world *w,
+                    const gs_track *t, gs_input *in);
 
 // Work out the finishing order and submit anything worth submitting. Called
 // once, when a race ends.

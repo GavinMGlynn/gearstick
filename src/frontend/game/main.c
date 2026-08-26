@@ -324,22 +324,8 @@ static void gs_start_race(gs_app *a) {
         // colour cannot change where a car ends up and must not be able to.
         const gs_race_setup *set = &a->menu.setup;
 
-        // **The dial is a multiple of Earth; `gravity` is an acceleration.**
-        // Assigning one to the other set a race's gravity to 1.0 tiles per
-        // second squared instead of Earth's 2.45 - so every race started from
-        // the setup screen ran at forty percent of the gravity it said it was
-        // at, and the records table it wrote could never be found again,
-        // because the screen looking it up made the same mistake differently.
-        // gs_world_init is the one place that knows the conversion; the
-        // editor's dials already went through it.
-        gs_world_init(&a->world, set->gravity);
-        gs_world_set_mode(&a->world, (gs_mode)set->mode);
-        gs_world_set_laps(&a->world, set->mode == (uint8_t)GS_MODE_RACE ? set->laps : 0);
-
+        gs_setup_build(set, &a->t, &a->world);
         for (uint8_t i = 0; i < set->players && i < GS_MAX_CARS; i++) {
-            gs_fix sx, sy; gs_angle facing;
-            gs_track_grid(&a->t, i, &sx, &sy, &facing);
-            gs_world_add_car(&a->world, &a->t, set->vehicle[i], sx, sy, facing);
             gs_render_set_car_paint(i, set->colour[i]);
         }
         players = set->players;
@@ -1648,6 +1634,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     for (uint32_t i = 0; i < steps; i++) {
         gs_input in[GS_MAX_CARS];
         gs_input_poll(&a->input, in, a->world.car_count);
+
+        // **The cars nobody is driving are driven.** Offline only: online, the
+        // grid belongs to the server and every car on it belongs to a machine
+        // that is sending its own inputs.
+        if (!a->online) gs_setup_drive(&a->menu.setup, &a->world, &a->t, in);
+
         if (a->autodrive) {
             for (uint8_t c = 0; c < a->world.car_count; c++) {
                 in[c] = gs_ai_drive(&a->world, &a->t, c);

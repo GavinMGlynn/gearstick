@@ -1936,6 +1936,11 @@ TEST(a_finished_race_becomes_a_table_in_the_order_it_finished) {
     gs_m.setup.profile[1] = 1;
     gs_m.setup.profile[2] = -1;      // a guest
 
+    // **Three people, said out loud.** A slot is the game's until somebody
+    // takes it, which is what an empty grid should be - so a test about what
+    // three *drivers* get out of a race has to say that all three are drivers.
+    for (uint8_t i = 0; i < 3; i++) gs_m.setup.computer[i] = false;
+
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_set_mode(&w, GS_MODE_RACE);
@@ -3496,6 +3501,165 @@ TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
     CHECK(gs_menu_back(&m, true) == GS_SCREEN_RACE);
 }
 
+TEST(the_empty_seats_on_the_grid_are_filled_with_somebody) {
+    (void)ren;
+
+    // **A race set up for four with one person at the keyboard used to be one
+    // car going round on its own** and three sitting on the grid. There is a
+    // driver in this game and there was no way to race it: every car took its
+    // input from a pad, so the AI drove only in headless self-play, the
+    // editor's background ghost and the demo.
+    //
+    // A slot marked as the game's is driven by it, at the skill on the dial,
+    // and what the setup screen means is written where a test can reach it
+    // rather than in the client.
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    }
+    gs_track_add_gate(&t, GS_INT(45), GS_INT(15), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(45), GS_INT(45), GS_QUARTER, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(15), GS_INT(45), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(15), GS_INT(15), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+    static gs_menu m;
+    gs_menu_init(&m);
+    m.setup.players = GS_MAX_CARS;
+    m.setup.laps = 1;
+    m.setup.mode = (uint8_t)GS_MODE_RACE;
+    m.setup.skill = GS_AI_SKILL_STEPS;        // opponents worth racing
+    m.setup.computer[0] = false;              // the person at the keyboard
+    for (uint8_t i = 1; i < GS_MAX_CARS; i++) m.setup.computer[i] = true;
+
+    // **The world the setup screen describes**, built by the rule the client
+    // uses rather than by hand here.
+    gs_world w;
+    gs_setup_build(&m.setup, &t, &w);
+    CHECK(w.car_count == GS_MAX_CARS);
+    CHECK(w.laps_to_win == 1);
+    CHECK(w.mode == (uint8_t)GS_MODE_RACE);
+
+    // **What the person presses is left exactly as it came in.** Filling in a
+    // slot somebody is driving would be the game taking the wheel off them.
+    {
+        gs_input in[GS_MAX_CARS] = { (gs_input)GS_IN_LEFT, 0, 0, 0 };
+        gs_setup_drive(&m.setup, &w, &t, in);
+        CHECK(in[0] == (gs_input)GS_IN_LEFT);
+        for (uint8_t i = 1; i < GS_MAX_CARS; i++) CHECK(in[i] != 0);
+    }
+
+    // And the race, with nobody at the keyboard: the person's car sits on the
+    // grid, which is exactly the case this item is about.
+    for (uint32_t k = 0; k < (uint32_t)GS_TICK_HZ * 240u && !w.over; k++) {
+        gs_input in[GS_MAX_CARS] = { 0, 0, 0, 0 };
+        gs_setup_drive(&m.setup, &w, &t, in);
+        gs_world_step(&w, &t, in);
+    }
+
+    int timed = 0;
+    for (uint8_t i = 0; i < w.car_count; i++) {
+        if (w.car[i].finish_tick != 0) timed++;
+    }
+    printf("  GRID %d of %u cars finished, winner %u\n", timed, w.car_count,
+           w.winner);
+
+    // **More than one car has a time**, which is the whole claim: the empty
+    // seats raced.
+    CHECK(timed > 1);
+    CHECK(timed == GS_MAX_CARS - 1);   // everybody who was driving got round
+
+    // The race is *not* over, and that is right: one car is still on the grid
+    // with nobody in it, and a race is over when everybody has been dealt with.
+    // What matters here is that somebody won it.
+    CHECK(!w.over);
+    CHECK(w.winner != GS_NO_WINNER);
+
+    // **And the winner is not the person**, who never touched a control. An
+    // opponent that cannot beat a parked car is not an opponent.
+    CHECK(w.winner != 0);
+    CHECK(w.car[0].finish_tick == 0);
+
+    // **Nor do the game's cars go in the records.** A table with the computer
+    // at the top of it is a table nobody can get on.
+    gs_menu_finish(&m, &w, &t);
+    CHECK(m.result_count == GS_MAX_CARS);
+    CHECK(m.records.count == 0);
+}
+
+TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
+    (void)ren;
+
+    // **The tracks in the box, not the one the test built.** A driver that gets
+    // round a circuit written to suit it and then sits in the run-off on
+    // something a person would actually race is a driver nobody meets. So every
+    // `.gstrack` that ships is loaded and raced - from **every slot on the
+    // grid**, because the slots are staggered back from the line and across it,
+    // and the car in the last one has a different first corner to make.
+    int count = 0;
+    char **found = SDL_GlobDirectory(GS_SOURCE_ASSETS "/tracks", "*.gstrack",
+                                     SDL_GLOB_CASEINSENSITIVE, &count);
+    CHECK(found != nullptr);
+    if (found == nullptr) return;
+
+    // The set that ships, asserted rather than assumed: a directory that has
+    // quietly emptied would otherwise pass this in no time at all.
+    printf("  STOCK %d tracks in assets/tracks\n", count);
+    CHECK(count >= 20);
+
+    int raced = 0, stuck = 0;
+    for (int i = 0; i < count; i++) {
+        char path[1024];
+        SDL_snprintf(path, sizeof path, "%s/tracks/%s", GS_SOURCE_ASSETS, found[i]);
+
+        size_t len = 0;
+        void *raw = SDL_LoadFile(path, &len);
+        CHECK(raw != nullptr);
+        if (raw == nullptr) continue;
+
+        static gs_track t;
+        const bool read = gs_track_deserialize(&t, (const uint8_t *)raw, len);
+        SDL_free(raw);
+        CHECK(read);
+        if (!read) continue;
+        CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+        for (uint8_t slot = 0; slot < GS_MAX_CARS; slot++) {
+            gs_world w;
+            gs_world_init(&w, GS_ONE);
+            gs_world_set_mode(&w, GS_MODE_RACE);
+            gs_world_set_laps(&w, 1);
+
+            gs_fix sx = 0, sy = 0;
+            gs_angle facing = 0;
+            gs_track_grid(&t, slot, &sx, &sy, &facing);
+            gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
+
+            for (uint32_t k = 0; k < (uint32_t)GS_TICK_HZ * 240u; k++) {
+                gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &t, 0), 0, 0, 0 };
+                gs_world_step(&w, &t, in);
+                if (w.car[0].finish_tick != 0) break;
+            }
+
+            if (w.car[0].finish_tick == 0) {
+                printf("  STUCK on %s from slot %u, at %.1f,%.1f after %d laps\n",
+                       found[i], slot, (double)w.car[0].x / 65536.0,
+                       (double)w.car[0].y / 65536.0,
+                       gs_car_laps_done(&t, &w.car[0]));
+                stuck++;
+            }
+            raced++;
+        }
+    }
+    SDL_free(found);
+
+    printf("  STOCK %d races over %d tracks, %d of them stuck\n",
+           raced, count, stuck);
+    CHECK(raced == count * GS_MAX_CARS);
+    CHECK(stuck == 0);
+}
+
 TEST(a_pad_can_leave_a_screen_without_walking_to_the_button) {
     (void)ren;
 
@@ -4233,17 +4397,28 @@ TEST(every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real) {
         // **Not a trap.** A screen you can reach and cannot leave is the worst
         // thing a front end can do, and it is what the results screen became
         // when it kept putting itself back.
-        // **Two screens are allowed no button that changes screen**, and both
-        // for reasons written down rather than discovered:
+        // **This walk is Tab and Space and nothing else**, which is what makes
+        // it worth keeping next to the one that presses by name: it is the only
+        // thing here that asks what somebody with a keyboard and no mouse can
+        // reach. Where the two disagree, the disagreement is the finding.
+        //
+        // **Three screens have no exit it can reach**, each for a reason
+        // written down rather than discovered:
         //
         //  - the sign-in door leaves by signing in, which needs a password
         //    typed, or by quitting, which is not a screen at all;
         //  - the tracks screen puts a whole library of selectable rows before
-        //    its buttons, so a pad reaches Back only after walking every track
-        //    somebody owns. That is a real complaint about that screen and it
-        //    is written up as one - but it is a long walk rather than a trap,
-        //    and Escape leaves it either way.
-        bool may_have_none = from == GS_SCREEN_LOGIN || from == GS_SCREEN_TRACKS;
+        //    its buttons;
+        //  - the setup screen puts the grid table before its buttons, and Tab
+        //    does not walk out of a table's rows the way it walks a plain
+        //    window: pressing by name finds Back and GO exactly where the probe
+        //    says they are, and no number of Tab presses lands on either. Both
+        //    are real complaints about those screens and both are written up as
+        //    such. Neither is a trap: the walk next door proves every screen has
+        //    a way off it and can get home, Escape leaves any of them, and so
+        //    does a pad's cancel button.
+        bool may_have_none = from == GS_SCREEN_LOGIN || from == GS_SCREEN_TRACKS ||
+                             from == GS_SCREEN_SETUP;
         if (!may_have_none) CHECK(found > 0);
 
         for (int to = 0; to < GS_SCREEN_COUNT; to++) {
@@ -4262,7 +4437,8 @@ TEST(every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real) {
         seen[gs_every_screen[i]] = true;
 
         if (gs_every_screen[i] == GS_SCREEN_LOGIN ||
-            gs_every_screen[i] == GS_SCREEN_TRACKS) {
+            gs_every_screen[i] == GS_SCREEN_TRACKS ||
+            gs_every_screen[i] == GS_SCREEN_SETUP) {
             continue;      // see above
         }
 
@@ -4275,6 +4451,10 @@ TEST(every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real) {
                 seen[to] = true;
                 queue[tail++] = (gs_screen)to;
             }
+        }
+        if (!home) {
+            printf("  NO WAY HOME from %s, by Tab and Space alone\n",
+                   gs_screen_name(gs_every_screen[i]));
         }
         CHECK(home);
     }
@@ -8492,6 +8672,8 @@ int main(void) {
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
     run_the_condition_bar_stays_inside_the_hud(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
+    run_the_empty_seats_on_the_grid_are_filled_with_somebody(ren);
+    run_an_opponent_finishes_every_track_that_ships_from_every_grid_slot(ren);
     run_a_pad_can_leave_a_screen_without_walking_to_the_button(ren);
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
     run_the_light_tree_counts_down_and_then_goes_green(ren);

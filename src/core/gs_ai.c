@@ -3,15 +3,53 @@
 #include "core/gs_ai.h"
 
 // Below this the steering does nothing useful and the car weaves; above it, it
-// turns. A dead band is the difference between driving and hunting.
+// turns. A dead band is the difference between driving and hunting - and how
+// wide it is, is one of the things the dial moves.
 #define GS_AI_DEADBAND 900
 
+gs_ai_style gs_ai_skill_style(int skill) {
+    if (skill < 0) skill = 0;
+    if (skill > GS_AI_SKILL_STEPS) skill = GS_AI_SKILL_STEPS;
+
+    gs_ai_style st;
+
+    // 0.600 at the bottom to 0.960 at the top, in twenty steps of 0.018. Fine
+    // enough that no two settings drive the same and coarse enough that every
+    // one of them is a different lap time.
+    st.margin = GS_RATIO(600 + 18 * skill, 1000);
+
+    // A third early at the bottom, on the sum at the top. This is what stops
+    // the dial being a speed handicap: two drivers can lap within a tenth of
+    // each other and still be visibly doing different things at the corner,
+    // because one of them has finished braking before the other has started.
+    st.brake_early = GS_RATIO(1200 - 10 * skill, 1000);
+
+    // Twice the base dead band at the bottom, half of it at the top. A driver
+    // who corrects late wanders on the straights and arrives at a jump pointing
+    // slightly wrong, which is where the lines diverge.
+    st.deadband = (gs_angle)(GS_AI_DEADBAND * 2 - (GS_AI_DEADBAND * 3 / 2) *
+                             skill / GS_AI_SKILL_STEPS);
+    return st;
+}
+
+gs_fix gs_ai_skill_margin(int skill) {
+    return gs_ai_skill_style(skill).margin;
+}
+
 gs_input gs_ai_drive(const gs_world *w, const gs_track *t, uint8_t car) {
-    return gs_ai_drive_at(w, t, car, GS_AI_NORMAL);
+    return gs_ai_drive_style(w, t, car, gs_ai_skill_style(GS_AI_SKILL_DEFAULT));
 }
 
 gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
                         gs_fix margin) {
+    gs_ai_style st = gs_ai_skill_style(GS_AI_SKILL_DEFAULT);
+    st.margin = margin;
+    return gs_ai_drive_style(w, t, car, st);
+}
+
+gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
+                           gs_ai_style style) {
+    const gs_fix margin = style.margin;
     if (car >= w->car_count || t->gate_count == 0) return 0;
 
     const gs_car *c = &w->car[car];
@@ -66,6 +104,7 @@ gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
     gs_angle want = 0;
     int32_t  turn = 0;
     gs_input in = 0;
+    bool     blocked = false;      // against something it cannot climb
 
     // --- Stay on the track.
     //
@@ -105,13 +144,113 @@ gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
             if (dx == 0 && dy == 0) dx = GS_ONE;
         }
 
+        // **A step too steep to climb is a wall, and a driver goes round it.**
+        //
+        // The ground is authored per corner and nothing stops a track having a
+        // whole tile of rise in one tile of ground - the parts box drops pieces
+        // with sides like that, the generator makes them, and two of the tracks
+        // in the box have one across the way to the first gate. A driver aiming
+        // only at the gate drives into it, stops dead, and sits there with the
+        // throttle open for the rest of the race: full power, wheel hard over,
+        // nought point nought one tiles a second, for three minutes.
+        //
+        // **Asked of the way to the gate rather than of the way the car is
+        // pointing**, which is the difference between going round it and
+        // bouncing off it. A test on the heading changes its mind every time
+        // the car turns, so the car turns back, and the two argue until the
+        // race ends. From here to there is a fact about the map: it holds while
+        // the car crawls along the wall, and stops holding when the wall is
+        // behind it.
+        {
+            const gs_fix reach = gs_fix_len2(dx, dy);
+            if (reach > 0) {
+                const gs_fix ux = gs_fix_div(dx, reach);
+                const gs_fix uy = gs_fix_div(dy, reach);
+                const gs_fix look = GS_ONE + GS_HALF;
+
+                const gs_fix here_h = gs_track_height(t, c->x, c->y);
+                const gs_fix ahead_h =
+                    gs_track_height(t, c->x + gs_fix_mul(ux, look),
+                                       c->y + gs_fix_mul(uy, look));
+
+                // What momentum will carry: a car at speed rides over a step
+                // that stops a car at rest, which is why a run-up works and why
+                // this is not a fixed height.
+                const gs_fix speed_now = gs_car_speed(c);
+                const gs_fix climbable =
+                    GS_HALF + gs_fix_mul(speed_now, GS_RATIO(15, 100));
+
+                if (ahead_h - here_h > climbable) {
+                    // **Turned away from it a little at a time, and the first
+                    // way that is not a wall wins.** Half a turn either side in
+                    // eighths, nearest first, so the car gives up as little of
+                    // the direction it wanted as the ground allows - which is
+                    // what going round something means. Trying only ninety
+                    // degrees either way finds the way round a wall and drives
+                    // along the side of a hill that a smaller turn would have
+                    // cleared.
+                    static const int32_t sweep[] = {
+                        4096, -4096, 8192, -8192, 12288, -12288, 16384, -16384,
+                    };
+
+                    const gs_angle facing_now = gs_atan2(dy, dx);
+                    gs_fix best_h = ahead_h;
+                    gs_angle best_way = facing_now;
+                    bool clear = false;
+
+                    for (size_t k = 0; k < sizeof sweep / sizeof sweep[0]; k++) {
+                        const gs_angle way =
+                            (gs_angle)((int32_t)facing_now + sweep[k]);
+                        const gs_fix tx = c->x + gs_fix_mul(gs_cos(way), look);
+                        const gs_fix ty = c->y + gs_fix_mul(gs_sin(way), look);
+                        const gs_fix h = gs_track_height(t, tx, ty);
+
+                        if (h - here_h <= climbable) {
+                            best_way = way;
+                            clear = true;
+                            break;
+                        }
+                        // Nothing clear yet: remember the least bad, so a car
+                        // in a bowl still climbs out of the shallowest side
+                        // rather than sitting in the bottom of it.
+                        if (h < best_h) { best_h = h; best_way = way; }
+                    }
+                    (void)clear;
+
+                    dx = gs_fix_mul(gs_cos(best_way), reach);
+                    dy = gs_fix_mul(gs_sin(best_way), reach);
+
+                }
+
+                // **And whether it is against one right now**, which is a
+                // different question from whether the way to the gate crosses
+                // one. A car can be aiming somewhere perfectly clear and be
+                // pinned by a cliff it is *pointing* at - it cannot steer,
+                // because steering is something a moving car does, and full
+                // power holds it there for the rest of the race. Two of the
+                // tracks in the box have a three-tile face, and a car that
+                // arrived at it sideways sat under it at nought tiles a second
+                // with the throttle open.
+                //
+                // So this one asks about the heading, and the answer is to back
+                // off until there is room to turn.
+                if (speed_now < GS_RATIO(30, 100)) {
+                    const gs_fix nx = c->x + gs_fix_mul(gs_cos(c->heading), look);
+                    const gs_fix ny = c->y + gs_fix_mul(gs_sin(c->heading), look);
+                    if (gs_track_height(t, nx, ny) - here_h > climbable) {
+                        blocked = true;
+                    }
+                }
+            }
+        }
+
         distance = gs_fix_len2(dx, dy);
         want = gs_atan2(dy, dx);
         turn = gs_angle_delta(c->heading, want);
 
         in = 0;
-        if (turn < -GS_AI_DEADBAND) in |= GS_IN_LEFT;
-        else if (turn > GS_AI_DEADBAND) in |= GS_IN_RIGHT;
+        if (turn < -(int32_t)style.deadband) in |= GS_IN_LEFT;
+        else if (turn > (int32_t)style.deadband) in |= GS_IN_RIGHT;
     }
 
     // --- The corner at the next gate, and whether there is room left to slow
@@ -156,11 +295,30 @@ gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
     gs_fix cos_half = gs_cos(half_corner);
 
     gs_fix corner_speed;
-    if (sin_half < GS_RATIO(3, 100) || cos_half <= 0) {
+    if (sin_half < GS_RATIO(3, 100)) {
         corner_speed = INT32_MAX;      // straight on, or as near as makes no odds
     } else {
-        gs_fix radius = gs_fix_div(gs_fix_mul(leg, cos_half),
-                                   gs_fix_mul(sin_half, GS_INT(2)));
+        // **A hairpin is the tightest corner there is, and this read it as the
+        // straightest.**
+        //
+        // The radius of a turn of angle `corner` is leg*cos(half)/(2 sin(half)),
+        // which goes to nothing as the corner approaches a full reversal -
+        // and cos(half) reaches exactly zero at a hundred and eighty degrees.
+        // That case was lumped in with "straight on", so a driver arriving at a
+        // hairpin planned no braking at all, went straight on at the gate, and
+        // then spent the rest of the race looping back for it. **Every track
+        // with two gates on it is that corner**, which is why a bare rectangle
+        // with a start and a finish was where it showed.
+        //
+        // The floor is a turning circle rather than nothing. A radius of zero
+        // says come to a complete stop, which no car has to do for a hairpin,
+        // and it makes the last degree before the reversal behave nothing like
+        // the one before it.
+        gs_fix radius = cos_half > 0
+                            ? gs_fix_div(gs_fix_mul(leg, cos_half),
+                                         gs_fix_mul(sin_half, GS_INT(2)))
+                            : 0;
+        if (radius < GS_HALF) radius = GS_HALF;
         corner_speed = gs_fix_mul(gs_fix_sqrt(gs_fix_mul(traction, radius)),
                                   margin);
     }
@@ -190,6 +348,7 @@ gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
     if (corner_speed != INT32_MAX && speed > corner_speed) {
         gs_fix excess = gs_fix_mul(speed, speed) - gs_fix_mul(corner_speed, corner_speed);
         gs_fix needed = gs_fix_div(excess, gs_fix_mul(traction, GS_INT(2)));
+        needed = gs_fix_mul(needed, style.brake_early);
         if (needed >= distance) must_brake = true;
     }
 
@@ -256,7 +415,21 @@ gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
         }
     }
 
-    if (must_brake) in |= GS_IN_BRAKE;
+    if (blocked) {
+        // **Backing away from a wall turns the nose the other way.** The rule
+        // above picked the side to go round by; reversing with the wheel that
+        // way swings the front the wrong way and the car comes back off the
+        // wall pointing at it again, which is an oscillation rather than a
+        // recovery. So while it is backing off, the wheel goes the other way -
+        // and it arrives with its nose already pointed along the wall.
+        const bool left = (in & GS_IN_LEFT) != 0;
+        const bool right = (in & GS_IN_RIGHT) != 0;
+        in &= (gs_input)~(unsigned)(GS_IN_LEFT | GS_IN_RIGHT);
+        if (left) in |= GS_IN_RIGHT;
+        else if (right) in |= GS_IN_LEFT;
+    }
+
+    if (must_brake || blocked) in |= GS_IN_BRAKE;
     else in |= GS_IN_ACCEL;
 
     return in;

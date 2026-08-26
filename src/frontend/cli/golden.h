@@ -91,4 +91,15 @@
 // The *world* hash below did not move. The physics is untouched by any of this.
 #define GS_SELFTEST_GENERATOR_HASH 0x41365c813fecc890ULL
 
+// **A race with nobody at the keyboard**, four opponents spread across the
+// skill dial, on a circuit none of them has seen.
+//
+// This one moves for two reasons rather than one: the physics, like the number
+// above it, and *the driver*. An opponent is a pure function of the world, so a
+// change to how it decides where to lift or which way round a wall to go is a
+// change to every race anybody has recorded against it - and unlike a scripted
+// input log, there is nothing else holding the race in place. That is exactly
+// why it is pinned.
+#define GS_OPPONENTS_WORLD_HASH 0x7e8fe47bf3be48b4ULL
+
 #endif // GS_GOLDEN_H

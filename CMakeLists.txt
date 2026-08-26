@@ -397,7 +397,11 @@ target_compile_definitions(gearstick_shell PRIVATE
 # walk is out of cannot come from the walk**: one that sees less reports all of
 # what it saw and calls it complete. The source text does not care what any walk
 # reached.
+# And where the tracks that ship live, so a test can race every one of them
+# rather than a track it built itself. A driver that gets round the test's own
+# circuit and not the ones in the box is a driver nobody meets.
 target_compile_definitions(gearstick_shell PUBLIC
+    GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets"
     GS_SOURCE_UI="${CMAKE_CURRENT_SOURCE_DIR}/src/ui"
     GS_SOURCE_DOCS="${CMAKE_CURRENT_SOURCE_DIR}/docs"
     # The package name this platform actually produces, so a test can check the
