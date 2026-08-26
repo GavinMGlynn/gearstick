@@ -65,4 +65,13 @@ void gs_input_event(gs_input_state *s, const SDL_Event *e);
 // cars 0 and 1 as well, so one person can test two cars without two pads.
 void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars);
 
+// **Back, said two ways.** Escape is a key and a pad has none of those - so
+// somebody on a pad could only leave a screen by walking to the button that
+// says so, which on the tracks screen means stepping down through every track
+// they own. The pad's cancel button is back as well.
+//
+// **Except while a race is on**, where that same button is the brake. Backing
+// out of a corner is not what anybody means by it.
+bool gs_input_is_back(const SDL_Event *e, bool racing);
+
 #endif // GS_INPUT_H

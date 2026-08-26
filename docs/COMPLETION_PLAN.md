@@ -1763,12 +1763,21 @@ worth as much as what was decided about it.
 - [x] **A door nobody answers says so.** A wrong key means the server cannot
       decrypt what we sent and has nothing to reply to, so the lobby knocked
       silently forever. It now names the three things it could be.
-- [ ] **The tracks screen puts a whole library between you and its buttons.**
-      *(Found walking the front end by machine — see Phase 17.)* A pad reaches
-      Back only after stepping through every track somebody owns. Escape leaves,
-      so it is a long walk rather than a trap, but it is why the walk needs
-      seventy-two steps and why that screen is exempt from the no-trap check.
-- [ ] **Login and tracks are exempt from the no-trap check.** *(Same walk.)*
-      Login because getting out of it needs a typed password, tracks for the
-      reason above. Both exemptions close when the walk can type and press
-      Escape — Phase 17.
+- [x] **The tracks screen puts a whole library between you and its buttons.**
+      *(Found walking the front end by machine — see Phase 17. Closed by giving
+      the pad a way out.)* Escape is a key and a pad has none, so somebody on a
+      pad could only leave by walking down through every track they own. **The
+      pad's cancel button is back now** — except during a race, where that same
+      button is the brake.
+      *Verification: the cancel button counts as back and no other button on the
+      pad does, in a race or out of one; and the brake really is that button, so
+      moving it and leaving this rule behind fails rather than surprising
+      somebody in the first corner.*
+- [x] **Login and tracks are exempt from the no-trap check.** *(Closed in
+      Phase 17.)* Tracks stopped being exempt when the walk learned to press
+      Escape; the door stopped being exempt when the walk that carries the
+      password had what it learned folded into the same graph.
+      *Verification: 0 traps and 0 stranded over **every** screen, with no
+      exemption anywhere. One exemption is left in the whole set of properties
+      and it is correct: no button leads to the results, because finishing a
+      race is what takes you there.*

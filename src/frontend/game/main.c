@@ -1239,6 +1239,48 @@ static void gs_trace(gs_app *a, uint8_t views) {
             a->online ? a->net.stalls : 0u);
 }
 
+// **One step back, wherever back is from here.** Written once because two
+// things ask for it: Escape, and a pad's cancel button - and a pad has no
+// Escape key, so without this the only way off a screen with a pad is to walk
+// to the button that says so. On the tracks screen that means stepping down
+// through every track somebody owns.
+//
+// Returns true when there is nothing behind this screen and the game should
+// stop.
+static bool gs_back_out(gs_app *a) {
+    // Back out one step rather than always quitting: quitting from a race
+    // because you wanted the menu is the oldest bad habit in games, and the
+    // title screen is where quitting belongs.
+    //
+    // **Where back goes is gs_menu_back's to say**, not this handler's, so that
+    // it is a rule with a test rather than four lines nothing can reach. A
+    // machine driving itself - a shot, a session, the showroom - has no front
+    // end to back out to and quits.
+    if (a->editor.active) {
+        gs_editor_toggle(&a->editor, &a->view[0]);
+        return false;
+    }
+    if (a->skip_menu) return true;
+
+    gs_screen back = gs_menu_back(&a->menu, false);
+    if (back == GS_SCREEN_COUNT) return true;
+
+    // Leaving an online race is leaving the race: the lobby is where it can be
+    // joined again, and it is only ready to be rejoined once this machine has
+    // stopped racing.
+    if (a->menu.screen == GS_SCREEN_RACE && a->online &&
+        a->net_started && !a->net_settling) {
+        gs_net_finish(&a->net);
+        a->net_started = false;
+        a->lobby_hold = true;
+        // Not race_settled - see the note by the other place this used to be
+        // cleared. The finished world outlives the screen, so clearing it here
+        // re-runs the end of the race.
+    }
+    a->menu.screen = back;
+    return false;
+}
+
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
     gs_app *a = (gs_app *)appstate;
 
@@ -1251,6 +1293,18 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         gs_layout(a);
         break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        // **A pad's cancel is back too**, and nothing else here listens for a
+        // pad button: driving reads them by polling, and the construction set's
+        // rebinding takes them where it draws. Only when a race is not on, and
+        // only when the construction set is not waiting to be told which button
+        // somebody meant.
+        if (a->editor.active && a->editor.rebind_action >= 0) break;
+        if (gs_input_is_back(e, a->menu.screen == GS_SCREEN_RACE) &&
+            gs_back_out(a)) {
+            return SDL_APP_SUCCESS;
+        }
+        break;
     case SDL_EVENT_KEY_DOWN:
         // **Typing is not a shortcut.** Dear ImGui says when a text field has
         // the keyboard, and while it does the game's hotkeys stay out of the
@@ -1260,38 +1314,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         // of the form somebody is halfway through filling in.
         if (ImGui_GetIO()->WantCaptureKeyboard) break;
 
-        if (e->key.key == SDLK_ESCAPE) {
-            // Back out one step rather than always quitting: quitting from a
-            // race because you wanted the menu is the oldest bad habit in
-            // games, and the title screen is where quitting belongs.
-            //
-            // **Where back goes is gs_menu_back's to say**, not this handler's,
-            // so that it is a rule with a test rather than four lines nothing
-            // can reach. A machine driving itself - a shot, a session, the
-            // showroom - has no front end to back out to and quits.
-            if (a->editor.active) {
-                gs_editor_toggle(&a->editor, &a->view[0]);
-            } else if (a->skip_menu) {
-                return SDL_APP_SUCCESS;
-            } else {
-                gs_screen back = gs_menu_back(&a->menu, false);
-                if (back == GS_SCREEN_COUNT) return SDL_APP_SUCCESS;
-
-                // Leaving an online race is leaving the race: the lobby is
-                // where it can be joined again, and it is only ready to be
-                // rejoined once this machine has stopped racing.
-                if (a->menu.screen == GS_SCREEN_RACE && a->online &&
-                    a->net_started && !a->net_settling) {
-                    gs_net_finish(&a->net);
-                    a->net_started = false;
-                    a->lobby_hold = true;
-                    // Not race_settled - see the note by the other place this
-                    // used to be cleared. The finished world outlives the
-                    // screen, so clearing it here re-runs the end of the race.
-
-                }
-                a->menu.screen = back;
-            }
+        if (gs_input_is_back(e, a->menu.screen == GS_SCREEN_RACE) &&
+            gs_back_out(a)) {
+            return SDL_APP_SUCCESS;
         }
         if (e->key.key == SDLK_G) {
             for (uint8_t i = 0; i < a->views; i++)

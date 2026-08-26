@@ -180,3 +180,16 @@ void gs_input_editor_pad(gs_input_state *s, gs_pad_edit *out) {
     out->next_brush = (pressed & (1u << 2)) != 0;
     out->drive = (pressed & (1u << 3)) != 0;
 }
+
+bool gs_input_is_back(const SDL_Event *e, bool racing) {
+    if (e == nullptr) return false;
+
+    if (e->type == SDL_EVENT_KEY_DOWN) return e->key.key == SDLK_ESCAPE;
+
+    // The cancel button, in the position every pad calls B - which is also the
+    // brake, so it only means back when nobody is driving.
+    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        return !racing && e->gbutton.button == SDL_GAMEPAD_BUTTON_EAST;
+    }
+    return false;
+}

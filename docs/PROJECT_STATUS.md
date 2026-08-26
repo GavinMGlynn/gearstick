@@ -4219,11 +4219,16 @@ Screens it merely arrived at are not asked about: one nobody departed from has
 no outgoing edges because nobody looked, and asking would be asking about the
 walk again.
 
-**Two exemptions, named rather than counted.** The sign-in door is left by
-typing a name and a password correctly, and this walk types one word into every
-box it meets - that the door opens is proved next to it by the walk that carries
-the vocabulary for it. The results screen is arrived at by *finishing a race*:
-no button anywhere leads to it and none should.
+**One exemption, named rather than counted** - and it used to be two. The
+results screen is arrived at by *finishing a race*: no button anywhere leads to
+it and none should.
+
+The sign-in door was the other, because leaving it means typing a name and a
+password correctly and the walk carries one word. It is not exempt any more:
+the walk that does carry the vocabulary now runs as part of the same test, told
+to stop the moment it is through, and the one thing it learns - that the door
+leads to the title - is folded into the same graph. **No screen is exempt from
+the no-trap check.**
 
 ### No control does nothing everywhere
 
@@ -4351,6 +4356,21 @@ from scratch are not the same state, by building two panel menus. It now makes
 two drivers itself, which is what the claim was always about.
 
 **Stopping the wheel from working puts all 86 back and turns the tree red.**
+
+### A pad can leave a screen
+
+Escape is a key and a pad has none of those, so somebody on a pad could only
+leave a screen by walking to the button that says so - and the tracks screen
+puts the whole library between them and it, one track at a time. Thirty-two
+presses to get out of a screen opened by mistake.
+
+The pad's cancel button is back as well now, **except while a race is on, where
+that same button is the brake**. That is not a guess about the pad: the test
+checks the binding this game ships, so moving the brake and leaving the rule
+behind fails here rather than surprising somebody in the first corner. Where
+back goes is still `gs_menu_back`'s to say; this is only about what counts as
+asking, and it is one function with a test rather than a line in a key handler
+nothing can reach.
 
 ### The count that does not come from the walk
 

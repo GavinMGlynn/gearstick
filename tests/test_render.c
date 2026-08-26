@@ -3496,6 +3496,68 @@ TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
     CHECK(gs_menu_back(&m, true) == GS_SCREEN_RACE);
 }
 
+TEST(a_pad_can_leave_a_screen_without_walking_to_the_button) {
+    (void)ren;
+
+    // **Escape is a key, and a pad has none of those.**
+    //
+    // So somebody on a pad could only leave a screen by walking to the button
+    // that says so - and on the tracks screen the nav order puts the whole
+    // library between them and it, one track at a time. Thirty-two presses to
+    // get out of a screen you opened by mistake.
+    //
+    // The pad's cancel button is back as well now. Where back goes is still
+    // gs_menu_back's to say; this is only about what counts as asking.
+    SDL_Event key = { 0 };
+    key.type    = SDL_EVENT_KEY_DOWN;
+    key.key.key = SDLK_ESCAPE;
+    CHECK(gs_input_is_back(&key, false));
+    CHECK(gs_input_is_back(&key, true));       // a key means it during a race too
+
+    SDL_Event pad = { 0 };
+    pad.type          = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    pad.gbutton.button = (uint8_t)SDL_GAMEPAD_BUTTON_EAST;
+    CHECK(gs_input_is_back(&pad, false));
+
+    // **Except while a race is on, where that button is the brake.** Not a
+    // guess: it is the binding this game ships, checked here so that moving the
+    // brake and leaving this rule behind is a failure rather than a surprise in
+    // the first corner.
+    gs_bindings b;
+    gs_bind_defaults(&b);
+    CHECK(b.button[0][GS_ACT_BRAKE] == (int16_t)SDL_GAMEPAD_BUTTON_EAST);
+    CHECK(!gs_input_is_back(&pad, true));
+
+    // **Every other button on the pad, and every other key**, because a cancel
+    // that is also three other things is worse than no cancel.
+    for (int i = 0; i < SDL_GAMEPAD_BUTTON_COUNT; i++) {
+        if (i == (int)SDL_GAMEPAD_BUTTON_EAST) continue;
+        pad.gbutton.button = (uint8_t)i;
+        CHECK(!gs_input_is_back(&pad, false));
+        CHECK(!gs_input_is_back(&pad, true));
+    }
+
+    static const SDL_Keycode others[] = {
+        SDLK_RETURN, SDLK_SPACE, SDLK_TAB, SDLK_G, SDLK_J, SDLK_R, SDLK_H,
+        SDLK_M, SDLK_F5, SDLK_F9, SDLK_UP, SDLK_DOWN, SDLK_A, SDLK_Z,
+    };
+    for (size_t i = 0; i < SDL_arraysize(others); i++) {
+        key.key.key = others[i];
+        CHECK(!gs_input_is_back(&key, false));
+        CHECK(!gs_input_is_back(&key, true));
+    }
+
+    // And a button going *up* is not a press.
+    pad.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
+    pad.gbutton.button = (uint8_t)SDL_GAMEPAD_BUTTON_EAST;
+    CHECK(!gs_input_is_back(&pad, false));
+    key.type = SDL_EVENT_KEY_UP;
+    key.key.key = SDLK_ESCAPE;
+    CHECK(!gs_input_is_back(&key, false));
+
+    CHECK(!gs_input_is_back(nullptr, false));
+}
+
 TEST(the_condition_bar_stays_inside_the_hud) {
     gs_imgui_start(gs_win, ren);
     CHECK(gs_imgui_ready);
@@ -7703,6 +7765,59 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // draws six of its controls disabled under conditions, and until the walk
     // was started from a menu where those conditions differ, their destinations
     // were not in the map at all.
+    // **And the door, which is not opened by pressing things.** The walk above
+    // carries one word, because trying three strings in every box on every
+    // screen multiplies the states without covering one more control - and one
+    // word cannot sign anybody in. So the door is walked once more, here, with
+    // the whole vocabulary and told to stop the moment it is through, and what
+    // it learned about where the login screen leads is added to the graph.
+    //
+    // That is what closes the last exemption: no screen is exempt from the
+    // no-trap check any more, the door included.
+    {
+        static gs_walk door;
+        SDL_memset(door.slot, 0, sizeof door.slot);
+        SDL_memset(door.shape, 0, sizeof door.shape);
+        SDL_memset(door.offered, 0, sizeof door.offered);
+        SDL_memset(door.pressed, 0, sizeof door.pressed);
+        SDL_memset(door.never, 0, sizeof door.never);
+        SDL_memset(door.unseen, 0, sizeof door.unseen);
+        SDL_memset(door.moved, 0, sizeof door.moved);
+        SDL_memset(door.named, 0, sizeof door.named);
+        SDL_memset(door.reached, 0, sizeof door.reached);
+        SDL_memset(door.edge, 0, sizeof door.edge);
+        door.n_offered = 0; door.n_pressed = 0; door.n_never = 0;
+        door.n_unseen = 0; door.n_moved = 0; door.n_stranded = 0;
+        door.states = 0; door.edges = 0; door.typed = 0; door.deepest = 0;
+        door.did_nothing = 0; door.capped = 0; door.ran_out = false;
+        door.fine      = true;
+        door.words     = (int)SDL_arraysize(gs_walk_words);
+        door.per_shape = GS_WALK_PER_SHAPE;
+        door.stop_at   = GS_SCREEN_TITLE;
+        door.stop_set  = true;
+        door.seed_at   = 0;
+        door.seed_from = GS_SCREEN_LOGIN;
+
+        gs_panel_menu(&seed, &t);
+        gs_seed_signed_out(&seed);
+        seed.screen = GS_SCREEN_LOGIN;
+
+        gs_walk_screen(&ui, &seed, &t, ren, GS_SCREEN_LOGIN, &door);
+        CHECK(!door.ran_out);
+        CHECK(door.reached[GS_SCREEN_TITLE]);
+
+        int carried = 0;
+        for (int from = 0; from < GS_SCREEN_COUNT; from++) {
+            for (int to = 0; to < GS_SCREEN_COUNT; to++) {
+                if (!door.edge[from][to] || w.edge[from][to]) continue;
+                w.edge[from][to] = true;
+                carried++;
+            }
+        }
+        printf("  WALK the door opens in %d actions, %d ways off it carried "
+               "into the graph\n", door.edges, carried);
+    }
+
     // -----------------------------------------------------------------------
     // **What the walk proves, said as properties of the front end.**
     //
@@ -7716,17 +7831,14 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // it would be asking about the walk again.
     // -----------------------------------------------------------------------
 
-    // **No screen is a trap.** At least one thing on it leads somewhere else.
-    //
-    // The sign-in door is the one exception and it is not skipped: leaving it
-    // means signing in, which wants a name and a password typed correctly, and
-    // this walk types one word into every box it meets. That the door opens is
-    // proved next door, by a walk carrying the vocabulary for it - see
-    // the_walk_signs_in_through_the_door_rather_than_being_put_behind_it.
+    // **No screen is a trap, and there are no exemptions left.** At least one
+    // thing on every screen leads somewhere else - the sign-in door included,
+    // which is why the pass above exists: leaving it means signing in, which
+    // wants a name and a password typed correctly rather than pressed.
     int traps = 0;
     for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
         const gs_screen from = gs_every_screen[i];
-        if (!w.reached[from] || from == GS_SCREEN_LOGIN) continue;
+        if (!w.reached[from]) continue;
 
         int ways_off = 0;
         for (int to = 0; to < GS_SCREEN_COUNT; to++) {
@@ -7745,7 +7857,7 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     int stranded = 0;
     for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
         const gs_screen from = gs_every_screen[i];
-        if (!w.reached[from] || from == GS_SCREEN_LOGIN) continue;
+        if (!w.reached[from]) continue;
 
         bool seen[GS_SCREEN_COUNT] = { false };
         gs_screen queue[GS_SCREEN_COUNT];
@@ -7775,9 +7887,11 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // direction and a different claim: a screen nobody can get *to* is as
     // broken as one nobody can leave, and only this half catches it.
     //
-    // Two are named rather than counted. The results screen is arrived at by
-    // finishing a race and no button leads to it, which is right; and the
-    // sign-in door is arrived at by signing out, which this walk cannot undo.
+    // **One is named rather than counted**, and it is the last exemption left
+    // anywhere in these properties: the results screen is arrived at by
+    // finishing a race, and no button leads to it, which is right. The sign-in
+    // door used to be the other one and is not any more - it is reachable from
+    // the title, by signing out, and it can be left, by signing in.
     {
         bool seen[GS_SCREEN_COUNT] = { false };
         gs_screen queue[GS_SCREEN_COUNT];
@@ -7798,7 +7912,7 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
         for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
             const gs_screen to = gs_every_screen[i];
             if (!w.reached[to]) continue;
-            if (to == GS_SCREEN_RESULTS || to == GS_SCREEN_LOGIN) continue;
+            if (to == GS_SCREEN_RESULTS) continue;
             if (seen[to]) continue;
             printf("  UNREACHABLE screen %d cannot be got to from the title\n",
                    (int)to);
@@ -8378,6 +8492,7 @@ int main(void) {
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
     run_the_condition_bar_stays_inside_the_hud(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
+    run_a_pad_can_leave_a_screen_without_walking_to_the_button(ren);
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
     run_the_light_tree_counts_down_and_then_goes_green(ren);
     run_a_start_line_and_a_finish_line_are_different_things(ren);
