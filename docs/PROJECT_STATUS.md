@@ -4117,6 +4117,39 @@ Two things found on the way that the work will have to face:
   parks is not an opponent, and "completes any valid track" - which Phase 8
   ticks - is evidently a narrower claim than it sounds.
 
+### Brushes meeting each other
+
+**147 brush-and-setting configurations, every one of the 21,609 ordered pairs
+walked**, in 51 seconds. What is pinned is two properties which together say a
+brush is *for* one thing:
+
+- **What it is not for, it leaves exactly as it found it.** Painting ice does
+  not move the ground; a gravity pocket does not repaint the surface under it; a
+  gate does not touch either.
+- **What it is for, it does the same whatever was there before.** Ice is ice on
+  a slope as much as on the flat, and a gravity value reads back the same over
+  a ramp as over level ground.
+
+The exception is deliberate and named: **the parts box writes several fields at
+once**, because a piece lays ground, its own surface and - where it is a piece
+of the route - a gate. It is exempt from the first property and held to a
+different one: a piece always says what happened, and anything it changed it can
+take back.
+
+**The pair is the unit here, not the value.** Interference is a property of two
+brushes meeting rather than of the number on a slider, and every one of those
+numbers is walked exhaustively on its own in the option sweep - 5,563 of them.
+Walking every pair of *values* instead would be a hundred million tracks to
+learn what 21,609 already say.
+
+One thing this test kept re-finding, which is now written into it rather than
+learned again: **a road piece dropped on ground that already matches it is
+correctly a no-op.** A straight laid on level road of its own surface is the
+road it would have laid, so nothing changes and nothing is recorded - and in a
+pairwise sweep the first brush leaves it exactly so surprisingly often. The
+assertion is therefore tied to whether the track actually changed, not to
+whether the tool said "dropped".
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

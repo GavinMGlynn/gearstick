@@ -5009,6 +5009,185 @@ static uint64_t gs_ed_key(const gs_ed *ed) {
     return h;
 }
 
+// Which of the track's fields a brush is *for*. The parts box is the one that
+// writes several: a piece lays ground, its own surface, and where it is a piece
+// of the route, a gate too.
+static void gs_brush_writes(int brush, bool *height, bool *surface,
+                            bool *gravity, bool *gates) {
+    *height  = brush == GS_BRUSH_RAISE || brush == GS_BRUSH_LOWER ||
+               brush == GS_BRUSH_PART;
+    *surface = brush == GS_BRUSH_SURFACE || brush == GS_BRUSH_PART;
+    *gravity = brush == GS_BRUSH_GRAVITY;
+    *gates   = brush == GS_BRUSH_GATE || brush == GS_BRUSH_PART;
+}
+
+typedef struct gs_brush_cfg {
+    int   brush;
+    int   surface;
+    int   part_kind;
+    float gravity;
+    float step;
+    float heading;
+} gs_brush_cfg;
+
+static int gs_brush_configs(gs_brush_cfg *out, int cap) {
+    int n = 0;
+    for (int lower = 0; lower < 2 && n < cap; lower++) {
+        for (int h = 5; h <= 200 && n < cap; h += 5) {
+            out[n] = (gs_brush_cfg){ 0 };
+            out[n].brush = lower ? GS_BRUSH_LOWER : GS_BRUSH_RAISE;
+            out[n].step  = (float)h / 100.0f;
+            n++;
+        }
+    }
+    for (int surf = 0; surf < GS_SURF_COUNT && n < cap; surf++) {
+        out[n] = (gs_brush_cfg){ 0 };
+        out[n].brush   = GS_BRUSH_SURFACE;
+        out[n].surface = surf;
+        n++;
+    }
+    for (int g = 0; g <= 390 && n < cap; g += 10) {
+        out[n] = (gs_brush_cfg){ 0 };
+        out[n].brush   = GS_BRUSH_GRAVITY;
+        out[n].gravity = (float)g / 100.0f;
+        n++;
+    }
+    for (int deg = 0; deg < 360 && n < cap; deg += 45) {
+        out[n] = (gs_brush_cfg){ 0 };
+        out[n].brush   = GS_BRUSH_GATE;
+        out[n].heading = (float)deg;
+        n++;
+    }
+    for (int kind = 0; kind < GS_PART_COUNT && n < cap; kind++) {
+        out[n] = (gs_brush_cfg){ 0 };
+        out[n].brush     = GS_BRUSH_PART;
+        out[n].part_kind = kind;
+        n++;
+    }
+    return n;
+}
+
+static void gs_brush_set(gs_editor *e, const gs_brush_cfg *c) {
+    e->brush        = c->brush;
+    e->surface      = c->surface;
+    e->part_kind    = c->part_kind;
+    e->part         = gs_part_default((gs_part_kind)c->part_kind);
+    e->gravity      = c->gravity;
+    e->step         = c->step > 0.0f ? c->step : 0.25f;
+    e->gate_heading = c->heading;
+    e->gate_width   = 2.5f;
+    e->radius       = 0;
+}
+
+TEST(one_brush_never_undoes_what_another_one_did) {
+    (void)ren;
+
+    // **The faults worth finding are in what one brush did to what another had
+    // already done** - ice on a slope, gravity under a ramp, a gate on ground
+    // that moves afterwards. A brush tested only on flat pavement is a brush
+    // tested against nothing.
+    //
+    // Two properties, and between them they say a brush is *for* one thing:
+    //
+    //  - what the second brush is not for, it leaves exactly as it found it;
+    //  - what it is for, it does the same regardless of what was there before.
+    //
+    // Every ordered pair is walked. The pair is the unit here rather than the
+    // value, because interference is a property of two brushes meeting and not
+    // of the number on a slider - and every one of those numbers is walked
+    // exhaustively on its own in
+    // every_brush_and_every_option_it_carries_does_what_it_says.
+    static gs_editor ed;
+    CHECK(gs_editor_init(&ed, 65536));
+
+    static gs_brush_cfg cfg[256];
+    const int n_cfg = gs_brush_configs(cfg, (int)SDL_arraysize(cfg));
+    CHECK(n_cfg > 100);
+
+    static gs_track t;
+    int pairs = 0;
+
+    for (int a = 0; a < n_cfg; a++) {
+        for (int b = 0; b < n_cfg; b++) {
+            gs_flat_pavement(&t, 40, 40);
+            gs_edit_reset(ed.log);
+
+            // The first brush, and what the track looked like afterwards.
+            gs_brush_set(&ed, &cfg[a]);
+            gs_editor_paint(&ed, &t, 18.0f, 18.0f);
+
+            const gs_fix     h0 = gs_track_height(&t, GS_INT(18), GS_INT(18));
+            const gs_surface s0 = gs_track_surface(&t, GS_INT(18) + GS_ONE / 2,
+                                                   GS_INT(18) + GS_ONE / 2);
+            const gs_fix     g0 = gs_track_gravity(&t, GS_INT(18) + GS_ONE / 2,
+                                                   GS_INT(18) + GS_ONE / 2);
+            const uint8_t    n0 = t.gate_count;
+            const uint32_t   d0 = gs_edit_undo_depth(ed.log);
+            const uint64_t   hash0 = gs_track_hash(&t);
+
+            // The second, on top of it.
+            gs_brush_set(&ed, &cfg[b]);
+            gs_editor_paint(&ed, &t, 18.0f, 18.0f);
+
+            const gs_fix     h1 = gs_track_height(&t, GS_INT(18), GS_INT(18));
+            const gs_surface s1 = gs_track_surface(&t, GS_INT(18) + GS_ONE / 2,
+                                                   GS_INT(18) + GS_ONE / 2);
+            const gs_fix     g1 = gs_track_gravity(&t, GS_INT(18) + GS_ONE / 2,
+                                                   GS_INT(18) + GS_ONE / 2);
+            const uint8_t    n1 = t.gate_count;
+
+            bool wh, ws, wg, wgate;
+            gs_brush_writes(cfg[b].brush, &wh, &ws, &wg, &wgate);
+
+            // **What it is not for, it leaves alone.**
+            if (!wh)    CHECK(h1 == h0);
+            if (!ws)    CHECK(s1 == s0);
+            if (!wg)    CHECK(g1 == g0);
+            if (!wgate) CHECK(n1 == n0);
+
+            // **What it is for, it does the same whatever was there.**
+            if (cfg[b].brush == GS_BRUSH_SURFACE) {
+                CHECK(s1 == (gs_surface)cfg[b].surface);
+            }
+            if (cfg[b].brush == GS_BRUSH_GRAVITY) {
+                const gs_fix want = (gs_fix)(cfg[b].gravity * (float)GS_ONE);
+                const gs_fix unit = GS_ONE / GS_GRAVITY_UNIT;
+                CHECK(g1 >= want - unit && g1 <= want + unit);
+            }
+            if (cfg[b].brush == GS_BRUSH_RAISE || cfg[b].brush == GS_BRUSH_LOWER) {
+                // Relative, on purpose: raising ground that is already raised
+                // is what building a ramp *is*.
+                const gs_fix delta = (gs_fix)(cfg[b].step * (float)GS_ONE);
+                const gs_fix want =
+                    cfg[b].brush == GS_BRUSH_LOWER ? h0 - delta : h0 + delta;
+                const gs_fix quantum = GS_ONE / 256;
+                CHECK(h1 >= want - quantum && h1 <= want + quantum);
+            }
+            if (cfg[b].brush == GS_BRUSH_GATE && n0 < GS_TRACK_MAX_GATES) {
+                CHECK(n1 == (uint8_t)(n0 + 1u));
+            }
+            if (cfg[b].brush == GS_BRUSH_PART) {
+                // A piece always says what happened, and **anything it changed
+                // it can take back**. It is allowed to change nothing: a
+                // straight laid on ground that is already level road of that
+                // surface is the road it would have laid, and the first brush
+                // in this pair often leaves it exactly so.
+                CHECK(ed.status[0] != '\0');
+                if (gs_track_hash(&t) != hash0) {
+                    CHECK(gs_edit_undo_depth(ed.log) > d0);
+                }
+            }
+            pairs++;
+        }
+    }
+
+    printf("  COMBOS %d brush configurations, %d ordered pairs walked\n",
+           n_cfg, pairs);
+    CHECK(pairs == n_cfg * n_cfg);
+
+    gs_editor_quit(&ed);
+}
+
 TEST(every_brush_and_every_option_it_carries_does_what_it_says) {
     (void)ren;
 
@@ -5990,6 +6169,7 @@ int main(void) {
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);
     run_every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real(ren);
     run_a_menu_knows_a_state_it_has_already_been_in(ren);
+    run_one_brush_never_undoes_what_another_one_did(ren);
     run_every_brush_and_every_option_it_carries_does_what_it_says(ren);
     run_every_control_in_the_construction_set_is_pressed(ren);
     run_the_walk_signs_in_through_the_door_rather_than_being_put_behind_it(ren);

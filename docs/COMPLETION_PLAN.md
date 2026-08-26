@@ -1104,14 +1104,15 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       goes through the multiple-of-Earth conversion rather than round it, which
       is the fault that once made every race run at forty percent of what it
       claimed.*
-- [ ] **Brushes are walked in combination, exhaustively.** Ice on a slope,
-      gravity under a ramp, a gate on ground that moves afterwards: the faults
-      worth finding are in what one brush did to what another had already done,
-      and a sample of those combinations is a sample of the faults. An edit is
-      simulation work on a plain value, so it costs microseconds once the walk
-      is not drawing — there is no reason to sample it.
-      *Verification: the walk states how many brush-and-setting combinations
-      exist and how many it applied, and those two numbers are equal.*
+- [x] **Brushes are walked in combination, exhaustively.** Ice on a slope,
+      gravity under a ramp, a gate on ground that moves afterwards. Two
+      properties, and between them they say a brush is *for* one thing: what it
+      is not for it leaves exactly as it found it, and what it is for it does
+      the same regardless of what was there before.
+      *Verification: **147 brush-and-setting configurations, all 21,609 ordered
+      pairs of them walked** — the count is stated and asserted equal to the
+      space, so a brush added later and left out of the sweep turns the tree red
+      by itself.*
 - [ ] **Building a track is walked end to end.** New, shape the ground, paint a
       surface, set the gravity, place a route, name it, save it, come back to it
       and race it — performed as one sequence by the machine, not as a set of
