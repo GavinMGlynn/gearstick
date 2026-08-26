@@ -111,6 +111,32 @@ bool gs_ui_probe_focus_window(const char *name)
     return true;
 }
 
+bool gs_ui_probe_wheel(const char *window, float ticks)
+{
+    if (ImGui::GetCurrentContext() == nullptr || window == nullptr) return false;
+    ImGuiWindow *w = ImGui::FindWindowByName(window);
+    if (w == nullptr) return false;
+
+    // Over the middle of it, because ImGui gives the wheel to the window under
+    // the pointer and to nothing else - a wheel event with the mouse parked at
+    // the origin scrolls whatever happens to be in the corner.
+    ImGuiIO &io = ImGui::GetIO();
+    io.AddMousePosEvent(w->Pos.x + w->Size.x * 0.5f,
+                        w->Pos.y + w->Size.y * 0.5f);
+    io.AddMouseWheelEvent(0.0f, ticks);
+    return true;
+}
+
+bool gs_ui_probe_scroll_at(const char *window, float *now, float *max)
+{
+    if (ImGui::GetCurrentContext() == nullptr || window == nullptr) return false;
+    ImGuiWindow *w = ImGui::FindWindowByName(window);
+    if (w == nullptr) return false;
+    if (now != nullptr) *now = w->Scroll.y;
+    if (max != nullptr) *max = w->ScrollMax.y;
+    return true;
+}
+
 uint32_t gs_ui_probe_focused(void)
 {
     const ImGuiContext *ctx = ImGui::GetCurrentContext();

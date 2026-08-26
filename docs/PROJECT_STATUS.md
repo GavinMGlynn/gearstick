@@ -4297,10 +4297,9 @@ neither presses a clipped item nor counts it as offered.
 - **The pinned count moves down from 750 to 663**, which is the deliberate act
   the comment beside it demands. Eighty-seven of those 750 were rows scrolled
   out of sight.
-- **86 controls are drawn and out of reach**, counted where they can be seen.
-  This walk has no way to scroll - nothing here drags a scrollbar or turns a
-  wheel - so a library longer than the panel is tall keeps its tail to itself.
-  That is a new item in the plan.
+- **86 controls were drawn and out of reach**, counted where they could be
+  seen rather than folded in with the ones drawn dead. Reaching them is the
+  next section.
 - **The walk got cheaper and truer at once**: 6,264 states and 18,979 presses
   where it was 11,825 and 26,290, and the same 100% over a denominator that no
   longer includes things nobody can press.
@@ -4308,6 +4307,50 @@ neither presses a clipped item nor counts it as offered.
   reason: a seed that empties the library or leaves no track picked takes the
   detail panel away, and the table underneath grows tall enough to show rows
   that are otherwise below the fold.
+
+### The walk can scroll
+
+`0 controls drawn and out of reach`, down from 86, and the count of controls
+covered back up from 663 to **749**.
+
+A person reaches the bottom of a long list with the wheel, so this does: the
+mouse is put over the window and a wheel event queued, which is what a backend
+does when somebody turns it. It is the only mouse in the whole walk. The window
+is wound to the top first - ImGui keeps a window's scroll under its name and the
+walk has been through a great many screens by then - and then walked down a tick
+at a time. A tick is a fraction of the panel's height, so a row would have to be
+off the top at one stop and off the bottom at the next to be missed.
+
+**It is done in two passes, and the first version was wrong in a way worth
+recording.** It pressed as it went, and half the rows it reported covered had
+already slid away: on this screen picking a track opens the panel underneath it,
+which makes the list shorter, which makes ImGui clamp the scroll. So the
+wind-down now only writes down what it saw and how far down it was, and a second
+pass puts the state back, winds to that same place, and presses one row.
+
+Forty-eight of the rows it reached then did nothing when pressed, and every one
+of them was **the row that was already picked** - a track added by "Keep this
+one" picks itself. That is the ordinary case the retry above exists for, so the
+sweep hands those states to it, and the retry learned to wind a window too. All
+forty-eight woke up.
+
+**The seed menu is built once and copied.** Building it runs argon2 over 64 MB
+twice - once to hash the driver's password and once to check it on the way in -
+which is the point of argon2 and is most of a second under sanitizers. The walk
+seeds from it twelve times and the passes that go back to a state were building
+it again for every control they visited. Copying it instead took the suite from
+125 seconds to 47, and it has a second effect worth more than the speed: a
+password is hashed over a **random salt**, so two menus built from the same
+instructions used to differ in those bytes and in nothing else. Copying makes
+every seed byte-for-byte the menu the walk started from, so a path recorded
+during the walk now leads back to the identical state afterwards - which is
+asserted where it lands rather than assumed.
+
+One test had been resting on that difference: it proved that two rosters built
+from scratch are not the same state, by building two panel menus. It now makes
+two drivers itself, which is what the claim was always about.
+
+**Stopping the wheel from working puts all 86 back and turns the tree red.**
 
 ## Known risks
 

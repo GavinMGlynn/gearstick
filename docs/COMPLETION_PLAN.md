@@ -1096,14 +1096,14 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       the excuse is itself asserted, so the day it can be typed into, the tree
       goes red rather than quietly covering for whatever goes dead next. A
       button rigged to do nothing is named and turns the tree red.*
-- [ ] **The walk can scroll.** It cannot, and until now that was invisible:
-      a table hands ImGui every row it holds and ImGui drops the ones off the
-      bottom, so the walk was pressing rows that had already returned and
-      counting each as covered. Those presses are gone and the rows are counted
-      where they can be seen — **86 controls drawn and out of reach**, which is
-      most of a track library.
-      *Verification: the tail of a full library is pressed, and the count of
-      controls out of reach goes to nothing.*
+- [x] **The walk can scroll.** A person reaches the bottom of a long list with
+      the wheel, so the walk does: it winds a table to the top, walks down a
+      tick at a time, and presses everything that comes into view — which is how
+      the twenty-one tracks below the fold of a full library got pressed for the
+      first time.
+      *Verification: **0 controls drawn and out of reach**, down from 86, and
+      the count of controls covered comes back up from 663 to 749. Stopping the
+      wheel from working puts all 86 back and turns the tree red.*
 - [x] **The editor is walked by machine as well.** Nothing had ever pressed a
       button in it: `gs_editor_frame` was called in exactly one place in the
       whole repository and that place was `main.c`, so every control in the

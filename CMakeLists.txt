@@ -697,9 +697,13 @@ if(GEARSTICK_TESTS)
         # **Ten minutes, because this suite walks the whole front end.** It was
         # three, from when the heaviest thing here photographed a frame. It now
         # presses every control the front end offers, in every state it can find
-        # one in, under sanitizers - 111 seconds on the machine this was written
-        # on, and CI's machines are slower than that. A budget that fits locally
-        # and not on the runner is a red tree that says nothing about the code.
+        # one in, and winds every table down to reach the rows below the fold -
+        # under sanitizers, in 47 seconds on the machine this was written on,
+        # and CI's machines are slower than that. It was 111 seconds until the
+        # menu the walk seeds from stopped being rebuilt for every use: building
+        # it runs argon2 over 64 MB twice, which is the point of argon2 and is
+        # most of a second here. A budget that fits locally and not on the
+        # runner is a red tree that says nothing about the code.
         TIMEOUT 600)
 
     # A track through a real file, not just a buffer: the format is what a

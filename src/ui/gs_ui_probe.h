@@ -91,6 +91,21 @@ void gs_ui_probe_press(uint32_t id);
 // press-only walk gets carried through rather than opens.
 void gs_ui_probe_type(const char *text);
 
+// **The wheel, over a named window.** A table taller than the panel holding it
+// is not walked by pressing things: every row past the fold is submitted,
+// dropped for being off-screen, and unreachable by any key. The wheel is how a
+// person gets at them, so it is how the walk does - the mouse is put over the
+// window and a wheel event queued, which is exactly what a backend does when
+// somebody turns it. Nothing else in the walk uses a mouse.
+//
+// False if there is no window by that name.
+bool gs_ui_probe_wheel(const char *window, float ticks);
+
+// Where a named window is scrolled to, and how far it can go. `max` of zero
+// means everything it holds is already on screen. False if there is no such
+// window.
+bool gs_ui_probe_scroll_at(const char *window, float *now, float *max);
+
 // **Which control the keyboard is on**, as ImGui's own id for it - so a walk
 // that moves focus with Tab can say what it just pressed rather than counting
 // how many times it pressed Tab and hoping the order has not changed.
