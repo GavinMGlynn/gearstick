@@ -4233,9 +4233,10 @@ typedef struct gs_act {
 } gs_act;
 
 typedef struct gs_walk_path {
-    gs_act   act[GS_WALK_DEPTH];
-    int      len;
-    uint64_t hash;                  // what standing here hashed to when found
+    gs_act    act[GS_WALK_DEPTH];
+    int       len;
+    uint64_t  hash;                 // what standing here hashed to when found
+    gs_screen screen;               // and which screen that was
 } gs_walk_path;
 
 #define GS_WALK_CTRLS 4096          // a power of two, ids offered anywhere
@@ -4284,6 +4285,11 @@ typedef struct gs_walk {
     gs_screen    stop_at;           // give up the moment this is reached...
     bool         stop_set;          // ...if anybody asked for one
     bool         reached[GS_SCREEN_COUNT];
+
+    // **Where each press led.** The front end as a graph, which is what turns
+    // "the walk pressed everything" into statements about the game rather than
+    // about the walk.
+    bool         edge[GS_SCREEN_COUNT][GS_SCREEN_COUNT];
 } gs_walk;
 
 // Open addressing, and a zero slot means empty - so a hash of zero is nudged
@@ -4498,8 +4504,9 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
 
     w->head = 0;
     w->tail = 0;
-    w->queue[w->tail].len  = 0;
-    w->queue[w->tail].hash = 0;
+    w->queue[w->tail].len    = 0;
+    w->queue[w->tail].hash   = 0;
+    w->queue[w->tail].screen = from;
     w->tail++;
 
     {
@@ -4595,6 +4602,10 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
                 gs_walk_mark(w->pressed, acts[i].id, &w->n_pressed);
             }
             if (m.screen < GS_SCREEN_COUNT) w->reached[m.screen] = true;
+            if (here.screen < GS_SCREEN_COUNT && m.screen < GS_SCREEN_COUNT &&
+                m.screen != here.screen) {
+                w->edge[here.screen][m.screen] = true;
+            }
             if (w->stop_set && w->reached[w->stop_at]) return;
 
             const uint64_t h = gs_menu_hash(&m);
@@ -4640,7 +4651,8 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
             gs_walk_path next = here;
             next.act[next.len] = acts[i];
             next.len++;
-            next.hash = h;
+            next.hash   = h;
+            next.screen = m.screen;
             w->queue[w->tail++] = next;
         }
     }
@@ -5904,6 +5916,7 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // **One state per offering.** Every extra one is the whole path replayed
     // again for every control on it, and what this walk is counting is the
     // controls rather than the values behind them.
+    SDL_memset(w.edge, 0, sizeof w.edge);
     w.fine      = false;
     w.words     = 1;
     w.per_shape = 1;
@@ -5983,6 +5996,111 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // draws six of its controls disabled under conditions, and until the walk
     // was started from a menu where those conditions differ, their destinations
     // were not in the map at all.
+    // -----------------------------------------------------------------------
+    // **What the walk proves, said as properties of the front end.**
+    //
+    // Everything above is about the walk - how much of it was pressed, how far
+    // it got. These are about the game: each is a thing a player would notice
+    // going wrong, and each would be worth stating even if somebody had
+    // established it another way.
+    //
+    // Only screens the walk actually stood on are asked about. One it merely
+    // arrived at has no outgoing edges because nobody looked, and asking about
+    // it would be asking about the walk again.
+    // -----------------------------------------------------------------------
+
+    // **No screen is a trap.** At least one thing on it leads somewhere else.
+    //
+    // The sign-in door is the one exception and it is not skipped: leaving it
+    // means signing in, which wants a name and a password typed correctly, and
+    // this walk types one word into every box it meets. That the door opens is
+    // proved next door, by a walk carrying the vocabulary for it - see
+    // the_walk_signs_in_through_the_door_rather_than_being_put_behind_it.
+    int traps = 0;
+    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+        const gs_screen from = gs_every_screen[i];
+        if (!w.reached[from] || from == GS_SCREEN_LOGIN) continue;
+
+        int ways_off = 0;
+        for (int to = 0; to < GS_SCREEN_COUNT; to++) {
+            if (w.edge[from][to]) ways_off++;
+        }
+        if (ways_off == 0) {
+            printf("  TRAP screen %d has nothing on it that leaves\n", (int)from);
+            traps++;
+        }
+    }
+    printf("  WALK %d traps\n", traps);
+    CHECK(traps == 0);
+
+    // **The title is reachable from everywhere.** A screen you can leave and
+    // cannot get home from strands a player just as thoroughly as a trap.
+    int stranded = 0;
+    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+        const gs_screen from = gs_every_screen[i];
+        if (!w.reached[from] || from == GS_SCREEN_LOGIN) continue;
+
+        bool seen[GS_SCREEN_COUNT] = { false };
+        gs_screen queue[GS_SCREEN_COUNT];
+        int head = 0, tail = 0;
+        queue[tail++] = from;
+        seen[from] = true;
+
+        bool home = from == GS_SCREEN_TITLE;
+        while (head < tail && !home) {
+            const gs_screen at = queue[head++];
+            for (int to = 0; to < GS_SCREEN_COUNT && !home; to++) {
+                if (!w.edge[at][to] || seen[to]) continue;
+                if (to == GS_SCREEN_TITLE) { home = true; break; }
+                seen[to] = true;
+                queue[tail++] = (gs_screen)to;
+            }
+        }
+        if (!home) {
+            printf("  STRANDED screen %d cannot get home\n", (int)from);
+            stranded++;
+        }
+    }
+    printf("  WALK %d stranded\n", stranded);
+    CHECK(stranded == 0);
+
+    // **And everywhere is reachable from the title**, which is the other
+    // direction and a different claim: a screen nobody can get *to* is as
+    // broken as one nobody can leave, and only this half catches it.
+    //
+    // Two are named rather than counted. The results screen is arrived at by
+    // finishing a race and no button leads to it, which is right; and the
+    // sign-in door is arrived at by signing out, which this walk cannot undo.
+    {
+        bool seen[GS_SCREEN_COUNT] = { false };
+        gs_screen queue[GS_SCREEN_COUNT];
+        int head = 0, tail = 0;
+        queue[tail++] = GS_SCREEN_TITLE;
+        seen[GS_SCREEN_TITLE] = true;
+
+        while (head < tail) {
+            const gs_screen at = queue[head++];
+            for (int to = 0; to < GS_SCREEN_COUNT; to++) {
+                if (!w.edge[at][to] || seen[to]) continue;
+                seen[to] = true;
+                queue[tail++] = (gs_screen)to;
+            }
+        }
+
+        int unreachable = 0;
+        for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+            const gs_screen to = gs_every_screen[i];
+            if (!w.reached[to]) continue;
+            if (to == GS_SCREEN_RESULTS || to == GS_SCREEN_LOGIN) continue;
+            if (seen[to]) continue;
+            printf("  UNREACHABLE screen %d cannot be got to from the title\n",
+                   (int)to);
+            unreachable++;
+        }
+        printf("  WALK %d unreachable from the title\n", unreachable);
+        CHECK(unreachable == 0);
+    }
+
     const int revived = gs_walk_revived(&w);
     printf("  WALK %d controls dead in one state and pressed in another; "
            "%d of %d found only by seeding\n",

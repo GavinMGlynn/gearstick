@@ -127,7 +127,7 @@ void gs_ui_probe_settle(void)
 // --- The hooks themselves. Declared by imgui_internal.h, called by imgui.cpp
 //     when TestEngineHookItems is on, and by nothing at all when it is not.
 
-void ImGuiTestEngineHook_ItemAdd(ImGuiContext *, ImGuiID id, const ImRect &,
+void ImGuiTestEngineHook_ItemAdd(ImGuiContext *, ImGuiID id, const ImRect &bb,
                                  const ImGuiLastItemData *item_data)
 {
     if (gs_slot(id) != nullptr) return;      // already counted this frame
@@ -154,6 +154,21 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext *, ImGuiID id, const ImRect &,
     it->disabled  = (flags & ImGuiItemFlags_Disabled) != 0;
     it->reachable = (flags & ImGuiItemFlags_NoNav) == 0;
     it->typable   = false;
+    it->visible   = true;
+    it->heading   = false;
+
+    // The hook runs before ImGui's own clipping test, which is what makes a
+    // scrolled-away table row look like a control. The same test, made here.
+    if (ctx != nullptr && ctx->CurrentWindow != nullptr) {
+        it->visible = bb.Overlaps(ctx->CurrentWindow->ClipRect);
+    }
+
+    // Inside the row a table opened with ImGuiTableRowFlags_Headers, which is
+    // what TableHeadersRow() does and nothing else does.
+    if (ctx != nullptr && ctx->CurrentTable != nullptr) {
+        it->heading =
+            (ctx->CurrentTable->RowFlags & ImGuiTableRowFlags_Headers) != 0;
+    }
 }
 
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext *, ImGuiID id, const char *label,

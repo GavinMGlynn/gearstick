@@ -42,6 +42,14 @@ typedef enum gs_screen {
     GS_SCREEN_COUNT
 } gs_screen;
 
+// **What a screen is called, in one place.** The client's trace prints these
+// and `tools/play_check.py` makes assertions out of them, and the front-end
+// walk names screens with them when it reports a trap or a stranding - so a
+// second list somewhere else is a second list that drifts. The switch behind
+// it has no `default`, which means adding a screen and forgetting to name it
+// is a build failure rather than a "?" nobody notices.
+const char *gs_screen_name(gs_screen s);
+
 // What the setup screen has been told to do. Handed to the frontend, which
 // builds the world from it - so the menu never touches gs_world itself.
 // What a screen's panel came out as, measured as it was drawn.
@@ -329,6 +337,9 @@ int gs_menu_take_choice(gs_menu *m);
 
 // Work out the finishing order and submit anything worth submitting. Called
 // once, when a race ends.
+// **The race is over: build the table and show it.** Places, records, the
+// driver's tally - and the move to the results screen, which is part of
+// finishing rather than something the caller remembers to do afterwards.
 void gs_menu_finish(gs_menu *m, const gs_world *w, const gs_track *t);
 
 // A time as people say them: 1:02.35, or "-" for a car that never finished.

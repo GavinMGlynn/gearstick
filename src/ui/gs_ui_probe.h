@@ -42,6 +42,24 @@ typedef struct gs_ui_item {
     bool     disabled;            // drawn, but refusing to be pressed
     bool     reachable;           // the keyboard can land on it
     bool     typable;             // a box that takes text rather than a press
+
+    // **Submitted, and scrolled out of sight.** A table with a scrollbar still
+    // submits every row it holds, and ImGui reports each of them here before it
+    // decides they are off-screen and drops them - so a library of forty tracks
+    // comes back as forty rows whatever the window is tall enough to show. A
+    // clipped item cannot be pressed: activating it by id sets a flag the item
+    // never reads, because the item returns early. Counting one as a control
+    // the walk pressed is counting a press that did not happen, which is how a
+    // denominator quietly fills with things nobody can reach.
+    bool     visible;
+
+    // **A table's column heading is not a control.** ImGui submits the heading
+    // row as items, reachable and not disabled and looking exactly like
+    // buttons, and pressing one sorts the table - or does nothing at all, which
+    // is what happens here, because none of these tables is sortable. Told
+    // apart by what ImGui itself says the row is, rather than by a list of
+    // names in a test that would go stale the day a column is renamed.
+    bool     heading;
 } gs_ui_item;
 
 #ifdef __cplusplus

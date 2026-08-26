@@ -1073,12 +1073,27 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       the setup screen at four is a different screen from the one at two rather
       than the same screen with more rows. Controls reachable **only** by
       seeding went from 3 to 23.*
-- [ ] **What the walk proves, said as properties.** No screen without a way off
-      it — including the two exempt today; the title reachable from everywhere;
-      every screen reachable from the title; and no control that does nothing at
-      all in every state it can be pressed in.
-      *Verification: each property fails on its own when the rule behind it is
-      taken out.*
+- [x] **What the walk proves, said as properties.** Three of the four, asserted
+      against the graph the walk builds as it goes: **no screen is a trap**,
+      **the title is reachable from everywhere**, and **everywhere is reachable
+      from the title** — which is the other direction and a different claim, and
+      the only half that catches a screen nobody can get *to*.
+      *Verification: 0 traps, 0 stranded, 0 unreachable, over the eight screens
+      the walk stands on. Two are named rather than counted: the sign-in door,
+      which is left by typing a password and is proved by the door test next to
+      it, and the results screen, which is arrived at by finishing a race and
+      which no button leads to — correctly.*
+- [ ] **No control does nothing everywhere.** A control that never changed
+      anything in any state it was pressed in is either dead code or a button
+      that lies about being one. Doing nothing *sometimes* is ordinary — a Back
+      that is already back, a row already selected.
+      *Two things stand in the way and both were found by trying it: a table's
+      column headings and cell text come back from the probe looking exactly
+      like controls, so real ones want telling apart by something better than a
+      name; and a gravity preset on the setup screen came out of 26,000 presses
+      having never changed anything, which is either a dead button or a walk
+      that only pressed it while it was already chosen. That wants finding out
+      before anything is asserted.*
 - [x] **The editor is walked by machine as well.** Nothing had ever pressed a
       button in it: `gs_editor_frame` was called in exactly one place in the
       whole repository and that place was `main.c`, so every control in the

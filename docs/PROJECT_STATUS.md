@@ -4200,6 +4200,44 @@ cannot walk back past a load into somebody else's track. The first version of
 this test assumed the opposite, undid nothing, and reported a hundred and
 forty-seven corners still standing.
 
+### The front end as a graph
+
+The walk records where every press led, and three properties are asserted
+against that graph rather than against the walk itself. Each is a thing a player
+would notice going wrong:
+
+- **No screen is a trap** - every screen has at least one thing on it that
+  leads somewhere else.
+- **The title is reachable from everywhere** - a screen you can leave and cannot
+  get home from strands somebody as thoroughly as one you cannot leave.
+- **Everywhere is reachable from the title** - the other direction, and a
+  different claim. A screen nobody can get *to* is as broken as one nobody can
+  leave, and only this half catches it.
+
+`0 traps, 0 stranded, 0 unreachable`, over the eight screens the walk stands on.
+Screens it merely arrived at are not asked about: one nobody departed from has
+no outgoing edges because nobody looked, and asking would be asking about the
+walk again.
+
+**Two exemptions, named rather than counted.** The sign-in door is left by
+typing a name and a password correctly, and this walk types one word into every
+box it meets - that the door opens is proved next to it by the walk that carries
+the vocabulary for it. The results screen is arrived at by *finishing a race*:
+no button anywhere leads to it and none should.
+
+**The fourth property is not asserted yet, and that is deliberate.** "No control
+does nothing everywhere" is a good rule and trying it turned up two things
+first:
+
+- A table's column headings and the text in its cells - `by`, `best lap`,
+  `machine`, the name of a track - come back from the probe looking exactly like
+  controls. Telling real ones apart wants something better than a name.
+- **A gravity preset on the setup screen came out of 26,000 presses having never
+  changed anything.** That is either a button that does nothing or a walk that
+  only ever pressed it while it was already chosen. Which of the two it is wants
+  finding out, and asserting zero today would bury it as surely as asserting
+  nothing at all.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

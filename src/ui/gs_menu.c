@@ -2003,4 +2003,33 @@ void gs_menu_finish(gs_menu *m, const gs_world *w, const gs_track *t) {
                          r->place <= 3, r->wrecked, r->laps, gs_now());
         m->store_dirty = true;
     }
+
+    // **The chequered flag is a screen change, and it belongs here.** Every
+    // other move between screens is a decision the front end makes and can be
+    // asked about; this one was two assignments in the client's frame loop, so
+    // the results screen was the one screen nothing walking the menu could
+    // reach and the graph had a hole in it that no test could see. Setting it
+    // where the results are built costs nothing and makes "every screen is
+    // reachable from the title" a property rather than an exception.
+    //
+    // Abandoning a race is not finishing one - a client caught lying, or a
+    // machine gone quiet - and those still go to the results from where they
+    // are noticed, because there is nothing to build there.
+    m->screen = GS_SCREEN_RESULTS;
+}
+
+const char *gs_screen_name(gs_screen s) {
+    switch (s) {
+    case GS_SCREEN_LOGIN:    return "login";
+    case GS_SCREEN_TITLE:    return "title";
+    case GS_SCREEN_PROFILES: return "drivers";
+    case GS_SCREEN_SETUP:    return "setup";
+    case GS_SCREEN_RACE:     return "race";
+    case GS_SCREEN_RESULTS:  return "results";
+    case GS_SCREEN_RECORDS:  return "records";
+    case GS_SCREEN_LOBBY:    return "lobby";
+    case GS_SCREEN_TRACKS:   return "tracks";
+    case GS_SCREEN_COUNT:    break;      // not a screen; not nameable
+    }
+    return "?";
 }

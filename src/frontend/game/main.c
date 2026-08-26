@@ -1188,22 +1188,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 // pointed somewhere else, controls that did nothing, a wreck with no way out.
 // None of it is reachable from a unit test, because it is a property of what
 // ended up on the screen - so the client says what ended up on the screen, and
-// tools/play_check.py makes assertions out of it.
-static const char *gs_screen_name(gs_screen s) {
-    switch (s) {
-    case GS_SCREEN_LOGIN:    return "login";
-    case GS_SCREEN_TITLE:    return "title";
-    case GS_SCREEN_PROFILES: return "drivers";
-    case GS_SCREEN_SETUP:    return "setup";
-    case GS_SCREEN_RACE:     return "race";
-    case GS_SCREEN_RESULTS:  return "results";
-    case GS_SCREEN_RECORDS:  return "records";
-    case GS_SCREEN_LOBBY:    return "lobby";
-    case GS_SCREEN_TRACKS:   return "tracks";
-    default:                 return "?";
-    }
-}
-
+// tools/play_check.py makes assertions out of it. What the screens are called
+// lives with the screens, in gs_menu.h.
 static void gs_trace(gs_app *a, uint8_t views) {
     if (!a->trace) return;
 
@@ -1382,9 +1368,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         }
 
         a->race_settled = true;
-        gs_menu_finish(&a->menu, &a->world, &a->t);
+        gs_menu_finish(&a->menu, &a->world, &a->t);   // and it shows the results
         gs_store_save(a);
-        a->menu.screen = GS_SCREEN_RESULTS;
         SDL_Log("session: %u laps, winner %u, over %s",
                 a->menu.setup.laps, a->world.winner, a->world.over ? "yes" : "no");
     }
@@ -1452,7 +1437,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         // they never are, and the other machine can never confirm the finish -
         // a race that is correct everywhere except the end.
         if (a->online && a->net_started) gs_net_finish(&a->net);
-        gs_menu_finish(&a->menu, &a->world, &a->t);
+        gs_menu_finish(&a->menu, &a->world, &a->t);   // and it shows the results
         gs_store_save(a);
 
         // And to the server, with the inputs that produced it. The server
@@ -1473,7 +1458,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             gs_submit_result(a, &a->world);
         }
 
-        a->menu.screen = GS_SCREEN_RESULTS;
         steps = 0;
     }
 
