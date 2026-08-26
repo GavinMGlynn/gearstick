@@ -4352,6 +4352,65 @@ two drivers itself, which is what the claim was always about.
 
 **Stopping the wheel from working puts all 86 back and turns the tree red.**
 
+### A track built by hand, and two panels that did not fit
+
+There was already a test that built a track from nothing and raced it, and every
+step of it was a function call: `gs_editor_paint` at this tile, `gs_editor_save`,
+`gs_world_add_car`. That proves the model holds together and proves nothing at
+all about the construction set, because no button is pressed and no ground is
+dragged over - a brush unreachable from the palette passes it.
+
+The new one presses New on the screen about tracks, chooses each brush by
+pressing its button, shapes the ground by holding the mouse down and dragging
+across it, picks ice out of the surface list, winds the gravity brush down with
+the arrows, clicks a route, keeps the result in the library and types a name for
+it - and then races what came back out of the library. `2 gates, won on tick
+735`. The mouse goes through ImGui the way a backend reports one, and where a
+tile is on screen is found by moving the pointer and asking the editor what is
+under it, because the projection throws away the dimension the answer depends
+on.
+
+Three things it needed that are worth recording:
+
+- **The client's four lines.** The view carries the camera and the editor
+  carries where it is looking; the client copies one into the other every frame.
+  Without it the camera is a zero, every pixel maps to the same nowhere, and the
+  pointer is never over any tile at all - the panels work perfectly and nothing
+  can be painted.
+- **Two controls on the palette are called "surface"** - the brush and the list
+  of grounds it paints - so which is which is settled by pressing each and
+  seeing which one offers ice.
+- **The brush's gravity is not the race dial.** The planets set what a race runs
+  at; the brush paints its own value into the ground, and it starts at Earth, so
+  painting with it untouched would prove nothing.
+
+**And it found two layout faults, both real, both invisible from the one state
+the panel test used to measure.**
+
+The first stopped this test dead: with nothing chosen, the box under THIS ONE
+was given a height of zero, and a child asked for a height of zero does not take
+none of the panel - it takes **all of what is left**. The box swallowed the space
+under it and the two rows of buttons went past the bottom of the panel. It now
+draws no box at all when there is nothing to put in one, which is what the
+sizing already assumed.
+
+The second came from measuring **every screen from every state the walk is
+seeded in**, which is what that test now does - 96 measurements over 12 starting
+states, where it was 9 over one. The setup panel was a fixed six hundred pixels
+at every player count, and the grid draws a row per driver: at three drivers
+thirty-five pixels were below the fold and at four, seventy-two, with the Race
+button on the far side of it. The panel is now sized from its own rows.
+
+Two more properties came out of the same work. The walk asserts that **nothing
+is drawn off a panel that cannot scroll** - a control there is not scrolled past,
+it is gone - and it stands at zero. And the fourth property gained a second
+exemption, which is asserted as a *condition* rather than a name: **a row that is
+the only entry in the library and is the one chosen**. Nothing on that screen can
+un-choose it, there being no other row to pick and keeping the loaded track again
+folding into the entry already there. A list of one, already selected, is the
+ordinary case the rule was written to allow; the same row going quiet in a
+library of thirty-two is not excused by anything.
+
 ### Every value of every dial
 
 `106 of 106 values pressed`, on the screen rather than set in the struct behind

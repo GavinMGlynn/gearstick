@@ -814,7 +814,19 @@ static gs_screen gs_profiles_screen(gs_menu *m) {
 
 static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
     gs_screen next = GS_SCREEN_SETUP;
-    gs_centre_window("setup", 760.0f, 600.0f);
+    // **One row per driver, so the panel is that much taller.** The grid draws
+    // a row for every car in the race - two combo boxes and sixteen paint
+    // swatches - and this window was a fixed six hundred pixels whatever the
+    // count. At three drivers thirty-five pixels of it were below the bottom
+    // edge and at four, seventy-two: a panel that cannot be moved or resized,
+    // with the Race button on the far side of the fold. Found by measuring
+    // every screen from every state the walk is seeded in rather than from the
+    // one state that happened to be two.
+    #define GS_SETUP_CHROME 528.0f      // everything above and below the grid
+    const float grid_row = ImGui_GetFrameHeight() + ImGui_GetStyle()->ItemSpacing.y;
+    const int   grid_rows = m->setup.players > 0 ? (int)m->setup.players : 1;
+    gs_centre_window("setup", 760.0f,
+                     GS_SETUP_CHROME + grid_row * (float)grid_rows);
 
     if (ImGui_Begin("Race setup", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -1629,15 +1641,28 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
         gs_heading("THIS ONE");
 
         gs_follow_selection(m);
-        ImGui_BeginChild("detail", (ImVec2){ 0.0f, detail_h },
-                         ImGuiChildFlags_None, ImGuiWindowFlags_None);
         const gs_library_entry *picked = gs_library_at(&m->library, m->picked);
+
+        // **No box at all when there is nothing to put in it**, rather than a
+        // box of no height.
+        //
+        // The panel is sized without the detail box when nothing is chosen -
+        // that is what `detail_h` being zero means - and a child asked for a
+        // height of zero does not take none of the panel, it takes **all of
+        // what is left**. So the box swallowed the space under it and the two
+        // rows of buttons beneath, New and Back among them, were laid out past
+        // the bottom edge of a window that cannot be moved, resized or
+        // scrolled. Nothing drew wrong; everything was simply somewhere nobody
+        // could press it. Found by a machine building a track and then trying
+        // to keep it.
         if (picked == nullptr) {
             ImGui_PushStyleColorImVec4(ImGuiCol_Text,
                                        ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
             ImGui_TextUnformatted("Nothing chosen.");
             ImGui_PopStyleColor();
         } else {
+            ImGui_BeginChild("detail", (ImVec2){ 0.0f, detail_h },
+                             ImGuiChildFlags_None, ImGuiWindowFlags_None);
             ImGui_Text("%u x %u, %u gates, %016llx", picked->track.w,
                        picked->track.h, picked->track.gate_count,
                        (unsigned long long)picked->hash);
@@ -1720,9 +1745,8 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
                     }
                 }
             }
+            ImGui_EndChild();
         }
-
-        ImGui_EndChild();
 
         ImGui_Dummy((ImVec2){ 0.0f, 8.0f });
         ImGui_Separator();

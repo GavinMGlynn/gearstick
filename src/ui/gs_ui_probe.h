@@ -106,6 +106,10 @@ bool gs_ui_probe_wheel(const char *window, float ticks);
 // window.
 bool gs_ui_probe_scroll_at(const char *window, float *now, float *max);
 
+// Where a window ended up and whether it is folded shut.
+bool gs_ui_probe_window_box(const char *window, float *x, float *y,
+                            float *w, float *h, bool *collapsed);
+
 // **Which control the keyboard is on**, as ImGui's own id for it - so a walk
 // that moves focus with Tab can say what it just pressed rather than counting
 // how many times it pressed Tab and hoping the order has not changed.

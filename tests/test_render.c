@@ -4317,7 +4317,9 @@ typedef struct gs_walk_named {
     gs_screen    from;
     bool         idled;         // pressing it there changed nothing
     bool         hidden;        // it was drawn there, scrolled out of sight
+    bool         stranded;      // drawn off a panel that cannot scroll
     int          tick;          // and how far down the window it was found
+    int          company;       // how many other live controls stood with it
 } gs_walk_named;
 
 typedef struct gs_walk {
@@ -4335,6 +4337,7 @@ typedef struct gs_walk {
     // four, most of them a table row that was simply scrolled past.
     uint32_t     unseen[GS_WALK_CTRLS];
     int          n_offered, n_pressed, n_never, n_unseen;
+    int          n_stranded;    // drawn where no scroll and no key can reach
 
     // **What a press did, as against that it happened.** `pressed` is a fact
     // about the walk. `moved` is a fact about the front end: pressing this
@@ -4457,7 +4460,9 @@ static void gs_walk_note(gs_walk *w, const gs_ui_item *it) {
     w->named[i].heading = it->heading;
     w->named[i].idled   = false;
     w->named[i].hidden  = false;
+    w->named[i].stranded = false;
     w->named[i].tick    = 0;
+    w->named[i].company = -1;
 }
 
 // The record for an id, or nothing if the walk never saw it.
@@ -4717,9 +4722,31 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
         // back to it, in case nowhere else ever puts it on screen - which is
         // the case for most of a track library, because a walk that only
         // presses things never moves a table.
+        //
+        // **And if the window it is in does not scroll, it is not scrolled
+        // past - it is simply gone.** No wheel reaches it, no key reaches it,
+        // and no amount of walking will; the screen has laid a control out
+        // somewhere nobody can press it, in this state, for good. That is a
+        // fault in the screen rather than a gap in the walk, so it is counted
+        // apart and asserted at zero.
         for (int i = 0; i < held; i++) {
             if (items[i].visible) continue;
             if (!items[i].reachable || items[i].disabled) continue;
+
+            float scroll = 0.0f, reach = 0.0f;
+            if (gs_ui_probe_scroll_at(items[i].window, &scroll, &reach) &&
+                reach <= 0.0f) {
+                gs_walk_named *lost = gs_walk_named_of(w, items[i].id);
+                if (lost == nullptr || !lost->stranded) {
+                    w->n_stranded++;
+                    printf("  OFF THE PANEL '%s' in '%s' on screen %s, where "
+                           "nothing scrolls\n",
+                           items[i].label[0] != '\0' ? items[i].label : "(unnamed)",
+                           items[i].window, gs_screen_name(m.screen));
+                }
+                if (lost != nullptr) lost->stranded = true;
+            }
+
             gs_walk_note(w, &items[i]);
             gs_walk_named *nm = gs_walk_named_of(w, items[i].id);
             if (nm == nullptr || nm->hidden || nm->idled) continue;
@@ -4736,6 +4763,14 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
         // button for it.
         static gs_act acts[GS_UI_MAX_ITEMS * 3 + 8];
         int n_acts = 0;
+
+        // How much company a control has here, for the retry to choose the
+        // state it goes back to.
+        int live = 0;
+        for (int i = 0; i < held; i++) {
+            if (items[i].reachable && !items[i].disabled && items[i].visible) live++;
+        }
+
         for (int i = 0; i < held; i++) {
             if (!items[i].reachable || items[i].disabled) continue;
             if (!items[i].visible) continue;      // it has already returned
@@ -4805,18 +4840,27 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
 
                 // Where it was standing when it did nothing, kept so that a
                 // control which does nothing *everywhere* can be tried again
-                // here rather than described as dead on this evidence. The
-                // last one wins, and one is all that is needed: what makes the
-                // difference is what else is on the screen, and that is the
-                // same wherever this control is drawn.
+                // here rather than described as dead on this evidence.
+                //
+                // **The busiest screen it did nothing on wins.** Not the
+                // first and not the last: what the retry has to work with is
+                // the *other* controls standing there, because what wakes a row
+                // that is already picked is pressing a different row.
+                //
+                // A library the walk had emptied down to one entry is the worst
+                // possible place to ask - the only track there is is the one
+                // that is picked, and nothing on the screen can un-pick it. The
+                // same row with thirty-one others beside it is woken by any of
+                // them.
                 if (acts[i].id != 0 && acts[i].word < 0 && acts[i].key == 0 &&
                     !gs_walk_has(w->moved, acts[i].id)) {
                     gs_walk_named *nm = gs_walk_named_of(w, acts[i].id);
-                    if (nm != nullptr) {
-                        nm->where = here;
-                        nm->seed  = w->seed_at;
-                        nm->from  = w->seed_from;
-                        nm->idled = true;
+                    if (nm != nullptr && live > nm->company) {
+                        nm->where   = here;
+                        nm->seed    = w->seed_at;
+                        nm->from    = w->seed_from;
+                        nm->company = live;
+                        nm->idled   = true;
                     }
                 }
                 continue;
@@ -5209,7 +5253,8 @@ static float gs_walk_wind(gs_ui *ui, const char *window, int tick, float want,
 // that stands in every state of every offering, which was measured: it does not
 // finish in ten minutes where this finishes in one.
 static bool gs_walk_retry(gs_ui *ui, gs_track *t, SDL_Renderer *ren,
-                          const gs_walk_named *nm, int *acted, const char **how)
+                          const gs_walk_named *nm, int *acted, const char **how,
+                          gs_menu *stood)
 {
     static gs_menu seed, m, at;
     static gs_ui_item items[GS_UI_MAX_ITEMS];
@@ -5218,6 +5263,7 @@ static bool gs_walk_retry(gs_ui *ui, gs_track *t, SDL_Renderer *ren,
     gs_seeds[nm->seed].set(&seed);
     gs_walk_to(ui, &m, &seed, nm->from, &nm->where, t, ren);
     at = m;
+    if (stood != nullptr) *stood = at;
 
     // Where in the window it was, for the ones that live below the fold. A
     // control the walk only ever reached by winding a table down has to be
@@ -5276,6 +5322,7 @@ static bool gs_walk_retry(gs_ui *ui, gs_track *t, SDL_Renderer *ren,
     }
 
     // --- and after each of the others in turn
+    int tried = 0;
     for (int i = 0; i < held; i++) {
         if (items[i].id == nm->id) continue;
         if (!items[i].reachable || items[i].disabled || !items[i].visible) continue;
@@ -5300,8 +5347,9 @@ static bool gs_walk_retry(gs_ui *ui, gs_track *t, SDL_Renderer *ren,
         gs_act_do(ui, &then);
         (*acted)++;
         if (gs_menu_hash(&m) != between) { *how = "after another control"; return true; }
+        tried++;
     }
-
+    (void)tried;
     return false;
 }
 
@@ -5412,12 +5460,13 @@ static bool gs_walk_reach(gs_ui *ui, gs_track *t, SDL_Renderer *ren,
             // question, not this one's - so where it stands is written down the
             // same way the walk writes it down, with how far to wind.
             gs_walk_named *did = gs_walk_named_of(w, seen[k].id);
-            if (did != nullptr && !did->idled) {
-                did->where = nm->where;
-                did->seed  = nm->seed;
-                did->from  = nm->from;
-                did->tick  = seen[k].tick;
-                did->idled = true;
+            if (did != nullptr && found > did->company) {
+                did->where   = nm->where;
+                did->seed    = nm->seed;
+                did->from    = nm->from;
+                did->tick    = seen[k].tick;
+                did->company = found;
+                did->idled   = true;
             }
         }
         if (seen[k].id == nm->id) got = true;
@@ -5475,6 +5524,18 @@ static void gs_ed_frame(gs_ed *ed) {
     // activating nothing: the palette enumerates perfectly and every press
     // lands on the floor.
     ImGui_GetIO()->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    // **The client's four lines, which the editor cannot do for itself.** The
+    // view carries the camera and the editor carries where it is looking; the
+    // client copies one into the other every frame. Without it the camera is a
+    // zero, and a zero camera means every pixel maps to the same nowhere - the
+    // panels all work and the pointer can never be over any tile at all.
+    ed->view.cam.cx   = ed->e->cam_x;
+    ed->view.cam.cy   = ed->e->cam_y;
+    ed->view.cam.cz   = 0.0f;
+    ed->view.cam.zoom = ed->e->zoom;
+    ed->view.cam.vw   = (float)ed->view.rect.w;
+    ed->view.cam.vh   = (float)ed->view.rect.h;
 
     cImGui_ImplSDLRenderer3_NewFrame();
     cImGui_ImplSDL3_NewFrame();
@@ -6389,6 +6450,339 @@ static void gs_dial_press(gs_ui *ui, uint32_t id) {
     gs_act_do(ui, &a);
 }
 
+// The mouse, reported the way a backend reports it. The editor reads it through
+// ImGui rather than from SDL, so this is the same road a real pointer travels.
+static void gs_ed_point(gs_ed *ed, float sx, float sy) {
+    ImGuiIO *io = ImGui_GetIO();
+    ImGuiIO_AddMousePosEvent(io, sx, sy);
+    gs_ed_frame(ed);
+}
+
+static void gs_ed_button(gs_ed *ed, bool down) {
+    ImGuiIO *io = ImGui_GetIO();
+    ImGuiIO_AddMouseButtonEvent(io, ImGuiMouseButton_Left, down);
+    gs_ed_frame(ed);
+}
+
+// **Put the pointer over a given tile**, by moving it and looking at where the
+// editor says it now is.
+//
+// Nothing here works out the screen position of a tile from the projection: the
+// projection throws away a dimension and the answer depends on the height of
+// the ground, which is the thing being changed. So the pointer is moved, the
+// editor is asked what is under it, and the difference is converted back to
+// pixels with the one relation that is exact - the diamond - and applied again.
+// Two or three passes on flat ground, a few more on a ramp.
+static bool gs_ed_over(gs_ed *ed, float tx, float ty) {
+    float sx = (float)ed->view.rect.w * 0.5f;
+    float sy = (float)ed->view.rect.h * 0.5f;
+
+    for (int i = 0; i < 32; i++) {
+        gs_ed_point(ed, sx, sy);
+        if (!ed->e->hover_on) {
+            // Off the track, or over a panel: back towards the middle and try
+            // again from there.
+            sx = (sx + (float)ed->view.rect.w * 0.5f) * 0.5f;
+            sy = (sy + (float)ed->view.rect.h * 0.5f) * 0.5f;
+            continue;
+        }
+        const float dx = tx - ed->e->hover_x;
+        const float dy = ty - ed->e->hover_y;
+        if (SDL_fabsf(dx) < 0.35f && SDL_fabsf(dy) < 0.35f) return true;
+
+        sx += (dx - dy) * (GS_ISO_TILE_W * 0.5f) * ed->e->zoom;
+        sy += (dx + dy) * (GS_ISO_TILE_H * 0.5f) * ed->e->zoom;
+    }
+    return false;
+}
+
+// One click: down and up without moving, which is one gate rather than one for
+// every frame the button was held.
+static bool gs_ed_click(gs_ed *ed, float tx, float ty) {
+    if (!gs_ed_over(ed, tx, ty)) return false;
+    gs_ed_button(ed, true);
+    gs_ed_button(ed, false);
+    return true;
+}
+
+// One stroke: down on the first tile, dragged across the rest, up at the end -
+// which is also one undo step, because that is what the editor makes of a drag.
+static bool gs_ed_drag(gs_ed *ed, float x0, float y0, float x1, float y1, int steps) {
+    if (!gs_ed_over(ed, x0, y0)) return false;
+    gs_ed_button(ed, true);
+
+    for (int i = 1; i <= steps; i++) {
+        const float f = (float)i / (float)steps;
+        if (!gs_ed_over(ed, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)) {
+            gs_ed_button(ed, false);
+            return false;
+        }
+    }
+    gs_ed_button(ed, false);
+    return true;
+}
+
+// What the editor is showing, the same question the walk asks of a menu.
+static int gs_walk_controls_ed(gs_ed *ed, gs_ui_item *into, int cap) {
+    gs_ui_probe_start(into, cap);
+    gs_ui_probe_frame();
+    gs_ed_frame(ed);
+    const int n = gs_ui_probe_count();
+    gs_ui_probe_stop();
+    return n;
+}
+
+// Press a named control in the editor's panels.
+static bool gs_ed_press_named(gs_ed *ed, const char *label) {
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+    const int n = gs_walk_controls_ed(ed, items, GS_UI_MAX_ITEMS);
+
+    uint32_t at = 0;
+    for (int i = 0; i < n && i < GS_UI_MAX_ITEMS; i++) {
+        if (!items[i].visible || items[i].disabled || !items[i].reachable) continue;
+        if (SDL_strcmp(items[i].label, label) == 0) at = items[i].id;
+    }
+    if (at == 0) return false;
+
+    gs_ui_probe_press(at);
+    gs_ed_frame(ed);
+    gs_ed_frame(ed);
+    return true;
+}
+
+TEST(a_track_is_built_named_saved_and_raced_by_pressing_and_dragging) {
+    // **The whole loop, done the way a player does it.**
+    //
+    // There is a test beside this one that builds a track from nothing and
+    // races it, and every step of it is a function call: `gs_editor_paint` at
+    // this tile, `gs_editor_save`, `gs_world_add_car`. That proves the model
+    // holds together and proves nothing at all about the construction set,
+    // because no button is pressed and no ground is dragged over. A brush that
+    // is unreachable from the palette passes it.
+    //
+    // This one presses New, chooses each brush by pressing its button, shapes
+    // the ground by holding the mouse down and dragging across it, picks ice
+    // out of the surface list, sets the gravity dial from a planet, lays a
+    // route, keeps the result in the library, types a name for it - and then
+    // races what came back out of the library. The only steps not performed by
+    // pressing something are the two the client itself performs, and they are
+    // named where they happen.
+    static gs_menu m;
+    static gs_track t;
+    gs_panel_menu(&m, &t);
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    gs_ui ui;
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+
+    // --- **New**, pressed on the screen about tracks. ------------------------
+    m.screen = GS_SCREEN_TRACKS;
+    gs_ui_probe_settle();
+    gs_ui_begin(&ui, &m, &t, ren);
+    {
+        const uint32_t at = gs_dial_nth(&ui, items, "New", 0);
+        CHECK(at != 0);
+        gs_dial_press(&ui, at);
+    }
+    CHECK(m.new_requested);
+
+    // The client's own answer to that button, which is two lines in main.c: a
+    // blank field of the size New gives, and the construction set opened on it.
+    // Everything after this is done by hand on the screen.
+    m.new_requested = false;
+    gs_track_init(&t, 48, 40, GS_SURF_PAVEMENT);
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_NO_START);
+
+    static gs_editor e;
+    CHECK(gs_editor_init(&e, 65536));
+    static gs_ed ed;
+    ed.e = &e;
+    ed.t = &t;
+    ed.view = (gs_view){ 0 };
+    ed.view.rect = (SDL_Rect){ 0, 0, 1280, 720 };
+    ed.input = (gs_input_state){ 0 };
+    gs_bind_defaults(&ed.input.bind);
+    gs_editor_toggle(&e, &ed.view);
+    CHECK(e.active);
+    gs_ed_frame(&ed);
+    gs_ed_frame(&ed);
+
+    // --- **Shape the ground**, with the brush chosen off the palette. --------
+    CHECK(gs_ed_press_named(&ed, "raise"));
+    CHECK(e.brush == GS_BRUSH_RAISE);
+
+    const uint64_t before_ridge = gs_track_hash(&t);
+    CHECK(gs_ed_drag(&ed, 20.0f, 14.0f, 20.0f, 26.0f, 12));
+    CHECK(gs_track_hash(&t) != before_ridge);
+    CHECK(gs_track_height(&t, GS_INT(20), GS_INT(20)) > 0);
+
+    // A drag is one undo step however many tiles it crossed, and undo is a
+    // button on the same panel - pressed here rather than called, because a
+    // history nobody can reach is not a history.
+    CHECK(gs_ed_press_named(&ed, "undo"));
+    CHECK(gs_track_hash(&t) == before_ridge);
+    CHECK(gs_ed_press_named(&ed, "redo"));
+    CHECK(gs_track_hash(&t) != before_ridge);
+    const uint64_t ridge = gs_track_hash(&t);
+
+    // --- **Ice, onto the ridge rather than beside it.** ----------------------
+    CHECK(gs_ed_press_named(&ed, "surface"));
+    CHECK(e.brush == GS_BRUSH_SURFACE);
+
+    // The surface list is a combo, which ImGui does not name; it is found by
+    // opening things until the surfaces turn up, and the surfaces are named.
+    //
+    //     **Two controls on this panel are called "surface"** - the brush and
+    //     the list of grounds it paints - so which is which is settled by
+    //     pressing each and seeing which one offers ice.
+    {
+        static uint32_t both[GS_UI_MAX_ITEMS];
+        int count = 0;
+        const int n = gs_walk_controls_ed(&ed, items, GS_UI_MAX_ITEMS);
+        for (int i = 0; i < n && i < GS_UI_MAX_ITEMS; i++) {
+            if (!items[i].visible || items[i].disabled || !items[i].reachable) continue;
+            if (SDL_strcmp(items[i].label, "surface") != 0) continue;
+            both[count++] = items[i].id;
+        }
+        CHECK(count >= 1);
+
+        bool picked = false;
+        for (int i = 0; i < count && !picked; i++) {
+            gs_ui_probe_settle();
+            gs_ed_frame(&ed);
+            gs_ui_probe_press(both[i]);
+            gs_ed_frame(&ed);
+            gs_ed_frame(&ed);
+            if (!gs_ed_press_named(&ed, gs_surfaces[GS_SURF_ICE].name)) continue;
+            picked = e.surface == (int)GS_SURF_ICE;
+        }
+        gs_ui_probe_settle();
+        gs_ed_frame(&ed);
+        CHECK(picked);
+        CHECK(e.brush == GS_BRUSH_SURFACE);
+    }
+    CHECK(gs_ed_drag(&ed, 20.0f, 16.0f, 20.0f, 24.0f, 8));
+    CHECK(gs_track_surface(&t, GS_INT(20) + GS_ONE / 2,
+                           GS_INT(20) + GS_ONE / 2) == GS_SURF_ICE);
+    CHECK(gs_track_hash(&t) != ridge);
+
+    // --- **A low-gravity pocket over the jump**, from a planet on the dial. --
+    CHECK(gs_ed_press_named(&ed, "Moon"));
+    CHECK(SDL_fabsf(e.dial_gravity - gs_to_f(gs_gravity_presets[1].scale)) < 0.001f);
+    CHECK(gs_ed_press_named(&ed, "gravity"));
+    CHECK(e.brush == GS_BRUSH_GRAVITY);
+
+    // **The brush carries its own gravity and it is not the race dial.** The
+    // dial the planets set is what a race runs at; this slider is what the
+    // brush paints into the ground, and it starts at Earth - so painting with
+    // it untouched would change nothing and prove nothing. Wound down the way a
+    // person without a mouse winds a slider.
+    {
+        static gs_ui_item pal[GS_UI_MAX_ITEMS];
+        const int n = gs_walk_controls_ed(&ed, pal, GS_UI_MAX_ITEMS);
+        uint32_t at = 0;
+        for (int i = 0; i < n && i < GS_UI_MAX_ITEMS; i++) {
+            if (!pal[i].visible || pal[i].disabled || !pal[i].reachable) continue;
+            if (SDL_strcmp(pal[i].label, "gravity (x)") == 0) at = pal[i].id;
+        }
+        CHECK(at != 0);
+        for (int i = 0; i < 20 && e.gravity > 0.3f; i++) {
+            gs_ui_probe_press(at);
+            gs_ed_frame(&ed);
+            ImGuiIO_AddKeyEvent(ImGui_GetIO(), ImGuiKey_LeftArrow, true);
+            gs_ed_frame(&ed);
+            ImGuiIO_AddKeyEvent(ImGui_GetIO(), ImGuiKey_LeftArrow, false);
+            gs_ed_frame(&ed);
+        }
+        CHECK(e.gravity < 1.0f);
+    }
+
+    CHECK(gs_ed_drag(&ed, 20.0f, 18.0f, 20.0f, 22.0f, 4));
+    CHECK(gs_track_gravity(&t, GS_INT(20) + GS_ONE / 2,
+                           GS_INT(20) + GS_ONE / 2) < GS_ONE);
+
+    // --- **A route**, which is what turns a field with scenery into a track. -
+    CHECK(gs_ed_press_named(&ed, "gate"));
+    CHECK(e.brush == GS_BRUSH_GATE);
+    CHECK(gs_ed_click(&ed, 10.0f, 20.0f));
+    CHECK(gs_ed_click(&ed, 34.0f, 20.0f));
+    CHECK(t.gate_count == 2);
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+    const uint64_t built = gs_track_hash(&t);
+
+    // --- **Kept, and named**, on the screen about tracks. --------------------
+    gs_editor_toggle(&e, &ed.view);
+    CHECK(!e.active);
+
+    m.screen = GS_SCREEN_TRACKS;
+    gs_ui_probe_settle();
+    gs_ui_begin(&ui, &m, &t, ren);
+
+    // A library with room in it. The one this menu was built with is deliberately
+    // full - it is the size the tracks screen is measured at - and a full
+    // library refuses in words rather than losing what was built.
+    m.library.count = 0;
+    m.picked = -1;
+
+    const uint16_t was = m.library.count;
+    {
+        const uint32_t at = gs_dial_nth(&ui, items, "Keep this one", 0);
+        CHECK(at != 0);
+        gs_dial_press(&ui, at);
+    }
+    CHECK(m.library.count == (uint16_t)(was + 1));
+    CHECK(m.picked == (int)was);
+
+    // The name box is a box: pressed, then typed into, then committed - which
+    // is what a person does and what the walk does to every box it meets.
+    {
+        const uint32_t at = gs_dial_nth(&ui, items, "##name", 0);
+        CHECK(at != 0);
+        const gs_act typed = { at, 0, 0 };      // the first word the walk knows
+        gs_act_do(&ui, &typed);
+    }
+
+    const gs_library_entry *kept = gs_library_at(&m.library, m.picked);
+    CHECK(kept != nullptr);
+    if (kept == nullptr) { gs_editor_quit(&e); return; }
+    CHECK(SDL_strcmp(kept->name, gs_walk_words[0]) == 0);
+
+    // **What is in the library is what was built**, hash for hash, with the ice
+    // on the ridge and the low gravity over it.
+    CHECK(gs_track_hash(&kept->track) == built);
+    CHECK(gs_track_validate(&kept->track).problem == GS_TRACK_OK);
+
+    // --- **And raced**, on the track that came back out of the library. ------
+    static gs_track raced;
+    raced = kept->track;
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+
+    gs_fix sx, sy;
+    gs_angle heading;
+    gs_track_grid(&raced, 0, &sx, &sy, &heading);
+    gs_world_add_car(&w, &raced, (uint8_t)GS_VEH_SPRINT_CAR, sx, sy, heading);
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * 60u * 10u && !w.over; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &raced, in);
+    }
+
+    CHECK(w.over);
+    CHECK(w.winner == 0);
+    printf("  BUILT a track by hand: %u gates, won on tick %u\n",
+           raced.gate_count, w.car[0].finish_tick);
+
+    gs_editor_quit(&e);
+}
+
 TEST(every_value_of_every_dial_is_pressed_not_three_interesting_ones) {
     // **Every value of every dial the setup screen offers, pressed on the
     // screen rather than set in the struct behind it - and the range walked is
@@ -6722,6 +7116,7 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     w.n_pressed = 0;
     w.n_never   = 0;
     w.n_unseen  = 0;
+    w.n_stranded = 0;
     w.n_moved   = 0;
     w.states    = 0;
     w.typed     = 0;
@@ -6796,6 +7191,16 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     printf("  WALK %d controls wound onto the screen with the wheel, in %d "
            "actions; %d still out of reach\n", wound, wheeling, out_of_reach);
 
+    // **Nothing is laid out off the edge of a panel that cannot scroll.** The
+    // tracks screen did exactly that with nothing chosen: the box under THIS
+    // ONE was given a height of zero, which in ImGui means every pixel that is
+    // left, so the two rows of buttons under it - New and Back among them -
+    // were laid out past the bottom of a window that cannot be moved, resized
+    // or scrolled. Everything drew correctly and none of it could be pressed.
+    printf("  WALK %d controls drawn off a panel that cannot scroll\n",
+           w.n_stranded);
+    CHECK(w.n_stranded == 0);
+
     printf("  WALK total: %d states, %d actions (%d typed), "
            "%d of %d pressable controls pressed, %d never pressable, "
            "%d drawn but out of reach\n",
@@ -6843,13 +7248,16 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // out put the number where it honestly stood, at 663. Winding the tables
     // with the wheel then reached them for real and it came back to 749.
     //
-    // Not to 750, and the missing one is not a control that went away: dropping
-    // eighty-seven presses from every state that had them changes the order the
-    // walk explores in, and with one state allowed per offering a different
-    // order reaches a different set of states. That is what a floor is for. It
-    // is a tripwire against the number quietly falling, not a claim that this
-    // walk and the last one visit the same places.
-    CHECK(w.n_offered >= 749);
+    // It came back to 749 rather than 750, which is not a control that went
+    // away: dropping eighty-seven presses from every state that had them
+    // changes the order the walk explores in, and with one state allowed per
+    // offering a different order reaches a different set of states. The
+    // seven-hundred-and-fiftieth came back with the setup panel's height, once
+    // that stopped being a fixed six hundred pixels at every player count.
+    //
+    // That is what a floor is for: a tripwire against the number quietly
+    // falling, not a claim that two walks visit the same places.
+    CHECK(w.n_offered >= 750);
 
     // **The controls that are dead in one state and live in another.** This is
     // the number the seeding is for, and it is what a walk from a single
@@ -6990,6 +7398,17 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
         { "##code", "Tracks/detail",
           "read-only: a box to copy the track out of", false },
     };
+
+    // **And one excused by the state it was found in rather than by its name.**
+    //
+    // A row that is the only entry in the library, and is the entry chosen.
+    // Nothing on that screen can un-choose it: there is no other row to pick,
+    // and keeping the loaded track again folds into the entry that is already
+    // there, because a track is known by what it is. A list of one, already
+    // selected, is the ordinary case the rule is written to allow - and this is
+    // asserted as a condition, so the same row going quiet in a library with
+    // thirty-two entries in it is not excused by anything.
+    int excused_alone = 0;
     static bool excused_used[SDL_arraysize(excused_start)];
     SDL_memset(excused_used, 0, sizeof excused_used);
 
@@ -7012,9 +7431,19 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
             // It did nothing everywhere the walk stood. That is not an answer
             // yet - go back and try it properly.
             const char *how = "";
-            if (nm->idled && gs_walk_retry(&ui, &t, ren, nm, &tries, &how)) {
+            static gs_menu stood;
+            if (nm->idled &&
+                gs_walk_retry(&ui, &t, ren, nm, &tries, &how, &stood)) {
                 printf("  WOKE  %-24s %-26s by %s\n", nm->label, nm->window, how);
                 woken++;
+                continue;
+            }
+
+            if (nm->idled && SDL_strncmp(nm->window, "Tracks/library", 14) == 0 &&
+                stood.library.count == 1 && stood.picked == 0) {
+                printf("  ALONE %-24s %-26s the only track there is, and the "
+                       "one chosen\n", nm->label, nm->window);
+                excused_alone++;
                 continue;
             }
 
@@ -7039,8 +7468,8 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
                "structure, %d window furniture, %d column headings, %d clipped "
                "out of sight\n",
                inert, controls, unnamed, chrome, headings, clipped);
-        printf("  WALK %d woken by being retried properly, in %d actions\n",
-               woken, tries);
+        printf("  WALK %d woken by being retried properly, in %d actions; "
+               "%d alone in their list\n", woken, tries, excused_alone);
 
         // **No control does nothing everywhere**, save the one named above.
         CHECK(inert == 0);
@@ -7170,25 +7599,53 @@ TEST(no_screen_is_drawn_bigger_than_the_window_it_is_in) {
     CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
                                            SDL_LOGICAL_PRESENTATION_DISABLED));
 
-    for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
-        gs_panel_report p = gs_panel_of(ren, &m, &t, gs_every_screen[i]);
-        // The measurement itself is worth checking: a zero-sized panel would
-        // pass everything below without a screen having been drawn at all.
-        CHECK(p.w > 100.0f);
-        CHECK(p.h > 100.0f);
-        CHECK(p.view_w >= 1280.0f);
+    // **Every screen, from every state the walk is seeded in.** A panel's
+    // height is worked out from what is on it - how many tracks, whether a
+    // track is chosen, how many people are racing - so measuring it in one
+    // state measures one of the sizes it comes in.
+    //
+    // This is not hypothetical. With nothing chosen, the box under THIS ONE was
+    // given a height of zero, which in ImGui means every pixel that is left
+    // rather than none of them: the box swallowed the space under it and the
+    // two rows of buttons went below the fold of a panel that is sized to need
+    // no scrolling. Measured from the one state where a track *is* chosen, it
+    // looked perfect.
+    int measured = 0;
+    for (size_t sd = 0; sd < SDL_arraysize(gs_seeds); sd++) {
+        gs_panel_menu(&m, &t);
+        gs_seeds[sd].set(&m);
 
-        CHECK(p.x >= 0.0f);
-        CHECK(p.y >= 0.0f);
-        CHECK(p.x + p.w <= p.view_w + 1.0f);
-        CHECK(p.y + p.h <= p.view_h + 1.0f);
+        for (size_t i = 0; i < SDL_arraysize(gs_every_screen); i++) {
+            gs_panel_report p = gs_panel_of(ren, &m, &t, gs_every_screen[i]);
+            // The measurement itself is worth checking: a zero-sized panel
+            // would pass everything below without a screen having been drawn at
+            // all.
+            CHECK(p.w > 100.0f);
+            CHECK(p.h > 100.0f);
+            CHECK(p.view_w >= 1280.0f);
 
-        // And at the size the game opens at, nothing is below the fold: a
-        // button half outside the bottom of its own panel is the other half of
-        // this fault, and it is what a screen grown one control at a time
-        // eventually does.
-        CHECK(p.hidden == 0.0f);
+            CHECK(p.x >= 0.0f);
+            CHECK(p.y >= 0.0f);
+            CHECK(p.x + p.w <= p.view_w + 1.0f);
+            CHECK(p.y + p.h <= p.view_h + 1.0f);
+
+            // And at the size the game opens at, nothing is below the fold: a
+            // button half outside the bottom of its own panel is the other half
+            // of this fault, and it is what a screen grown one control at a
+            // time eventually does.
+            if (p.hidden != 0.0f) {
+                printf("  BELOW THE FOLD %s from '%s': %.0f hidden\n",
+                       gs_screen_name(gs_every_screen[i]), gs_seeds[sd].name,
+                       (double)p.hidden);
+            }
+            CHECK(p.hidden == 0.0f);
+            measured++;
+        }
     }
+    printf("  PANELS %d screens measured, over %d starting states\n",
+           measured, (int)SDL_arraysize(gs_seeds));
+
+    gs_panel_menu(&m, &t);
 
     // Half that window, which is what somebody dragging a corner gets. The
     // panels no longer fit, and the rule that still has to hold is that they
@@ -7450,6 +7907,7 @@ int main(void) {
     run_every_brush_and_every_option_it_carries_does_what_it_says(ren);
     run_every_control_in_the_construction_set_is_pressed(ren);
     run_the_walk_signs_in_through_the_door_rather_than_being_put_behind_it(ren);
+    run_a_track_is_built_named_saved_and_raced_by_pressing_and_dragging(ren);
     run_every_value_of_every_dial_is_pressed_not_three_interesting_ones(ren);
     run_the_walk_goes_as_deep_as_the_front_end_does(ren);
     run_every_control_is_known_by_name_and_answers_to_it(ren);

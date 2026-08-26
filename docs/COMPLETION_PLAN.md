@@ -1141,12 +1141,20 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       pairs of them walked** — the count is stated and asserted equal to the
       space, so a brush added later and left out of the sweep turns the tree red
       by itself.*
-- [ ] **Building a track is walked end to end.** New, shape the ground, paint a
-      surface, set the gravity, place a route, name it, save it, come back to it
-      and race it — performed as one sequence by the machine, not as a set of
-      tests that each start halfway through.
-      *Verification: the track the walk builds loads, validates, and is raced to
-      a finish that the simulation agrees is a finish.*
+- [x] **Building a track is walked end to end, by pressing and dragging.**
+      Press New, choose each brush off the palette, hold the mouse down and drag
+      a ridge, pick ice out of the surface list, wind the gravity brush down,
+      click a route, keep the result in the library and type a name for it —
+      then race what came back out of the library. There was already a test that
+      did all of this by calling functions; a brush unreachable from the palette
+      passed it.
+      *Verification: the track built by hand validates, goes into the library
+      under the name that was typed, comes back out hash for hash, and is won.
+      **Two real layout faults fell out of it**: the box under THIS ONE took the
+      whole panel when nothing was chosen, and the setup panel was a fixed
+      height at every player count, so at four drivers seventy-two pixels of it
+      — including the Race button — were below the bottom edge of a window
+      nobody can move or resize.*
 - [x] **Undo is walked against the whole build, not against single edits.**
       The ridge, the ice over it, the gravity over that and the route — taken
       back in order and put back again.
