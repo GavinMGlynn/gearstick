@@ -1135,6 +1135,47 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       *Verification: a control added to a screen and not walked turns the tree
       red on the next run, without anybody adding a case for it.*
 
+## Phase 18 — Opponents worth racing
+
+There is a driver in the game and no way to race it. `gs_ai_drive` plans a line
+from the grip it has at that moment rather than following a baked one — which is
+why it re-thinks a corner when somebody moves the gravity dial — and it has been
+finished and tested since Phase 8. But every car in a race takes its input from
+a pad: the AI drives only in headless self-play, the editor's background ghost
+and the demo. **A one-player race is one car going round on its own.**
+
+- [ ] **The empty grid slots can be filled with opponents.** A race set up for
+      four with one person at the keyboard is three cars nobody is driving; they
+      should be somebody.
+      *Verification: a one-player race started from the setup screen finishes
+      with more than one car having a time, and the winner is not always the
+      human.*
+- [ ] **Their skill is a dial, not three names.** One continuous setting from a
+      driver who brakes far too early to one who is quicker than you are — the
+      same treatment gravity got when it stopped being a dropdown.
+      *Verification: turning it up produces a faster lap on the same track and
+      the same car, every step of the way, with no two settings tying.*
+- [ ] **The dial changes how they drive, not just how fast.** Where they brake,
+      how much they will lean on a surface they do not trust, whether they take
+      a jump flat. A dial that only scales the top speed is a handicap, not a
+      driver.
+      *Verification: two settings that lap in similar times are still visibly
+      driving differently — different entry speeds into the same corner, and
+      different lines over the same jump.*
+- [ ] **An opponent finishes the tracks people actually build.** This is the
+      hard half and the reason the item is not just plumbing: put on a bare
+      rectangle with two gates, the driver as it stands laps twice and then sits
+      in the run-off for as long as it is left — found while walking the lap
+      dial, where it read exactly like a lap counter stuck at ten.
+      *Verification: an opponent completes every stock track and every track the
+      generator makes, from every grid slot, without getting stuck.*
+- [ ] **A race against opponents replays to the bit.** They are a pure function
+      of the world, so a recorded race with three of them in it must re-race
+      identically — otherwise every ghost and every shared replay of a race with
+      opponents in it is wrong.
+      *Verification: the golden replay gains a race with opponents in it, and it
+      hashes the same on all three platforms.*
+
 ## Tails
 
 Found while implementing something else. Added when found, not when remembered.

@@ -144,6 +144,22 @@ predict what the car will do is out, however impressive it looks.
   Raise a ramp, and two seconds later watch the ghost overshoot the landing.
   Track editing stops being blind construction and becomes a feedback loop.
 
+- **Opponents you can actually race, with their smarts on a dial.** `WANTED`
+  There is a driver in here already - it plans a line from the grip it has here
+  and now rather than following a baked one, so it re-thinks the corner the
+  moment somebody moves the gravity dial. What there is no way to do is *race*
+  it: every car in a race takes its input from a pad, and the AI drives only in
+  headless self-play, the editor's ghost and the demo attract mode. A one-player
+  race is a lone car going round on its own.
+  So: fill the empty grid slots with opponents, and put their skill on a dial
+  like everything else - one continuous setting from a driver who brakes far too
+  early to one who is faster than you are, rather than three named presets. The
+  dial has to change how they *drive* and not just how fast they go: where they
+  brake, how much they will lean on a surface they do not trust, whether they
+  take a jump flat. And it has to hold up on the tracks people build, which is
+  the harder half - the current driver, put on a bare rectangle with two gates,
+  laps it twice and then sits in the run-off for as long as you leave it.
+
 - **Surfaces that change over the race.** `CANDIDATE`
   Dirt churns into ruts and loses grip on the line everyone is taking; ice
   polishes into something faster and looser; pavement does not care. Lap five

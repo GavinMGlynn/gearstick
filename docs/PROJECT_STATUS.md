@@ -4087,6 +4087,36 @@ checking that each car gets its own grid slot with no two in the same place, and
 that each vehicle arrives as the one that was chosen and drives under its own
 power.
 
+### There is a driver, and no way to race it
+
+Worth stating plainly because the plan reads as though this were done: **Phase 8
+delivered the driver and not the opponent.** `gs_ai_drive` is finished work - it
+plans a line from the grip it has at that tick rather than following a baked
+one, re-plans when the gravity dial moves, and is a pure integer function of the
+world so a race against it replays to the bit. It is tested and it is good.
+
+What is missing is the plumbing and the dial. In a race every car's input comes
+from `gs_input_poll`; `gs_ai_drive` is called in exactly three places and none of
+them is a race somebody is playing - headless self-play (`--session`), the
+editor's background ghost, and the demo attract mode. A one-player race is one
+car going round on its own. Phase 18 is that gap.
+
+Two things found on the way that the work will have to face:
+
+- **The pace dial is three constants, not a dial.** `GS_AI_CAUTIOUS`,
+  `GS_AI_NORMAL` and `GS_AI_QUICK` are a fraction of available grip the driver
+  is willing to use - 0.62, 0.82, 0.96. That is the right *shape* for a skill
+  setting and it is three names where the rest of the game has a slider, and it
+  scales only how hard the car is pushed rather than how it is driven.
+- **The driver gets stuck on a bare field.** Put on a flat 40x16 rectangle with
+  two gates, it laps twice and then sits in the run-off, still `active`, for
+  twenty-five minutes of simulated time. Found while walking the lap dial, where
+  for an afternoon it read exactly like a lap counter frozen at ten. On a
+  generated circuit it fares differently and no better: dropped on the grid by
+  `gs_track_grid` it finishes the race with no laps at all. An opponent that
+  parks is not an opponent, and "completes any valid track" - which Phase 8
+  ticks - is evidently a narrower claim than it sounds.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
