@@ -3939,8 +3939,27 @@ each seed is only ever asked what it reaches that the ones before it did not:
 | no track picked | 88 | 0 |
 | no results yet | 101 | 0 |
 | alone in the lobby | 135 | 0 |
+| one player | 94 | 0 |
+| two players | 101 | 0 |
+| **three players** | 108 | **10** |
+| **four players** | 115 | **10** |
+| a guest racing | 101 | 0 |
 
-730 of 730 pressable controls pressed, 12 never pressable, 25,110 actions, 44 s.
+**750 of 750** pressable controls pressed, 13 never pressable, 26,290 actions,
+57 s - and **23 of the 750 are reachable only by seeding**, up from 3.
+
+**The player count turned out to be the second thing no control can reach.**
+Three players draws ten controls no other starting state does and four players
+draws ten more, which says the setup screen at four is a *different screen* from
+the one at two rather than the same screen with more rows - each grid row
+carries its own driver, vehicle and colour. The walk can change a lot by
+pressing, but it cannot change how many people are playing, any more than it can
+decide this copy was pointed at a server.
+
+The floor moved from 727 to 750 with that change, deliberately and with the
+reason written beside it. Raising a floor because the front end genuinely grew
+is what it is for; raising it because the last run happened to measure more is
+how a tripwire quietly becomes a ratchet.
 
 **Six of the seven seeds add no controls at all, and that is a good result
 rather than a wasted one.** It says the walk can press its way into most of

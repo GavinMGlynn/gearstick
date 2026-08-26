@@ -4863,6 +4863,24 @@ static void gs_seed_no_results(gs_menu *m) {
     m->result_count = 0;
 }
 
+// **One to four players, because the setup screen is a different screen at
+// each.** A grid row is drawn per player, and each row carries a driver, a
+// vehicle and a colour of its own - so the control set at four players is not
+// the one at one player with more of it, it is a different set. A walk seeded
+// at whatever the fresh menu happened to hold has never seen three of them.
+static void gs_seed_one_player(gs_menu *m)   { m->setup.players = 1; }
+static void gs_seed_two_players(gs_menu *m)  { m->setup.players = 2; }
+static void gs_seed_three_players(gs_menu *m){ m->setup.players = 3; }
+static void gs_seed_four_players(gs_menu *m) { m->setup.players = GS_MAX_CARS; }
+
+// And with a guest in a seat, which is not a roster driver and does not draw
+// the same row.
+static void gs_seed_a_guest_racing(gs_menu *m) {
+    m->setup.players = 2;
+    m->setup.profile[0] = -1;
+    m->setup.profile[1] = 0;
+}
+
 static void gs_seed_alone_in_the_lobby(gs_menu *m) {
     gs_panel_lobby.count = 1;
     for (int i = 1; i < GS_PROTO_MAX_PLAYERS; i++) {
@@ -4882,6 +4900,11 @@ static const struct {
     { "no track picked",     gs_seed_nothing_picked },
     { "no results yet",      gs_seed_no_results },
     { "alone in the lobby",  gs_seed_alone_in_the_lobby },
+    { "one player",          gs_seed_one_player },
+    { "two players",         gs_seed_two_players },
+    { "three players",       gs_seed_three_players },
+    { "four players",        gs_seed_four_players },
+    { "a guest racing",      gs_seed_a_guest_racing },
 };
 
 // How many controls were drawn dead somewhere and pressed somewhere else. This
@@ -5944,7 +5967,15 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     //
     // The honest fix is a count taken without asking a walk what it found, and
     // that is the last item of Phase 17 rather than this one.
-    CHECK(w.n_offered >= 727);
+    //
+    // Moved from 727 to 750 on 2026-08-26, and deliberately: seeding the walk
+    // at every player count found twenty controls no other starting state
+    // draws, because the setup screen at four players is a different screen
+    // from the one at two rather than the same screen with more rows. Raising
+    // it because the front end genuinely grew is the point of it; raising it
+    // because the last run happened to measure more is how a tripwire quietly
+    // becomes a ratchet.
+    CHECK(w.n_offered >= 750);
 
     // **The controls that are dead in one state and live in another.** This is
     // the number the seeding is for, and it is what a walk from a single

@@ -1064,14 +1064,15 @@ not need to draw anything at all. Make the step cheap, then walk everything.
       *Verification: the walk enumerates each dial's full range and presses
       every value in it; a value added to a dial and left unhandled turns the
       test red without anybody adding a case.*
-- [ ] **The number of players changes what the setup screen *is*, so the walk
-      changes with it.** One to four players is one to four rows on the grid,
-      each with a driver, a vehicle and a colour of its own, and a guest is not
-      a roster driver — so the control set is different at every count rather
-      than merely longer.
-      *Verification: every control at every player count appears in the map, and
-      dropping from four players to two leaves nothing behind that a press can
-      still reach.*
+- [x] **The number of players changes what the setup screen *is*, so the walk
+      changes with it.** Seeded at one, two, three and four players, and with a
+      guest in a seat — a guest is not a roster driver and does not draw the
+      same row.
+      *Verification: **750 of 750** now, up from 730. Three players draws ten
+      controls no other starting state does and four players draws ten more, so
+      the setup screen at four is a different screen from the one at two rather
+      than the same screen with more rows. Controls reachable **only** by
+      seeding went from 3 to 23.*
 - [ ] **What the walk proves, said as properties.** No screen without a way off
       it — including the two exempt today; the title reachable from everywhere;
       every screen reachable from the title; and no control that does nothing at
