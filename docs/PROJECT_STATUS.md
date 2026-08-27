@@ -5535,6 +5535,24 @@ it did not fire: its `paths` list covers the generators and the assets, and not
 the simulation that decides what the generators produce. `src/core/**` is in
 that list now.
 
+### And a guard for the next field, not just this one
+
+A test naming the loop-and-path case catches the loop-and-path case. The general
+fault is that a field was added to `gs_track` and the function that says what a
+track *is* was not told, and nothing anywhere could notice.
+
+`a_track_is_identified_by_everything_that_is_on_it` flips **every byte of a
+track** and requires the identity to move exactly when the hash claims to read
+that byte: 315 bytes are what a track is, 16842 are room the arrays have and
+nobody filled. `w`, `h` and `gate_count` are counted apart and changed to other
+legal values rather than flipped, because a flipped one says 255 tiles and sends
+the hash reading off the end of a 64-tile array - a test crashing, not a fault
+found.
+
+So a field added next year is either read by the hash or is named in that test
+as deliberately not part of what a track is. It cannot be neither, which is what
+`route` was for four commits.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

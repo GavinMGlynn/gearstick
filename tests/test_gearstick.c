@@ -335,6 +335,114 @@ static void gs_make_edits(gs_edit_log *l, gs_track *t, uint32_t n) {
     }
 }
 
+// Is this byte one the hash is meant to read? The used region and nothing else:
+// a track's identity is what is on it, not what the arrays have room for.
+static bool gs_byte_counts(const gs_track *t, size_t at) {
+    const size_t corner = offsetof(gs_track, corner);
+    const size_t surface = offsetof(gs_track, surface);
+    const size_t gravity = offsetof(gs_track, gravity);
+    const size_t gate = offsetof(gs_track, gate);
+
+    if (at == offsetof(gs_track, route)) return true;
+    if (at == offsetof(gs_track, gate_count)) return true;
+
+    if (at >= corner && at < corner + sizeof t->corner) {
+        const size_t i = (at - corner) / sizeof t->corner[0];
+        const size_t x = i % GS_CORNER_STRIDE, y = i / GS_CORNER_STRIDE;
+        return x <= t->w && y <= t->h;      // corners are one more than tiles
+    }
+    if (at >= surface && at < surface + sizeof t->surface) {
+        const size_t i = at - surface;
+        return (i % GS_TRACK_MAX) < t->w && (i / GS_TRACK_MAX) < t->h;
+    }
+    if (at >= gravity && at < gravity + sizeof t->gravity) {
+        const size_t i = at - gravity;
+        return (i % GS_TRACK_MAX) < t->w && (i / GS_TRACK_MAX) < t->h;
+    }
+    if (at >= gate && at < gate + sizeof t->gate) {
+        const size_t i = (at - gate) / sizeof t->gate[0];
+        if (i >= t->gate_count) return false;      // a gate nobody laid
+        const size_t in = (at - gate) % sizeof t->gate[0];
+        // Everything but the padding the struct carries for alignment.
+        return in < offsetof(gs_gate, pad);
+    }
+    return false;       // w, h and anything the compiler put between fields
+}
+
+TEST(a_track_is_identified_by_everything_that_is_on_it) {
+    // **The guard the route byte got past.** A field was added to gs_track and
+    // the function that says what a track *is* was not told about it, so a
+    // circuit and a sprint over the same ground were one track and a library
+    // ate somebody's work. A test naming that one case catches that one case.
+    // This is the general one: every byte of a track is flipped, and whether
+    // the identity moves has to match what the hash claims to cover.
+    //
+    // So a field added next year is either read by the hash or is named here as
+    // deliberately not part of what a track is. It cannot be neither.
+    static gs_track t;
+    gs_track_init(&t, 9, 7, GS_SURF_DIRT);       // smaller than the arrays hold
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_track_set_corner(&t, x, y, GS_INT((x + y) % 3));
+        }
+    }
+    gs_track_set_surface(&t, 3, 3, GS_SURF_ICE);
+    gs_track_set_gravity(&t, 4, 2, GS_RATIO(40, 100));
+    CHECK(gs_track_add_gate(&t, GS_INT(2), GS_INT(3), 0, GS_INT(2)) >= 0);
+    CHECK(gs_track_add_gate(&t, GS_INT(7), GS_INT(3),
+                            (gs_angle)(GS_TURN / 4), GS_INT(2)) >= 0);
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+
+    const uint64_t was = gs_track_hash(&t);
+
+    // **`w`, `h` and `gate_count` are changed to other legal values** rather
+    // than flipped. They say how much of the arrays is real, and a flipped one
+    // says 255 tiles - which sends the hash reading off the end of a 64-tile
+    // array. That is a test crashing, not a fault found.
+    int read = 0, ignored = 0, wrong = 0;
+    for (size_t at = 0; at < sizeof t; at++) {
+        if (at == offsetof(gs_track, w) || at == offsetof(gs_track, h) ||
+            at == offsetof(gs_track, gate_count)) {
+            continue;
+        }
+
+        uint8_t *raw = (uint8_t *)&t;
+        const uint8_t keep = raw[at];
+        raw[at] = (uint8_t)(keep ^ 0xffu);
+        const bool moved = gs_track_hash(&t) != was;
+        raw[at] = keep;
+
+        const bool should = gs_byte_counts(&t, at);
+        if (moved) read++; else ignored++;
+        if (moved == should) continue;
+
+        wrong++;
+        printf("  IDENTITY byte %zu %s the hash and %s\n", at,
+               moved ? "moves" : "does not move",
+               should ? "should" : "should not");
+    }
+
+    // And the three counted apart, because they decide how much of the rest is
+    // real and every one of them has to be part of what a track is.
+    const uint8_t w = t.w, h = t.h, gates = t.gate_count;
+    t.w = (uint8_t)(w - 1);
+    CHECK(gs_track_hash(&t) != was);
+    t.w = w;
+    t.h = (uint8_t)(h - 1);
+    CHECK(gs_track_hash(&t) != was);
+    t.h = h;
+    t.gate_count = (uint8_t)(gates - 1);
+    CHECK(gs_track_hash(&t) != was);
+    t.gate_count = gates;
+    CHECK(gs_track_hash(&t) == was);
+
+    printf("  IDENTITY %zu bytes of a track: %d are what it is, %d are room "
+           "the arrays have and nobody filled\n", sizeof t, read, ignored);
+    CHECK(wrong == 0);
+    CHECK(read > 0);
+    CHECK(ignored > 0);
+}
+
 TEST(a_loop_and_a_path_over_the_same_ground_are_two_tracks) {
     // **Found by walking every kind of edit through undo.** Changing a track
     // from a path to a loop did not change its hash, which the test above reads
@@ -7335,6 +7443,7 @@ int main(void) {
     run_a_track_survives_the_round_trip_through_its_file_format();
     run_a_corrupt_track_file_is_refused_rather_than_half_loaded();
     run_two_tracks_built_the_same_way_share_an_identity_through_a_file();
+    run_a_track_is_identified_by_everything_that_is_on_it();
     run_a_loop_and_a_path_over_the_same_ground_are_two_tracks();
     run_every_kind_of_edit_can_be_taken_back_and_put_back_again();
     run_any_sequence_of_edits_undone_completely_restores_the_track();

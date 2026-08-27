@@ -2034,3 +2034,12 @@ worth as much as what was decided about it.
       generated files honest was not watching the simulation.
       *Verification: the chooser is re-run and its output committed; the check
       now runs whenever anything in the simulation changes.*
+- [x] **A track is identified by everything that is on it.** *(The guard the
+      route byte got past.)* Naming the one case that went wrong catches that
+      one case; the general fault was that something was added to a track and
+      whatever decides what a track *is* was never told. Every byte of a track
+      is now flipped, and the identity has to move exactly when it should.
+      *Verification: 315 bytes are what a track is and 16842 are room the arrays
+      have and nobody filled, with every one of them behaving as claimed — so
+      anything added later is either part of a track's identity or is written
+      down as deliberately not, and cannot be neither.*
