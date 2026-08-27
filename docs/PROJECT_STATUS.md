@@ -5242,6 +5242,71 @@ different and much weaker claim - so the test fails if either count is zero.
 
 **No physics moved.** This is all `src/ui/`.
 
+## Six of the nine grounds sounded like pavement
+
+`gs_surface_voice` had three cases and a `default`. It was written when there
+were three surfaces. Six more went in - sand, gravel, rock, dust, slush, grass,
+each with its own grip, its own rolling resistance and its own way of wearing -
+and **every one of them fell through the default and sounded exactly like
+pavement.**
+
+Two thirds of the grounds in a game whose editor lets you paint all nine, in a
+game where what you are driving on is the point. The test next door says so in
+its own name: *the ground a car is on changes what it sounds like*. It walked
+pavement, dirt and ice, which were all there were when it was written, and it
+went on passing.
+
+That is the sampling failure the project already has a rule against, and this is
+what it costs. The rule says cover every scenario, not a representative sample.
+Three of nine was a representative sample.
+
+### No `default`, ever, on a switch over an enum
+
+The structural half of the fix, and the more important one: the switch has a
+case per surface and **no default**, so `-Wswitch` makes a tenth surface a build
+failure rather than a tenth surface that sounds like the first. `gs_screen_name`
+in `gs_menu.c` was already written this way; this was the only place in the tree
+that was not.
+
+The numbers themselves are a judgement rather than a derivation - what grass
+sounds like is not in its rolling resistance - but they are read off the
+character each surface is given in `gs_track.c`, and no two are alike in either
+column.
+
+### And what the test asserts now
+
+Every surface, walked from `GS_SURF_COUNT` rather than a list, so a tenth is in
+the test the day it exists. Each one has to be audible at all, and then **all 36
+pairs have to be tellable apart** - by a tenth in loudness or ten zero crossings
+in brightness - because two surfaces that sound alike means the second one is a
+colour in the palette rather than something to drive on.
+
+The named facts stay: dirt is the loudest of the nine and ice the quietest, ice
+is a hiss where dirt is a rumble, rock is the deepest thing here. What is *not*
+asserted, deliberately, is an order across all nine by brightness. Loud and
+bright are two axes rather than one; sand and gravel are thrown against the
+underside and read sharper than ice does, because there is far more of them, and
+ice is the quietest thing here. Ranking all nine would have meant inventing a
+design decision to fit whatever the numbers happened to be.
+
+### The headroom checks were sampling too
+
+`nothing_the_synthesiser_produces_can_blow_a_speaker` used dirt in a sprint car,
+dirt having been the loudest surface when it was written. **Three of the six new
+ones are louder than dirt.** It walks all nine grounds in all six machines now -
+54 mixes, four cars each, all sliding and all being hit - and the music-under-a-
+race check walks all nine with a different tune under each. Nothing clipped.
+
+### Two more compiler differences, caught before pushing
+
+`build/linux-clang` earned itself twice in one sitting: `gs_music_start(0x1234ULL
++ (uint64_t)surf)` and `mixes == GS_SURF_COUNT * GS_VEH_COUNT` are both fine to
+gcc and both errors to clang - a sign change on one, arithmetic between two
+different enumeration types on the other. Neither reached CI.
+
+**No physics moved.** `src/audio/` is downstream of the simulation and no part
+of it; the golden replay is untouched.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

@@ -180,29 +180,89 @@ TEST(the_engine_note_follows_the_drivetrain_up_and_down) {
 TEST(the_ground_a_car_is_on_changes_what_it_sounds_like) {
     gs_world w;
 
-    // The same car at the same speed, sliding the same amount, on three
-    // surfaces. If these come out the same, the surface is not reaching the
-    // synthesiser at all.
-    float level[3];
-    int bright[3];
-    const gs_surface surfaces[3] = { GS_SURF_PAVEMENT, GS_SURF_DIRT, GS_SURF_ICE };
+    // **Every surface there is, not three of them.**
+    //
+    // This walked pavement, dirt and ice, which were all there were when it was
+    // written, and it went on passing when six more went in: sand, gravel,
+    // rock, dust, slush and grass all fell through one `default` in
+    // gs_surface_voice and **sounded exactly like pavement**. Two thirds of the
+    // grounds in a game whose editor lets you paint all nine, and this test -
+    // the one whose whole point is knowing what you are driving on without
+    // looking - could not see it, because it never asked about them.
+    //
+    // Walked from GS_SURF_COUNT rather than a list here, so a tenth surface is
+    // in this test the day it exists.
+    float level[GS_SURF_COUNT];
+    int bright[GS_SURF_COUNT];
 
-    for (int i = 0; i < 3; i++) {
-        gs_scene(&w, surfaces[i]);
+    for (int i = 0; i < GS_SURF_COUNT; i++) {
+        gs_scene(&w, (gs_surface)i);
         w.car[0].vx = GS_INT(5);
         w.car[0].vy = GS_INT(4);          // sideways, so the tyres are working
         gs_settle(&w, &gs_t);
         level[i] = gs_rms(gs_buf, FRAMES);
         bright[i] = gs_crossings(gs_buf, FRAMES);
+
+        // Every one of them is something you can hear, before any of them is
+        // compared with any other.
+        CHECK(level[i] > 0.01f);
     }
+
+    // **No two grounds sound the same.** This is the claim that matters and the
+    // one that was false: if two surfaces come out alike, the second of them is
+    // a colour in the editor's palette rather than something to drive on.
+    int alike = 0;
+    for (int a = 0; a < GS_SURF_COUNT; a++) {
+        for (int b = a + 1; b < GS_SURF_COUNT; b++) {
+            const float apart = level[a] > level[b] ? level[a] - level[b]
+                                                    : level[b] - level[a];
+            const int sharper = bright[a] > bright[b] ? bright[a] - bright[b]
+                                                      : bright[b] - bright[a];
+            // Different in loudness, or different in how bright it is, or both.
+            // A tenth of the quieter one, and ten zero crossings in a buffer
+            // this long, are both well past what a person could argue about.
+            if (apart > level[a] * 0.10f || sharper > 10) continue;
+
+            alike++;
+            printf("  ALIKE %s and %s: %.4f against %.4f, %d crossings against "
+                   "%d\n", gs_surfaces[a].name, gs_surfaces[b].name,
+                   (double)level[a], (double)level[b], bright[a], bright[b]);
+        }
+    }
+    for (int i = 0; i < GS_SURF_COUNT; i++) {
+        printf("  SURF %-9s rms %.4f  crossings %d\n", gs_surfaces[i].name,
+               (double)level[i], bright[i]);
+    }
+    printf("  SURFACES %d grounds, %d pairs, all of them told apart\n",
+           (int)GS_SURF_COUNT, GS_SURF_COUNT * (GS_SURF_COUNT - 1) / 2);
+    CHECK(alike == 0);
 
     // Dirt is the loudest and ice the quietest, which is the whole point of
     // knowing what you are driving on without looking.
-    CHECK(level[1] > level[0]);
-    CHECK(level[0] > level[2]);
+    CHECK(level[GS_SURF_DIRT] > level[GS_SURF_PAVEMENT]);
+    CHECK(level[GS_SURF_PAVEMENT] > level[GS_SURF_ICE]);
+    for (int i = 0; i < GS_SURF_COUNT; i++) {
+        CHECK(level[GS_SURF_DIRT] >= level[i]);      // the loudest of all nine
+        CHECK(level[GS_SURF_ICE] <= level[i]);       // and the quietest
+    }
 
-    // And ice is the brightest: a hiss rather than a rumble.
-    CHECK(bright[2] > bright[1]);
+    // And ice is a hiss where dirt is a rumble, which is the pair this was
+    // always about.
+    CHECK(bright[GS_SURF_ICE] > bright[GS_SURF_DIRT]);
+
+    // Basalt is the bottom of the range: all rumble and no top end at all.
+    for (int i = 0; i < GS_SURF_COUNT; i++) {
+        CHECK(bright[GS_SURF_ROCK] <= bright[i]);
+    }
+
+    // **The nine are deliberately not ranked by brightness.** Loud and bright
+    // are two axes rather than one, and what makes a surface itself is its own
+    // pair of them - sand and gravel are thrown against the underside and read
+    // sharper than ice does, because there is far more of them. Ice is the
+    // quietest thing here and quiet cannot out-hiss loud. Asserting an order
+    // across all nine would be inventing a design decision to fit whatever the
+    // numbers happened to be; what is asserted instead is that no two of them
+    // land in the same place, which is the thing that was actually wrong.
 }
 
 TEST(a_car_in_the_air_makes_no_tyre_noise_at_all) {
@@ -256,35 +316,66 @@ TEST(a_car_further_away_is_quieter_than_the_one_being_driven) {
 
 TEST(nothing_the_synthesiser_produces_can_blow_a_speaker) {
     gs_world w;
-    gs_scene(&w, GS_SURF_DIRT);
 
-    // Four cars, all sideways at speed, all being hit. If anything is going to
-    // overshoot, it is this.
-    for (uint8_t i = 1; i < GS_MAX_CARS; i++) {
-        gs_world_add_car(&w, &gs_t, (uint8_t)GS_VEH_SPRINT_CAR,
-                         GS_INT(16), GS_INT(8) + GS_INT(i), 0);
-    }
-    for (uint8_t i = 0; i < w.car_count; i++) {
-        w.car[i].vx = GS_INT(8);
-        w.car[i].vy = GS_INT(7);
-    }
+    // **On every ground and in every machine**, not on dirt in a sprint car.
+    //
+    // This checked one surface, chosen as the loudest when there were three of
+    // them - and three of the six that were added since are louder than it.
+    // Slush is the heaviest drag here and gravel is the sharpest, and neither
+    // had ever been asked whether four of them at once fit in a speaker. The
+    // machine matters too: it sets the engine note this is all piled on top of.
     gs_audio_set_volume(1.0f);
 
-    for (int step = 0; step < 200; step++) {
-        for (uint8_t i = 0; i < w.car_count; i++) {
-            // Damage climbing every update, which is what an impact is read
-            // from, so every voice is struck over and over.
-            if (w.car[i].damage < 200) w.car[i].damage = (uint8_t)(w.car[i].damage + 8);
-        }
-        gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
-        gs_audio_render(gs_buf, FRAMES);
+    int mixes = 0;
+    for (int surf = 0; surf < GS_SURF_COUNT; surf++) {
+        for (int veh = 0; veh < GS_VEH_COUNT; veh++) {
+            gs_scene(&w, (gs_surface)surf);
+            w.car[0].vehicle = (uint8_t)veh;
 
-        for (int i = 0; i < FRAMES * GS_AUDIO_CHANNELS; i++) {
-            CHECK(gs_buf[i] >= -1.0f && gs_buf[i] <= 1.0f);
-            CHECK(gs_buf[i] == gs_buf[i]);      // and not a NaN
-            if (gs_failures > 0) return;        // one report is enough
+            // Four cars, all sideways at speed, all being hit. If anything is
+            // going to overshoot, it is this.
+            for (uint8_t i = 1; i < GS_MAX_CARS; i++) {
+                gs_world_add_car(&w, &gs_t, (uint8_t)veh,
+                                 GS_INT(16), GS_INT(8) + GS_INT(i), 0);
+            }
+            for (uint8_t i = 0; i < w.car_count; i++) {
+                w.car[i].vx = GS_INT(8);
+                w.car[i].vy = GS_INT(7);
+            }
+
+            for (int step = 0; step < 60; step++) {
+                for (uint8_t i = 0; i < w.car_count; i++) {
+                    // Damage climbing every update, which is what an impact is
+                    // read from, so every voice is struck over and over.
+                    if (w.car[i].damage < 200) {
+                        w.car[i].damage = (uint8_t)(w.car[i].damage + 8);
+                    }
+                }
+                gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
+                gs_audio_render(gs_buf, FRAMES);
+
+                for (int i = 0; i < FRAMES * GS_AUDIO_CHANNELS; i++) {
+                    if (gs_buf[i] < -1.0f || gs_buf[i] > 1.0f ||
+                        gs_buf[i] != gs_buf[i]) {
+                        printf("  OVER %s in a %s: sample %.4f at step %d\n",
+                               gs_surfaces[surf].name, gs_vehicles[veh].name,
+                               (double)gs_buf[i], step);
+                    }
+                    CHECK(gs_buf[i] >= -1.0f && gs_buf[i] <= 1.0f);
+                    CHECK(gs_buf[i] == gs_buf[i]);      // and not a NaN
+                    if (gs_failures > 0) {              // one report is enough
+                        gs_audio_set_volume(0.8f);
+                        return;
+                    }
+                }
+            }
+            mixes++;
         }
     }
+    printf("  HEADROOM %d mixes: %d grounds x %d machines, four cars each, all "
+           "sliding and all being hit\n", mixes, (int)GS_SURF_COUNT,
+           (int)GS_VEH_COUNT);
+    CHECK(mixes == (int)GS_SURF_COUNT * (int)GS_VEH_COUNT);
     gs_audio_set_volume(0.8f);
 }
 
@@ -444,33 +535,61 @@ TEST(the_music_stops_by_fading_and_can_be_started_again) {
 
 TEST(the_music_and_the_race_together_still_fit_in_a_speaker) {
     gs_world w;
-    gs_scene(&w, GS_SURF_DIRT);
-    for (uint8_t i = 1; i < GS_MAX_CARS; i++) {
-        gs_world_add_car(&w, &gs_t, (uint8_t)GS_VEH_SPRINT_CAR,
-                         GS_INT(16), GS_INT(8) + GS_INT(i), 0);
-    }
-    for (uint8_t i = 0; i < w.car_count; i++) {
-        w.car[i].vx = GS_INT(8);
-        w.car[i].vy = GS_INT(7);
-    }
 
+    // On every ground, for the same reason as the test above: the loudest
+    // surface when this was written is no longer the loudest surface, and the
+    // race is being piled on top of a tune here rather than on silence.
     gs_audio_set_volume(1.0f);
     gs_music_set_volume(1.0f);
-    gs_music_start(0x1234ULL);
 
-    for (int step = 0; step < 120; step++) {
+    int mixes = 0;
+    for (int surf = 0; surf < GS_SURF_COUNT; surf++) {
+        gs_scene(&w, (gs_surface)surf);
+        for (uint8_t i = 1; i < GS_MAX_CARS; i++) {
+            gs_world_add_car(&w, &gs_t, (uint8_t)GS_VEH_SPRINT_CAR,
+                             GS_INT(16), GS_INT(8) + GS_INT(i), 0);
+        }
         for (uint8_t i = 0; i < w.car_count; i++) {
-            if (w.car[i].damage < 200) w.car[i].damage = (uint8_t)(w.car[i].damage + 8);
+            w.car[i].vx = GS_INT(8);
+            w.car[i].vy = GS_INT(7);
         }
-        gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
-        gs_audio_render(gs_buf, FRAMES);
 
-        for (int i = 0; i < FRAMES * GS_AUDIO_CHANNELS; i++) {
-            CHECK(gs_buf[i] >= -1.0f && gs_buf[i] <= 1.0f);
-            CHECK(gs_buf[i] == gs_buf[i]);
-            if (gs_failures > 0) return;
+        // A different tune each time, so this is not one bar of one song
+        // checked nine times.
+        gs_music_start(0x1234ULL + (uint64_t)(unsigned)surf);
+
+        for (int step = 0; step < 120; step++) {
+            for (uint8_t i = 0; i < w.car_count; i++) {
+                if (w.car[i].damage < 200) {
+                    w.car[i].damage = (uint8_t)(w.car[i].damage + 8);
+                }
+            }
+            gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
+            gs_audio_render(gs_buf, FRAMES);
+
+            for (int i = 0; i < FRAMES * GS_AUDIO_CHANNELS; i++) {
+                if (gs_buf[i] < -1.0f || gs_buf[i] > 1.0f ||
+                    gs_buf[i] != gs_buf[i]) {
+                    printf("  OVER %s with the music on: sample %.4f at step "
+                           "%d\n", gs_surfaces[surf].name, (double)gs_buf[i],
+                           step);
+                }
+                CHECK(gs_buf[i] >= -1.0f && gs_buf[i] <= 1.0f);
+                CHECK(gs_buf[i] == gs_buf[i]);
+                if (gs_failures > 0) {
+                    gs_audio_set_volume(0.8f);
+                    gs_music_set_volume(0.55f);
+                    gs_music_stop();
+                    return;
+                }
+            }
         }
+        mixes++;
     }
+    printf("  HEADROOM %d mixes with a tune under them, one per ground\n",
+           mixes);
+    CHECK(mixes == GS_SURF_COUNT);
+
     gs_audio_set_volume(0.8f);
     gs_music_set_volume(0.55f);
     gs_music_stop();

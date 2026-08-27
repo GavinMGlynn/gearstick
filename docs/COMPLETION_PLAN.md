@@ -1949,3 +1949,21 @@ worth as much as what was decided about it.
       and the test also states how many of them can actually scroll (27
       sideways, 93 down) and fails if that is none, because a rule about
       scrollbars proves nothing where nothing scrolls.*
+- [x] **Six of the nine grounds sounded like pavement.** *(Found by asking what
+      the sound tests actually covered.)* The synthesiser knew pavement, dirt
+      and ice — the three that existed when it was written — and everything
+      else fell through to pavement. Sand, gravel, rock, dust, slush and grass
+      each have their own grip and their own way of wearing, and by ear all six
+      were the same ground. They have their own voices now, and a tenth surface
+      fails to build rather than silently sounding like the first.
+      *Verification: every surface is walked, not three of them — each has to be
+      audible, and all thirty-six pairs have to be tellable apart by loudness or
+      by brightness. Dirt is still the loudest and ice the quietest, ice is
+      still a hiss where dirt is a rumble, and rock is the deepest thing there.*
+- [x] **Four cars at full noise, on every ground and in every machine.** The
+      check that nothing the synthesiser produces can blow a speaker used dirt
+      in a sprint car, dirt having been the loudest surface at the time — and
+      three of the six added since are louder than it.
+      *Verification: 54 mixes, nine grounds by six machines, four cars each all
+      sliding and all being struck; and nine more with a different tune playing
+      underneath. Nothing clipped and nothing produced a NaN.*

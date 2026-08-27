@@ -271,12 +271,46 @@ void gs_audio_silence(void) {
 
 // --- What the world sounds like ---------------------------------------------
 
-// How much a surface roughens the tyre note, and how bright it is.
+// **How much a surface roughens the tyre note, and how bright it is - for
+// every surface there is.**
+//
+// This had three cases and a `default`, written when there were three surfaces.
+// Six more went in - sand, gravel, rock, dust, slush, grass, each with its own
+// grip, its own rolling resistance and its own way of wearing - and every one
+// of them fell through the default and **sounded exactly like pavement**. Two
+// thirds of the grounds in a game whose editor lets you paint all nine, and the
+// test next door says the point of this function is "knowing what you are
+// driving on without looking".
+//
+// So: no `default`. A tenth surface now fails to compile here rather than
+// quietly sounding like the first, which is the only part of this that a test
+// cannot check for itself.
+//
+// The numbers are a judgement and not a derivation - what grass sounds like is
+// not in its rolling resistance - but they are read off the character each
+// surface is given in gs_track.c, and no two are alike in either column.
 static void gs_surface_voice(gs_surface s, float *level, float *bright) {
     switch (s) {
-    case GS_SURF_DIRT:  *level = 1.00f; *bright = 0.15f; break;  // a rumble
-    case GS_SURF_ICE:   *level = 0.45f; *bright = 0.90f; break;  // a hiss
-    default:            *level = 0.62f; *bright = 0.45f; break;  // pavement
+    // Made ground, and the one everything else is heard against.
+    case GS_SURF_PAVEMENT: *level = 0.62f; *bright = 0.45f; break;
+    // A rumble. Loose enough to roar, heavy enough to have no top end.
+    case GS_SURF_DIRT:     *level = 1.00f; *bright = 0.15f; break;
+    // A hiss, and almost nothing under it.
+    case GS_SURF_ICE:      *level = 0.45f; *bright = 0.90f; break;
+    // Thrown rather than rolled over: loud, and high with it.
+    case GS_SURF_SAND:     *level = 0.85f; *bright = 0.70f; break;
+    // Stones off the underside. The sharpest thing here that is not ice.
+    case GS_SURF_GRAVEL:   *level = 0.92f; *bright = 0.60f; break;
+    // Basalt: hard, loud and entirely bottom end.
+    case GS_SURF_ROCK:     *level = 0.78f; *bright = 0.05f; break;
+    // Regolith, never weathered. Fine, quiet and nearly all hiss.
+    case GS_SURF_DUST:     *level = 0.55f; *bright = 0.80f; break;
+    // Wet and heavy: the loudest drag here, and dull with it.
+    case GS_SURF_SLUSH:    *level = 0.95f; *bright = 0.35f; break;
+    // A swish, sitting between pavement and the loose stuff.
+    case GS_SURF_GRASS:    *level = 0.70f; *bright = 0.55f; break;
+    // Not a surface. Here so the switch is exhaustive and stays that way.
+    case GS_SURF_COUNT:    *level = 0.62f; *bright = 0.45f; break;
     }
 }
 
