@@ -1980,3 +1980,17 @@ worth as much as what was decided about it.
       stand in for; the stick steers past the deadzone and not before it; and
       somebody trips over a cable mid-race, after which the pad that was third
       drives the second car and nothing reads a closed one.*
+- [x] **Escape went somewhere different from the button beside it.** *(Found by
+      following what the client does with Escape down to the rule that decides
+      it.)* The records screen remembers which screen opened it so its Back
+      button can return there, and Escape threw that away and went to the main
+      menu — as did the pad's cancel button, which is the same rule. And the
+      results of a server's race offered "Back to the lobby" on screen while
+      Escape went to the main menu, out of the room the next race is decided in.
+      Both are one rule now, written once and used by the buttons and by
+      Escape alike.
+      *Verification: every screen walked on a server and off one, with the
+      construction set open and shut, and the records screen walked from all
+      nine screens as the place it came from. The test also fails if a screen is
+      missing from its own table, so a tenth screen must have its way out
+      chosen rather than inheriting one.*

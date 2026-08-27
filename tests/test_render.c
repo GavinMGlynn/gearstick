@@ -3663,37 +3663,107 @@ TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
     CHECK(gs_menu_set_password(&m, 0, "a good one", "a good one"));
     CHECK(gs_menu_sign_in(&m, 0, "a good one", ""));
 
-    // Racing on this machine: out is the screen that set the race up.
-    m.online = false;
-    m.screen = GS_SCREEN_RACE;
-    CHECK(gs_menu_back(&m, false) == GS_SCREEN_SETUP);
-
-    // Racing other people: out is the lobby, where there is something to press
-    // to race again - and never the setup screen, which would be this machine
-    // deciding a race that is not its to decide.
-    m.online = true;
-    CHECK(gs_menu_back(&m, false) == GS_SCREEN_LOBBY);
-
-    // Every other screen backs out to the title...
-    static const gs_screen inner[] = {
-        GS_SCREEN_PROFILES, GS_SCREEN_SETUP, GS_SCREEN_RESULTS,
-        GS_SCREEN_RECORDS, GS_SCREEN_LOBBY, GS_SCREEN_TRACKS,
+    // **Every screen, on a server and off one, with the construction set open
+    // and shut.** This walked nine of the thirty-six, and worse than that: the
+    // six it ran through a list were all measured with `online` left true from
+    // two lines above, so what Escape does off a server on those six was never
+    // asked at all. What it hid is below.
+    static const struct {
+        gs_screen screen;
+        gs_screen alone;      // where back goes on this machine
+        gs_screen served;     // and where it goes on somebody's server
+    } way_out[] = {
+        // Out of a race is the screen that set it up - unless the race belongs
+        // to a server, when the setup screen is not this machine's to use and
+        // the lobby is where another one is decided.
+        { GS_SCREEN_RACE,     GS_SCREEN_SETUP,   GS_SCREEN_LOBBY },
+        // **And out of the results, the same.** This was the title in both,
+        // while the button on the screen beside it said "Back to the lobby":
+        // one screen, two ways out, two different places, and the one a player
+        // reaches for by reflex was the one that left the room.
+        { GS_SCREEN_RESULTS,  GS_SCREEN_TITLE,   GS_SCREEN_LOBBY },
+        // The rest are the same wherever the race came from.
+        { GS_SCREEN_PROFILES, GS_SCREEN_TITLE,   GS_SCREEN_TITLE },
+        { GS_SCREEN_SETUP,    GS_SCREEN_TITLE,   GS_SCREEN_TITLE },
+        { GS_SCREEN_LOBBY,    GS_SCREEN_TITLE,   GS_SCREEN_TITLE },
+        { GS_SCREEN_TRACKS,   GS_SCREEN_TITLE,   GS_SCREEN_TITLE },
+        // The records screen goes back to whoever opened it, which is its own
+        // rule and is walked separately below.
+        { GS_SCREEN_RECORDS,  GS_SCREEN_TITLE,   GS_SCREEN_TITLE },
+        // And the title and the door are where leaving belongs.
+        { GS_SCREEN_TITLE,    GS_SCREEN_COUNT,   GS_SCREEN_COUNT },
+        { GS_SCREEN_LOGIN,    GS_SCREEN_COUNT,   GS_SCREEN_COUNT },
     };
-    for (size_t i = 0; i < SDL_arraysize(inner); i++) {
-        m.screen = inner[i];
-        CHECK(gs_menu_back(&m, false) == GS_SCREEN_TITLE);
+
+    // Every screen there is appears exactly once, so a screen added next year
+    // is a red tree rather than a screen nobody asked about.
+    CHECK((int)SDL_arraysize(way_out) == GS_SCREEN_COUNT);
+    bool listed[GS_SCREEN_COUNT] = { false };
+    for (size_t i = 0; i < SDL_arraysize(way_out); i++) {
+        CHECK(!listed[way_out[i].screen]);
+        listed[way_out[i].screen] = true;
     }
+    for (int i = 0; i < GS_SCREEN_COUNT; i++) CHECK(listed[i]);
 
-    // ...and the title and the door are where leaving belongs.
-    m.screen = GS_SCREEN_TITLE;
-    CHECK(gs_menu_back(&m, false) == GS_SCREEN_COUNT);
-    m.screen = GS_SCREEN_LOGIN;
-    CHECK(gs_menu_back(&m, false) == GS_SCREEN_COUNT);
+    m.records_from = GS_SCREEN_TITLE;
+    int walked = 0;
+    for (size_t i = 0; i < SDL_arraysize(way_out); i++) {
+        for (int served = 0; served < 2; served++) {
+            m.screen = way_out[i].screen;
+            m.online = served != 0;
 
-    // The construction set is a layer over whatever is underneath it, so
-    // closing it moves nobody anywhere.
-    m.screen = GS_SCREEN_RACE;
-    CHECK(gs_menu_back(&m, true) == GS_SCREEN_RACE);
+            const gs_screen want = served ? way_out[i].served
+                                          : way_out[i].alone;
+            const gs_screen got = gs_menu_back(&m, false);
+            if (got != want) {
+                printf("  BACK from %s %s went to %d, wanted %d\n",
+                       gs_screen_name(way_out[i].screen),
+                       served ? "on a server" : "on this machine",
+                       (int)got, (int)want);
+            }
+            CHECK(got == want);
+
+            // **The construction set is a layer over whatever is underneath
+            // it**, so closing it moves nobody anywhere - from every screen,
+            // not from the one that happened to be set last.
+            CHECK(gs_menu_back(&m, true) == way_out[i].screen);
+            walked++;
+        }
+    }
+    printf("  BACK %d ways out walked: %d screens, on a server and off one\n",
+           walked, GS_SCREEN_COUNT);
+    CHECK(walked == GS_SCREEN_COUNT * 2);
+
+    // **And the records screen goes back to whoever opened it.** It is reached
+    // from the title, from the setup screen and from the results, and it
+    // remembers which - so Escape has to honour that too. It did not: the
+    // button on the screen went back where you came from and Escape went to the
+    // main menu, which is the same fault as the results screen wearing a
+    // different hat.
+    //
+    // Walked over every screen as the place it came from, including the ones
+    // nobody can arrive from, because the safe answer for those is the thing
+    // being claimed.
+    m.screen = GS_SCREEN_RECORDS;
+    m.online = false;
+    int froms = 0;
+    for (int from = 0; from < GS_SCREEN_COUNT; from++) {
+        m.records_from = (gs_screen)from;
+        const bool arrivable = from == GS_SCREEN_TITLE ||
+                               from == GS_SCREEN_RESULTS ||
+                               from == GS_SCREEN_SETUP;
+        const gs_screen want = arrivable ? (gs_screen)from : GS_SCREEN_TITLE;
+        const gs_screen got = gs_menu_back(&m, false);
+        if (got != want) {
+            printf("  BACK records opened from %d went to %d, wanted %d\n",
+                   from, (int)got, (int)want);
+        }
+        CHECK(got == want);
+        froms++;
+    }
+    printf("  BACK records walked from all %d screens\n", froms);
+    CHECK(froms == GS_SCREEN_COUNT);
+    m.records_from = GS_SCREEN_TITLE;
 }
 
 TEST(the_empty_seats_on_the_grid_are_filled_with_somebody) {

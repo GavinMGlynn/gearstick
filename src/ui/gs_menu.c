@@ -1329,6 +1329,22 @@ static gs_screen gs_results_screen(gs_menu *m) {
     return next;
 }
 
+// **Where the records screen goes back to.** It is opened from more than one
+// place - the title, the setup screen, the results - so "back" means the screen
+// that opened it and not a fixed destination. Anything else is the title, which
+// is the safe answer for a value nobody could have arrived from.
+//
+// Written once, here, because it was written twice: the button on the screen
+// knew this and Escape did not, so a player who opened the records from their
+// results and pressed Escape was put on the main menu instead of back where
+// they were. Two ways out of one screen going to two different places.
+static gs_screen gs_records_back(const gs_menu *m) {
+    const bool sane = m->records_from == GS_SCREEN_TITLE ||
+                      m->records_from == GS_SCREEN_RESULTS ||
+                      m->records_from == GS_SCREEN_SETUP;
+    return sane ? m->records_from : GS_SCREEN_TITLE;
+}
+
 static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
     gs_screen next = GS_SCREEN_RECORDS;
     // Counted before the window opens, so the panel is the height of its table
@@ -1402,12 +1418,7 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
         ImGui_Separator();
         ImGui_Spacing();
         if (ImGui_ButtonEx("Back", (ImVec2){ 120.0f, 38.0f })) {
-            // The title is the safe answer for anything that is not a screen
-            // somebody could have arrived from.
-            bool sane = m->records_from == GS_SCREEN_TITLE ||
-                        m->records_from == GS_SCREEN_RESULTS ||
-                        m->records_from == GS_SCREEN_SETUP;
-            next = sane ? m->records_from : GS_SCREEN_TITLE;
+            next = gs_records_back(m);
         }
         gs_panel_measure(m);
     }
@@ -1973,6 +1984,10 @@ gs_screen gs_menu_back(const gs_menu *m, bool editing) {
     // closing it is the first thing Escape does and it changes no screen.
     if (editing) return m->screen;
 
+    // **Every screen named, and no `default`.** A default here is a screen
+    // added next year quietly getting a way out that nobody chose - which is
+    // exactly how six surfaces came to sound like pavement. `-Wswitch` makes
+    // that a build failure instead.
     switch (m->screen) {
     case GS_SCREEN_RACE:
         // **Out of a race, and online that means the lobby.** A wrecked car in
@@ -1981,15 +1996,35 @@ gs_screen gs_menu_back(const gs_menu *m, bool editing) {
         // used to go to decides a race that belongs to the server.
         return m->online ? GS_SCREEN_LOBBY : GS_SCREEN_SETUP;
 
+    case GS_SCREEN_RESULTS:
+        // **And out of the results, online, is the lobby too** - the same place
+        // the button on the screen says, which it did not used to be. The
+        // results of a server's race led back to the main menu on Escape and to
+        // the lobby on the button beside it: one screen, two ways out, two
+        // different places, and the one a player reaches for by reflex was the
+        // one that left the room.
+        return m->online ? GS_SCREEN_LOBBY : GS_SCREEN_TITLE;
+
+    case GS_SCREEN_RECORDS:
+        // Whichever screen opened it - see gs_records_back.
+        return gs_records_back(m);
+
     case GS_SCREEN_TITLE:
         return GS_SCREEN_COUNT;      // nothing behind the title but the door
 
     case GS_SCREEN_LOGIN:
         return GS_SCREEN_COUNT;      // and nothing behind the door but leaving
 
-    default:
+    case GS_SCREEN_PROFILES:
+    case GS_SCREEN_SETUP:
+    case GS_SCREEN_LOBBY:
+    case GS_SCREEN_TRACKS:
         return GS_SCREEN_TITLE;
+
+    case GS_SCREEN_COUNT:
+        break;                       // not a screen; nothing to leave
     }
+    return GS_SCREEN_TITLE;
 }
 
 // FNV-1a, because the only property wanted here is that different states give

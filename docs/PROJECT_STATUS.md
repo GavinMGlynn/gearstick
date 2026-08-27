@@ -5367,10 +5367,68 @@ it is good at is answering "what has never run at all", which is a different
 question from "what is tested" and the only one a coverage tool answers
 honestly. It found this in one pass.
 
-The other thing it says is that **`src/frontend/game/main.c` is at 0% of 1186
-lines** - the client's own event loop and argument handling, never entered by
-any test in the suite. That is the largest untouched thing left in the tree and
-it is not addressed here.
+It also reported `src/frontend/game/main.c` at 0% of 1186 lines. **That number
+was wrong and is corrected below** - it is a property of how the client is
+stopped, not of what runs it.
+
+## The 0% that was not, and two ways out of one screen
+
+`src/frontend/game/main.c` was reported here as 0% of 1186 lines, "never entered
+by any test in the suite". **That was wrong.** `gearstick_plays` and
+`gearstick_front_door` both drive the real client through real races, and both
+stop it with `proc.kill()` - SIGKILL, deliberately, so the harness behaves the
+same on every platform. A process killed that way never flushes its coverage
+counters. The client runs; nothing can see it run.
+
+Measured properly - five clean-exit invocations of the client through its own
+flags - main.c is at **34%**, and the parts that stay dark are the ones the two
+end-to-end checks reach and the flags do not.
+
+The lesson is the one this project keeps relearning from the other side: a
+number that says "never" is a claim about the instrument as much as the code.
+The pad finding a few hours earlier was real because `gs_input.c` is compiled
+into a test binary that exits normally.
+
+### And what was behind it: Escape did not say what the screens say
+
+Looking at what main.c does with Escape led to `gs_menu_back`, which is where
+the rule actually lives - "where back goes is gs_menu_back's to say, not this
+handler's, so that it is a rule with a test rather than four lines nothing can
+reach". Two screens disagreed with it.
+
+**The records screen** is opened from the title, from the setup screen and from
+the results, and it remembers which so its Back button can return there. Escape
+ignored that and went to the title. A player who opened the records from their
+own results and pressed Escape - or a player on a pad, whose cancel button is
+the same rule - was put on the main menu instead of back where they were.
+
+**The results of a server's race** had a button saying "Back to the lobby" and
+an Escape that went to the main menu. One screen, two ways out, two different
+places, and the one a player reaches for by reflex was the one that left the
+room. Recoverable - PLAY on the title takes an online player back to the lobby -
+but not what the screen said.
+
+Both are now one rule: `gs_records_back` is written once and called by both the
+button and `gs_menu_back`, and the results screen backs out where its own button
+points. The switch names **every screen and has no `default`**, so a screen added
+next year has to have its way out chosen rather than inheriting one - the same
+`-Wswitch` guarantee the surfaces got this morning, for the same reason.
+
+### The test walked nine of thirty-six, and one of them lied
+
+`there_is_always_a_way_back_out_of_wherever_you_are` set `m.online = true` to
+check the race case and then ran six more screens through a loop **without
+setting it back**. So those six were only ever asked what Escape does *on a
+server*, and the answer off one was never asked at all. That is how the results
+screen kept its two different exits: the case that was wrong was the case
+nothing looked at.
+
+It walks every screen on a server and off one now, with the construction set
+open and shut - 18 ways out - and the records screen from all nine screens as
+the place it came from, including the ones nobody can arrive from, because the
+safe answer for those is part of the claim. The table also asserts that every
+screen appears in it exactly once, so a tenth screen turns the tree red by
+itself.
 
 ## Known risks
 
