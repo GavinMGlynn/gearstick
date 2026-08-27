@@ -46,4 +46,10 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
 // box. This is what a test reads instead of counting pixels.
 float gs_hud_overflow(void);
 
+// **And how much of it was nothing.** The room left under the last thing drawn.
+// A panel sized for rows it is not drawing is a box with an empty half - which
+// is what the HUD looked like in a derby the day it stopped pretending to be a
+// race - and no amount of asking what fell off the bottom can see it.
+float gs_hud_spare(void);
+
 #endif // GS_HUD_H

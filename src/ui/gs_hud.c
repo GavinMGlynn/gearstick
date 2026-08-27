@@ -41,6 +41,7 @@ static void gs_hud_stat(const char *label, const char *value, float scale) {
 
 // What did not fit in the panel last time it was drawn - see gs_hud_overflow.
 static float gs_hud_hidden = 0.0f;
+static float gs_hud_room;
 
 // The damage bar. A number from 0 to 255 means nothing to a driver; a bar that
 // is running out means something immediately, and the colour says how worried to
@@ -124,15 +125,28 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
     float row_big = line * GS_HUD_BIG + line + st->ItemSpacing.y * 2.0f;
     float row_small = line * GS_HUD_SMALL + line + st->ItemSpacing.y * 2.0f;
 
+    // **A derby is not a race and its HUD is not the same size.** Where you are
+    // in the order, which lap it is, how long this one is taking and the best
+    // one so far are four rows about getting round a track, and "last one
+    // driving" is not about that. What it draws instead is one row - how many
+    // are left - so it is one row tall plus whatever the countdown is doing.
+    const bool derby = w->mode == (uint8_t)GS_MODE_DESTRUCTION;
+    const bool counting = gs_world_countdown(w) > 0;
+
+    const float bigs = derby ? 1.0f : 2.0f;      // still driving | position, lap
+    const float smalls = derby ? (counting ? 1.0f : 0.0f)   // get ready
+                               : 2.0f;                      // this lap, best
+    // A gap before each small row and one before the bar. An ImGui_Spacing() is
+    // an item of no height that still costs a gap, and forgetting them is the
+    // whole of the twenty-nine pixels this panel was short in every state it
+    // had. In a race there is a gap between the two big rows as well.
+    const float gaps = smalls + 1.0f + (derby ? 0.0f : 1.0f);
+
     float height = st->WindowPadding.y * 2.0f
-                 + row_big * 2.0f          // position, lap
-                 + row_small * 2.0f        // this lap, best
+                 + row_big * bigs
+                 + row_small * smalls
                  + 8.0f + st->ItemSpacing.y * 2.0f + line   // the bar, labelled
-                 // And the four deliberate gaps between those groups. An
-                 // ImGui_Spacing() is an item of no height that still costs a
-                 // gap, and forgetting them is the whole of the twenty-nine
-                 // pixels this panel was short in every state it has.
-                 + st->ItemSpacing.y * 4.0f;
+                 + st->ItemSpacing.y * gaps;
     // A finished car's time, and the gap above it.
     if (c->finish_tick != 0) height += row_small + st->ItemSpacing.y;
     // The way out, when there is a wreck to need one. Counted here rather than
@@ -166,32 +180,49 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                     ImGuiWindowFlags_NoSavedSettings)) {
         char text[32];
 
-        // --- Position. First, and biggest, because it is the question.
-        uint8_t place = gs_world_place(w, t, v->car);
-        uint8_t racing = 0;
-        for (uint8_t i = 0; i < w->car_count; i++) {
-            if (w->car[i].active) racing++;
+        // **A derby is not a race and its HUD should not pretend to be one.**
+        //
+        // Four of these five rows are about getting round a track: where you
+        // are in the order, which lap it is, how long this one is taking, and
+        // the best one so far. In "last one driving" none of that decides
+        // anything - a car three corners ahead and a car sitting still are
+        // equal until one of them is wrecked - and the one question the mode
+        // does ask, how many are left, was not on the screen at all. It read
+        // "position 1/4" with two of the four already wrecked.
+        // --- First, and biggest, because it is the question. Which question it
+        //     is depends on what is being played.
+        if (derby) {
+            SDL_snprintf(text, sizeof text, "%u", gs_world_driving(w, nullptr));
+            gs_hud_stat("still driving", text, GS_HUD_BIG);
+        } else {
+            uint8_t place = gs_world_place(w, t, v->car);
+            uint8_t racing = 0;
+            for (uint8_t i = 0; i < w->car_count; i++) {
+                if (w->car[i].active) racing++;
+            }
+            SDL_snprintf(text, sizeof text, "%u/%u", place, racing);
+            gs_hud_stat("position", text, GS_HUD_BIG);
         }
-        SDL_snprintf(text, sizeof text, "%u/%u", place, racing);
-        gs_hud_stat("position", text, GS_HUD_BIG);
 
         // --- Lap. The target counts from the world rather than the setup, so a
         // race whose length was changed shows the length being raced.
-        ImGui_Spacing();
+        if (!derby) ImGui_Spacing();
         // **Asked of the route rather than read off the car.** On a loop the
         // first crossing of the line is the run up to it and not a lap anybody
         // drove, so `laps` is one ahead of what a driver would say; and a path
         // has no laps at all, only an arrival. See gs_car_laps_done.
-        uint16_t needed = gs_world_laps_needed(w, t);
-        uint16_t done = gs_car_laps_done(t, c);
-        if (needed > 0) {
-            uint16_t on = (uint16_t)(done + 1);
-            if (on > needed) on = needed;
-            SDL_snprintf(text, sizeof text, "%u/%u", on, needed);
-        } else {
-            SDL_snprintf(text, sizeof text, "%u", (uint16_t)(done + 1));
+        if (!derby) {
+            uint16_t needed = gs_world_laps_needed(w, t);
+            uint16_t done = gs_car_laps_done(t, c);
+            if (needed > 0) {
+                uint16_t on = (uint16_t)(done + 1);
+                if (on > needed) on = needed;
+                SDL_snprintf(text, sizeof text, "%u/%u", on, needed);
+            } else {
+                SDL_snprintf(text, sizeof text, "%u", (uint16_t)(done + 1));
+            }
+            gs_hud_stat("lap", text, GS_HUD_BIG);
         }
-        gs_hud_stat("lap", text, GS_HUD_BIG);
 
         // --- The lap being driven, counting up. Ticks since the last crossing,
         // which is the same clock the simulation will judge the lap by.
@@ -211,13 +242,15 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // that exists for three seconds would leave a hole in it for the rest
         // of the race. The light tree beside the grid is the thing being read
         // at that moment; this is for anybody whose eyes are on their own car.
-        ImGui_Spacing();
-        uint32_t counting = gs_world_countdown(w);
-        if (counting > 0) {
+        if (counting || !derby) ImGui_Spacing();
+        if (counting) {
+            const uint32_t left = gs_world_countdown(w);
             SDL_snprintf(text, sizeof text, "%u",
-                         (unsigned)((counting + (uint32_t)GS_TICK_HZ - 1u) /
+                         (unsigned)((left + (uint32_t)GS_TICK_HZ - 1u) /
                                     (uint32_t)GS_TICK_HZ));
             gs_hud_stat("get ready", text, GS_HUD_SMALL);
+        } else if (derby) {
+            // Nothing: a lap clock in a derby is a clock counting nothing.
         } else if (c->wrecked) {
             gs_hud_stat("this lap", "-", GS_HUD_SMALL);
         } else {
@@ -227,9 +260,11 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         }
 
         // --- And the one to beat.
-        ImGui_Spacing();
-        gs_time_text(text, sizeof text, c->best_lap);
-        gs_hud_stat("best", text, GS_HUD_SMALL);
+        if (!derby) {
+            ImGui_Spacing();
+            gs_time_text(text, sizeof text, c->best_lap);
+            gs_hud_stat("best", text, GS_HUD_SMALL);
+        }
 
         // --- What is left of the car.
         ImGui_Spacing();
@@ -265,8 +300,16 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         }
 
         gs_hud_hidden = ImGui_GetScrollMaxY();
+
+        // **And what was left over.** The room under the last thing drawn,
+        // which is the other half of the same question: a panel sized for rows
+        // it is not drawing has a hole in it, and asking what fell off the
+        // bottom cannot see a hole.
+        gs_hud_room = ImGui_GetContentRegionAvail().y;
+        if (gs_hud_room < 0.0f) gs_hud_room = 0.0f;
     }
     ImGui_End();
 }
 
 float gs_hud_overflow(void) { return gs_hud_hidden; }
+float gs_hud_spare(void) { return gs_hud_room; }

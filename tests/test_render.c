@@ -3415,20 +3415,34 @@ TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
     // Racing, wrecked, waiting, finished, and the combinations of those that a
     // race can actually produce - offline, where a wreck is offered a restart,
     // and online, where it is not.
-    struct { bool wrecked; bool finished; float waited; bool online; } states[] = {
-        { false, false, 0.0f,  false },
-        { true,  false, 0.0f,  false },
-        { true,  false, 0.0f,  true  },
-        { false, false, 3.0f,  false },
-        { true,  false, 3.0f,  true  },
-        { false, true,  0.0f,  false },
-        { true,  true,  9.0f,  false },
+    //
+    // **And in both modes**, because a derby draws a different set of rows -
+    // one, where a race draws four - and the panel is sized from the rows it
+    // has. A HUD sized for the other mode is either a box with a hole in it or
+    // a box with something below the bottom of it, and this test is the thing
+    // that says which.
+    struct { bool wrecked; bool finished; float waited; bool online; bool derby;
+             bool counting; } states[] = {
+        { false, false, 0.0f,  false, false, false },
+        { true,  false, 0.0f,  false, false, false },
+        { true,  false, 0.0f,  true,  false, false },
+        { false, false, 3.0f,  false, false, false },
+        { true,  false, 3.0f,  true,  false, false },
+        { false, true,  0.0f,  false, false, false },
+        { true,  true,  9.0f,  false, false, false },
+        { false, false, 0.0f,  false, false, true  },
+        { false, false, 0.0f,  false, true,  false },
+        { true,  false, 0.0f,  false, true,  false },
+        { false, false, 0.0f,  false, true,  true  },
+        { true,  false, 3.0f,  true,  true,  false },
     };
 
     for (size_t i = 0; i < SDL_arraysize(states); i++) {
         w.car[0].wrecked = states[i].wrecked;
         w.car[0].damage = states[i].wrecked ? 255 : 0;
         w.car[0].finish_tick = states[i].finished ? 4200 : 0;
+        gs_world_set_mode(&w, states[i].derby ? GS_MODE_DESTRUCTION : GS_MODE_RACE);
+        gs_world_set_countdown(&w, states[i].counting ? 200u : 0u);
 
         gs_frame f = { 0 };
         for (int frame = 0; frame < 3; frame++) {
@@ -3445,9 +3459,33 @@ TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
         }
         gs_frame_free(&f);
 
+        if (gs_hud_overflow() != 0.0f) {
+            printf("  HUD state %zu (%s%s%s%s) hides %.0f\n", i,
+                   states[i].derby ? "derby " : "race ",
+                   states[i].wrecked ? "wrecked " : "",
+                   states[i].finished ? "finished " : "",
+                   states[i].counting ? "counting" : "",
+                   (double)gs_hud_overflow());
+        }
         CHECK(gs_hud_overflow() == 0.0f);
+
+        // **And no hole in it either.** A panel sized for rows it is not
+        // drawing is a box with an empty half, which is what a derby HUD looked
+        // like the day it stopped drawing four of its five rows. Measured as
+        // the room left under the last thing drawn.
+        const float spare = gs_hud_spare();
+        if (spare > 12.0f) {
+            printf("  HUD state %zu (%s%s%s%s) has %.0f pixels of nothing at "
+                   "the bottom\n", i, states[i].derby ? "derby " : "race ",
+                   states[i].wrecked ? "wrecked " : "",
+                   states[i].finished ? "finished " : "",
+                   states[i].counting ? "counting" : "", (double)spare);
+        }
+        CHECK(spare <= 12.0f);
     }
 
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_countdown(&w, 0);
     w.car[0].wrecked = false;
     w.car[0].damage = 0;
     w.car[0].finish_tick = 0;

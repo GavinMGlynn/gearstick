@@ -264,6 +264,15 @@ uint64_t gs_world_hash(const gs_world *w);
 // three of them working it out separately is three chances to disagree.
 uint8_t gs_world_place(const gs_world *w, const gs_track *t, uint8_t car);
 
+// **How many are still driving**, and which one of them if there is exactly
+// one. Active and not wrecked - the thing a demolition derby is decided by, and
+// the thing somebody in one wants to know.
+//
+// Here rather than counted where it is wanted, because it was already being
+// counted in the rule that ends a derby, and a second count somewhere else is a
+// second definition of what "out of it" means.
+uint8_t gs_world_driving(const gs_world *w, uint8_t *last);
+
 // **Where an airborne car is going to come down**, as the path it will take.
 //
 // Off by default in the game, because the arc being *not* negotiable is what

@@ -1199,6 +1199,16 @@ finished and tested since Phase 8. But every car in a race takes its input from
 a pad: the AI drives only in headless self-play, the editor's background ghost
 and the demo. **A one-player race is one car going round on its own.**
 
+- [x] **A demolition derby has a demolition derby's HUD.** *(Found by looking at
+      one, which nobody had done.)* Four of its five rows were about getting
+      round a track — position, lap, this lap, best — and in "last one driving"
+      none of that decides anything; the one question the mode asks, how many
+      are left, was not on the screen at all. It read `position 1/4` with two of
+      the four already wrecked.
+      *Verification: the HUD test renders twelve states rather than seven — both
+      modes, wrecked, finished, waiting, counting — and asks two things of each:
+      what fell off the bottom, and how much of the panel was nothing. "Still
+      driving" has one definition, shared with the rule that ends the race.*
 - [x] **The first screen a new player sees offers the thing that can work.**
       *(Found by running with an empty preferences directory — nobody had ever
       looked at a fresh install, because this machine has had a driver on it

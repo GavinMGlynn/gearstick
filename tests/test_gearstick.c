@@ -1777,6 +1777,86 @@ TEST(a_race_does_not_end_just_because_somebody_was_wrecked) {
     CHECK(w.winner == GS_NO_WINNER);
 }
 
+TEST(how_many_are_still_driving_is_one_number_with_one_definition) {
+    // **The question a derby asks**, and it was being counted in two places
+    // that did not know about each other: the rule that ends the race, and
+    // nowhere else - because the screen was not showing it at all. It told the
+    // player their position in a running order instead, with the wrecked cars
+    // counted among the opposition.
+    static gs_track t;
+    gs_track_init(&t, 32, 32, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    }
+    gs_track_add_gate(&t, GS_INT(8), GS_INT(16), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(16), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_DESTRUCTION);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(6) + GS_INT(3) * i, GS_INT(14), 0);
+    }
+
+    uint8_t last = 0;
+    CHECK(gs_world_driving(&w, &last) == GS_MAX_CARS);
+    CHECK(last == GS_MAX_CARS - 1);          // the last one still going
+
+    // Wrecked is out of it, whatever it is doing and wherever it is.
+    w.car[0].wrecked = true;
+    CHECK(gs_world_driving(&w, &last) == GS_MAX_CARS - 1);
+    CHECK(last == GS_MAX_CARS - 1);
+
+    w.car[GS_MAX_CARS - 1].wrecked = true;
+    CHECK(gs_world_driving(&w, &last) == GS_MAX_CARS - 2);
+    CHECK(last == GS_MAX_CARS - 2);
+
+    // **And it is the same number the race is decided by.** Two definitions of
+    // "out of it" is a screen saying two are left over a race that has already
+    // been won. Two are still going here, so it is not over; wreck one and it
+    // is, and the winner is the one the count hands back.
+    {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(gs_world_driving(&w, &last) == 2);
+    CHECK(!w.over);
+
+    w.car[1].wrecked = true;
+    CHECK(gs_world_driving(&w, &last) == 1);
+    {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.over);
+    CHECK(w.winner == last);
+
+    // **And everybody out at once is nobody's win.** A fresh race, because the
+    // one above is settled and settled is forever - a winner who then drives
+    // off a cliff in the silence afterwards has still won.
+    gs_world all_out;
+    gs_world_init(&all_out, GS_ONE);
+    gs_world_set_mode(&all_out, GS_MODE_DESTRUCTION);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_world_add_car(&all_out, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(6) + GS_INT(3) * i, GS_INT(14), 0);
+        all_out.car[i].wrecked = true;
+    }
+
+    // Nobody driving hands back nobody, rather than the last index it saw.
+    last = 3;
+    CHECK(gs_world_driving(&all_out, &last) == 0);
+    CHECK(last == GS_NO_WINNER);
+
+    {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        gs_world_step(&all_out, &t, in);
+    }
+    CHECK(all_out.over);
+    CHECK(all_out.winner == GS_NO_WINNER);
+}
+
 TEST(a_destruction_race_fought_out_between_two_cars_finishes_by_itself) {
     // Not staged: two cars driven into each other until one of them stops.
     static gs_track t;
@@ -7119,6 +7199,7 @@ int main(void) {
     run_destruction_mode_ends_when_one_car_is_left_driving();
     run_everybody_going_at_once_is_a_draw_rather_than_a_win();
     run_a_race_does_not_end_just_because_somebody_was_wrecked();
+    run_how_many_are_still_driving_is_one_number_with_one_definition();
     run_a_destruction_race_fought_out_between_two_cars_finishes_by_itself();
     run_a_wreck_changes_the_racing_line_for_the_rest_of_the_race();
     run_a_wreck_is_still_there_much_later_and_has_not_moved();

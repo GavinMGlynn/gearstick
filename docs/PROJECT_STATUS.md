@@ -4530,6 +4530,37 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### Half the modes had the other one's HUD
+
+Nobody had looked at a demolition derby. It is one of the two things the mode
+dropdown offers, and the screen it draws was built for the other one:
+
+    1/4   position          two of the four already wrecked
+    1     lap               there are no laps
+    10.00 this lap          a lap clock, counting nothing
+    -     best              a best lap
+          condition         the only row that meant anything
+
+**Four of five rows were about getting round a track**, which in "last one
+driving" decides nothing: a car three corners ahead and a car sitting still are
+equal until one of them is wrecked. And the one question the mode does ask - how
+many are left - was not on the screen at all.
+
+It shows what it is about now: `still driving`, and the damage bar. Two rows,
+and the panel is two rows tall, because the panel's height and its contents are
+one list in this file rather than two that drift.
+
+**The count has one definition.** It was already being worked out in the rule
+that ends a derby, so `gs_world_driving` is that count, and the rule calls it -
+two definitions of "out of it" is a screen saying two are left over a race that
+has already been won.
+
+The HUD test now renders **twelve** states rather than seven: both modes, wrecked,
+finished, waiting, counting down. And it asks two questions of each rather than
+one - what fell off the bottom, and *how much of the panel was nothing*. A panel
+sized for rows it is not drawing has a hole in it, and no amount of asking what
+overflowed can see a hole.
+
 ### What a new player sees
 
 Nobody had ever looked at the first screen of a fresh install, because this

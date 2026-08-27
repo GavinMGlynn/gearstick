@@ -705,13 +705,8 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
     // and never revisited: a winner who then drives off a cliff in the silence
     // afterwards has still won, and taking it back would be absurd.
     if (w->mode == (uint8_t)GS_MODE_DESTRUCTION && !w->over) {
-        uint8_t alive = 0, last = GS_NO_WINNER;
-        for (uint8_t i = 0; i < w->car_count; i++) {
-            if (w->car[i].active && !w->car[i].wrecked) {
-                alive++;
-                last = i;
-            }
-        }
+        uint8_t last = GS_NO_WINNER;
+        const uint8_t alive = gs_world_driving(w, &last);
         if (alive <= 1) {
             w->over = true;
             // `last` is only ever set for a car that is still driving, so it is
@@ -792,6 +787,18 @@ static int64_t gs_progress(const gs_world *w, const gs_track *t, uint8_t i) {
     }
 
     return whole * GS_ONE + part;
+}
+
+uint8_t gs_world_driving(const gs_world *w, uint8_t *last) {
+    uint8_t driving = 0;
+    if (last != nullptr) *last = GS_NO_WINNER;
+
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        if (!w->car[i].active || w->car[i].wrecked) continue;
+        driving++;
+        if (last != nullptr) *last = i;
+    }
+    return driving;
 }
 
 uint8_t gs_world_place(const gs_world *w, const gs_track *t, uint8_t car) {
