@@ -61,15 +61,27 @@ typedef enum gs_hazard_kind {
     GS_HAZ_NONE = 0,
     GS_HAZ_OIL,     // takes the grip away and gives it back when you leave
     GS_HAZ_MINE,    // one use, and it hurts
+    GS_HAZ_SMOKE,   // hides the ground under it, and nothing else
+    GS_HAZ_FLAME,   // burns while you are in it, and burns itself out
     GS_HAZ_COUNT
 } gs_hazard_kind;
+
+// **Half a second decides which of the two things the button does.** A tap
+// leaves whatever is selected; a hold moves the selection on. One button,
+// because four people are sharing one keyboard and a fifth key each is a key
+// somebody has to reach - and because a pad has the same five actions on it.
+#define GS_FIRE_HOLD (GS_TICK_HZ / 2)
 
 typedef struct gs_hazard {
     gs_fix  x, y;
     uint8_t kind;
     uint8_t owner;   // the car that dropped it, which it never affects
     uint8_t spent;   // a mine that has gone off
-    uint8_t pad;
+    // **How long it has left**, in ticks, or zero for something that stays
+    // until the race ends. Oil and mines stay; smoke and fire do not, because
+    // a screen that fills with smoke and never clears is a track nobody can
+    // race on by lap three.
+    uint16_t life;
 } gs_hazard;
 
 typedef struct gs_car {
@@ -108,6 +120,20 @@ typedef struct gs_car {
     // How long since the wheels last touched. The renderer wants it for the
     // shadow, and the landing-prediction arc will want it later.
     uint32_t air_ticks;
+
+    // **What this car is carrying**, one count per kind of hazard, indexed by
+    // gs_hazard_kind. Set from the race before the flag and spent during it, so
+    // it is world state like everything else that decides a race: two machines
+    // disagreeing about how many mines somebody has left is a disagreement
+    // about what is about to happen.
+    uint8_t  ammo[GS_HAZ_COUNT];
+    uint8_t  selected;        // gs_hazard_kind: what a tap would leave
+
+    // How long the button has been down, and whether this hold has already
+    // moved the selection on - so holding cycles once rather than racing
+    // through all four in half a second.
+    uint16_t fire_held;
+    uint8_t  fire_cycled;
 } gs_car;
 
 // Everything that changes during a race. No pointers - see the header comment.
@@ -359,6 +385,18 @@ uint8_t gs_world_arc(const gs_world *w, const gs_track *t, uint8_t car,
 // Drop a hazard at a car's position, if it is allowed to. Returns whether one
 // was left behind.
 bool gs_world_drop(gs_world *w, uint8_t car, gs_hazard_kind kind);
+
+// **What a car starts the race carrying.** Zero of everything is a race with no
+// weapons in it, which is what every race was before this and what a race with
+// them turned off still is. Selecting settles on the first kind there is any
+// of, so a car carrying only mines has mines selected without anybody pressing
+// anything.
+void gs_world_arm(gs_world *w, uint8_t car, gs_hazard_kind kind, uint8_t count);
+
+// Which kind a tap would leave, and how many of it are left. GS_HAZ_NONE when
+// the car is carrying nothing at all.
+gs_hazard_kind gs_car_selected(const gs_car *c);
+uint8_t gs_car_ammo(const gs_car *c, gs_hazard_kind kind);
 
 // How worn the ground is at a point, 0 to GS_ONE. The renderer wants it, and so
 // will the analyser when it starts asking where the line has moved to.

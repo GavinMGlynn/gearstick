@@ -467,6 +467,12 @@ TEST(a_race_is_identified_by_everything_that_decides_it) {
         sizeof any->air_ticks, sizeof any->drop_cooldown, sizeof any->next_gate,
         sizeof any->laps, sizeof any->finish_tick, sizeof any->lap_start,
         sizeof any->best_lap,
+        // What it is carrying, what a tap would leave, and how long the button
+        // has been down. Added the day weapons went in - and this test is how
+        // it was noticed that they had not been added to the hash yet, which is
+        // exactly the job it was written to do.
+        sizeof any->ammo, sizeof any->selected,
+        sizeof any->fire_held, sizeof any->fire_cycled,
     };
     size_t named = 0;
     for (size_t i = 0; i < GS_ARRAY_LEN(car_field); i++) named += car_field[i];
@@ -2006,7 +2012,10 @@ static double gs_turn_over_hazard(gs_hazard_kind kind, int dropper) {
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(50), 0);
 
     if (kind != GS_HAZ_NONE) {
-        // Dropped exactly where the first car is about to be.
+        // Dropped exactly where the first car is about to be. Armed first,
+        // because a car carrying none of something drops none of it - which is
+        // what a race with the weapons turned off is.
+        gs_world_arm(&w, (uint8_t)dropper, kind, 4);
         w.car[(uint8_t)dropper].x = GS_INT(30);
         w.car[(uint8_t)dropper].y = GS_INT(30);
         CHECK(gs_world_drop(&w, (uint8_t)dropper, kind));
@@ -2049,6 +2058,7 @@ TEST(oil_gives_the_grip_back_the_moment_you_are_off_it) {
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(10), 0);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    gs_world_arm(&w, 1, GS_HAZ_OIL, 4);
     CHECK(gs_world_drop(&w, 1, GS_HAZ_OIL));
 
     // Drive the first car through the slick and out the far side.
@@ -2087,6 +2097,7 @@ TEST(a_mine_goes_off_once_and_hurts_whoever_found_it) {
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(16), 0);
 
     // Car one leaves a mine where it stands, then gets out of the way.
+    gs_world_arm(&w, 1, GS_HAZ_MINE, 4);
     CHECK(gs_world_drop(&w, 1, GS_HAZ_MINE));
     w.car[1].x = GS_INT(50);
     w.car[1].y = GS_INT(16);
@@ -2109,7 +2120,199 @@ TEST(a_mine_goes_off_once_and_hurts_whoever_found_it) {
     CHECK(w.hazard[0].spent);
 }
 
-TEST(holding_the_button_leaves_a_trail_and_not_a_carpet) {
+// Hold the fire button down for `ticks`, then let go, stepping the world all
+// the way through. Returns the world so the caller can look at what happened.
+static void gs_fire_for(gs_world *w, const gs_track *t, int ticks) {
+    gs_input in[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_FIRE), 0, 0, 0 };
+    for (int i = 0; i < ticks; i++) gs_world_step(w, t, in);
+    in[0] = (gs_input)GS_IN_ACCEL;
+    gs_world_step(w, t, in);
+}
+
+TEST(a_tap_leaves_a_hazard_and_a_hold_changes_which_one) {
+    // **One button, four things to leave behind.** A tap drops what is
+    // selected; holding for half a second moves the selection on instead and
+    // drops nothing. That is the whole control, and it is the same control on a
+    // pad as on a keyboard, because the binding for it carries a key and a
+    // button and gs_input_poll ors them together.
+    //
+    // This replaces a test that held the button down and counted a trail. That
+    // was the rule before there was more than one thing to drop.
+    static gs_track t;
+    gs_track_init(&t, 80, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
+    gs_world_arm(&w, 0, GS_HAZ_OIL, 3);
+    gs_world_arm(&w, 0, GS_HAZ_MINE, 2);
+
+    // Armed with two kinds, the first of them is what a tap would leave.
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_OIL);
+
+    // **A tap leaves one.** Short - well under the half second that means
+    // "change" - and the drop lands when the button comes up.
+    gs_fire_for(&w, &t, 6);
+    CHECK(w.hazard_count == 1);
+    CHECK(w.hazard[0].kind == (uint8_t)GS_HAZ_OIL);
+    CHECK(gs_car_ammo(&w.car[0], GS_HAZ_OIL) == 2);
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_OIL);
+
+    // **A hold leaves nothing and changes what is selected.**
+    gs_fire_for(&w, &t, GS_FIRE_HOLD + 4);
+    CHECK(w.hazard_count == 1);                       // still just the one
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_MINE);
+    CHECK(gs_car_ammo(&w.car[0], GS_HAZ_OIL) == 2);   // and nothing was spent
+
+    // And the next tap leaves the thing that is now selected.
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+    gs_fire_for(&w, &t, 6);
+    CHECK(w.hazard_count == 2);
+    CHECK(w.hazard[1].kind == (uint8_t)GS_HAZ_MINE);
+    CHECK(gs_car_ammo(&w.car[0], GS_HAZ_MINE) == 1);
+
+    // **Holding goes round rather than stopping at the end**, and it moves the
+    // selection once per hold rather than racing through everything in half a
+    // second - which would make the control unusable.
+    gs_fire_for(&w, &t, GS_FIRE_HOLD * 3);
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_OIL);
+}
+
+TEST(fire_burns_while_you_are_in_it_and_then_burns_out) {
+    // **A mine punishes arriving; fire punishes staying.** That is the whole
+    // difference between them, and it is why fire is not spent by being found:
+    // what ends it is its own clock.
+    static gs_track t;
+    gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(40), GS_INT(10), 0);
+
+    gs_world_arm(&w, 1, GS_HAZ_FLAME, 1);
+    w.car[1].x = GS_INT(20);
+    w.car[1].y = GS_INT(10);
+    CHECK(gs_world_drop(&w, 1, GS_HAZ_FLAME));
+    w.car[1].x = GS_INT(40);           // and out of its own fire
+
+    CHECK(w.car[0].damage == 0);
+
+    // A second of standing in it costs something, and two seconds cost more -
+    // which is what "while you are in it" means and a mine cannot do.
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+    const uint8_t after_one = w.car[0].damage;
+    CHECK(after_one > 0);
+
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+    CHECK(w.car[0].damage > after_one);
+
+    // **The one who lit it walks through it.** Same rule as oil: a weapon that
+    // hurts the person carrying it is a weapon nobody uses.
+    CHECK(w.car[1].damage == 0);
+
+    // And it burns out. Long after it should have, the car parked in it stops
+    // taking damage at all.
+    for (int i = 0; i < GS_TICK_HZ * 6; i++) gs_world_step(&w, &t, nullptr);
+    const uint8_t burnt_out = w.car[0].damage;
+    for (int i = 0; i < GS_TICK_HZ * 2; i++) gs_world_step(&w, &t, nullptr);
+    CHECK(w.car[0].damage == burnt_out);
+}
+
+TEST(smoke_hides_the_ground_and_does_nothing_to_the_car) {
+    // **Smoke is the one that is not physics.** It is where it is and it goes
+    // out after a while, and both of those are world state that two machines
+    // have to agree about - but a car driving through it drives exactly as it
+    // would have. What it changes is what the driver behind can see, and that
+    // belongs to the renderer.
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
+
+    const double clean = gs_turn_over_hazard(GS_HAZ_NONE, 0);
+    const double smoked = gs_turn_over_hazard(GS_HAZ_SMOKE, 1);
+    CHECK(clean > 5.0);
+    CHECK(smoked > clean - 0.5);      // somebody else's smoke: no difference
+    CHECK(smoked < clean + 0.5);
+
+    // And it clears, which is what stops a track being fog by lap three.
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+    gs_world_arm(&w, 0, GS_HAZ_SMOKE, 1);
+    CHECK(gs_world_drop(&w, 0, GS_HAZ_SMOKE));
+    CHECK(w.hazard[0].spent == 0);
+    CHECK(w.hazard[0].life > 0);
+
+    for (int i = 0; i < GS_TICK_HZ * 9; i++) gs_world_step(&w, &t, nullptr);
+    CHECK(w.hazard[0].spent == 1);
+}
+
+TEST(oil_and_mines_stay_where_they_were_left) {
+    // The other half of the same rule: what has no clock does not get one.
+    // Oil and a mine are still there at the end of a long race, which is what
+    // makes them worth placing early.
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+    gs_world_arm(&w, 0, GS_HAZ_OIL, 1);
+    gs_world_arm(&w, 0, GS_HAZ_MINE, 1);
+
+    CHECK(gs_world_drop(&w, 0, GS_HAZ_OIL));
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+    CHECK(gs_world_drop(&w, 0, GS_HAZ_MINE));
+
+    for (int i = 0; i < GS_TICK_HZ * 60; i++) gs_world_step(&w, &t, nullptr);
+    CHECK(w.hazard_count == 2);
+    for (uint8_t i = 0; i < w.hazard_count; i++) {
+        CHECK(w.hazard[i].life == 0);
+        CHECK(w.hazard[i].spent == 0);
+    }
+}
+
+TEST(every_kind_of_hazard_can_be_carried_dropped_and_told_apart) {
+    // Walked from GS_HAZ_COUNT rather than a list, so a fifth kind is in this
+    // test the day it exists. Two of the four could not be dropped by anybody
+    // at all before this: the mine was written, hashed and unreachable, and
+    // smoke and fire did not exist.
+    int walked = 0;
+    for (int kind = GS_HAZ_NONE + 1; kind < GS_HAZ_COUNT; kind++) {
+        static gs_track t;
+        gs_track_init(&t, 60, 20, GS_SURF_PAVEMENT);
+
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
+
+        // Carried, selected without anybody pressing anything, and dropped by
+        // a tap - the whole way a weapon reaches the ground in a real race.
+        gs_world_arm(&w, 0, (gs_hazard_kind)kind, 2);
+        CHECK(gs_car_selected(&w.car[0]) == (gs_hazard_kind)kind);
+        CHECK(gs_car_ammo(&w.car[0], (gs_hazard_kind)kind) == 2);
+
+        gs_fire_for(&w, &t, 6);
+        if (w.hazard_count != 1) {
+            printf("  HAZARD kind %d was carried and could not be dropped\n",
+                   kind);
+        }
+        CHECK(w.hazard_count == 1);
+        CHECK(w.hazard[0].kind == (uint8_t)kind);
+        CHECK(w.hazard[0].owner == 0);
+        CHECK(gs_car_ammo(&w.car[0], (gs_hazard_kind)kind) == 1);
+        walked++;
+    }
+    printf("  HAZARDS all %d kinds carried, selected and dropped by a tap\n",
+           walked);
+    CHECK(walked == GS_HAZ_COUNT - 1);
+}
+
+TEST(a_car_carrying_nothing_leaves_nothing) {
+    // **A race with the weapons turned off is every car carrying zero**, and
+    // that is what makes the setting a setting rather than a branch in the
+    // simulation. Nothing is dropped, the button does nothing, and nothing
+    // selects itself.
     static gs_track t;
     gs_track_init(&t, 80, 20, GS_SURF_PAVEMENT);
 
@@ -2117,10 +2320,64 @@ TEST(holding_the_button_leaves_a_trail_and_not_a_carpet) {
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
 
-    gs_input in[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_FIRE), 0, 0, 0 };
-    for (int i = 0; i < GS_TICK_HZ * 5; i++) gs_world_step(&w, &t, in);
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_NONE);
+    for (int k = 0; k < GS_HAZ_COUNT; k++) {
+        CHECK(gs_car_ammo(&w.car[0], (gs_hazard_kind)k) == 0);
+    }
 
-    // Five seconds of holding it down is about five, not six hundred.
+    gs_fire_for(&w, &t, 6);                       // a tap
+    CHECK(w.hazard_count == 0);
+    gs_fire_for(&w, &t, GS_FIRE_HOLD * 2);        // and a hold
+    CHECK(w.hazard_count == 0);
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_NONE);
+}
+
+TEST(a_weapon_runs_out_and_the_button_moves_on) {
+    // Spending the last of something moves the selection to whatever is left,
+    // so the button keeps doing something instead of going dead in the hand.
+    static gs_track t;
+    gs_track_init(&t, 80, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
+    gs_world_arm(&w, 0, GS_HAZ_OIL, 1);
+    gs_world_arm(&w, 0, GS_HAZ_SMOKE, 1);
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_OIL);
+
+    gs_fire_for(&w, &t, 6);
+    CHECK(w.hazard_count == 1);
+    CHECK(gs_car_ammo(&w.car[0], GS_HAZ_OIL) == 0);
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_SMOKE);
+
+    // The last one of all, and then there is nothing to select.
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+    gs_fire_for(&w, &t, 6);
+    CHECK(w.hazard_count == 2);
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_NONE);
+
+    // And now the button does nothing at all, however it is pressed.
+    for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
+    gs_fire_for(&w, &t, 6);
+    CHECK(w.hazard_count == 2);
+}
+
+TEST(one_a_second_however_fast_the_button_is_tapped) {
+    // The cooldown is what stops a road being paved. It was written when the
+    // button dropped while held; tapping is the way to do it quickly now, so
+    // this is the rule stated against tapping.
+    static gs_track t;
+    gs_track_init(&t, 80, 20, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
+    gs_world_arm(&w, 0, GS_HAZ_OIL, 200);
+
+    // Tapped as fast as a button can be tapped: down one tick, up the next,
+    // for five seconds.
+    for (int i = 0; i < GS_TICK_HZ * 5 / 2; i++) gs_fire_for(&w, &t, 1);
+
     CHECK(w.hazard_count >= 4);
     CHECK(w.hazard_count <= 7);
 
@@ -7630,7 +7887,14 @@ int main(void) {
     run_a_hazard_dropped_by_one_car_affects_the_other_and_not_the_dropper();
     run_oil_gives_the_grip_back_the_moment_you_are_off_it();
     run_a_mine_goes_off_once_and_hurts_whoever_found_it();
-    run_holding_the_button_leaves_a_trail_and_not_a_carpet();
+    run_a_tap_leaves_a_hazard_and_a_hold_changes_which_one();
+    run_fire_burns_while_you_are_in_it_and_then_burns_out();
+    run_smoke_hides_the_ground_and_does_nothing_to_the_car();
+    run_oil_and_mines_stay_where_they_were_left();
+    run_every_kind_of_hazard_can_be_carried_dropped_and_told_apart();
+    run_a_car_carrying_nothing_leaves_nothing();
+    run_a_weapon_runs_out_and_the_button_moves_on();
+    run_one_a_second_however_fast_the_button_is_tapped();
     run_destruction_mode_ends_when_one_car_is_left_driving();
     run_everybody_going_at_once_is_a_draw_rather_than_a_win();
     run_a_race_does_not_end_just_because_somebody_was_wrecked();

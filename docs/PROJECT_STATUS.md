@@ -5594,6 +5594,81 @@ difference is how many bytes inside a car somebody is driving may sit still.
 **Add a field to `gs_car` and that difference grows and the test fails**,
 whatever the offsets happen to be on the machine it is built on.
 
+## Four things to leave behind, and a button that can choose
+
+**The mine was written, hashed, tested for its effect, and no player could ever
+drop one.** `GS_IN_FIRE` had exactly one reader in the simulation and it was
+hard-coded to oil. The plan item *Droppable hazards* was ticked and its
+verification describes the mine going off - which is true of the code and was
+not true of the game. Found by listing every count sentinel in the tree and
+asking which are walked by a test: `GS_HAZ_COUNT` was in none.
+
+The toolkit is four now.
+
+| | what it does | how it ends |
+| --- | --- | --- |
+| oil | takes the grip away and gives it back when you leave | stays |
+| mine | one use: launches and hurts whoever found it | being found |
+| smoke | hides the ground under it, and nothing else | eight seconds |
+| fire | burns while you are in it | five seconds |
+
+Fire is the one worth reading twice: **a mine punishes arriving and fire
+punishes staying**, which is why it is not spent by being found. Smoke is the
+one that is not physics at all - a car drives through it exactly as it would
+have, and what it changes is what the driver behind can see.
+
+### One button, and half a second decides which thing it does
+
+Four people share one keyboard, so a fifth key each is a key somebody has to
+reach. **A tap drops what is selected; holding for half a second moves the
+selection on and drops nothing.** The drop lands on the *release*, because at
+the moment of the press nothing yet knows whether this is a tap or the beginning
+of a hold.
+
+It is the same control on a pad as on a keyboard without any extra work, because
+the binding for fire already carries a key *and* a pad button per player and
+`gs_input_poll` ors them together.
+
+Spending the last of something moves the selection to whatever is left, so the
+button keeps doing something rather than going dead in the hand; running out of
+everything selects nothing, so it cannot look armed when it is not.
+
+### Ammunition is world state
+
+Each car carries a count per kind, set before the flag and spent during the
+race. That is hashed, like everything else that decides a race: two machines
+disagreeing about how many mines somebody has left is a disagreement about what
+is about to happen.
+
+**A race with the weapons turned off is every car carrying zero of everything**,
+which is what makes the setting a setting rather than a branch in the
+simulation - and is why every race that came before behaves identically.
+
+### The hashes that moved, and the one that did not
+
+`GS_SELFTEST_WORLD_HASH` and `GS_OPPONENTS_WORLD_HASH` both moved. Nothing about
+those two races changed - the cars end up in the same places - but a car carries
+more state than it did, so the number describing it is longer. The **track**
+hash did not move.
+
+`a_race_is_identified_by_everything_that_decides_it`, written a few hours
+earlier, failed the moment the fields went in: *"a car is 68 bytes and the hash
+reads 52 of them"*. That is precisely the job it was written for, and it caught
+its author.
+
+### What is not done yet
+
+- **Nothing sets the counts.** `gs_world_arm` exists and only tests call it; the
+  race setup screen has no weapons dial yet, so no race a player can start has
+  any. That is the next item.
+- **A replay does not carry the loadout.** A replay stores the setup and re-races
+  it, so a recording of a race with weapons would re-race without them. The
+  format needs a version.
+- **No opponent has ever dropped anything.** `gs_ai_drive` never sets
+  `GS_IN_FIRE`, so in a derby against the computer only the human is armed.
+- **Nothing draws smoke or fire.** They exist in the world and the renderer has
+  not been told.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

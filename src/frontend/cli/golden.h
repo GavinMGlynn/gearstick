@@ -59,12 +59,20 @@
 // in corners, and low gravity takes your acceleration along with your weight.
 // Every replay and ghost time recorded before that is invalid, which is what
 // this number failing is for. See docs/PROJECT_STATUS.md.
+// And when a race gained weapons. Four things a driver can leave behind rather
+// than one, a count of each on every car, and which one a tap would drop - all
+// of it state that decides a race, so all of it hashed. A race with the weapons
+// turned off is every car carrying zero of everything and behaves exactly as
+// every race did before, which is why the *track* hash did not move and the
+// cars in the selftest race end up in the same places: what moved is the number
+// that describes them, because there is more of them to describe.
+//
 // And once more when the world stopped going on forever. There is now a run-off
 // outside a track and a drop past it, so the ground a car finds off the edge is
 // sand at the edge's height for ten tiles and then falling away - where before
 // it was the edge tile's own surface, level, without end. The selftest race has
 // a car that leaves the track, so its hash moves. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0xd831fad1fd238c26ULL
+#define GS_SELFTEST_WORLD_HASH 0x5cde014baa706c26ULL
 
 // The track generator, folded over its first two hundred seeds.
 //
@@ -124,6 +132,12 @@
 // change to every race anybody has recorded against it - and unlike a scripted
 // input log, there is nothing else holding the race in place. That is exactly
 // why it is pinned.
-#define GS_OPPONENTS_WORLD_HASH 0x7e8fe47bf3be48b4ULL
+//
+// Moved with the world hash above when weapons went in, and for the same
+// reason: a car carries more state than it did. No opponent has ever dropped
+// anything - gs_ai_drive does not press the button - so the race itself is
+// unchanged, and that is a gap written down in docs/PROJECT_STATUS.md rather
+// than a thing this number is hiding.
+#define GS_OPPONENTS_WORLD_HASH 0x7deda8f2e3e392b4ULL
 
 #endif // GS_GOLDEN_H

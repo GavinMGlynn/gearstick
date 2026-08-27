@@ -123,14 +123,88 @@ static gs_fix gs_steer_authority(const gs_vehicle_def *v, gs_fix speed) {
 #define GS_MINE_LIFT    GS_INT(4)
 #define GS_MINE_HURT    GS_INT(9)
 
+// Smoke hides the ground and does nothing to the car. It is wide, because a
+// screen you can see round the edge of is not a screen, and it clears after
+// eight seconds so a track is not fog by lap three.
+#define GS_SMOKE_RADIUS GS_RATIO(220, 100)
+#define GS_SMOKE_LIFE   (GS_TICK_HZ * 8)
+
+// Fire burns while you are in it rather than once when you reach it, which is
+// what makes it different from a mine: a mine punishes arriving, fire punishes
+// staying. Five seconds and it has burnt out.
+#define GS_FLAME_RADIUS GS_RATIO(100, 100)
+#define GS_FLAME_LIFE   (GS_TICK_HZ * 5)
+#define GS_FLAME_HURT   GS_INT(6)
+#define GS_FLAME_EVERY  12u          // ten bites a second, not a hundred
+
 // One a second. Holding the button should leave a trail, not a carpet.
 #define GS_DROP_COOLDOWN (GS_TICK_HZ)
+
+// How long a hazard of each kind lasts. Zero is "until the race ends".
+static uint16_t gs_haz_life(gs_hazard_kind kind) {
+    switch (kind) {
+    case GS_HAZ_SMOKE: return (uint16_t)GS_SMOKE_LIFE;
+    case GS_HAZ_FLAME: return (uint16_t)GS_FLAME_LIFE;
+    case GS_HAZ_OIL:
+    case GS_HAZ_MINE:
+    case GS_HAZ_NONE:
+    case GS_HAZ_COUNT:
+        break;
+    }
+    return 0;
+}
+
+void gs_world_arm(gs_world *w, uint8_t car, gs_hazard_kind kind, uint8_t count) {
+    if (car >= w->car_count || kind == GS_HAZ_NONE || kind >= GS_HAZ_COUNT) return;
+
+    gs_car *c = &w->car[car];
+    c->ammo[kind] = count;
+
+    // Settle the selection on something the car actually has. Kept in kind
+    // order rather than remembered, so arming is not sensitive to the order the
+    // race happens to hand the counts over in.
+    c->selected = (uint8_t)GS_HAZ_NONE;
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        if (c->ammo[k] > 0) { c->selected = (uint8_t)k; break; }
+    }
+}
+
+gs_hazard_kind gs_car_selected(const gs_car *c) {
+    return (gs_hazard_kind)c->selected;
+}
+
+uint8_t gs_car_ammo(const gs_car *c, gs_hazard_kind kind) {
+    if (kind <= GS_HAZ_NONE || kind >= GS_HAZ_COUNT) return 0;
+    return c->ammo[kind];
+}
+
+// The next kind this car has any of, going round. Itself if it is the only one
+// it has any of, and nothing at all when it has run out of everything - which
+// is what stops a spent weapon staying selected and the button looking armed
+// when it is not.
+static uint8_t gs_next_armed(const gs_car *c) {
+    const int kinds = GS_HAZ_COUNT - 1;            // NONE is not a weapon
+    const int first = GS_HAZ_NONE + 1;
+    const int from = (c->selected >= first) ? (int)c->selected : GS_HAZ_NONE;
+
+    // Every kind exactly once, starting after the one selected and ending on
+    // it - so the only kind left is still found, and no kind is offered twice.
+    for (int step = 1; step <= kinds; step++) {
+        const int k = first + (((from - first + step) % kinds) + kinds) % kinds;
+        if (c->ammo[k] > 0) return (uint8_t)k;
+    }
+    return (uint8_t)GS_HAZ_NONE;
+}
 
 bool gs_world_drop(gs_world *w, uint8_t car, gs_hazard_kind kind) {
     if (car >= w->car_count || kind == GS_HAZ_NONE || kind >= GS_HAZ_COUNT) return false;
 
     gs_car *c = &w->car[car];
     if (!c->active || c->wrecked || c->drop_cooldown != 0) return false;
+
+    // **Nothing left is nothing dropped.** A race with weapons turned off is
+    // every car carrying zero of everything, which is what this reads.
+    if (c->ammo[kind] == 0) return false;
 
     // A ring rather than a refusal when full. Running out of room to record
     // hazards should quietly forget the oldest one, not stop the newest from
@@ -144,8 +218,14 @@ bool gs_world_drop(gs_world *w, uint8_t car, gs_hazard_kind kind) {
     }
 
     w->hazard[at] = (gs_hazard){ .x = c->x, .y = c->y, .kind = (uint8_t)kind,
-                                 .owner = car, .spent = 0, .pad = 0 };
+                                 .owner = car, .spent = 0,
+                                 .life = gs_haz_life(kind) };
     c->drop_cooldown = GS_DROP_COOLDOWN;
+    c->ammo[kind]--;
+
+    // Out of this one: move to whatever is left, so the button keeps doing
+    // something rather than going dead in the driver's hand.
+    if (c->ammo[kind] == 0) c->selected = gs_next_armed(c);
     return true;
 }
 
@@ -182,7 +262,28 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
     gs_fix g = gs_fix_mul(w->gravity, gs_track_gravity(t, c->x, c->y));
 
     if (c->drop_cooldown > 0) c->drop_cooldown--;
-    if ((in & GS_IN_FIRE) != 0) gs_world_drop(w, index, GS_HAZ_OIL);
+
+    // **Tap to drop, hold to change.** One button and four things to leave
+    // behind: the count is per weapon and the choice has to live somewhere, and
+    // a fifth key each is a key somebody on a shared keyboard has to reach.
+    //
+    // The drop happens on *release*, not on the press - because at the moment
+    // of the press nothing yet knows whether this is a tap or the beginning of
+    // a hold, and a button that drops and then also cycles is a button that
+    // does two things every time.
+    if ((in & GS_IN_FIRE) != 0) {
+        if (c->fire_held < UINT16_MAX) c->fire_held++;
+        if (c->fire_held >= GS_FIRE_HOLD && !c->fire_cycled) {
+            c->selected = gs_next_armed(c);
+            c->fire_cycled = 1;
+        }
+    } else {
+        if (c->fire_held > 0 && !c->fire_cycled) {
+            gs_world_drop(w, index, (gs_hazard_kind)c->selected);
+        }
+        c->fire_held = 0;
+        c->fire_cycled = 0;
+    }
 
     gs_surface surf = gs_track_surface(t, c->x, c->y);
     const gs_surface_def *sd = &gs_surfaces[surf];
@@ -566,6 +667,44 @@ static void gs_collide(gs_world *w, gs_car *a, gs_car *b) {
     }
 }
 
+// **Fire burns whoever is standing in it**, ten bites a second rather than a
+// hundred - a car's damage is a byte, and a hundredth of a bite a tick rounds
+// to nothing at all. Not one-shot like a mine and not spent by being found:
+// what ends it is its own clock.
+static void gs_flames(gs_world *w) {
+    if ((w->tick % GS_FLAME_EVERY) != 0) return;
+
+    for (uint8_t i = 0; i < w->hazard_count; i++) {
+        const gs_hazard *h = &w->hazard[i];
+        if (h->kind != GS_HAZ_FLAME || h->spent) continue;
+
+        for (uint8_t ci = 0; ci < w->car_count; ci++) {
+            gs_car *c = &w->car[ci];
+            if (!c->active || c->wrecked || h->owner == ci) continue;
+            if (!c->grounded) continue;
+            if (gs_fix_len2(c->x - h->x, c->y - h->y) >= GS_FLAME_RADIUS) continue;
+
+            gs_fix hurt = gs_fix_div(gs_fix_mul(GS_FLAME_HURT, w->damage_scale),
+                                     gs_vehicle(c->vehicle)->toughness);
+            int32_t d = (int32_t)c->damage + (hurt >> GS_FIX_SHIFT);
+            c->damage = (uint8_t)GS_CLAMP(d, 0, 255);
+            if (c->damage >= 255) c->wrecked = true;
+        }
+    }
+}
+
+// **Smoke and fire burn out; oil and mines do not.** Aged in one place, after
+// everything that reads them, so a hazard lasts the number of ticks it says it
+// does rather than one fewer on the tick it was dropped.
+static void gs_hazards_age(gs_world *w) {
+    for (uint8_t i = 0; i < w->hazard_count; i++) {
+        gs_hazard *h = &w->hazard[i];
+        if (h->spent || h->life == 0) continue;
+        h->life--;
+        if (h->life == 0) h->spent = 1;
+    }
+}
+
 // Mines, checked after everybody has moved so that two cars reaching one on the
 // same tick get the same answer whichever order they were stepped in.
 static void gs_mines(gs_world *w) {
@@ -700,6 +839,8 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
     }
 
     gs_mines(w);
+    gs_flames(w);
+    gs_hazards_age(w);
 
     // Destruction mode ends when there is nobody left to fight. Settled once
     // and never revisited: a winner who then drives off a cliff in the silence
@@ -940,6 +1081,14 @@ uint64_t gs_world_hash(const gs_world *w) {
         gs_hash_u64(&h, c->finish_tick);
         gs_hash_u64(&h, c->lap_start);
         gs_hash_u64(&h, c->best_lap);
+
+        // What it is carrying and what it would leave. Two machines disagreeing
+        // about how many mines somebody has is a disagreement about what is
+        // about to happen, which is exactly what this number exists to catch.
+        for (int k = 0; k < GS_HAZ_COUNT; k++) gs_hash_u64(&h, c->ammo[k]);
+        gs_hash_u64(&h, c->selected);
+        gs_hash_u64(&h, c->fire_held);
+        gs_hash_u64(&h, c->fire_cycled);
     }
 
     // Hazards are state that changes the race, so they are hashed like
@@ -952,6 +1101,7 @@ uint64_t gs_world_hash(const gs_world *w) {
         gs_hash_u64(&h, z->kind);
         gs_hash_u64(&h, z->owner);
         gs_hash_u64(&h, z->spent);
+        gs_hash_u64(&h, z->life);
     }
     return h;
 }

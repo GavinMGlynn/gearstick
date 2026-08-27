@@ -2054,3 +2054,22 @@ worth as much as what was decided about it.
       out — when the lights go green — is named with its reason, and the thing
       that covers it is asserted rather than assumed: take that away and the
       test goes red.*
+- [ ] **Four things to leave behind.** *(Found by asking which enums no test
+      walks — nothing had ever asked about hazard kinds.)* The mine was written,
+      hashed and tested, and no player could drop one: the fire button was
+      hard-coded to oil. There are four now — oil, a mine, smoke that hides the
+      ground, and fire that burns while you are in it — and one button chooses
+      between them, a tap dropping what is selected and a half-second hold
+      moving the selection on. Each car carries a count of each, spent as they
+      are used.
+      *Verification so far: every kind can be carried, selected without anybody
+      pressing anything, and dropped by a tap; a hold changes the selection and
+      drops nothing; running out moves the selection on and running out of
+      everything selects nothing; fire hurts more the longer you stay in it and
+      then burns out, where a mine goes off once; smoke changes nothing about
+      how a car drives. A race with the weapons off is every car carrying zero,
+      which is why every race that came before behaves identically.*
+      **Not finished:** nothing sets the counts yet (the race setup screen has
+      no dial), a replay does not carry the loadout so a recorded weapons race
+      would re-race without them, opponents never fire, and nothing draws smoke
+      or fire.
