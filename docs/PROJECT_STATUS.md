@@ -5069,6 +5069,29 @@ the window back does not fail itself, it fails whatever runs next.
 to a HUD test forty lines away. Every size-changing test puts the window back
 now.
 
+### Both sweeps then walked their whole space, and found nothing more
+
+Two coverage holes were left behind by the two fixes above, and closing them is
+the difference between a test that caught one fault and a test that will catch
+the next.
+
+The small-window sweep ran from one starting state, and how big a screen is
+depends on what is on it - the setup screen grows a row per driver, the tracks
+screen draws a detail panel only once something is chosen, the door is a
+different door with an empty roster. It runs from all seventeen states the
+panels are measured from at full size now: **1758 controls over 136
+screen-states**, every one of them reachable at 640x480.
+
+The HUD sweep used four players, and the screen is divided by the car count:
+two get half the window each and keep its full height, three and four get a
+quarter. A HUD that fits a quarter fits a half, but a HUD that fits neither is a
+different fault in each. All three counts are walked now: **216 panels**, twelve
+states by two, three and four views by two window sizes.
+
+Neither found anything. That is the result, and it is worth as much written down
+as a fault would have been - the fixes hold across the whole space and not only
+where they were found.
+
 **No physics moved.** This is all `src/ui/`.
 
 ## Known risks

@@ -3510,16 +3510,11 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
     static gs_track t;
     gs_flat_pavement(&t, 96, 96);
 
-    static gs_world w;
-    gs_world_init(&w, GS_ONE);
-    // Four corners of a big track, so the split really is four and stays four.
+    // Corners of a big track, so the cars are far enough apart that the screen
+    // really does split and stays split.
     const int32_t at[GS_MAX_CARS][2] = {
         { 8, 8 }, { 88, 8 }, { 8, 88 }, { 88, 88 },
     };
-    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
-        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
-                         GS_INT(at[i][0]), GS_INT(at[i][1]), 0);
-    }
 
     // **At the size the game opens at as well as the size it can be dragged
     // to.** A quarter of 1280x720 is 638x358, which is not obviously too small
@@ -3550,10 +3545,23 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
 
     int measured = 0, spilled = 0;
 
+    // **Every number of players, not the worst one.** The screen is divided by
+    // the car count: two get half the window each and keep its full height,
+    // three and four get a quarter each. Two is not covered by four - a HUD
+    // that fits a quarter fits a half, and a HUD that fits neither is a
+    // different fault in each - so all three are walked.
+    for (uint8_t cars = 2; cars <= GS_MAX_CARS; cars++) {
     for (size_t z = 0; z < SDL_arraysize(sizes); z++) {
     CHECK(SDL_SetWindowSize(gs_win, sizes[z].w, sizes[z].h));
     CHECK(SDL_SetRenderLogicalPresentation(ren, sizes[z].w, sizes[z].h,
                                            SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    for (uint8_t i = 0; i < cars; i++) {
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(at[i][0]), GS_INT(at[i][1]), 0);
+    }
 
     gs_split sp;
     gs_split_init(&sp);
@@ -3564,11 +3572,11 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
     gs_view v[GS_MAX_CARS];
     uint8_t views = gs_split_views(&sp, &t, &w, &w, 1.0f, sizes[z].w,
                                    sizes[z].h, v);
-    CHECK(views == GS_MAX_CARS);
-    if (views != GS_MAX_CARS) return;
+    CHECK(views == cars);
+    if (views != cars) return;
 
     for (size_t i = 0; i < SDL_arraysize(states); i++) {
-        for (uint8_t c = 0; c < GS_MAX_CARS; c++) {
+        for (uint8_t c = 0; c < cars; c++) {
             w.car[c].wrecked = states[i].wrecked;
             w.car[c].damage = states[i].wrecked ? 255 : 0;
             w.car[c].finish_tick = states[i].finished ? 4200 : 0;
@@ -3603,10 +3611,11 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
                 continue;
             }
             spilled++;
-            printf("  HUD OUT OF ITS VIEW  state %zu (%s%s%s%s) car %u: "
+            printf("  HUD OUT OF ITS VIEW  %u players, state %zu "
+                   "(%s%s%s%s) car %u: "
                    "%.0f,%.0f %.0fx%.0f in a view %.0f,%.0f %dx%d - "
                    "%.0f past the bottom, %.0f past the right (%s)\n",
-                   i, states[i].derby ? "derby " : "race ",
+                   cars, i, states[i].derby ? "derby " : "race ",
                    states[i].wrecked ? "wrecked " : "",
                    states[i].finished ? "finished " : "",
                    states[i].counting ? "counting" : "", v[c].car,
@@ -3618,16 +3627,15 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
     }
 
     }
+    }
 
-    printf("  HUD %d panels measured: %d states x %d views x %d window sizes\n",
-           measured, (int)SDL_arraysize(states), GS_MAX_CARS,
+    // Two, three and four players: 2 + 3 + 4 views for each state and size.
+    printf("  HUD %d panels measured: %d states x (2+3+4) views x %d window "
+           "sizes\n", measured, (int)SDL_arraysize(states),
            (int)SDL_arraysize(sizes));
-    CHECK(measured == (int)SDL_arraysize(states) * GS_MAX_CARS *
+    CHECK(measured == (int)SDL_arraysize(states) * (2 + 3 + 4) *
                       (int)SDL_arraysize(sizes));
     CHECK(spilled == 0);
-
-    gs_world_set_mode(&w, GS_MODE_RACE);
-    gs_world_set_countdown(&w, 0);
 
     // **Back to the size the suite runs at.** The window is one thing shared by
     // every test in this binary, and the ones that read a frame back index it
@@ -8736,7 +8744,6 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
 
     static gs_menu fresh;
     static gs_track t;
-    gs_panel_menu(&fresh, &t);
 
     static gs_ui_item items[GS_UI_MAX_ITEMS];
     static gs_reach   seen[GS_UI_MAX_ITEMS];
@@ -8744,9 +8751,16 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
 
     int screens = 0, checked = 0, in_lists = 0, stranded = 0;
 
+    // **From every state the panels are measured from at full size**, because
+    // how big a screen is depends on what is on it: the setup screen grows a
+    // row per driver, the tracks screen draws a detail panel only once
+    // something is chosen, and the door is a different door with an empty
+    // roster. One state is one shape, and this fault is about shapes.
+    for (size_t sd = 0; sd < SDL_arraysize(gs_seeds); sd++) {
     for (size_t si = 0; si < SDL_arraysize(gs_every_screen); si++) {
+        gs_panel_menu(&fresh, &t);
+        gs_seeds[sd].set(&fresh);
         gs_menu m = fresh;
-        m.picked = 0;
         m.screen = gs_every_screen[si];
         gs_ui_begin(&ui, &m, &t, ren);
 
@@ -8828,10 +8842,10 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
             checked++;
             if (seen[k].whole) continue;
             stranded++;
-            printf("  PAST THE EDGE  %s: '%s' id %08x never wholly on screen "
-                   "- %.0f,%.0f to %.0f,%.0f (%.0f x %.0f), panel can move "
-                   "%.0f x %.0f, nav %d dead %d\n",
-                   gs_screen_name(gs_every_screen[si]),
+            printf("  PAST THE EDGE  %s from '%s': '%s' id %08x never wholly "
+                   "on screen - %.0f,%.0f to %.0f,%.0f (%.0f x %.0f), panel "
+                   "can move %.0f x %.0f, nav %d dead %d\n",
+                   gs_screen_name(gs_every_screen[si]), gs_seeds[sd].name,
                    seen[k].label[0] != '\0' ? seen[k].label : "(unnamed)",
                    seen[k].id,
                    (double)seen[k].x0, (double)seen[k].y0,
@@ -8843,11 +8857,13 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
         }
         screens++;
     }
+    }
 
-    printf("  SMALL %d controls across %d screens reachable at %dx%d; "
-           "%d more sit inside lists that scroll themselves\n",
-           checked, screens, GS_W, GS_H, in_lists);
-    CHECK(screens == (int)SDL_arraysize(gs_every_screen));
+    printf("  SMALL %d controls over %d screens reachable at %dx%d, from %d "
+           "starting states; %d more sit inside lists that scroll themselves\n",
+           checked, screens, GS_W, GS_H, (int)SDL_arraysize(gs_seeds), in_lists);
+    CHECK(screens == (int)SDL_arraysize(gs_every_screen) *
+                     (int)SDL_arraysize(gs_seeds));
     CHECK(stranded == 0);
 
     CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
