@@ -150,6 +150,16 @@ bool gs_ui_probe_scroll_span(const char *window, float *x, float *y,
     return true;
 }
 
+bool gs_ui_probe_scrollbars(const char *window, bool *x, bool *y)
+{
+    if (ImGui::GetCurrentContext() == nullptr || window == nullptr) return false;
+    ImGuiWindow *w = ImGui::FindWindowByName(window);
+    if (w == nullptr) return false;
+    if (x != nullptr) *x = w->ScrollbarX;
+    if (y != nullptr) *y = w->ScrollbarY;
+    return true;
+}
+
 bool gs_ui_probe_scroll_to(const char *window, float x, float y)
 {
     if (ImGui::GetCurrentContext() == nullptr || window == nullptr) return false;

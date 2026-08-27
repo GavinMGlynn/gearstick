@@ -1907,3 +1907,22 @@ worth as much as what was decided about it.
       four ways, and all twelve states of the HUD drawn in all four views at
       both the size the game opens at and a smaller one — 96 panels, every one
       of them inside the view it belongs to.*
+- [x] **A scrollbar along the bottom of screens that fit.** *(Found by
+      photographing the screens again after the last fix — it was that fix's own
+      doing.)* Letting every panel scroll sideways also gave every panel with a
+      rule drawn across it a permanent scrollbar with nothing to scroll, because
+      a full-width rule is exactly as wide as the window holding it. Panels ask
+      for the sideways scrollbar only when they were actually made narrower than
+      they wanted to be.
+      *Verification: a window that can be scrolled shows the bar that says so,
+      and one that cannot does not — checked on every screen from every starting
+      state. The reachability test could not have caught either fault before:
+      it moved the panel itself, which a person cannot do without the bar.*
+- [x] **Every screen measured with the longest name anybody can type.** A driver
+      name holds fifteen characters and a track name forty-seven, and every
+      layout had only ever been measured with "gavin" and "track number 7" in
+      it — the narrowest a screen can be, and a name is the one piece of a
+      screen the person using it chooses the width of.
+      *Verification: an eighteenth starting state fills every name in the menu,
+      the library, the records and the lobby with the widest glyph there is.
+      Nothing overflowed and nothing became unreachable, at either window size.*

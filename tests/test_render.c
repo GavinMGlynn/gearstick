@@ -5752,6 +5752,41 @@ static void gs_seed_a_track_that_shipped(gs_menu *m) {
     m->picked = 0;
 }
 
+// **The longest thing that can be typed into a field, in every field.** A
+// layout measured with "gavin" in it is a layout measured at its narrowest, and
+// a name is the one piece of a screen the person using it chooses the width of.
+// W rather than a real name because it is the widest glyph there is: what has to
+// survive is not a plausible name, it is the widest one the field will hold.
+static void gs_widest(char *out, size_t cap) {
+    if (cap < 2) return;
+    for (size_t i = 0; i + 1 < cap; i++) out[i] = 'W';
+    out[cap - 1] = '\0';
+}
+
+static void gs_seed_the_longest_names_that_fit(gs_menu *m) {
+    for (uint8_t i = 0; i < m->profiles.count; i++) {
+        gs_widest(m->profiles.entry[i].name, sizeof m->profiles.entry[i].name);
+    }
+    for (uint16_t i = 0; i < m->library.count; i++) {
+        gs_widest(m->library.entry[i].name, sizeof m->library.entry[i].name);
+        gs_widest(m->library.entry[i].author, sizeof m->library.entry[i].author);
+    }
+    for (uint16_t i = 0; i < m->records.count; i++) {
+        gs_widest(m->records.entry[i].who, sizeof m->records.entry[i].who);
+    }
+    // The menu holds the lobby as something it reads and never writes, so the
+    // names are changed where they live - in the one the test filled.
+    if (m->lobby == &gs_panel_lobby) {
+        for (uint8_t i = 0; i < gs_panel_lobby.count; i++) {
+            gs_widest(gs_panel_lobby.player[i].name,
+                      sizeof gs_panel_lobby.player[i].name);
+        }
+    }
+    gs_widest(m->track_name, sizeof m->track_name);
+    gs_widest(m->new_name, sizeof m->new_name);
+    gs_widest(m->login_name, sizeof m->login_name);
+}
+
 static const struct {
     const char *name;
     gs_seed_fn  set;
@@ -5773,6 +5808,7 @@ static const struct {
     { "asked for a code",    gs_seed_a_server_asking_for_a_code },
     { "a track that shipped", gs_seed_a_track_that_shipped },
     { "nobody has driven here", gs_seed_nobody_has_driven_here },
+    { "the longest names that fit", gs_seed_the_longest_names_that_fit },
 };
 
 // **A window, put back where it was.** To the top - ImGui keeps a window's
@@ -8788,6 +8824,28 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
 
         float max_x = 0.0f, max_y = 0.0f;
         CHECK(gs_ui_probe_scroll_span(window, nullptr, nullptr, &max_x, &max_y));
+
+        // **And a panel that can move says so.** Everything below reaches a
+        // control by setting the scroll position, which a test can do to any
+        // window whether or not there is a scrollbar on it - so on its own it
+        // proves the control is somewhere, not that anybody can get to it. A
+        // window that can be scrolled has to be showing the bar that says so.
+        //
+        // This is also what keeps the bar from being asked for when it is not
+        // needed. A window carrying the horizontal scrollbar flag shows the bar
+        // whenever its contents are as wide as it is, and a rule drawn across a
+        // panel *is* exactly as wide as it is - so every screen with a
+        // separator on it grew a permanent scrollbar with the grip filling the
+        // whole track. Fourteen pixels of furniture that scrolls nothing.
+        bool bar_x = false, bar_y = false;
+        CHECK(gs_ui_probe_scrollbars(window, &bar_x, &bar_y));
+        if ((max_x > 0.0f) != bar_x || (max_y > 0.0f) != bar_y) {
+            printf("  SCROLLBAR %s from '%s': can move %.0f x %.0f, bars %d %d\n",
+                   gs_screen_name(gs_every_screen[si]), gs_seeds[sd].name,
+                   (double)max_x, (double)max_y, bar_x, bar_y);
+        }
+        CHECK((max_x > 0.0f) == bar_x);
+        CHECK((max_y > 0.0f) == bar_y);
 
         // Steps of half a viewport, so no control can hide between two of
         // them: anything narrower than the window is wholly inside it at some

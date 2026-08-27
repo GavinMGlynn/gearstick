@@ -134,6 +134,13 @@ bool gs_ui_probe_scroll_at(const char *window, float *now, float *max);
 bool gs_ui_probe_scroll_span(const char *window, float *x, float *y,
                              float *max_x, float *max_y);
 
+// **Whether the window is showing that it can be scrolled.** Setting a scroll
+// position from a test works whether or not there is a scrollbar on the window,
+// so "the control can be reached by scrolling to it" is not on its own a claim
+// about anything a person can do. This is the other half: a window that can
+// move has to say so.
+bool gs_ui_probe_scrollbars(const char *window, bool *x, bool *y);
+
 // Put a window at a scroll position, so a test can ask what a person sees after
 // they have scrolled there rather than only what they see on arrival.
 bool gs_ui_probe_scroll_to(const char *window, float x, float y);

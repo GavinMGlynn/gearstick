@@ -5094,6 +5094,58 @@ where they were found.
 
 **No physics moved.** This is all `src/ui/`.
 
+## A scrollbar that scrolls nothing, and the widest name anybody can type
+
+Two more came out of photographing screens, one of them mine from an hour
+earlier.
+
+### The furniture I had just added
+
+Giving every panel `ImGuiWindowFlags_HorizontalScrollbar` fixed the four missing
+planets and put a **permanent scrollbar with the grip filling the whole track**
+along the bottom of screens that fit perfectly well. A window carrying that flag
+shows the bar whenever its contents are as wide as it is - and a `Separator`, or
+anything else drawn at the full width, *is* exactly as wide as it is. Fourteen
+pixels of furniture that scrolls nothing, on the tracks screen and anything else
+with a rule across it.
+
+None of the numbers could see it: `ScrollMaxX` was zero, which is exactly why the
+grip filled the track. A photograph could.
+
+`gs_centre_window` asks for the flag only when it actually took width away,
+which it knows before anything is drawn - so the bar exists precisely when the
+panel is narrower than it wants to be, and never otherwise.
+
+### And the test could not have caught it, or the fault before it
+
+`at_the_smallest_window_every_control_can_be_scrolled_to` reaches a control by
+setting the window's scroll position, and a test can do that to any window
+whether or not it has a scrollbar on it. So it proved every control was
+*somewhere*, and not that anybody could get to it - it would have passed with
+the flag removed altogether.
+
+It asserts both halves now: a window that can be scrolled shows the bar that
+says so, and a window that cannot does not. That is one rule catching the
+missing planets and the useless scrollbar at once, and it holds over all 144
+screen-states.
+
+### The widest name anybody can type
+
+A driver name holds fifteen characters, a track name forty-seven, an author
+twenty-three. Every layout in this game had been measured with "gavin" and
+"track number 7" in it - the narrowest a screen can be, and a name is the one
+piece of a screen the person using it chooses the width of.
+
+`the longest names that fit` is an eighteenth starting state: every name field
+in the menu, the library, the records and the lobby filled with W - the widest
+glyph there is, because what has to survive is not a plausible name but the
+widest one the field will hold.
+
+**Nothing broke**, at either window size, in any of the eight screens. Written
+down because it is a class of fault that was never being looked for, and now is
+- 144 screen-states measured at full size and 1865 controls checked for reach at
+640x480.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

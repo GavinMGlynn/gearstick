@@ -244,10 +244,21 @@ static bool gs_go_button(const char *label, float w, float h) {
 // scrolling in both directions when what is on it does not fit - which is the
 // promise gs_centre_window makes when it clamps a panel to the window it is in.
 #define GS_PANEL_FLAGS (ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | \
-                        ImGuiWindowFlags_NoCollapse | \
-                        ImGuiWindowFlags_HorizontalScrollbar)
+                        ImGuiWindowFlags_NoCollapse)
 
-static void gs_centre_window(const char *title, float w, float h) {
+// **What this panel is opened with**, which depends on whether it fitted.
+//
+// The horizontal scrollbar is asked for only when the width was actually taken
+// away, and that is not fussiness. A window carrying the flag shows the
+// scrollbar whenever its contents are as wide as it is - and a Separator, or
+// anything else drawn at the full width, *is* exactly as wide as it is. So
+// every panel with a rule across it grew a permanent scrollbar with the grip
+// filling the whole track: fourteen pixels of furniture that scrolls nothing,
+// on screens that fit perfectly well. Found by photographing them.
+//
+// Whether the panel was clamped is known right here, before anything is drawn,
+// which is what makes this exact rather than a guess about content.
+static ImGuiWindowFlags gs_centre_window(const char *title, float w, float h) {
     ImGuiViewport *vp = ImGui_GetMainViewport();
 
     // **Never bigger than the window it is in.** These panels cannot be moved,
@@ -259,6 +270,7 @@ static void gs_centre_window(const char *title, float w, float h) {
     // with the window, which reads as a drawing mistake.
     float most_w = vp->WorkSize.x - GS_PANEL_MARGIN * 2.0f;
     float most_h = vp->WorkSize.y - GS_PANEL_MARGIN * 2.0f;
+    const bool squeezed = w > most_w;
     if (w > most_w) w = most_w;
     if (h > most_h) h = most_h;
 
@@ -267,6 +279,8 @@ static void gs_centre_window(const char *title, float w, float h) {
                              ImGuiCond_Always, (ImVec2){ 0.5f, 0.5f });
     ImGui_SetNextWindowSize((ImVec2){ w, h }, ImGuiCond_Always);
     (void)title;
+    return squeezed ? (GS_PANEL_FLAGS | ImGuiWindowFlags_HorizontalScrollbar)
+                    : GS_PANEL_FLAGS;
 }
 
 // **What the panel came out as**, noted on the way out of every screen.
@@ -437,10 +451,11 @@ static gs_screen gs_login_screen(gs_menu *m) {
     // screen's list may not.
     const bool nobody = m->profiles.count == 0 && !m->login_making &&
                         !m->login_setting;
-    gs_centre_window("login", 470.0f, nobody ? 260.0f : 430.0f);
+    const ImGuiWindowFlags panel =
+        gs_centre_window("login", 470.0f, nobody ? 260.0f : 430.0f);
 
     if (ImGui_Begin("##login", nullptr,
-                    GS_PANEL_FLAGS | ImGuiWindowFlags_NoTitleBar)) {
+                    panel | ImGuiWindowFlags_NoTitleBar)) {
         ImGui_SetWindowFontScale(2.6f);
         float w = ImGui_CalcTextSize("GEARSTICK").x;
         ImGui_SetCursorPosX((ImGui_GetWindowWidth() - w) * 0.5f);
@@ -637,10 +652,10 @@ static gs_screen gs_login_screen(gs_menu *m) {
 
 static gs_screen gs_title(gs_menu *m) {
     gs_screen next = GS_SCREEN_TITLE;
-    gs_centre_window("title", 460.0f, 530.0f);
+    const ImGuiWindowFlags panel = gs_centre_window("title", 460.0f, 530.0f);
 
     if (ImGui_Begin("##title", nullptr,
-                    GS_PANEL_FLAGS | ImGuiWindowFlags_NoTitleBar)) {
+                    panel | ImGuiWindowFlags_NoTitleBar)) {
         // The name, big and centred. A title screen whose title is the same
         // size as its buttons is a settings dialog.
         ImGui_SetWindowFontScale(2.6f);
@@ -723,10 +738,9 @@ static gs_screen gs_title(gs_menu *m) {
 
 static gs_screen gs_profiles_screen(gs_menu *m) {
     gs_screen next = GS_SCREEN_PROFILES;
-    gs_centre_window("drivers", 560.0f, 510.0f);
+    const ImGuiWindowFlags panel = gs_centre_window("drivers", 560.0f, 510.0f);
 
-    if (ImGui_Begin("Drivers", nullptr,
-                    GS_PANEL_FLAGS)) {
+    if (ImGui_Begin("Drivers", nullptr, panel)) {
         // **Your own driver, and nobody else's.** This screen used to list the
         // whole roster with an edit and a remove beside every row, which meant
         // signing in as anybody let you rename, repaint and delete everybody -
@@ -881,11 +895,11 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
     // sees it is `panel.wider`, and what found it in the first place was a
     // photograph.
     #define GS_SETUP_WIDE 800.0f
-    gs_centre_window("setup", GS_SETUP_WIDE,
-                     GS_SETUP_CHROME + grid_row * (float)grid_rows);
+    const ImGuiWindowFlags panel =
+        gs_centre_window("setup", GS_SETUP_WIDE,
+                         GS_SETUP_CHROME + grid_row * (float)grid_rows);
 
-    if (ImGui_Begin("Race setup", nullptr,
-                    GS_PANEL_FLAGS)) {
+    if (ImGui_Begin("Race setup", nullptr, panel)) {
         gs_track_issue issue = gs_track_validate(t);
         bool ok = issue.problem == GS_TRACK_OK;
 
@@ -1204,11 +1218,11 @@ static gs_screen gs_results_screen(gs_menu *m) {
     float w = GS_RESULT_COLUMNS + note + style->CellPadding.x * 2.0f * 6.0f +
               style->WindowPadding.x * 2.0f;
 
-    gs_centre_window("results", w,
-                     168.0f + gs_row_height() * (float)(m->result_count + 1));
+    const ImGuiWindowFlags panel =
+        gs_centre_window("results", w,
+                         168.0f + gs_row_height() * (float)(m->result_count + 1));
 
-    if (ImGui_Begin("Results", nullptr,
-                    GS_PANEL_FLAGS)) {
+    if (ImGui_Begin("Results", nullptr, panel)) {
         if (ImGui_BeginTable("results", 6,
                              ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
             ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthFixed, 34.0f, 0);
@@ -1327,11 +1341,11 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
     const gs_record *rows[16];
     uint16_t n = gs_records_for(&m->records, gs_track_hash(t), conditions, rows, 16);
 
-    gs_centre_window("records", 720.0f,
-                     222.0f + gs_row_height() * (float)(n > 0 ? n + 1 : 1));
+    const ImGuiWindowFlags panel =
+        gs_centre_window("records", 720.0f,
+                         222.0f + gs_row_height() * (float)(n > 0 ? n + 1 : 1));
 
-    if (ImGui_Begin("Records", nullptr,
-                    GS_PANEL_FLAGS)) {
+    if (ImGui_Begin("Records", nullptr, panel)) {
         ImGui_Text("%s", gs_track_label(m, t));
         ImGui_PushStyleColorImVec4(ImGuiCol_Text,
                                    ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
@@ -1406,10 +1420,11 @@ static gs_screen gs_lobby_screen(gs_menu *m) {
 
     int rows = (m->lobby != nullptr && m->lobby->capacity > 0)
                    ? m->lobby->capacity : 4;
-    gs_centre_window("lobby", 640.0f, 220.0f + gs_row_height() * (float)(rows + 1));
+    const ImGuiWindowFlags panel =
+        gs_centre_window("lobby", 640.0f,
+                         220.0f + gs_row_height() * (float)(rows + 1));
 
-    if (ImGui_Begin("Lobby", nullptr,
-                    GS_PANEL_FLAGS)) {
+    if (ImGui_Begin("Lobby", nullptr, panel)) {
         ImGui_TextUnformatted(m->server_text);
 
         if (m->lobby_error != nullptr) {
@@ -1684,10 +1699,11 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     if (rows > fits) rows = fits;
 
     float list_h = row * (float)(rows + 1);
-    gs_centre_window("tracks", 720.0f, GS_TRACKS_CHROME + detail_h + list_h);
+    const ImGuiWindowFlags panel =
+        gs_centre_window("tracks", 720.0f,
+                         GS_TRACKS_CHROME + detail_h + list_h);
 
-    if (ImGui_Begin("Tracks", nullptr,
-                    GS_PANEL_FLAGS)) {
+    if (ImGui_Begin("Tracks", nullptr, panel)) {
         ImGui_TextUnformatted("Everything you have built. A track is known by "
                               "what it is, so the same");
         ImGui_TextUnformatted("track from two people is one entry.");
