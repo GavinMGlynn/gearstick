@@ -7029,6 +7029,162 @@ TEST(every_brush_and_every_option_it_carries_does_what_it_says) {
     gs_editor_quit(&ed);
 }
 
+TEST(the_construction_set_keeps_its_panels_on_the_screen) {
+    // **The editor is half the product and it was laid out for one screen.**
+    //
+    // Its three panels are the player's to move and resize, which is what a
+    // tool panel should be - and they were placed and sized from constants
+    // chosen while looking at a 1280x720 window. Measured anywhere else:
+    //
+    //   960x600   the parts box 304 pixels off the right-hand edge,
+    //             the palette and the controls 104 below the bottom
+    //   640x480   nineteen pixels of the parts box on screen and the rest not
+    //
+    // And nothing scrolled, in either direction, on any of them - because what
+    // is off the *screen* is not what is off the *window*. A window knows what
+    // did not fit inside it; ImGui clips it to the display and it never finds
+    // out. Every number these panels already had said they were fine.
+    //
+    // ImGui keeps about nineteen pixels of a window reachable so it can always
+    // be dragged back into view. That is a rescue, not a place to open in.
+    static gs_editor e;
+    CHECK(gs_editor_init(&e, 65536));
+
+    static gs_track t;
+    gs_flat_pavement(&t, 32, 32);
+
+    static gs_ed ed;
+    ed.e = &e;
+    ed.t = &t;
+    ed.view = (gs_view){ 0 };
+    ed.input = (gs_input_state){ 0 };
+    gs_bind_defaults(&ed.input.bind);
+
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    // The size the game opens at, two ordinary smaller ones, and one small
+    // enough that a panel cannot have the width it wants - which is the case
+    // the sideways scrollbar exists for.
+    const struct { int w, h; } sizes[] = {
+        { 1280, 720 }, { 960, 600 }, { GS_W, GS_H }, { 400, 300 },
+    };
+    static const char *const panels[] = {
+        "Construction set", "Parts box", "Controls",
+    };
+
+    // The controls panel is shut by default; this is a test about panels.
+    e.show_controls = true;
+
+    // **Where they were, so they can be put back.** ImGui remembers a window's
+    // position and size under its name for the rest of the process, and this
+    // test moves and shrinks all three - so without this it would leave every
+    // editor test after it walking panels the size of a 400x300 screen. It did,
+    // and they went red in places that mention no windows at all.
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+    ed.view.rect = (SDL_Rect){ 0, 0, 1280, 720 };
+    gs_editor_toggle(&e, &ed.view);
+    CHECK(e.active);
+    for (int i = 0; i < 4; i++) gs_ed_frame(&ed);
+
+    float was[3][4];
+    for (size_t p = 0; p < SDL_arraysize(panels); p++) {
+        CHECK(gs_ui_probe_window_box(panels[p], &was[p][0], &was[p][1],
+                                     &was[p][2], &was[p][3]));
+    }
+
+    int measured = 0, outside = 0, lying = 0;
+
+    for (size_t z = 0; z < SDL_arraysize(sizes); z++) {
+        CHECK(SDL_SetWindowSize(gs_win, sizes[z].w, sizes[z].h));
+        CHECK(SDL_SetRenderLogicalPresentation(ren, sizes[z].w, sizes[z].h,
+                                               SDL_LOGICAL_PRESENTATION_DISABLED));
+        ed.view.rect = (SDL_Rect){ 0, 0, sizes[z].w, sizes[z].h };
+        if (!e.active) gs_editor_toggle(&e, &ed.view);
+
+        // **Every brush, because the brush decides what the panel holds.** The
+        // palette is one height with the gravity dial on it and another with
+        // the parts list, and a panel that fits in one configuration says
+        // nothing about the one next to it.
+        for (int brush = 0; brush < GS_BRUSH_COUNT; brush++) {
+            e.brush = (gs_brush)brush;
+            for (int i = 0; i < 4; i++) gs_ed_frame(&ed);
+
+            for (size_t p = 0; p < SDL_arraysize(panels); p++) {
+                float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
+                CHECK(gs_ui_probe_window_box(panels[p], &bx, &by, &bw, &bh));
+                CHECK(bw > 0.0f);
+                CHECK(bh > 0.0f);
+
+                measured++;
+
+                // **On the screen, all of it.** Not "mostly", and not "there is
+                // a corner you can grab".
+                const float right = bx + bw - (float)sizes[z].w;
+                const float bottom = by + bh - (float)sizes[z].h;
+                if (bx < -0.5f || by < -0.5f || right > 0.5f || bottom > 0.5f) {
+                    outside++;
+                    printf("  OFF THE SCREEN '%s' at %dx%d with brush %d: "
+                           "%.0f,%.0f %.0fx%.0f - %+.0f past the right, "
+                           "%+.0f past the bottom\n",
+                           panels[p], sizes[z].w, sizes[z].h, brush,
+                           (double)bx, (double)by, (double)bw, (double)bh,
+                           (double)right, (double)bottom);
+                }
+
+                // **And what does not fit scrolls, and says it scrolls.** The
+                // same rule the front end's panels are held to: a bar that
+                // moves nothing is furniture, and a panel that can move without
+                // one is a panel only a test can scroll.
+                float max_x = 0.0f, max_y = 0.0f;
+                bool bar_x = false, bar_y = false;
+                CHECK(gs_ui_probe_scroll_span(panels[p], nullptr, nullptr,
+                                              &max_x, &max_y));
+                CHECK(gs_ui_probe_scrollbars(panels[p], &bar_x, &bar_y));
+                if ((max_x > 0.0f) != bar_x || (max_y > 0.0f) != bar_y) {
+                    lying++;
+                    printf("  SCROLLBAR '%s' at %dx%d with brush %d: can move "
+                           "%.0f x %.0f, bars %d %d\n",
+                           panels[p], sizes[z].w, sizes[z].h, brush,
+                           (double)max_x, (double)max_y, bar_x, bar_y);
+                }
+            }
+        }
+    }
+
+    printf("  EDITOR %d panels measured: %d panels x %d brushes x %d window "
+           "sizes\n", measured, (int)SDL_arraysize(panels), GS_BRUSH_COUNT,
+           (int)SDL_arraysize(sizes));
+    CHECK(measured == (int)SDL_arraysize(panels) * GS_BRUSH_COUNT *
+                      (int)SDL_arraysize(sizes));
+    CHECK(outside == 0);
+    CHECK(lying == 0);
+
+    e.brush = GS_BRUSH_RAISE;
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+    ed.view.rect = (SDL_Rect){ 0, 0, 1280, 720 };
+    for (int i = 0; i < 2; i++) gs_ed_frame(&ed);
+    for (size_t p = 0; p < SDL_arraysize(panels); p++) {
+        CHECK(gs_ui_probe_place(panels[p], was[p][0], was[p][1],
+                                was[p][2], was[p][3]));
+    }
+    for (int i = 0; i < 2; i++) gs_ed_frame(&ed);
+    for (size_t p = 0; p < SDL_arraysize(panels); p++) {
+        float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
+        CHECK(gs_ui_probe_window_box(panels[p], &bx, &by, &bw, &bh));
+        CHECK(bx == was[p][0]);
+        CHECK(by == was[p][1]);
+        CHECK(bw == was[p][2]);
+        CHECK(bh == was[p][3]);
+    }
+    e.show_controls = false;
+}
+
 TEST(every_control_in_the_construction_set_is_pressed) {
     // **Every configuration the palette has, and every control in each.**
     //
@@ -9267,6 +9423,7 @@ int main(void) {
     run_a_track_is_built_from_nothing_and_raced_without_leaving_the_editor(ren);
     run_one_brush_never_undoes_what_another_one_did(ren);
     run_every_brush_and_every_option_it_carries_does_what_it_says(ren);
+    run_the_construction_set_keeps_its_panels_on_the_screen(ren);
     run_every_control_in_the_construction_set_is_pressed(ren);
     run_the_walk_signs_in_through_the_door_rather_than_being_put_behind_it(ren);
     run_a_track_is_built_named_saved_and_raced_by_pressing_and_dragging(ren);

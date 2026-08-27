@@ -1926,3 +1926,16 @@ worth as much as what was decided about it.
       *Verification: an eighteenth starting state fills every name in the menu,
       the library, the records and the lobby with the widest glyph there is.
       Nothing overflowed and nothing became unreachable, at either window size.*
+- [x] **The construction set was laid out for one screen.** *(Found by measuring
+      its panels at sizes other than the one they were designed at.)* At 960×600
+      — an ordinary window — the parts box sat 304 pixels off the right-hand
+      edge, and at 640×480 nineteen pixels of it were on screen and the rest
+      was not. Nothing scrolled, because a window knows what did not fit inside
+      itself and has no idea it is hanging over the edge of the display. The
+      panels are never opened bigger than the screen now, never draggable or
+      resizable past its edges, and are put back inside if the screen shrinks
+      under them — while staying the player's to move, which is what a tool
+      panel should be.
+      *Verification: all three panels measured under every brush at four window
+      sizes down to 400×300 — 72 measurements, each wholly on the screen and
+      each showing a scrollbar exactly when it has something to scroll.*

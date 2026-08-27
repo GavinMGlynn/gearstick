@@ -183,6 +183,16 @@ bool gs_ui_probe_window_box(const char *name, float *x, float *y,
     return true;
 }
 
+bool gs_ui_probe_place(const char *name, float x, float y, float w, float h)
+{
+    if (ImGui::GetCurrentContext() == nullptr || name == nullptr) return false;
+    ImGuiWindow *win = ImGui::FindWindowByName(name);
+    if (win == nullptr) return false;
+    ImGui::SetWindowPos(win, ImVec2(x, y));
+    ImGui::SetWindowSize(win, ImVec2(w, h));
+    return true;
+}
+
 bool gs_ui_probe_unfold(const char *name)
 {
     if (ImGui::GetCurrentContext() == nullptr || name == nullptr) return false;

@@ -5146,6 +5146,57 @@ down because it is a class of fault that was never being looked for, and now is
 - 144 screen-states measured at full size and 1865 controls checked for reach at
 640x480.
 
+## The construction set was laid out for one screen
+
+The editor is half the product and its three panels were placed and sized from
+constants chosen while looking at a 1280x720 window. Measured anywhere else:
+
+| window | what happened |
+| --- | --- |
+| 960x600 | the parts box **304 pixels off the right-hand edge**; the palette and the controls 104 below the bottom |
+| 640x480 | nineteen pixels of the parts box on screen and the rest not |
+| 400x300 | the palette 377 pixels taller than the screen |
+
+And **nothing scrolled**, in either direction, on any of them.
+
+That last part is the interesting one, because it is why none of the numbers
+already being taken could see this. `every_control_in_the_construction_set_is_pressed`
+has watched these panels for things below the fold since the day save and load
+were found hiding under one - and it asks the *window* what it is hiding. A
+window knows what did not fit inside itself. It has no idea it is hanging over
+the edge of the display: ImGui clips it there and never tells it. Every one of
+those panels reported nothing hidden while most of it was off the screen.
+
+ImGui keeps about nineteen pixels of any window reachable so it can always be
+dragged back into view. That is a rescue, not a place to open in.
+
+`gs_editor_panel` now opens all three: never bigger than the screen, never
+draggable or resizable past its edges, put back inside if the screen shrinks
+under them, and carrying a sideways scrollbar exactly when the screen is
+narrower than the panel wants to be. What the player does inside that is still
+theirs - these are tool windows and they stay movable.
+
+### The test, and the one it broke - again
+
+`the_construction_set_keeps_its_panels_on_the_screen` measures all three panels
+under **every brush**, because the brush decides what the palette holds, at four
+window sizes down to 400x300: 72 measurements, each required to be wholly on the
+screen and to show a scrollbar exactly when it can scroll.
+
+It also broke every editor test after it, in places that mention no windows at
+all. **ImGui remembers a window's position and size under its name for the rest
+of the process**, so a test that shrinks a panel to fit a 400x300 screen has
+shrunk it for everything that follows - and the walk then found 65 of 66
+controls instead of 69 of 69, with 134 panels hiding things. This is the same
+hazard as resizing the screen and not putting it back, one level deeper.
+
+`gs_ui_probe_place` puts a window back. The test records where all three were
+before it starts and restores them at the end, then checks they really did go
+back - because a cleanup nobody verifies is a cleanup that stops working
+silently.
+
+**No physics moved.** This is all `src/ui/`.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

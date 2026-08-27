@@ -273,20 +273,87 @@ static void gs_name_parts(void) {
 // be.
 static void gs_editor_parts_box(gs_editor *e, const gs_track *t);
 
+// **A tool panel that stays on the screen it is being used on.**
+//
+// These three are the player's to move and resize, which is what a tool panel
+// should be - and they were placed and sized from constants chosen while
+// looking at a 1280x720 window. At 960x600, an ordinary size, the parts box sat
+// **304 pixels off the right-hand edge** and the palette 104 below the bottom;
+// at 640x480 nineteen pixels of the parts box were on screen and the rest was
+// not. Nothing scrolled: these windows carry no horizontal scrollbar and had
+// nothing hidden vertically either, because what is off the *screen* is not
+// what is off the window - ImGui clips a window to the display and the window
+// never knows.
+//
+// ImGui keeps about nineteen pixels of a window reachable so it can always be
+// dragged back, which is a rescue rather than a place to open in.
+//
+// So: never opened bigger than the screen, never able to be dragged or resized
+// bigger than it, and put back inside if the screen shrinks under it. What the
+// player does inside that is theirs.
+static bool gs_editor_panel(const char *name, bool *open, float x, float y,
+                            float w, float h) {
+    ImGuiViewport *vp = ImGui_GetMainViewport();
+    const float pad = 16.0f;
+    const float most_w = vp->WorkSize.x - pad * 2.0f;
+    const float most_h = vp->WorkSize.y - pad * 2.0f;
+
+    // Sideways too, when the screen is narrower than the panel wants to be.
+    // Asked for only then, because a window carrying the flag shows the bar
+    // whenever its contents are as wide as it is - and anything drawn at the
+    // full width is - which is a scrollbar that scrolls nothing on a panel that
+    // fits. The same rule the front end's panels follow.
+    ImGuiWindowFlags flags = 0;
+    if (w > most_w) { w = most_w; flags |= ImGuiWindowFlags_HorizontalScrollbar; }
+    if (h > most_h) h = most_h;
+    if (x + w > vp->WorkPos.x + vp->WorkSize.x - pad) {
+        x = vp->WorkPos.x + vp->WorkSize.x - pad - w;
+    }
+    if (x < vp->WorkPos.x + pad) x = vp->WorkPos.x + pad;
+
+    ImGui_SetNextWindowPos((ImVec2){ x, y }, ImGuiCond_FirstUseEver);
+    ImGui_SetNextWindowSize((ImVec2){ w, h }, ImGuiCond_FirstUseEver);
+
+    // Every frame, not once: the screen can shrink under a panel that was
+    // placed when there was room for it.
+    ImGui_SetNextWindowSizeConstraints((ImVec2){ 100.0f, 60.0f },
+                                       (ImVec2){ most_w, most_h }, nullptr,
+                                       nullptr);
+
+    if (!ImGui_Begin(name, open, flags)) {
+        ImGui_End();
+        return false;
+    }
+
+    // And back inside, if it is hanging over an edge. Done after Begin because
+    // that is where the size a resize just settled on can be read.
+    ImVec2 at = ImGui_GetWindowPos();
+    ImVec2 size = ImGui_GetWindowSize();
+    float nx = at.x, ny = at.y;
+    if (nx + size.x > vp->WorkPos.x + vp->WorkSize.x) {
+        nx = vp->WorkPos.x + vp->WorkSize.x - size.x;
+    }
+    if (ny + size.y > vp->WorkPos.y + vp->WorkSize.y) {
+        ny = vp->WorkPos.y + vp->WorkSize.y - size.y;
+    }
+    if (nx < vp->WorkPos.x) nx = vp->WorkPos.x;
+    if (ny < vp->WorkPos.y) ny = vp->WorkPos.y;
+    if (nx != at.x || ny != at.y) {
+        ImGui_SetWindowPos((ImVec2){ nx, ny }, ImGuiCond_Always);
+    }
+    return true;
+}
+
 static void gs_editor_parts_window(gs_editor *e, const gs_track *t) {
     ImGuiViewport *vp = ImGui_GetMainViewport();
     // Wide enough for "crossroads" on a button and "turn (quarters)" beside a
     // slider. Three across rather than four: the piece names are words, and a
     // button labelled "crossroa" is a button nobody can read.
-    float w = 380.0f;
+    const float w = 380.0f;
 
-    ImGui_SetNextWindowPos((ImVec2){ vp->WorkPos.x + vp->WorkSize.x - w - 16.0f,
-                                     vp->WorkPos.y + 16.0f },
-                           ImGuiCond_FirstUseEver);
-    ImGui_SetNextWindowSize((ImVec2){ w, 460.0f }, ImGuiCond_FirstUseEver);
-
-    if (!ImGui_Begin("Parts box", nullptr, 0)) {
-        ImGui_End();
+    if (!gs_editor_panel("Parts box", nullptr,
+                         vp->WorkPos.x + vp->WorkSize.x - w - 16.0f,
+                         vp->WorkPos.y + 16.0f, w, 460.0f)) {
         return;
     }
 
@@ -435,18 +502,17 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     // **an auto-fitting window is hidden for its first frame** while ImGui
     // measures it - so a one-frame capture of an auto-sized panel renders
     // nothing at all, which looks exactly like the panel being broken.
-    ImGui_SetNextWindowPos((ImVec2){ 16.0f, 16.0f }, ImGuiCond_FirstUseEver);
-
     // **Tall enough for what is on it.** Four hundred and sixty was a guess and
     // it was a hundred and fifty short: the panel ended at the route check, and
     // save, load and the two buttons that move a track as text were below the
     // fold of a window with two hundred and forty pixels of empty screen under
     // it. A machine that presses by name found them; a person who does not
     // scroll a tool panel never did.
-    ImGui_SetNextWindowSize((ImVec2){ 340.0f, 688.0f }, ImGuiCond_FirstUseEver);
-
-    if (!ImGui_Begin("Construction set", nullptr, 0)) {
-        ImGui_End();
+    //
+    // Six hundred and eighty-eight is what it wants; what it gets is that or
+    // the screen, whichever is smaller - see gs_editor_panel.
+    if (!gs_editor_panel("Construction set", nullptr, 16.0f, 16.0f,
+                         340.0f, 688.0f)) {
         return;
     }
 
@@ -740,14 +806,10 @@ static void gs_capture_rebind(gs_editor *e, gs_input_state *input) {
 static void gs_controls_panel(gs_editor *e, gs_input_state *input) {
     if (!e->show_controls) return;
 
-    ImGui_SetNextWindowPos((ImVec2){ 380.0f, 16.0f }, ImGuiCond_FirstUseEver);
-
     // Four players of five controls each, and the button that puts them back.
     // The same guess, and the same two hundred and thirty pixels short.
-    ImGui_SetNextWindowSize((ImVec2){ 420.0f, 688.0f }, ImGuiCond_FirstUseEver);
-
-    if (!ImGui_Begin("Controls", &e->show_controls, 0)) {
-        ImGui_End();
+    if (!gs_editor_panel("Controls", &e->show_controls, 380.0f, 16.0f,
+                         420.0f, 688.0f)) {
         return;
     }
 

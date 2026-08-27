@@ -150,6 +150,13 @@ bool gs_ui_probe_scroll_to(const char *window, float x, float y);
 bool gs_ui_probe_window_box(const char *window, float *x, float *y,
                             float *w, float *h);
 
+// **Put a window back where it was.** ImGui remembers a window's position and
+// size under its name for the rest of the process, so a test that moves or
+// resizes one has changed the world for every test after it - the same hazard
+// as resizing the screen and not putting it back, and harder to see because
+// nothing in the next test mentions windows at all.
+bool gs_ui_probe_place(const char *window, float x, float y, float w, float h);
+
 // **Unfold a window somebody folded shut.** A collapsed window draws its title
 // bar and nothing else, and ImGui remembers that under the window's name for
 // the rest of the process - so one walk pressing a collapse arrow leaves every
