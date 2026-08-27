@@ -5220,6 +5220,26 @@ this file. Two compilers locally is not three platforms and does not pretend to
 be; it is the cheapest way to catch the class of thing that has now bitten
 twice in one day.
 
+### Every window, not only every panel
+
+There are ten `ImGui_Begin` sites in this game - eight menu screens, the
+editor's three panels through one helper, and the HUD - and all of them are now
+measured. But a *window* is not the same as a `Begin`: a list, or a bordered box
+inside a panel, is a window of its own to ImGui, with its own clip rectangle and
+its own scroll. There are three of those, and none of them had ever been asked
+what it was hiding sideways.
+
+The scrollbar rule applies to all of them now, discovered from what the frame
+actually drew rather than from a list somebody keeps up to date: **183 windows**
+across the eight screens and eighteen starting states at 640x480, each required
+to show a scrollbar exactly when it has something to scroll.
+
+Nothing was wrong. The number that matters for believing that is the other one
+the test prints: **27 of the 183 can move sideways and 93 can move down**. A
+rule about showing a bar when you can scroll proves nothing in a sweep where
+nothing can scroll - it would be asserting that no window has a bar, which is a
+different and much weaker claim - so the test fails if either count is zero.
+
 **No physics moved.** This is all `src/ui/`.
 
 ## Known risks

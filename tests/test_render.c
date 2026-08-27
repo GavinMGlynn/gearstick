@@ -9024,6 +9024,7 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
     gs_ui ui;
 
     int screens = 0, checked = 0, in_lists = 0, stranded = 0;
+    int windows = 0, lying = 0, sideways = 0, downwards = 0;
 
     // **From every state the panels are measured from at full size**, because
     // how big a screen is depends on what is on it: the setup screen grows a
@@ -9075,15 +9076,42 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
         // panel *is* exactly as wide as it is - so every screen with a
         // separator on it grew a permanent scrollbar with the grip filling the
         // whole track. Fourteen pixels of furniture that scrolls nothing.
-        bool bar_x = false, bar_y = false;
-        CHECK(gs_ui_probe_scrollbars(window, &bar_x, &bar_y));
-        if ((max_x > 0.0f) != bar_x || (max_y > 0.0f) != bar_y) {
-            printf("  SCROLLBAR %s from '%s': can move %.0f x %.0f, bars %d %d\n",
-                   gs_screen_name(gs_every_screen[si]), gs_seeds[sd].name,
-                   (double)max_x, (double)max_y, bar_x, bar_y);
+        // **Every window the screen opened, not only the panel.** A list or a
+        // bordered box inside a panel is a window of its own to ImGui, with its
+        // own clip rectangle and its own scroll - so a child whose contents are
+        // wider than it is hides them exactly the way the panels did, and none
+        // of the panel's numbers can see it. The track summary, the library and
+        // the detail box are three of these.
+        for (int i = 0; i < n; i++) {
+            if (SDL_strncmp(items[i].window, "Debug", 5) == 0) continue;
+
+            bool already = false;
+            for (int k = 0; k < i; k++) {
+                if (SDL_strcmp(items[k].window, items[i].window) == 0) {
+                    already = true;
+                    break;
+                }
+            }
+            if (already) continue;
+
+            float wx = 0.0f, wy = 0.0f;
+            bool bar_x = false, bar_y = false;
+            if (!gs_ui_probe_scroll_span(items[i].window, nullptr, nullptr,
+                                         &wx, &wy)) {
+                continue;
+            }
+            CHECK(gs_ui_probe_scrollbars(items[i].window, &bar_x, &bar_y));
+            windows++;
+            if (wx > 0.0f) sideways++;
+            if (wy > 0.0f) downwards++;
+            if ((wx > 0.0f) != bar_x || (wy > 0.0f) != bar_y) {
+                lying++;
+                printf("  SCROLLBAR %s from '%s': '%s' can move %.0f x %.0f, "
+                       "bars %d %d\n",
+                       gs_screen_name(gs_every_screen[si]), gs_seeds[sd].name,
+                       items[i].window, (double)wx, (double)wy, bar_x, bar_y);
+            }
         }
-        CHECK((max_x > 0.0f) == bar_x);
-        CHECK((max_y > 0.0f) == bar_y);
 
         // Steps of half a viewport, so no control can hide between two of
         // them: anything narrower than the window is wholly inside it at some
@@ -9156,11 +9184,25 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
     }
 
     printf("  SMALL %d controls over %d screens reachable at %dx%d, from %d "
-           "starting states; %d more sit inside lists that scroll themselves\n",
-           checked, screens, GS_W, GS_H, (int)SDL_arraysize(gs_seeds), in_lists);
+           "starting states; %d more sit inside lists that scroll themselves. "
+           "%d windows - panels and the boxes inside them - each showing a "
+           "scrollbar exactly when it has something to scroll, and %d of them "
+           "can move sideways and %d down\n",
+           checked, screens, GS_W, GS_H, (int)SDL_arraysize(gs_seeds), in_lists,
+           windows, sideways, downwards);
     CHECK(screens == (int)SDL_arraysize(gs_every_screen) *
                      (int)SDL_arraysize(gs_seeds));
     CHECK(stranded == 0);
+    CHECK(windows > screens);       // more than one window on some screen
+    CHECK(lying == 0);
+
+    // **And the rule is not vacuously true.** A check that a window shows a
+    // scrollbar exactly when it can scroll proves nothing if no window in the
+    // whole sweep can scroll: it would then be asserting that none of them has
+    // a bar, which is a different and much weaker claim than the one written
+    // above it.
+    CHECK(sideways > 0);
+    CHECK(downwards > 0);
 
     CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
     CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,

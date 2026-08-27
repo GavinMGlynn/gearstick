@@ -1939,3 +1939,13 @@ worth as much as what was decided about it.
       *Verification: all three panels measured under every brush at four window
       sizes down to 400×300 — 72 measurements, each wholly on the screen and
       each showing a scrollbar exactly when it has something to scroll.*
+- [x] **Every window measured, not just every panel.** A list or a bordered box
+      inside a panel is a window in its own right, with its own edges and its
+      own scrolling, and the three in this game had never been asked what they
+      were hiding sideways. Now every window a screen draws is found from the
+      frame itself and held to the same rule as the panels.
+      *Verification: 183 windows across eight screens and eighteen starting
+      states, each showing a scrollbar exactly when it has something to scroll —
+      and the test also states how many of them can actually scroll (27
+      sideways, 93 down) and fails if that is none, because a rule about
+      scrollbars proves nothing where nothing scrolls.*
