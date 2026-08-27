@@ -40,7 +40,13 @@ typedef enum gs_edit_kind {
 
     // Whether the track is a loop or a path, which decides which gate ends a
     // lap. A change to what the track *is*, so it belongs in the history.
-    GS_EDIT_ROUTE_KIND
+    GS_EDIT_ROUTE_KIND,
+
+    // **So a test can say it walked all of them.** Two of the seven above had
+    // never been called by any test at all - moving a gate and changing whether
+    // the track is a loop - and nothing could have noticed, because the way to
+    // notice is to count against a number like this one.
+    GS_EDIT_COUNT
 } gs_edit_kind;
 
 typedef struct gs_edit {

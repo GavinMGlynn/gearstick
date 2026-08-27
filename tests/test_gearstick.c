@@ -335,6 +335,184 @@ static void gs_make_edits(gs_edit_log *l, gs_track *t, uint32_t n) {
     }
 }
 
+TEST(a_loop_and_a_path_over_the_same_ground_are_two_tracks) {
+    // **Found by walking every kind of edit through undo.** Changing a track
+    // from a path to a loop did not change its hash, which the test above reads
+    // as "that edit did nothing" - and it is worse than that, because the hash
+    // is what a track *is*.
+    //
+    // The comment over gs_track_hash says the route is part of a track's
+    // identity, "the same ground driven the other way round is a different
+    // track, and its times are not comparable". It hashes the gates. It did not
+    // hash whether the gates make a loop or a path, which is the most literal
+    // reading of driving the same ground a different way round: on a circuit
+    // you cross gate zero again to finish a lap, on a sprint you drive from the
+    // first gate to the last and stop.
+    static gs_track path;
+    gs_track_init(&path, 16, 12, GS_SURF_PAVEMENT);
+    CHECK(gs_track_add_gate(&path, GS_INT(2), GS_INT(6), 0, GS_INT(2)) >= 0);
+    CHECK(gs_track_add_gate(&path, GS_INT(8), GS_INT(6), 0, GS_INT(2)) >= 0);
+    CHECK(gs_track_add_gate(&path, GS_INT(14), GS_INT(6), 0, GS_INT(2)) >= 0);
+    path.route = (uint8_t)GS_ROUTE_SPRINT;
+
+    static gs_track loop;
+    loop = path;
+    loop.route = (uint8_t)GS_ROUTE_CIRCUIT;
+
+    const uint64_t as_path = gs_track_hash(&path);
+    const uint64_t as_loop = gs_track_hash(&loop);
+    if (as_path == as_loop) {
+        printf("  TRACK a sprint and a circuit over the same ground both hash "
+               "%016llx\n", (unsigned long long)as_path);
+    }
+    CHECK(as_path != as_loop);
+
+    // **And the cost of that was somebody's work.** The library is content
+    // addressed - "the same track twice is one track" - so putting the loop in
+    // beside the path found the path already there, renamed it, and threw the
+    // loop away. A player who built a circuit, saved it, turned it into a
+    // sprint and saved that under a second name had one track in their library
+    // afterwards, with the second name on the first track.
+    static gs_library lib;
+    gs_library_clear(&lib);
+    CHECK(gs_library_put(&lib, &path, "the long way round", "gavin") >= 0);
+    CHECK(lib.count == 1);
+    CHECK(gs_library_put(&lib, &loop, "the same, as a lap", "gavin") >= 0);
+    if (lib.count != 2) {
+        printf("  TRACK the library folded a sprint and a circuit into one "
+               "entry, called '%s'\n", lib.entry[0].name);
+    }
+    CHECK(lib.count == 2);
+
+    // Both are there, and each is the track it says it is.
+    int as_sprint = 0, as_circuit = 0;
+    for (uint16_t i = 0; i < lib.count; i++) {
+        if (lib.entry[i].track.route == (uint8_t)GS_ROUTE_SPRINT) as_sprint++;
+        if (lib.entry[i].track.route == (uint8_t)GS_ROUTE_CIRCUIT) as_circuit++;
+    }
+    CHECK(as_sprint == 1);
+    CHECK(as_circuit == 1);
+
+    // And a record set on one is not offered against the other. A best lap on
+    // a circuit is a lap of the loop; on a sprint it is one end to the other.
+    // Pooling them puts a time on a screen next to a time it cannot be
+    // compared with, which is the whole reason a track has an identity.
+    CHECK(gs_track_hash(&lib.entry[0].track) !=
+          gs_track_hash(&lib.entry[1].track));
+}
+
+TEST(every_kind_of_edit_can_be_taken_back_and_put_back_again) {
+    // **Everything you can do, you can take back.** That is the promise the
+    // construction set makes, and it was tested on three of the seven kinds of
+    // edit there are. Two of the seven had never been called by *any* test at
+    // all: moving a gate in the route, and changing whether the track is a loop
+    // or a path. Both are undoable in principle and nothing had ever checked
+    // that they are - which for the route kind means the one edit that decides
+    // how a lap is scored.
+    //
+    // Walked from GS_EDIT_COUNT rather than a list, so an eighth kind of edit
+    // is in this test the day it exists rather than the day somebody remembers.
+    int walked = 0;
+    bool seen[GS_EDIT_COUNT] = { false };
+
+    for (int kind = 0; kind < GS_EDIT_COUNT; kind++) {
+        static gs_track t;
+        gs_track_init(&t, 16, 12, GS_SURF_PAVEMENT);
+
+        // Whatever this kind of edit needs to exist before it can happen, laid
+        // in directly so it is part of the track rather than part of the
+        // history - undo has to come back to *this*, not to an empty track.
+        if (kind == GS_EDIT_GATE_REMOVE || kind == GS_EDIT_GATE_MOVE) {
+            CHECK(gs_track_add_gate(&t, GS_INT(4), GS_INT(4), 0,
+                                    GS_INT(2)) >= 0);
+            CHECK(gs_track_add_gate(&t, GS_INT(8), GS_INT(4),
+                                    (gs_angle)(GS_TURN / 4), GS_INT(2)) >= 0);
+            CHECK(gs_track_add_gate(&t, GS_INT(12), GS_INT(8), 0,
+                                    GS_INT(2)) >= 0);
+        }
+
+        gs_edit_log *l = gs_fresh_log(GS_TEST_EDITS);
+        const uint64_t before = gs_track_hash(&t);
+        CHECK(!gs_edit_can_undo(l));
+
+        bool did = false;
+        switch ((gs_edit_kind)kind) {
+        case GS_EDIT_CORNER:
+            did = gs_edit_corner(l, &t, 3, 3, GS_INT(2) + GS_HALF);
+            break;
+        case GS_EDIT_SURFACE:
+            did = gs_edit_surface(l, &t, 2, 2, GS_SURF_ICE);
+            break;
+        case GS_EDIT_GRAVITY:
+            did = gs_edit_gravity(l, &t, 2, 2, GS_RATIO(38, 100));
+            break;
+        case GS_EDIT_GATE_ADD:
+            did = gs_edit_add_gate(l, &t, GS_INT(6), GS_INT(6), 0,
+                                   GS_INT(2)) >= 0;
+            break;
+        case GS_EDIT_GATE_REMOVE:
+            did = gs_edit_remove_gate(l, &t, 1);
+            break;
+        case GS_EDIT_GATE_MOVE:
+            // Last to first, which is what dropping a start line in after the
+            // corners have been laid actually does.
+            did = gs_edit_move_gate(l, &t, 2, 0);
+            break;
+        case GS_EDIT_ROUTE_KIND:
+            did = gs_edit_route_kind(l, &t, GS_ROUTE_CIRCUIT);
+            break;
+        case GS_EDIT_COUNT:
+            break;
+        }
+        CHECK(did);
+        seen[kind] = true;
+
+        // **It changed something.** An edit that did nothing would pass every
+        // assertion below without any of them meaning anything.
+        const uint64_t after = gs_track_hash(&t);
+        if (after == before) {
+            printf("  EDIT kind %d changed nothing\n", kind);
+        }
+        CHECK(after != before);
+        CHECK(gs_edit_can_undo(l));
+        CHECK(gs_edit_undo_depth(l) == 1);
+
+        // Taken back: the track is what it was, to the bit.
+        CHECK(gs_edit_undo(l, &t));
+        if (gs_track_hash(&t) != before) {
+            printf("  EDIT kind %d could not be undone: %016llx, was %016llx\n",
+                   kind, (unsigned long long)gs_track_hash(&t),
+                   (unsigned long long)before);
+        }
+        CHECK(gs_track_hash(&t) == before);
+        CHECK(!gs_edit_can_undo(l));
+        CHECK(gs_edit_can_redo(l));
+
+        // And put back again: the same track the edit made, not a near miss.
+        CHECK(gs_edit_redo(l, &t));
+        if (gs_track_hash(&t) != after) {
+            printf("  EDIT kind %d could not be redone: %016llx, wanted "
+                   "%016llx\n", kind, (unsigned long long)gs_track_hash(&t),
+                   (unsigned long long)after);
+        }
+        CHECK(gs_track_hash(&t) == after);
+        CHECK(!gs_edit_can_redo(l));
+
+        // And round again, because once through proves the pair works and not
+        // that the log is left in a state that can do it twice.
+        CHECK(gs_edit_undo(l, &t));
+        CHECK(gs_track_hash(&t) == before);
+        CHECK(gs_edit_redo(l, &t));
+        CHECK(gs_track_hash(&t) == after);
+
+        walked++;
+    }
+
+    for (int kind = 0; kind < GS_EDIT_COUNT; kind++) CHECK(seen[kind]);
+    printf("  EDITS all %d kinds undone and redone\n", walked);
+    CHECK(walked == GS_EDIT_COUNT);
+}
+
 TEST(any_sequence_of_edits_undone_completely_restores_the_track) {
     static gs_track t;
     gs_track_init(&t, 24, 16, GS_SURF_PAVEMENT);
@@ -2872,8 +3050,15 @@ TEST(a_code_is_the_same_code_on_every_machine) {
     // two code this test used to pin is below, and it still decodes to the same
     // track it always did. Nobody's shared link stopped working - they just do
     // not spell the same thing any more.
+    //
+    // **And moved a second time, deliberately**, when whether a track is a loop
+    // or a path became part of its identity. A code carries the hash of what it
+    // encodes, so a new code spells a different string - but the reader takes
+    // the answer that hash used to give as well, and the version two code below
+    // is the proof: it was shared with v0.1.0-beta1 and it still opens. See the
+    // note over gs_track_hash_before_route_kind.
     static const char *want =
-        "GST1nO3tcjgrKaH_R1RSSwMAAAAnCAYCBQAABAEKBxEPYBEPEQ8RDxEPEQ0BQAEPAgEN"
+        "GST1TvZUKuduud3_R1RSSwMAAAAnCAYCBQAABAEKBxEPYBEPEQ8RDxEPEQ0BQAEPAgEN"
         "AhMPAQ8BDwECagPrAQLpAwYNCA";
 
     static const char *version_two =
@@ -7150,6 +7335,8 @@ int main(void) {
     run_a_track_survives_the_round_trip_through_its_file_format();
     run_a_corrupt_track_file_is_refused_rather_than_half_loaded();
     run_two_tracks_built_the_same_way_share_an_identity_through_a_file();
+    run_a_loop_and_a_path_over_the_same_ground_are_two_tracks();
+    run_every_kind_of_edit_can_be_taken_back_and_put_back_again();
     run_any_sequence_of_edits_undone_completely_restores_the_track();
     run_redoing_everything_returns_the_track_to_where_it_was();
     run_a_brush_stroke_undoes_as_one_action();

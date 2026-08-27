@@ -341,7 +341,7 @@ static void gs_hash_i32(uint64_t *h, int32_t v) {
     gs_hash_bytes(h, le, sizeof le);
 }
 
-uint64_t gs_track_hash(const gs_track *t) {
+static uint64_t gs_track_hash_of(const gs_track *t, bool with_route) {
     uint64_t h = 0xcbf29ce484222325ULL;
 
     gs_hash_bytes(&h, &t->w, sizeof t->w);
@@ -367,6 +367,20 @@ uint64_t gs_track_hash(const gs_track *t) {
 
     // The route is part of the track's identity: the same ground driven the
     // other way round is a different track, and its times are not comparable.
+    //
+    // **Including whether it is a loop or a path**, which this said and did not
+    // do. It hashed the gates and not what they mean, so a circuit and a sprint
+    // over exactly the same ground were the same track - and the library is
+    // content addressed, so saving one beside the other renamed the first and
+    // threw the second away. A player who built a lap, saved it, turned it into
+    // a run and saved that under a second name had one track afterwards, with
+    // the second name on the first track. Their work, gone, silently.
+    //
+    // It is the most literal reading of driving the same ground the other way
+    // round: on a circuit you cross gate zero again to finish a lap, on a
+    // sprint you drive from the first gate to the last and stop. A best lap on
+    // one is not a time you can put beside a best lap on the other.
+    if (with_route) gs_hash_bytes(&h, &t->route, sizeof t->route);
     gs_hash_bytes(&h, &t->gate_count, sizeof t->gate_count);
     for (uint8_t i = 0; i < t->gate_count; i++) {
         const gs_gate *g = &t->gate[i];
@@ -376,6 +390,25 @@ uint64_t gs_track_hash(const gs_track *t) {
         gs_hash_i32(&h, (int32_t)g->heading);
     }
     return h;
+}
+
+uint64_t gs_track_hash(const gs_track *t) {
+    return gs_track_hash_of(t, true);
+}
+
+// **What this used to answer**, for reading a share code written before the
+// route was part of a track's identity.
+//
+// A code carries the hash of what it encodes so that a damaged one fails loudly
+// rather than opening as a track nobody built. Changing what a track's identity
+// *is* therefore stops every code already shared from opening - and one went
+// out with v0.1.0-beta1. A reader that accepts either answer costs three lines
+// and means nobody's link breaks; what it gives up is noticing a code whose
+// route byte alone was corrupted, which is one bit of one byte out of a
+// hundred, and the alternative was telling somebody their working code was
+// damaged.
+uint64_t gs_track_hash_before_route_kind(const gs_track *t) {
+    return gs_track_hash_of(t, false);
 }
 
 // --- the file format ------------------------------------------------------

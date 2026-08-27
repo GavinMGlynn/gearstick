@@ -5475,6 +5475,66 @@ Also pinned: the keyboard wins over a pad held at the same moment, nothing held
 decides nothing however long it goes on, and a null keyboard - what a caller
 gets before SDL has one - is not a crash.
 
+## A circuit and a sprint over the same ground were one track
+
+Walking every kind of edit through undo turned up one that "changed nothing":
+switching a track between a loop and a path. It changed the track, so what it
+had not changed was the **hash** - and the hash is what a track *is*.
+
+The comment over `gs_track_hash` says the route is part of a track's identity,
+*"the same ground driven the other way round is a different track, and its times
+are not comparable"*. It hashed the gates. It did not hash whether those gates
+make a loop or a path, which is the most literal reading of that sentence: on a
+circuit you cross gate zero again to finish a lap; on a sprint you drive from
+the first gate to the last and stop.
+
+**The library is content addressed**, and it says so: *"the same track twice is
+one track"*. So:
+
+> Build a lap. Save it. Turn it into a run and save that under a second name.
+> You have one track afterwards, with the second name on the first track.
+
+Somebody's work, gone, silently. And records keyed on the same number pooled a
+lap of a loop with a run from end to end - two times that cannot be put beside
+each other, which is the entire reason a track has an identity.
+
+`a_loop_and_a_path_over_the_same_ground_are_two_tracks` is the fault written
+down: it failed before the fix with the library folded into one entry, and names
+the entry it found there.
+
+### What it cost to move, and what it did not
+
+**The world hash did not move**, nor did the opponents race. Nothing about the
+physics changed; what changed is what counts as the same track.
+
+`GS_SELFTEST_TRACK_HASH` moved, deliberately. So did
+`GS_SELFTEST_GENERATOR_HASH`, and that one names nothing: it is a fold of
+`gs_track_hash` over the first two hundred seeds, so it moves when the function
+does. **Every seed builds exactly the same ground it built before.**
+
+A share code carries this hash so a damaged code fails loudly - and codes went
+out with `v0.1.0-beta1` eight days ago. Changing the identity would have told
+those people their working codes were damaged. `gs_track_hash_before_route_kind`
+answers what the function used to, the reader accepts either, and the version
+two code pinned in the test still opens. What that gives up is noticing a code
+whose *route byte alone* was corrupted - one bit of one byte in a hundred, which
+would still open as a real track - and the alternative was worse.
+
+### And the shipped tracks were two short
+
+Regenerating `assets/server/gearstick.db` meant re-running the chooser, and it
+wrote **two tracks that are not in the repository**. Not because of anything
+here: which generated tracks ship is decided by *racing* them - every vehicle
+has to be able to finish, or a stock track tells a new player their choice of
+machine was wrong - and the simulation has changed several times since those
+files were committed. Two seeds became finishable and nothing re-ran the
+choosing.
+
+`tables.yml` exists precisely to keep committed generated artefacts honest, and
+it did not fire: its `paths` list covers the generators and the assets, and not
+the simulation that decides what the generators produce. `src/core/**` is in
+that list now.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

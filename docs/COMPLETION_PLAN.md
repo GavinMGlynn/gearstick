@@ -2007,3 +2007,30 @@ worth as much as what was decided about it.
       not a handful, because a key that cannot be captured is a control
       somebody cannot have. Escape still means leave it alone, and not when
       Escape is merely the key that started the capture.*
+- [x] **A circuit and a sprint over the same ground were one track.** *(Found by
+      walking every kind of edit through undo — changing a track from a loop to
+      a path registered as "changed nothing".)* A track is known by what it is,
+      and what it was did not include whether its gates make a lap or a run.
+      The library treats two tracks with the same identity as one, so building a
+      lap, saving it, turning it into a run and saving that under a second name
+      left you with one track carrying the second name on the first track. Best
+      times were pooled the same way — a lap of a loop beside a run from end to
+      end.
+      *Verification: the two are now two entries in a library, each the track it
+      says it is, and the test states the fault it was written for. Nothing
+      about the physics moved. Codes shared with the released beta still open,
+      because the reader accepts the answer the hash used to give.*
+- [x] **Every kind of edit can be taken back and put back again.** Two of the
+      seven kinds — moving a gate along the route, and changing whether the
+      track is a lap or a run — had never been called by any test at all.
+      *Verification: all seven walked, each applied, undone and redone with the
+      track compared to the bit each time, and twice round to prove the history
+      is left usable. The test counts against the number of kinds, so an eighth
+      fails the tree rather than being forgotten.*
+- [x] **The shipped stock tracks were two short.** Which generated tracks ship
+      is decided by racing them — every vehicle has to be able to finish — so
+      the set depends on the simulation, and the simulation has changed several
+      times since those files were written. The job that keeps committed
+      generated files honest was not watching the simulation.
+      *Verification: the chooser is re-run and its output committed; the check
+      now runs whenever anything in the simulation changes.*

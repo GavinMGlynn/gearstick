@@ -47,6 +47,7 @@ static int16_t gs_edit_read(const gs_track *t, gs_edit_kind kind, uint8_t x, uin
     case GS_EDIT_GATE_REMOVE:
     case GS_EDIT_GATE_MOVE:
     case GS_EDIT_ROUTE_KIND:
+    case GS_EDIT_COUNT:
         break;      // the route is not a tile; see gs_edit_route
     }
     return 0;
@@ -67,6 +68,7 @@ static void gs_edit_write(gs_track *t, gs_edit_kind kind, uint8_t x, uint8_t y, 
     case GS_EDIT_GATE_REMOVE:
     case GS_EDIT_GATE_MOVE:
     case GS_EDIT_ROUTE_KIND:
+    case GS_EDIT_COUNT:
         break;      // the route is not a tile; see gs_edit_route
     }
 }
@@ -239,6 +241,10 @@ bool gs_edit_route_kind(gs_edit_log *l, gs_track *t, gs_route_kind kind) {
 
 // Undoing one entry, whichever kind it is.
 static void gs_edit_reverse(gs_track *t, const gs_edit *e) {
+    // Named one by one rather than defaulted: a kind of edit added later must
+    // say how it is taken back, and a `default` here would have it silently
+    // written to a tile instead - which for anything that is not a tile is a
+    // track quietly left in the wrong state by pressing undo.
     switch ((gs_edit_kind)e->kind) {
     case GS_EDIT_GATE_ADD:    gs_gate_delete(t, e->index); break;
     case GS_EDIT_GATE_REMOVE: gs_gate_insert(t, e->index, &e->gate); break;
@@ -247,7 +253,12 @@ static void gs_edit_reverse(gs_track *t, const gs_edit *e) {
         gs_gate_insert(t, (uint8_t)e->before, &e->gate);
         break;
     case GS_EDIT_ROUTE_KIND: t->route = (uint8_t)e->before; break;
-    default: gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->before); break;
+    case GS_EDIT_CORNER:
+    case GS_EDIT_SURFACE:
+    case GS_EDIT_GRAVITY:
+        gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->before);
+        break;
+    case GS_EDIT_COUNT: break;      // not an edit
     }
 }
 
@@ -260,7 +271,12 @@ static void gs_edit_forward(gs_track *t, const gs_edit *e) {
         gs_gate_insert(t, e->index, &e->gate);
         break;
     case GS_EDIT_ROUTE_KIND: t->route = (uint8_t)e->after; break;
-    default: gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->after); break;
+    case GS_EDIT_CORNER:
+    case GS_EDIT_SURFACE:
+    case GS_EDIT_GRAVITY:
+        gs_edit_write(t, (gs_edit_kind)e->kind, e->x, e->y, e->after);
+        break;
+    case GS_EDIT_COUNT: break;      // not an edit
     }
 }
 

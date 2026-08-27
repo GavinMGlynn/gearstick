@@ -88,5 +88,14 @@ bool gs_track_from_code(gs_track *t, const char *code) {
     // **The code says which track it is, and the track has to agree.** A code
     // that lost a character usually still decodes to *something*; this is what
     // stops that something being handed over as a track somebody built.
-    return gs_track_hash(t) == gs_get64(body);
+    //
+    // **Or agree with what it used to be.** A track's identity gained the loop
+    // or path byte after v0.1.0-beta1 went out, so a code shared by anybody
+    // running that build carries the answer this used to give. Refusing it
+    // would be telling somebody a working code was damaged; accepting either
+    // costs the ability to notice a corruption of the route byte alone, which
+    // is one byte in a hundred and would still open as a real track.
+    const uint64_t said = gs_get64(body);
+    return gs_track_hash(t) == said ||
+           gs_track_hash_before_route_kind(t) == said;
 }

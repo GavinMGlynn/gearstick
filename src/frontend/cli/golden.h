@@ -14,7 +14,23 @@
 // different track and its times are not comparable. The *world* hash below did
 // not move, which is the point - the physics was untouched, and that is exactly
 // what these two numbers being separate is for.
-#define GS_SELFTEST_TRACK_HASH 0x254cc5e1aae6c99aULL
+//
+// **And a second time, for the other half of that same sentence.** The hash
+// covered the gates and not whether they make a loop or a path - so a circuit
+// and a sprint over exactly the same ground were one track. The library is
+// content addressed, so saving one beside the other renamed the first entry and
+// threw the second away: somebody's work, gone, silently. Records keyed on this
+// pooled a lap of a loop with a run from end to end, which is two times that
+// cannot be put next to each other.
+//
+// The world hash did not move again. Nothing about the physics changed; what
+// changed is what counts as the same track.
+//
+// A share code carries this number so a damaged code fails loudly, and one went
+// out with v0.1.0-beta1, so those codes would have stopped opening. They do not:
+// the reader accepts the answer this used to give as well. See
+// gs_track_hash_before_route_kind.
+#define GS_SELFTEST_TRACK_HASH 0x483dd875662890aeULL
 // Moved twice more since, both times deliberately and both times because the
 // race really did change: the grip circle, and then the roster retune that
 // followed from it. A vehicle's numbers are inputs to the physics, so changing
@@ -89,7 +105,15 @@
 // `every_gate_is_wider_than_the_road_it_crosses` keeps them that way.
 //
 // The *world* hash below did not move. The physics is untouched by any of this.
-#define GS_SELFTEST_GENERATOR_HASH 0x41365c813fecc890ULL
+//
+// **Moved a fourth time, and this one names nothing.** This number is a fold of
+// `gs_track_hash` over the first two hundred seeds, and that function changed -
+// a track's identity now says whether it is a loop or a path. The generator did
+// not change. **Every seed builds exactly the same ground it built before**; the
+// number that names that ground is different, which is what the fold measures.
+// So unlike the three moves above, nobody's shared seed opens a different track,
+// and the warning this failure prints is worth reading with that in mind.
+#define GS_SELFTEST_GENERATOR_HASH 0x84b090da5b530ccfULL
 
 // **A race with nobody at the keyboard**, four opponents spread across the
 // skill dial, on a circuit none of them has seen.

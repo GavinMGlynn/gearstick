@@ -319,6 +319,11 @@ const char *gs_track_problem_text(gs_track_problem p);
 // track's identity does not depend on GS_TRACK_MAX.
 uint64_t gs_track_hash(const gs_track *t);
 
+// The same, as it was answered before whether a track is a loop or a path
+// became part of its identity. **Only for reading share codes issued then** -
+// see the note in gs_track.c. Nothing new should be keyed on this.
+uint64_t gs_track_hash_before_route_kind(const gs_track *t);
+
 // --- the file format ------------------------------------------------------
 //
 // Explicit little-endian on the wire, like the replay format, so a track

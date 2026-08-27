@@ -38,6 +38,14 @@ on:
       - 'src/net/gs_store.c'
       - 'assets/tracks/**'
       - 'assets/server/**'
+      # **And the simulation itself.** Which generated tracks are good enough
+      # to ship is decided by racing them - every vehicle has to be able to
+      # finish - so a change to the physics or to the driver changes the set,
+      # and none of the paths above moves when that happens. It went unnoticed
+      # for four commits: the shipped set was two tracks short of what the
+      # chooser produces, because two seeds became finishable and nothing
+      # re-ran the choosing.
+      - 'src/core/**'
       - 'tools/make_imgui_bindings.py'
       - 'tools/make_meshes.py'
       - 'src/core/gs_tables.h'
@@ -55,6 +63,14 @@ on:
       - 'src/net/gs_store.c'
       - 'assets/tracks/**'
       - 'assets/server/**'
+      # **And the simulation itself.** Which generated tracks are good enough
+      # to ship is decided by racing them - every vehicle has to be able to
+      # finish - so a change to the physics or to the driver changes the set,
+      # and none of the paths above moves when that happens. It went unnoticed
+      # for four commits: the shipped set was two tracks short of what the
+      # chooser produces, because two seeds became finishable and nothing
+      # re-ran the choosing.
+      - 'src/core/**'
       - 'tools/make_imgui_bindings.py'
       - 'tools/make_meshes.py'
       - 'src/core/gs_tables.h'
