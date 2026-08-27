@@ -400,7 +400,12 @@ target_compile_definitions(gearstick_shell PRIVATE
 # And where the tracks that ship live, so a test can race every one of them
 # rather than a track it built itself. A driver that gets round the test's own
 # circuit and not the ones in the box is a driver nobody meets.
+# The throwaway the tests keep their preferences in, named here so a test can
+# check it is the one being used - see GS_TEST_SANDBOX below.
+set(GS_TEST_HOME "${CMAKE_CURRENT_BINARY_DIR}/test-home")
+
 target_compile_definitions(gearstick_shell PUBLIC
+    GS_TEST_HOME="${GS_TEST_HOME}"
     GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets"
     GS_SOURCE_UI="${CMAKE_CURRENT_SOURCE_DIR}/src/ui"
     GS_SOURCE_DOCS="${CMAKE_CURRENT_SOURCE_DIR}/docs"
@@ -512,7 +517,25 @@ if(GEARSTICK_TESTS)
     gs_configure(gearstick_tests)
 
     add_test(NAME gearstick COMMAND gearstick_tests)
-    set_tests_properties(gearstick PROPERTIES TIMEOUT 120)
+    # **No test writes where a player keeps their things.**
+    #
+    # The construction set saves the track being built and the bindings
+    # somebody has chosen into the preferences directory, and the walk presses
+    # every button in it - so the day the walk learned to scroll far enough to
+    # reach `save`, `load` and `defaults`, running the tests began overwriting
+    # a real player's current track and their controls. It went unnoticed
+    # because the files it wrote happened to match what was already there.
+    #
+    # SDL builds that directory from XDG_DATA_HOME, HOME or APPDATA depending
+    # on the platform, so all three are pointed at a throwaway inside the build
+    # tree. `tools/play_check.py` has always done this for the clients it
+    # starts; the C tests had not.
+    file(MAKE_DIRECTORY "${GS_TEST_HOME}")
+    set(GS_TEST_SANDBOX
+        "XDG_DATA_HOME=${GS_TEST_HOME};HOME=${GS_TEST_HOME};APPDATA=${GS_TEST_HOME}")
+
+    set_tests_properties(gearstick PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # The renderer's own tests, which need a window system and therefore link
     # gearstick_shell. Kept a separate executable from the simulation tests on
@@ -565,7 +588,8 @@ if(GEARSTICK_TESTS)
     gs_configure(gearstick_store_tests)
 
     add_test(NAME gearstick_store COMMAND gearstick_store_tests)
-    set_tests_properties(gearstick_store PROPERTIES TIMEOUT 120)
+    set_tests_properties(gearstick_store PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # **Seven minutes, because this suite got much bigger.** Each test here
     # starts a real server process and talks to it over real sockets, and Phase
@@ -574,10 +598,12 @@ if(GEARSTICK_TESTS)
     # a loaded macOS runner, and the old three-minute limit turned that into a
     # red tree that said "Timeout" and nothing about what was wrong.
     add_test(NAME gearstick_server COMMAND gearstick_server_tests)
-    set_tests_properties(gearstick_server PROPERTIES TIMEOUT 420)
+    set_tests_properties(gearstick_server PROPERTIES TIMEOUT 420
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     add_test(NAME gearstick_wire COMMAND gearstick_wire_tests)
-    set_tests_properties(gearstick_wire PROPERTIES TIMEOUT 120)
+    set_tests_properties(gearstick_wire PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # The tunnel. No sockets and no SDL: it turns bytes into bytes, so it is
     # tested against the framework's published vectors rather than by watching
@@ -589,7 +615,8 @@ if(GEARSTICK_TESTS)
     gs_configure(gearstick_noise_tests)
 
     add_test(NAME gearstick_noise COMMAND gearstick_noise_tests)
-    set_tests_properties(gearstick_noise PROPERTIES TIMEOUT 120)
+    set_tests_properties(gearstick_noise PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # **A handshake against an implementation nobody here wrote.** The published
     # vectors say our bytes match a recording; they cannot say we can hold a
@@ -696,14 +723,15 @@ if(GEARSTICK_TESTS)
     # No driver named at all: these tests open no device, because a callback
     # thread pulling on the mixer makes what they measure depend on when it
     # fired. See gs_audio_open_silent.
-    set_tests_properties(gearstick_audio PROPERTIES TIMEOUT 120)
+    set_tests_properties(gearstick_audio PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     add_test(NAME gearstick_render COMMAND gearstick_render_tests)
     # No display, no audio device, no pads - and the software renderer, so the
     # pixels are the same ones on every platform's CI.
     gs_sanitizer_env(_sanitizers)
     set_tests_properties(gearstick_render PROPERTIES
-        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIO_DRIVER=dummy;${_sanitizers}"
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_AUDIO_DRIVER=dummy;${GS_TEST_SANDBOX};${_sanitizers}"
         # **Ten minutes, because this suite walks the whole front end.** It was
         # three, from when the heaviest thing here photographed a frame. It now
         # presses every control the front end offers, in every state it can find
@@ -721,7 +749,8 @@ if(GEARSTICK_TESTS)
     # that matters.
     add_test(NAME gearstick_track_file
              COMMAND gearstick_cli track round_trip.gstrack)
-    set_tests_properties(gearstick_track_file PROPERTIES TIMEOUT 60)
+    set_tests_properties(gearstick_track_file PROPERTIES TIMEOUT 60
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # Every way a route can be broken is refused, and named.
     add_test(NAME gearstick_validate COMMAND gearstick_cli validate)
@@ -730,30 +759,35 @@ if(GEARSTICK_TESTS)
     # for belongs to somebody else and does not ship - see docs/ASSETS.md rule 1
     # - so a check that needed a download would be a check that does not run.
     add_test(NAME gearstick_import COMMAND gearstick_cli import)
-    set_tests_properties(gearstick_validate PROPERTIES TIMEOUT 60)
+    set_tests_properties(gearstick_validate PROPERTIES TIMEOUT 60
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # The AI gets round, on every surface and in every machine, with no
     # recorded line and nothing tuned per track.
     add_test(NAME gearstick_ai COMMAND gearstick_cli ai)
-    set_tests_properties(gearstick_ai PROPERTIES TIMEOUT 180)
+    set_tests_properties(gearstick_ai PROPERTIES TIMEOUT 180
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # The opponent is beatable by driving better and not merely by driving
     # longer: a quicker driver beats it and a more cautious one does not.
     add_test(NAME gearstick_pace COMMAND gearstick_cli pace)
-    set_tests_properties(gearstick_pace PROPERTIES TIMEOUT 300)
+    set_tests_properties(gearstick_pace PROPERTIES TIMEOUT 300
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # Every vehicle is best at something. A roster where one machine wins
     # everything is a roster of one and five decorations, and this is what
     # noticed that the first one was.
     add_test(NAME gearstick_roster COMMAND gearstick_cli roster)
-    set_tests_properties(gearstick_roster PROPERTIES TIMEOUT 120)
+    set_tests_properties(gearstick_roster PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # The golden replay: an input log in, a state hash out. This is the test
     # that fails when a "harmless" change to the physics quietly rewrites every
     # ghost time and every shared replay in existence.
     add_test(NAME gearstick_golden_replay
              COMMAND gearstick_cli selftest --verify)
-    set_tests_properties(gearstick_golden_replay PROPERTIES TIMEOUT 120)
+    set_tests_properties(gearstick_golden_replay PROPERTIES TIMEOUT 120
+                         ENVIRONMENT "${GS_TEST_SANDBOX}")
 endif()
 
 # ---------------------------------------------------------------------------

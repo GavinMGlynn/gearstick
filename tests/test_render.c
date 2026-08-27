@@ -3660,6 +3660,34 @@ TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
     CHECK(stuck == 0);
 }
 
+TEST(no_test_writes_where_a_player_keeps_their_things) {
+    (void)ren;
+
+    // **The suite got better at pressing buttons and started deleting people's
+    // work.**
+    //
+    // The construction set saves the track being built and the bindings
+    // somebody has chosen into the preferences directory, and the walk presses
+    // every control in it. Those three buttons - `save`, `load` and the one
+    // that puts the controls back to their defaults - sat below the fold of a
+    // panel for as long as the panel was too short, so nothing had ever pressed
+    // them. The day the walk learned to wind a panel down, running `ctest`
+    // began overwriting a real player's current track and their controls.
+    //
+    // It went unnoticed because the files it wrote happened to match the ones
+    // already there. On the next machine it would not have.
+    //
+    // So every test runs with its preferences pointed at a throwaway inside the
+    // build tree, and this says so out loud: if that ever stops being true the
+    // tree goes red, rather than somebody losing what they were building.
+    const char *where = gs_pref_dir();
+    CHECK(where != nullptr);
+    if (where == nullptr) return;
+
+    printf("  PREFS tests keep theirs in %s\n", where);
+    CHECK(SDL_strstr(where, GS_TEST_HOME) == where);
+}
+
 TEST(a_pad_can_leave_a_screen_without_walking_to_the_button) {
     (void)ren;
 
@@ -8804,6 +8832,7 @@ int main(void) {
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
     run_the_empty_seats_on_the_grid_are_filled_with_somebody(ren);
     run_an_opponent_finishes_every_track_that_ships_from_every_grid_slot(ren);
+    run_no_test_writes_where_a_player_keeps_their_things(ren);
     run_a_pad_can_leave_a_screen_without_walking_to_the_button(ren);
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
     run_the_light_tree_counts_down_and_then_goes_green(ren);

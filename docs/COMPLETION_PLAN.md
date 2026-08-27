@@ -1199,6 +1199,15 @@ finished and tested since Phase 8. But every car in a race takes its input from
 a pad: the AI drives only in headless self-play, the editor's background ghost
 and the demo. **A one-player race is one car going round on its own.**
 
+- [x] **No test writes where a player keeps their things.** *(Found by
+      photographing a race and noticing the preferences directory had been
+      written a minute earlier.)* The editor saves the current track and the
+      chosen bindings there, and the walk presses every control in it — so the
+      day the walk learned to wind a panel down far enough to reach `save`,
+      running the tests began overwriting a real player's work.
+      *Verification: every test runs with its preferences pointed at a throwaway
+      in the build tree, and the render suite checks that it is: point it
+      anywhere else and the tree goes red.*
 - [x] **Race position is progress along the route, not distance to a point.**
       *(Found by photographing a four-car race: the HUD told the player on pole,
       before anybody had moved, that they were third of four.)* A gate is a line

@@ -4530,6 +4530,30 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### The suite got better at pressing buttons and started deleting people's work
+
+The construction set saves the track being built, and the controls panel saves
+the bindings somebody has chosen, into the preferences directory - the real one,
+where a player keeps their things. The walk presses every control in the editor.
+
+Those three buttons - `save`, `load`, and the one that puts the controls back to
+their defaults - sat below the fold of a panel too short to show them, so for as
+long as that was true, nothing had ever pressed them. **The day the walk learned
+to wind a panel down, running `ctest` began overwriting a real player's current
+track and their bindings.** It went unnoticed because what it wrote happened to
+match what was already there; on the next machine it would not have.
+
+Every test now runs with `XDG_DATA_HOME`, `HOME` and `APPDATA` pointed at a
+throwaway inside the build tree - which is what `tools/play_check.py` has always
+done for the clients it starts, and what the C tests never did. And the render
+suite says so out loud: it checks that the directory it would write to is that
+throwaway. Point it anywhere else and the tree goes red instead of somebody
+losing what they were building.
+
+This is the second time in an afternoon that **making the tests better made them
+dangerous**, and both times in the same way: a walk that could not reach a
+control was, accidentally, a walk that could not break anything with it.
+
 ### And a fourth, which was a rule in the simulation
 
 Photographing a four-car race showed the HUD telling the player on pole, before
