@@ -1867,3 +1867,18 @@ worth as much as what was decided about it.
       exemption anywhere. One exemption is left in the whole set of properties
       and it is correct: no button leads to the results, because finishing a
       race is what takes you there.*
+- [x] **Half the planets vanish in a small window.** *(Found by photographing
+      every screen at 640×480 — the size the panel test itself calls "what
+      somebody dragging a corner gets".)* These panels promise that whatever
+      does not fit scrolls, and only kept the promise downwards: the setup
+      screen wants 800 pixels across, got 624, and threw the difference away.
+      Mars, Venus, Neptune and Jupiter were not on the screen, and neither were
+      the last two paint colours on every driver's row. The panels scroll
+      sideways now, and the grid keeps the width it was designed at rather than
+      squeezing a column until it clips its own contents.
+      *Verification: at 640×480, every one of the 121 controls across all eight
+      screens is wholly on screen at some scroll position the window can be put
+      at — the panel is walked over a grid of scroll positions half a window
+      apart in both directions, and the test says how many controls it covered
+      and how many sit inside lists that scroll themselves. It named four before
+      the fix and none after.*

@@ -124,6 +124,20 @@ bool gs_ui_probe_wheel(const char *window, float ticks);
 // window.
 bool gs_ui_probe_scroll_at(const char *window, float *now, float *max);
 
+// **Where a window is scrolled to on both axes, and how far it can go.** The
+// vertical half of this used to be the whole of it, which was the same blind
+// spot the panels themselves had: a window clamped to a screen too small for it
+// scrolls what does not fit, and *sideways is a direction*. Four of the eight
+// gravity buttons sat past the right-hand edge of the race setup screen at six
+// hundred and forty across, with the test that was watching for exactly that
+// looking only downwards.
+bool gs_ui_probe_scroll_span(const char *window, float *x, float *y,
+                             float *max_x, float *max_y);
+
+// Put a window at a scroll position, so a test can ask what a person sees after
+// they have scrolled there rather than only what they see on arrival.
+bool gs_ui_probe_scroll_to(const char *window, float x, float y);
+
 // Where a window ended up: position and size, in the same pixels as an item's
 // rectangle.
 bool gs_ui_probe_window_box(const char *window, float *x, float *y,

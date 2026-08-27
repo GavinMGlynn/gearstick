@@ -8532,6 +8532,180 @@ TEST(every_control_is_known_by_name_and_answers_to_it) {
     }
 }
 
+// One frame of a screen with its panel put at a given scroll position, and
+// everything that frame drew.
+static int gs_reach_at(gs_ui *ui, gs_screen hold, const char *window,
+                       float sx, float sy, gs_ui_item *into, int cap) {
+    // Held on the screen being measured, the way gs_panel_of holds one: a
+    // frame that decided to move on would be measured somewhere else.
+    ui->m->screen = hold;
+    gs_ui_probe_scroll_to(window, sx, sy);
+    gs_ui_probe_start(into, cap);
+    gs_ui_probe_frame();
+    gs_ui_frame(ui);
+    int n = gs_ui_probe_count();
+    gs_ui_probe_stop();
+    return n;
+}
+
+// What a sweep remembers about one control: whether any scroll position ever
+// showed the whole of it.
+typedef struct gs_reach {
+    uint32_t id;
+    char     label[GS_UI_LABEL];
+    bool     whole;
+    bool     reachable, disabled;
+    float    x0, y0, x1, y1;       // where it was on the frame it arrived on
+} gs_reach;
+
+TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
+    // **The fault this was written for, and the one that hid it.** At six
+    // hundred and forty by four hundred and eighty - the size somebody dragging
+    // a corner in gets to - the race setup panel wants eight hundred pixels and
+    // is clamped to the window. Half the gravity dial went with the clamp: Mars,
+    // Venus, Neptune and Jupiter drawn past the right-hand edge, with nothing a
+    // player could do to reach them. Four of the eight worlds you can race on,
+    // gone, and the game looking perfectly normal.
+    //
+    // `no_screen_is_drawn_bigger_than_the_window_it_is_in` was watching for
+    // exactly this and did not see it, because it asked only whether anything
+    // was hidden *downwards*. Vertical overflow has always scrolled. Horizontal
+    // overflow had nowhere to go, so a panel wider than its window simply threw
+    // the difference away.
+    //
+    // The rule asserted here is the one that screen makes to a player: whatever
+    // does not fit scrolls, in **both** directions, and scrolling gets you all
+    // of it. So every control on every screen is required to be wholly on
+    // screen at some scroll position the window can actually be put at.
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    CHECK(SDL_SetWindowSize(gs_win, GS_W, GS_H));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, GS_W, GS_H,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    static gs_menu fresh;
+    static gs_track t;
+    gs_panel_menu(&fresh, &t);
+
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+    static gs_reach   seen[GS_UI_MAX_ITEMS];
+    gs_ui ui;
+
+    int screens = 0, checked = 0, in_lists = 0, stranded = 0;
+
+    for (size_t si = 0; si < SDL_arraysize(gs_every_screen); si++) {
+        gs_menu m = fresh;
+        m.picked = 0;
+        m.screen = gs_every_screen[si];
+        gs_ui_begin(&ui, &m, &t, ren);
+
+        // Probed against this menu rather than through gs_ui_controls, which
+        // leaves the harness pointing at a gs_menu inside its own frame - fine
+        // for a caller that begins again before its next frame, and a read of
+        // dead stack for one that keeps framing, as the sweep below does.
+        gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
+        gs_ui_probe_frame();
+        gs_ui_frame(&ui);
+        int n = gs_ui_probe_count();
+        gs_ui_probe_stop();
+        CHECK(n > 0);
+        CHECK(n <= GS_UI_MAX_ITEMS);
+
+        // The panel itself, as against ImGui's implicit debug window. Every
+        // screen opens exactly one.
+        char window[GS_UI_WINDOW] = "";
+        for (int i = 0; i < n; i++) {
+            if (SDL_strncmp(items[i].window, "Debug", 5) == 0) continue;
+            SDL_strlcpy(window, items[i].window, sizeof window);
+            break;
+        }
+        CHECK(window[0] != '\0');
+
+        float max_x = 0.0f, max_y = 0.0f;
+        CHECK(gs_ui_probe_scroll_span(window, nullptr, nullptr, &max_x, &max_y));
+
+        // Steps of half a viewport, so no control can hide between two of
+        // them: anything narrower than the window is wholly inside it at some
+        // position, and half a window apart is close enough that one of the
+        // positions swept is such a position.
+        const float step_x = (float)GS_W * 0.5f;
+        const float step_y = (float)GS_H * 0.5f;
+
+        int held = 0;
+        for (float sy = 0.0f; ; sy += step_y) {
+            if (sy > max_y) sy = max_y;
+            for (float sx = 0.0f; ; sx += step_x) {
+                if (sx > max_x) sx = max_x;
+
+                int at = gs_reach_at(&ui, gs_every_screen[si], window, sx, sy,
+                                     items, GS_UI_MAX_ITEMS);
+                CHECK(at <= GS_UI_MAX_ITEMS);
+                for (int i = 0; i < at; i++) {
+                    // Inside a list of its own, which scrolls on its own and is
+                    // walked by gs_walk_reach rather than by moving the panel.
+                    if (SDL_strcmp(items[i].window, window) != 0) continue;
+
+                    int k = 0;
+                    for (; k < held; k++) {
+                        if (seen[k].id == items[i].id) break;
+                    }
+                    if (k == held) {
+                        if (held >= GS_UI_MAX_ITEMS) continue;
+                        held++;
+                        seen[k].id = items[i].id;
+                        seen[k].whole = false;
+                        seen[k].reachable = items[i].reachable;
+                        seen[k].disabled  = items[i].disabled;
+                        seen[k].x0 = items[i].x0; seen[k].y0 = items[i].y0;
+                        seen[k].x1 = items[i].x1; seen[k].y1 = items[i].y1;
+                        SDL_strlcpy(seen[k].label, items[i].label,
+                                    sizeof seen[k].label);
+                    }
+                    if (items[i].whole) seen[k].whole = true;
+                }
+
+                if (sx >= max_x) break;
+            }
+            if (sy >= max_y) break;
+        }
+
+        for (int i = 0; i < n; i++) {
+            if (SDL_strcmp(items[i].window, window) != 0) in_lists++;
+        }
+
+        for (int k = 0; k < held; k++) {
+            checked++;
+            if (seen[k].whole) continue;
+            stranded++;
+            printf("  PAST THE EDGE  %s: '%s' id %08x never wholly on screen "
+                   "- %.0f,%.0f to %.0f,%.0f (%.0f x %.0f), panel can move "
+                   "%.0f x %.0f, nav %d dead %d\n",
+                   gs_screen_name(gs_every_screen[si]),
+                   seen[k].label[0] != '\0' ? seen[k].label : "(unnamed)",
+                   seen[k].id,
+                   (double)seen[k].x0, (double)seen[k].y0,
+                   (double)seen[k].x1, (double)seen[k].y1,
+                   (double)(seen[k].x1 - seen[k].x0),
+                   (double)(seen[k].y1 - seen[k].y0),
+                   (double)max_x, (double)max_y,
+                   seen[k].reachable, seen[k].disabled);
+        }
+        screens++;
+    }
+
+    printf("  SMALL %d controls across %d screens reachable at %dx%d; "
+           "%d more sit inside lists that scroll themselves\n",
+           checked, screens, GS_W, GS_H, in_lists);
+    CHECK(screens == (int)SDL_arraysize(gs_every_screen));
+    CHECK(stranded == 0);
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+}
+
 TEST(no_screen_is_drawn_bigger_than_the_window_it_is_in) {
     gs_imgui_start(gs_win, ren);
     CHECK(gs_imgui_ready);
@@ -8875,6 +9049,7 @@ int main(void) {
     run_every_value_of_every_dial_is_pressed_not_three_interesting_ones(ren);
     run_the_walk_goes_as_deep_as_the_front_end_does(ren);
     run_every_control_is_known_by_name_and_answers_to_it(ren);
+    run_at_the_smallest_window_every_control_can_be_scrolled_to(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
     run_the_condition_bar_stays_inside_the_hud(ren);

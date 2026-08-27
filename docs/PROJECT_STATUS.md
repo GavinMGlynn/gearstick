@@ -4879,6 +4879,73 @@ above it - and *the driver*, because an opponent is a pure function of the world
 and a change to where it lifts is a change to every race anybody recorded
 against it.
 
+## Half the planets, at a window somebody can drag to
+
+**Sideways is a direction, and the panel test only looked down.**
+
+Every one of these screens is a window that cannot be moved, resized or
+collapsed, clamped to the viewport with a margin, and the promise it makes is
+that whatever does not fit *scrolls*. That promise was half kept. Vertical
+overflow scrolled and had a test on it - `hidden`, the window's `ScrollMaxY`,
+which is what caught a Race button below the fold at four drivers. Horizontal
+overflow had nowhere to go: `gs_centre_window` clamped the width and the
+difference was simply thrown away.
+
+At 640x480 - the size the panel test itself calls "what somebody dragging a
+corner gets" - the race setup screen wants 800 and gets 624. **Mars, Venus,
+Neptune and Jupiter were not on the screen**, and neither were the last two
+paint colours on every driver's row. Four of the eight worlds you can race on
+and two of the eight colours you can be, gone, with the screen looking entirely
+normal.
+
+The `wider` assertion added when Venus and Jupiter were cut in half would have
+caught it, except that it only ever ran at 1280x720, where the panel fits.
+
+### Two different faults wearing the same face
+
+Fixing the first one is a flag: every panel is opened with `GS_PANEL_FLAGS`
+now, which is the old set plus `ImGuiWindowFlags_HorizontalScrollbar`. A window
+whose contents are wider than it is gets a scrollbar, the wheel and ImGui's own
+navigation both reach it, and the gravity buttons come back.
+
+That fixed the planets and not the paint. **A stretched table column does not
+overflow - it shrinks**, and then clips what no longer fits inside its own cell,
+where the window's scrollbar cannot reach it. The grid's `paint` column was
+`WidthStretch`, so at a narrower window it quietly got narrower and took two
+swatches with it. It is given an explicit width now: past 800 the table still
+stretches to fill the window; below it, the table keeps the width the screen was
+designed at and the difference becomes something the panel can be scrolled
+sideways to. The chrome is measured rather than assumed, because whether a
+vertical scrollbar is taking fourteen pixels depends on the driver count.
+
+### The test is the sweep, not the number
+
+`at_the_smallest_window_every_control_can_be_scrolled_to` states the rule the
+way a player would: **at 640x480, every control on every screen is wholly on
+screen at some scroll position the window can actually be put at.**
+
+Each screen's panel is put at every scroll position on a grid half a viewport
+apart in both directions - close enough that nothing narrower than the window
+can hide between two of them - and the whole frame is laid out at each. What
+comes back is, per control id, whether any of those positions ever showed all of
+it. `whole` was already there; what was missing was moving the window and asking
+again.
+
+It reports what it covered: **121 controls across 8 screens**, plus 77 that sit
+inside lists which scroll themselves and are walked by `gs_walk_reach` instead.
+Before the fix it named four; after it, none.
+
+Two things were needed to write it. `gs_ui_probe_scroll_span` and
+`gs_ui_probe_scroll_to` read and set both axes, where the old
+`gs_ui_probe_scroll_at` was vertical-only - the same blind spot as the panels,
+in the instrument. And the sweep cannot use `gs_ui_controls`, which leaves the
+harness pointing at a `gs_menu` inside its own stack frame: fine for a caller
+that begins again before its next frame, a read of dead stack for one that keeps
+framing. That was a hard crash under ASan with no usable trace, and it is worth
+knowing it is there.
+
+**No physics moved.** The golden replay is untouched; this is all `src/ui/`.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

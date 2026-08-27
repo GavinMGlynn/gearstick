@@ -137,6 +137,29 @@ bool gs_ui_probe_scroll_at(const char *window, float *now, float *max)
     return true;
 }
 
+bool gs_ui_probe_scroll_span(const char *window, float *x, float *y,
+                             float *max_x, float *max_y)
+{
+    if (ImGui::GetCurrentContext() == nullptr || window == nullptr) return false;
+    ImGuiWindow *w = ImGui::FindWindowByName(window);
+    if (w == nullptr) return false;
+    if (x != nullptr)     *x     = w->Scroll.x;
+    if (y != nullptr)     *y     = w->Scroll.y;
+    if (max_x != nullptr) *max_x = w->ScrollMax.x;
+    if (max_y != nullptr) *max_y = w->ScrollMax.y;
+    return true;
+}
+
+bool gs_ui_probe_scroll_to(const char *window, float x, float y)
+{
+    if (ImGui::GetCurrentContext() == nullptr || window == nullptr) return false;
+    ImGuiWindow *w = ImGui::FindWindowByName(window);
+    if (w == nullptr) return false;
+    ImGui::SetScrollX(w, x);
+    ImGui::SetScrollY(w, y);
+    return true;
+}
+
 bool gs_ui_probe_window_box(const char *name, float *x, float *y,
                             float *w, float *h)
 {
