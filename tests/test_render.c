@@ -5541,6 +5541,16 @@ static void gs_seed_a_server_asking_for_a_code(gs_menu *m) {
     SDL_strlcpy(m->login_name, "gavin", sizeof m->login_name);
 }
 
+// **A machine nobody has driven yet**, which is what every player sees once and
+// no other seed can reach: an empty roster changes the door itself.
+static void gs_seed_nobody_has_driven_here(gs_menu *m) {
+    m->profiles.count = 0;
+    m->signed_in = -1;
+    m->login_pick = -1;
+    m->login_name[0] = '\0';
+    m->login_password[0] = '\0';
+}
+
 static void gs_seed_a_track_that_shipped(gs_menu *m) {
     if (m->library.count == 0) return;
     m->library.entry[0].builtin = true;
@@ -5567,6 +5577,7 @@ static const struct {
     { "no password yet",     gs_seed_a_driver_with_no_password },
     { "asked for a code",    gs_seed_a_server_asking_for_a_code },
     { "a track that shipped", gs_seed_a_track_that_shipped },
+    { "nobody has driven here", gs_seed_nobody_has_driven_here },
 };
 
 // **A window, put back where it was.** To the top - ImGui keeps a window's
@@ -8081,7 +8092,7 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     //
     // That is what a floor is for: a tripwire against the number quietly
     // falling, not a claim that two walks visit the same places.
-    CHECK(w.n_offered >= 765);
+    CHECK(w.n_offered >= 768);
 
     // **The controls that are dead in one state and live in another.** This is
     // the number the seeding is for, and it is what a walk from a single

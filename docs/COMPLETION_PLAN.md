@@ -1199,6 +1199,16 @@ finished and tested since Phase 8. But every car in a race takes its input from
 a pad: the AI drives only in headless self-play, the editor's background ghost
 and the demo. **A one-player race is one car going round on its own.**
 
+- [x] **The first screen a new player sees offers the thing that can work.**
+      *(Found by running with an empty preferences directory — nobody had ever
+      looked at a fresh install, because this machine has had a driver on it
+      since the door was built.)* SIGN IN was the big blue button and cannot
+      succeed on a machine with no drivers on it; what it says when it fails
+      reads like the game refusing somebody who has done nothing wrong.
+      *Verification: an empty roster draws one sentence and one loud button, and
+      the walk starts from that state too — seventeen seed menus now, because
+      `NEW DRIVER` is a label no other starting state produces and the count
+      taken from the source insists every label is reached.*
 - [x] **No test writes where a player keeps their things.** *(Found by
       photographing a race and noticing the preferences directory had been
       written a minute earlier.)* The editor saves the current track and the

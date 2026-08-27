@@ -4530,6 +4530,40 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### What a new player sees
+
+Nobody had ever looked at the first screen of a fresh install, because this
+machine has had a driver on it since the door was built. Running with an empty
+preferences directory shows it, and it was wrong in the way that matters most:
+
+**SIGN IN was the big blue button, and on a machine where nobody has a driver it
+cannot succeed under any name or any password.** Three times the size of the
+button beside it, first in the tab order, and guaranteed to fail - and what it
+says when it fails is that the driver does not exist, which reads like the game
+refusing somebody who has done nothing wrong. The thing they had to press was
+the quiet one underneath.
+
+There is nothing to sign in to on an empty roster, so the boxes are gone too.
+One sentence and one button:
+
+    GEARSTICK
+    who is driving?
+
+    Nobody has driven here yet.
+
+    [ NEW DRIVER ]
+    [ Exit ]
+
+The panel is shorter to match, because a panel sized for a form that is not
+there is a rectangle of empty screen. The roster being empty is a settled fact
+rather than something that changes while somebody is looking at it, which is why
+this may depend on it where the tracks screen's list may not.
+
+**And the walk now starts from that state too** - seventeen seed menus rather
+than sixteen. It has to: the count taken from the source demands that every
+label the screens draw is reached, and `NEW DRIVER` is a label no other starting
+state can produce. That is the check doing exactly what it was built for.
+
 ### How to photograph a screen, since it keeps being worth it
 
     SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software SDL_AUDIO_DRIVER=dummy \

@@ -421,7 +421,16 @@ static const char *gs_track_label(const gs_menu *m, const gs_track *t) {
 
 static gs_screen gs_login_screen(gs_menu *m) {
     gs_screen next = GS_SCREEN_LOGIN;
-    gs_centre_window("login", 470.0f, 430.0f);
+
+    // **Shorter when there is nothing to fill in.** A machine nobody has driven
+    // yet shows one sentence and one button, and a panel sized for a form that
+    // is not there is a rectangle of empty screen under it. The roster being
+    // empty is a settled fact rather than something that changes while somebody
+    // is looking at it, which is why this may depend on it and the tracks
+    // screen's list may not.
+    const bool nobody = m->profiles.count == 0 && !m->login_making &&
+                        !m->login_setting;
+    gs_centre_window("login", 470.0f, nobody ? 260.0f : 430.0f);
 
     if (ImGui_Begin("##login", nullptr,
                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -528,6 +537,32 @@ static gs_screen gs_login_screen(gs_menu *m) {
             if (gs_wide_button("Back", 32.0f)) {
                 m->login_setting = false;
                 m->login_error[0] = '\0';
+                m->focus_form = true;
+                gs_forget_typing(m);
+            }
+        } else if (m->profiles.count == 0) {
+            // --- nobody has driven here yet -------------------------------
+            //
+            // **The loud button has to be the one that can work.** On a machine
+            // where nobody has a driver yet, SIGN IN cannot succeed under any
+            // name or any password - and it was the big blue one, three times
+            // the size of the button beside it. The first thing a new player
+            // was invited to press was the only thing on the screen guaranteed
+            // to fail, and what it says when it fails is that the driver does
+            // not exist, which reads like the game refusing them.
+            //
+            // There is nothing to sign in to, so the boxes are not drawn
+            // either. One sentence and one button.
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+            ImGui_TextWrapped("Nobody has driven here yet.");
+            ImGui_PopStyleColor();
+
+            ImGui_Dummy((ImVec2){ 0.0f, 10.0f });
+            if (gs_go_button("NEW DRIVER", -1.0f, 44.0f)) {
+                m->login_making = true;
+                m->login_error[0] = '\0';
+                m->login_wants_code = false;
                 m->focus_form = true;
                 gs_forget_typing(m);
             }
