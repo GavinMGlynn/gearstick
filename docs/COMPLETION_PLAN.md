@@ -822,6 +822,14 @@ review, and it fails it for good reasons.
       The byte sizes it quotes are pinned by a test, so the document cannot
       drift from the code without something going red. What is missing is
       somebody implementing a client from it who has not seen `gs_noise.c`.
+      **The check that can be automated now runs rather than skipping**: on
+      2026-08-27 the `noiseprotocol` package was installed, and
+      `gearstick_transport_document` writes a client from the document alone,
+      completes a handshake with a real server, and confirms every byte size the
+      document quotes — 96 for the first message, 48 for the second, 38 for a
+      sealed datagram carrying eight bytes. Both messages, the prologue, the key
+      schedule and the framing are therefore known to be right *as written*. It
+      remains not the verification, for the reason above.
 - [x] **A profile you can prove is yours.** A password, and a second factor for
       anybody who wants one. **This comes after the tunnel and is small because
       of it**: inside a sealed channel a password can simply be sent, and a

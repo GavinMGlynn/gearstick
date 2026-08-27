@@ -4523,6 +4523,27 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### Two tests that were skipping now run
+
+`gearstick_transport_document` and `gearstick_noise_interop` both need the
+`noiseprotocol` Python package and both quietly skipped without it. A skipped
+test is not evidence, and the first of those is the only automated check the
+transport specification has.
+
+Installed on 2026-08-27, and both pass. The document check writes a client from
+`docs/TRANSPORT.md` and nothing else, completes a handshake with a real server,
+and confirms the byte sizes the document quotes: **96 bytes for the first
+handshake message, 48 for the second, and 38 for a sealed datagram carrying
+eight** - six of header, eight of counter, the payload, and a sixteen-byte tag.
+So the prologue, the key schedule and the framing are right *as written*, which
+is what a document is for.
+
+It is still not the item's verification. The person who wrote the document also
+wrote the code and cannot unsee it; what is missing is a reader who has not.
+
+**All nineteen tests now run.** There are no skips left in the suite on this
+machine.
+
 ## Opponents worth racing
 
 There was a driver in this game and no way to race it. `gs_ai_drive` has been
