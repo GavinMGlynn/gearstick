@@ -1199,6 +1199,16 @@ finished and tested since Phase 8. But every car in a race takes its input from
 a pad: the AI drives only in headless self-play, the editor's background ghost
 and the demo. **A one-player race is one car going round on its own.**
 
+- [x] **Race position is progress along the route, not distance to a point.**
+      *(Found by photographing a four-car race: the HUD told the player on pole,
+      before anybody had moved, that they were third of four.)* A gate is a line
+      across the road and a car crosses it wherever it likes, so measuring the
+      straight line to the gate's centre made the car in the middle of the road
+      lead the car level with it on the outside.
+      *Verification: four cars abreast on a standing grid are first, second,
+      third and fourth in that order; moving one along the road changes the
+      order and moving one across it changes nothing. Every earlier test of this
+      rule spread its cars along the track, which is why none of them saw it.*
 - [x] **A tool panel that hides something is using the whole screen first.**
       *(Found by photographing the construction set, which had never been looked
       at in a picture.)* The palette ended at the route check with save, load,

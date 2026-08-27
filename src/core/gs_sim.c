@@ -761,13 +761,32 @@ static int64_t gs_progress(const gs_world *w, const gs_track *t, uint8_t i) {
     const gs_gate *to = &t->gate[c->next_gate % t->gate_count];
     const gs_gate *from = &t->gate[(c->next_gate + t->gate_count - 1u) % t->gate_count];
 
-    gs_fix leg = gs_fix_len2(to->x - from->x, to->y - from->y);
-    gs_fix left = gs_fix_len2(to->x - c->x, to->y - c->y);
+    const gs_fix ax = to->x - from->x;
+    const gs_fix ay = to->y - from->y;
+    const gs_fix leg = gs_fix_len2(ax, ay);
 
+    // **How far along the leg, not how far from the gate's middle.**
+    //
+    // A gate is a line across the road and a car crosses it wherever it likes,
+    // so the straight line to the gate's centre point is shorter for the car in
+    // the middle of the road than for the car level with it on the outside -
+    // and it decided the order. Four cars sitting level on a standing grid came
+    // out third, first, second and fourth, which is what the HUD said before
+    // anybody had moved.
+    //
+    // What is wanted is the part of the trip that is left, so the distance
+    // remaining is projected onto the leg. Two cars level across the road then
+    // have identical progress and the tie is broken by index, which is stable.
+    //
     // A zero-length leg is two gates in the same place, which the validator
     // refuses - but a track can be handed here without having been validated.
     gs_fix part = 0;
     if (leg > 0) {
+        const gs_fix ux = gs_fix_div(ax, leg);
+        const gs_fix uy = gs_fix_div(ay, leg);
+        gs_fix left = gs_fix_mul(to->x - c->x, ux) + gs_fix_mul(to->y - c->y, uy);
+        if (left < 0) left = 0;
+
         part = GS_ONE - gs_fix_div(left, leg);
         part = GS_CLAMP(part, 0, GS_ONE);
     }

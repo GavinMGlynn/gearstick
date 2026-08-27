@@ -6476,6 +6476,62 @@ TEST(the_leader_is_whoever_is_furthest_round_the_route) {
     w.car[1].laps = 1;
     CHECK(gs_world_place(&w, &t, 1) == 1);
     CHECK(gs_world_place(&w, &t, 2) == 2);
+
+    // **Level across the road is level.**
+    //
+    // A gate is a line and a car crosses it wherever it likes, so a straight
+    // line to the gate's centre point is shorter for the car in the middle of
+    // the road than for the one beside it on the outside - and that decided the
+    // order. Four cars sitting level on a standing grid came out third, first,
+    // second and fourth, which is what the HUD told the player on pole before
+    // anybody had moved: **position 3 of 4**.
+    //
+    // Found by looking at a screenshot of the race, not by any test: every one
+    // of them put its cars at different distances along the track.
+    gs_world grid;
+    gs_world_init(&grid, GS_ONE);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_fix sx = 0, sy = 0;
+        gs_angle facing = 0;
+        gs_track_grid(&t, i, &sx, &sy, &facing);
+        gs_world_add_car(&grid, &t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
+    }
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        const uint8_t place = gs_world_place(&grid, &t, i);
+        if (place != i + 1u) {
+            printf("  GRID car %u on the standing grid is %u of %u\n", i, place,
+                   grid.car_count);
+        }
+        CHECK(place == i + 1u);
+    }
+
+    // **And level along a leg is level too**, which is the same claim where the
+    // measurement is not saturated: four cars abreast, a third of the way to
+    // the far gate.
+    gs_world abreast;
+    gs_world_init(&abreast, GS_ONE);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_world_add_car(&abreast, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(14), GS_INT(4) + GS_INT(2) * i, 0);
+        abreast.car[i].next_gate = 1;
+    }
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        CHECK(gs_world_place(&abreast, &t, i) == i + 1u);
+    }
+
+    // Moving one *along* the road changes the order - so this measures
+    // progress rather than merely ignoring where anybody is.
+    abreast.car[GS_MAX_CARS - 1].x += GS_INT(3);
+    CHECK(gs_world_place(&abreast, &t, GS_MAX_CARS - 1) == 1);
+
+    // While moving one *across* the road changes nothing at all, which is the
+    // fault this pins.
+    gs_world beside = abreast;
+    beside.car[0].y += GS_INT(3);
+    beside.car[1].y -= GS_INT(1);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        CHECK(gs_world_place(&beside, &t, i) == gs_world_place(&abreast, &t, i));
+    }
 }
 
 TEST(every_car_has_a_place_and_no_two_share_one) {

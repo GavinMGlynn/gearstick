@@ -4530,6 +4530,34 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### And a fourth, which was a rule in the simulation
+
+Photographing a four-car race showed the HUD telling the player on pole, before
+the lights had gone out and before anybody had moved, **position 3 of 4**.
+
+`gs_world_place` orders cars by how far round the route they are: laps, then
+which gate they are heading for, then how close they are to reaching it. That
+last part measured the **straight line to the gate's centre point** - and a gate
+is a line across the road that a car crosses wherever it likes. So the car in
+the middle of the road was nearer the gate than the car level with it on the
+outside, and four cars sitting abreast on a standing grid came out third, first,
+second and fourth.
+
+It measures the part of the leg still to travel now, projected onto the leg, so
+two cars level across the road have identical progress and the tie is broken by
+index, which is stable.
+
+**Why no test caught it.** Every test of this rule put its cars at different
+distances *along* the track, because that is the interesting case when you are
+thinking about overtaking. Not one of them put two cars level. The test does
+now, in the two forms that matter: four cars abreast on the grid, and four
+abreast a third of the way down a leg - and moving one *across* the road changes
+nothing at all, which is the fault stated as a property.
+
+The golden replay did not move, and could not: `gs_world_place` is a question
+asked of the world rather than part of stepping it. That is the separation those
+two hashes exist to keep.
+
 ### And a third, in the construction set
 
 Photographing the editor - which is half the product and had never been looked
