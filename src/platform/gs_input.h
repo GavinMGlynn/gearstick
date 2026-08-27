@@ -74,4 +74,12 @@ void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars);
 // out of a corner is not what anybody means by it.
 bool gs_input_is_back(const SDL_Event *e, bool racing);
 
+// **And only a key can ask to quit.** Backing out of the title screen means
+// leaving the game, which the title screen says in as many words - "Escape
+// quit". A pad's cancel is the button everybody presses to go back one step,
+// reflexively, and having it close the game from the title is not something
+// anybody asked for. Where there is nothing behind the screen, a pad's cancel
+// does nothing at all.
+bool gs_input_back_may_quit(const SDL_Event *e);
+
 #endif // GS_INPUT_H

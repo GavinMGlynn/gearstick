@@ -4530,6 +4530,20 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### And a second thing, from reading the screen rather than measuring it
+
+The title screen prints its own key list: `Tab  the construction set`, `Escape
+quit`. Giving a pad's cancel button the same job as Escape therefore gave it
+that one too - **B on the title screen closed the game**, with no warning and
+nothing said about it anywhere, and B is the button people press reflexively to
+go back one step.
+
+Only a key can ask to quit now. `gs_input_back_may_quit` says so in the platform
+layer, beside the rule about what counts as asking to go back, so it is a
+sentence with a test over it rather than a condition in a frontend nothing can
+reach. Where there is nothing behind the screen - the title, and the door - a
+pad's cancel does nothing at all, and Escape does what the screen says.
+
 ### A photograph found what none of the numbers could
 
 The setup screen gained a skill dial beside the driver count, and it fitted:

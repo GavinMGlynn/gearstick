@@ -1806,7 +1806,10 @@ worth as much as what was decided about it.
       *Verification: the cancel button counts as back and no other button on the
       pad does, in a race or out of one; and the brake really is that button, so
       moving it and leaving this rule behind fails rather than surprising
-      somebody in the first corner.*
+      somebody in the first corner. **Only a key can ask to quit** — the title
+      screen prints "Escape  quit" and means it, and a pad's cancel doing the
+      same would close the game from the title on the button everybody presses
+      reflexively.*
 - [x] **Login and tracks are exempt from the no-trap check.** *(Closed in
       Phase 17.)* Tracks stopped being exempt when the walk learned to press
       Escape; the door stopped being exempt when the walk that carries the

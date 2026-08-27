@@ -193,3 +193,7 @@ bool gs_input_is_back(const SDL_Event *e, bool racing) {
     }
     return false;
 }
+
+bool gs_input_back_may_quit(const SDL_Event *e) {
+    return e != nullptr && e->type == SDL_EVENT_KEY_DOWN;
+}

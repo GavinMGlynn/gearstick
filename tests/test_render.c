@@ -3711,6 +3711,31 @@ TEST(a_pad_can_leave_a_screen_without_walking_to_the_button) {
         CHECK(!gs_input_is_back(&key, true));
     }
 
+    // **Only a key can ask to quit.** Backing out of the title screen means
+    // leaving the game, which the title screen says in as many words. A pad's
+    // cancel is the button everybody presses to go back one step, reflexively,
+    // and having it close the game from the title is not something anybody
+    // asked for - so where there is nothing behind the screen it does nothing.
+    key.type    = SDL_EVENT_KEY_DOWN;
+    key.key.key = SDLK_ESCAPE;
+    CHECK(gs_input_back_may_quit(&key));
+
+    pad.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    pad.gbutton.button = (uint8_t)SDL_GAMEPAD_BUTTON_EAST;
+    CHECK(gs_input_is_back(&pad, false));
+    CHECK(!gs_input_back_may_quit(&pad));
+
+    // And the title is where there is nothing behind: a key leaves the game
+    // from it and a pad does not.
+    {
+        static gs_menu title;
+        gs_menu_init(&title);
+        title.screen = GS_SCREEN_TITLE;
+        CHECK(gs_menu_back(&title, false) == GS_SCREEN_COUNT);
+    }
+
+    CHECK(!gs_input_back_may_quit(nullptr));
+
     // And a button going *up* is not a press.
     pad.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
     pad.gbutton.button = (uint8_t)SDL_GAMEPAD_BUTTON_EAST;

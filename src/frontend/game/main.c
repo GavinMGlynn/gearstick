@@ -1232,8 +1232,12 @@ static void gs_trace(gs_app *a, uint8_t views) {
 // through every track somebody owns.
 //
 // Returns true when there is nothing behind this screen and the game should
-// stop.
-static bool gs_back_out(gs_app *a) {
+// stop - which only a key can ask for. **A pad's cancel button never quits.**
+// The title screen says "Escape  quit" and means it; B is the button everybody
+// presses to go back one step, reflexively, and having it close the game from
+// the title is not a thing anybody asked for. Where there is nothing behind the
+// screen, a pad's cancel does nothing at all.
+static bool gs_back_out(gs_app *a, bool may_quit) {
     // Back out one step rather than always quitting: quitting from a race
     // because you wanted the menu is the oldest bad habit in games, and the
     // title screen is where quitting belongs.
@@ -1246,10 +1250,10 @@ static bool gs_back_out(gs_app *a) {
         gs_editor_toggle(&a->editor, &a->view[0]);
         return false;
     }
-    if (a->skip_menu) return true;
+    if (a->skip_menu) return may_quit;
 
     gs_screen back = gs_menu_back(&a->menu, false);
-    if (back == GS_SCREEN_COUNT) return true;
+    if (back == GS_SCREEN_COUNT) return may_quit;
 
     // Leaving an online race is leaving the race: the lobby is where it can be
     // joined again, and it is only ready to be rejoined once this machine has
@@ -1287,7 +1291,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         // somebody meant.
         if (a->editor.active && a->editor.rebind_action >= 0) break;
         if (gs_input_is_back(e, a->menu.screen == GS_SCREEN_RACE) &&
-            gs_back_out(a)) {
+            gs_back_out(a, gs_input_back_may_quit(e))) {
             return SDL_APP_SUCCESS;
         }
         break;
@@ -1301,7 +1305,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         if (ImGui_GetIO()->WantCaptureKeyboard) break;
 
         if (gs_input_is_back(e, a->menu.screen == GS_SCREEN_RACE) &&
-            gs_back_out(a)) {
+            gs_back_out(a, gs_input_back_may_quit(e))) {
             return SDL_APP_SUCCESS;
         }
         if (e->key.key == SDLK_G) {
