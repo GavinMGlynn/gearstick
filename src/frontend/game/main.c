@@ -1151,7 +1151,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                 a->menu.setup.vehicle[i] = a->menu.profiles.entry[i].vehicle;
                 a->menu.setup.colour[i] = a->menu.profiles.entry[i].colour;
             }
-            a->menu.setup.players = 2;
+
+            // **Two, unless somebody said otherwise.** This used to be two
+            // whatever the command line asked for, so `--session --players 4`
+            // ran a two-car race and said nothing about it - a flag that is
+            // quietly ignored in one mode is worse than one that is not offered.
+            a->menu.setup.players = a->players > 0 ? a->players : 2;
             a->menu.setup.laps = 2;
             // The session drives itself and never sees the door, but it does
             // reach the results screen afterwards - which is behind the gate.
