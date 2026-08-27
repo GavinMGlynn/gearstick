@@ -4530,6 +4530,39 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### How to photograph a screen, since it keeps being worth it
+
+    SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software SDL_AUDIO_DRIVER=dummy \
+        gearstick --screen setup --shot out.bmp
+
+`--screen` takes any of login, title, drivers, setup, tracks, records, lobby,
+results; `--editor` and `--heatmap` open the construction set; `--players N`
+and `--shot-at TICK` set the grid and how far into the race to wait. **The file
+is a BMP whatever the name says.**
+
+States the flags cannot reach - a track picked, a lobby with people in it - are
+reached from a test instead: `gs_panel_of` draws any screen from any menu, and
+`SDL_RenderReadPixels` plus `SDL_SaveBMP` writes what it drew. That was worth
+building for an afternoon and is not worth keeping as a test, because nobody
+looks at a picture a test writes.
+
+**Six faults came out of doing this**, none of which any test could see:
+
+| what the picture showed | what it was |
+| --- | --- |
+| Venus and Jupiter cut in half | a panel narrower than its contents |
+| `Escape  quit` on the title | a pad's cancel closing the game |
+| the palette ending at "Route" | save, load and the help line below the fold |
+| `position 3/4` on the grid | race order decided by which lane you are in |
+| the preferences directory written a minute ago | the suite overwriting a player's track |
+| two cars for `--players 4` | a flag silently ignored in one mode |
+
+The pattern is worth naming. The tests answer **can it be reached** - they press
+every control in every state, by name, and assert coverage against the source.
+They cannot answer **is it right when you look at it**, and a machine that
+presses by name and winds panels to reach things is structurally the worst
+possible judge of whether a thing is findable at all.
+
 ### The suite got better at pressing buttons and started deleting people's work
 
 The construction set saves the track being built, and the controls panel saves
