@@ -398,6 +398,10 @@ whatever the UI turns out to be — then the interface on top.
       number — how much of the available grip the driver will use — and nothing
       else: no extra power, no rubber-banding, no cheating on the physics. Lap
       times on a four-corner circuit, three laps flying, stock car:*
+      **(Phase 18 made that number a dial of twenty-one settings and gave it two
+      more things to move — where they lift and how straight they hold it — so
+      the three names below are three points on it now, and the times are from
+      before that. There was also no way to race any of it: see Phase 18.)**
 
       | | cautious | normal | quick |
       | --- | --- | --- | --- |

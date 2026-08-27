@@ -3980,9 +3980,14 @@ Two things the run also settles:
   conditions on its buttons, and both want looking at rather than passing
   quietly.
 
-The floor is still pinned at 727 rather than raised to 730 - a floor is there to
-catch the walk seeing *less*, and pinning it to the last measurement each time
-turns a tripwire into a ratchet that reports whatever it just did.
+The floor was pinned at 727 rather than raised to 730 at this point - a floor is
+there to catch the walk seeing *less*, and pinning it to the last measurement
+each time turns a tripwire into a ratchet that reports whatever it just did. It
+has moved four times since, each time deliberately and each time with the reason
+beside it in the test: to 750 when seeding at every player count found twenty
+more, down to 663 when the walk stopped counting rows it could not press, and up
+to 765 as scrolling, the sweep inside combo boxes and four more starting states
+reached what was left.
 
 ### The construction set, walked and measured
 
@@ -4120,7 +4125,9 @@ them is a race somebody is playing - headless self-play (`--session`), the
 editor's background ghost, and the demo attract mode. A one-player race is one
 car going round on its own. Phase 18 is that gap.
 
-Two things found on the way that the work will have to face:
+Two things found on the way that the work will have to face. **Both were faced -
+see "Opponents worth racing" below**, and both are left here because where a
+problem was found is worth as much as what was decided about it:
 
 - **The pace dial is three constants, not a dial.** `GS_AI_CAUTIOUS`,
   `GS_AI_NORMAL` and `GS_AI_QUICK` are a fraction of available grip the driver
