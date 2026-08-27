@@ -2043,3 +2043,14 @@ worth as much as what was decided about it.
       have and nobody filled, with every one of them behaving as claimed — so
       anything added later is either part of a track's identity or is written
       down as deliberately not, and cannot be neither.*
+- [x] **A race is identified by everything that decides it.** The same sweep as
+      the one for tracks, on the hash two machines compare to find out they have
+      stopped agreeing — because a field missing from that is a disagreement
+      neither machine can see.
+      *Verification: 8325 of a world's 8848 bytes are shown to decide the race,
+      the rest being padding, cars nobody added, and one named field. A car is
+      56 bytes and 52 are read, checked as arithmetic rather than by offsets, so
+      adding a field to a car fails the tree on any compiler. The one field left
+      out — when the lights go green — is named with its reason, and the thing
+      that covers it is asserted rather than assumed: take that away and the
+      test goes red.*

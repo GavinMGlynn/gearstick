@@ -5553,6 +5553,47 @@ So a field added next year is either read by the hash or is named in that test
 as deliberately not part of what a track is. It cannot be neither, which is what
 `route` was for four commits.
 
+## And the same sweep on the thing determinism is for
+
+If a field can be added to a track without the function that says what a track
+*is* being told, the same can happen to a **world** - and `gs_world_hash` is
+what two machines compare to find out they have stopped agreeing. A field
+missing from it is a disagreement neither machine can see, which is the failure
+mode CLAUDE.md describes: agree for ninety seconds, then differ by a car length.
+
+`a_race_is_identified_by_everything_that_decides_it` flips every byte of a raced
+world. **8325 of 8848 bytes decide the race.** The rest are padding, cars and
+hazards nobody added, and one field.
+
+### The one field, named with its reason
+
+`green_tick` - when the lights go green - is not in the hash. It gates whether
+any input reaches a car at all, so it is unambiguously state that decides the
+race.
+
+It is *not* added, and that is a decision rather than an oversight. That number
+is written into every networked recording as the state the peers agreed the race
+ended in, and `gs_verify` re-races a log and rejects it if it does not arrive
+there. Moving it would reject every recording made with `v0.1.0-beta1` as a
+different race - and unlike the track hash, this one cannot take "or what it
+used to be" for an answer without weakening the one check that says a claimed
+time is real.
+
+What covers it is now **asserted rather than assumed**: while the lights are red
+every car's lap clock is pinned to the green, so two worlds that disagree about
+when it comes disagree in the hash through that. Take the pinning away and the
+test goes red, and whoever does that has to hash `green_tick` instead. That is
+the difference between a gap somebody noticed once and a gap that is held shut.
+
+### A car is 56 bytes and the hash reads 52 of them
+
+Padding cannot be located portably - a compiler puts it where it likes, and this
+builds under four of them - so what is checked is the arithmetic instead. A
+car's hashed fields add up to a number, the struct is a number, and the
+difference is how many bytes inside a car somebody is driving may sit still.
+**Add a field to `gs_car` and that difference grows and the test fails**,
+whatever the offsets happen to be on the machine it is built on.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

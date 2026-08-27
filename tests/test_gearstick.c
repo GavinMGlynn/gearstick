@@ -369,6 +369,144 @@ static bool gs_byte_counts(const gs_track *t, size_t at) {
     return false;       // w, h and anything the compiler put between fields
 }
 
+TEST(a_race_is_identified_by_everything_that_decides_it) {
+    // **The same sweep as the track below, on the thing determinism is for.**
+    // `gs_world_hash` is what two machines compare to find out they have
+    // stopped agreeing, and it is written field by field - so a field added to
+    // gs_world and not added here is a disagreement neither machine can see.
+    // That is exactly what happened to a track's route byte.
+    //
+    // Every byte of a raced world is flipped and the hash has to move, except
+    // where it is padding the compiler inserted, a car or a hazard nobody has
+    // added, or the one field named below.
+    static gs_track t;
+    gs_track_init(&t, 24, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(4), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(8), GS_INT(4), 0);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_countdown(&w, 200);
+    for (int i = 0; i < 60; i++) gs_world_step(&w, &t, nullptr);
+    CHECK(gs_world_countdown(&w) > 0);      // still on the grid, lights red
+
+    const uint64_t was = gs_world_hash(&w);
+
+    // **The one field the hash does not read, named with its reason.**
+    //
+    // `green_tick` is when the lights go green. It gates whether any input
+    // reaches a car at all, so it is state that decides the race - and it is
+    // not in the hash. It is not *added* to the hash because that number is
+    // written into every networked recording as the state the peers agreed the
+    // race ended in, and moving it would have every recording made with
+    // v0.1.0-beta1 rejected as a different race.
+    //
+    // What covers it is asserted below rather than assumed, which is the whole
+    // point of writing it down here: while the lights are red every car's lap
+    // clock is pinned to the green, so two worlds that disagree about when it
+    // comes disagree in the hash through that. Take the pinning away and this
+    // test goes red, and whoever does that has to hash `green_tick` instead.
+    const size_t green = offsetof(gs_world, green_tick);
+
+    int moved = 0, still = 0, wrong = 0, in_cars = 0;
+    uint8_t *raw = (uint8_t *)&w;
+    for (size_t at = 0; at < sizeof w; at++) {
+        // These two say how much of the arrays after them is real. A flipped
+        // one says 255 cars, and the hash then reads off the end of an array
+        // holding four - a test crashing, not a fault found. Checked apart.
+        if (at == offsetof(gs_world, car_count) ||
+            at == offsetof(gs_world, hazard_count)) {
+            continue;
+        }
+
+        const uint8_t keep = raw[at];
+        raw[at] = (uint8_t)(keep ^ 0xffu);
+        const bool shifted = gs_world_hash(&w) != was;
+        raw[at] = keep;
+
+        if (shifted) { moved++; continue; }
+        still++;
+
+        // **Inside a car somebody is driving, every named field has to move
+        // it.** Padding does not, and there is no portable way to say where a
+        // compiler put padding - so what is checked instead is the arithmetic:
+        // a car's hashed fields add up to so many bytes, the struct is so many
+        // bytes, and the difference is what may sit still. Add a field to
+        // gs_car and the difference grows and this fails, whatever the offsets
+        // happen to be on the machine it is built on.
+        const size_t cars_at = offsetof(gs_world, car);
+        if (at >= cars_at && at < cars_at + sizeof w.car[0] * w.car_count) {
+            in_cars++;
+            continue;
+        }
+        if (at >= green && at < green + sizeof w.green_tick) continue;
+        if (at < cars_at) continue;             // padding around car_count
+        if (at >= cars_at + sizeof w.car[0] * w.car_count &&
+            at < offsetof(gs_world, wear)) {
+            continue;                           // cars and hazards nobody added
+        }
+        if (at >= offsetof(gs_world, wear) + sizeof w.wear) {
+            continue;                           // padding on the end of it all
+        }
+
+        wrong++;
+        printf("  RACE byte %zu is in the world and not in its hash\n", at);
+    }
+
+    // What one car has that the hash reads. The list is the hash's own, and
+    // adding to gs_car without adding here is the failure this exists for.
+    const gs_car *any = &w.car[0];
+    const size_t car_field[] = {
+        sizeof any->x, sizeof any->y, sizeof any->z,
+        sizeof any->vx, sizeof any->vy, sizeof any->vz,
+        sizeof any->heading, sizeof any->vehicle, sizeof any->damage,
+        sizeof any->grounded, sizeof any->wrecked, sizeof any->active,
+        sizeof any->air_ticks, sizeof any->drop_cooldown, sizeof any->next_gate,
+        sizeof any->laps, sizeof any->finish_tick, sizeof any->lap_start,
+        sizeof any->best_lap,
+    };
+    size_t named = 0;
+    for (size_t i = 0; i < GS_ARRAY_LEN(car_field); i++) named += car_field[i];
+
+    const size_t slack = (sizeof w.car[0] - named) * w.car_count;
+    if ((size_t)in_cars != slack) {
+        printf("  RACE %d bytes inside the cars are not hashed; a car is %zu "
+               "bytes and the hash reads %zu of them, so %zu should be\n",
+               in_cars, sizeof w.car[0], named, slack);
+    }
+    CHECK((size_t)in_cars == slack);
+
+    printf("  RACE %zu bytes of a raced world: %d decide it, %d are padding, "
+           "cars nobody added, or green_tick. A car is %zu bytes and %zu of "
+           "them are read\n", sizeof w, moved, still, sizeof w.car[0], named);
+    CHECK(wrong == 0);
+    CHECK(moved > 0);
+
+    // The two counted apart: both say how much is real and both must be read.
+    const uint8_t cars = w.car_count, hazards = w.hazard_count;
+    w.car_count = (uint8_t)(cars - 1);
+    CHECK(gs_world_hash(&w) != was);
+    w.car_count = cars;
+    w.hazard_count = (uint8_t)(hazards + 1);
+    CHECK(gs_world_hash(&w) != was);
+    w.hazard_count = hazards;
+    CHECK(gs_world_hash(&w) == was);
+
+    // **And the thing that covers green_tick, proved rather than believed.**
+    // Two worlds alike but for when the lights come: while they are still red,
+    // the lap clocks say so and the hashes differ.
+    static gs_world later;
+    later = w;
+    later.green_tick = w.green_tick + 30u;
+    for (uint8_t i = 0; i < later.car_count; i++) {
+        later.car[i].lap_start = later.green_tick;   // what a held step does
+    }
+    CHECK(gs_world_hash(&later) != was);
+}
+
 TEST(a_track_is_identified_by_everything_that_is_on_it) {
     // **The guard the route byte got past.** A field was added to gs_track and
     // the function that says what a track *is* was not told about it, so a
@@ -7443,6 +7581,7 @@ int main(void) {
     run_a_track_survives_the_round_trip_through_its_file_format();
     run_a_corrupt_track_file_is_refused_rather_than_half_loaded();
     run_two_tracks_built_the_same_way_share_an_identity_through_a_file();
+    run_a_race_is_identified_by_everything_that_decides_it();
     run_a_track_is_identified_by_everything_that_is_on_it();
     run_a_loop_and_a_path_over_the_same_ground_are_two_tracks();
     run_every_kind_of_edit_can_be_taken_back_and_put_back_again();
