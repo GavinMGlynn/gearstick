@@ -1994,3 +1994,16 @@ worth as much as what was decided about it.
       nine screens as the place it came from. The test also fails if a screen is
       missing from its own table, so a tenth screen must have its way out
       chosen rather than inheriting one.*
+- [x] **Rebinding a control from the keyboard could only ever bind Space.**
+      *(Found by asking the coverage build which player-facing code had never
+      run — the capture was at a third of its lines.)* A capture starts the
+      instant you press the control that says "press something...", and you
+      pressed that control *with something*: Space or Enter from a keyboard,
+      the bottom button from a pad. It was still held on the next frame, so the
+      control bound to it before you had touched the key you meant. A player
+      with a mouse never saw it; everyone else could not rebind anything. A
+      capture now waits for everything to be let go before it accepts anything.
+      *Verification: all 510 scancodes and all 26 pad buttons can be bound to —
+      not a handful, because a key that cannot be captured is a control
+      somebody cannot have. Escape still means leave it alone, and not when
+      Escape is merely the key that started the capture.*

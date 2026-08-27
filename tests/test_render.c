@@ -2453,6 +2453,147 @@ TEST(the_analyser_refuses_a_track_with_no_route_rather_than_guessing) {
     gs_editor_quit(&ed);
 }
 
+TEST(a_rebind_waits_for_the_key_that_started_it_to_be_let_go) {
+    (void)ren;
+
+    // **The fault this is named for.** A capture begins the instant the "press
+    // something..." control is pressed - and that control was pressed *with
+    // something*. Space or Enter, if the player walked to it with the keyboard.
+    // The pad's bottom button, if they walked to it with a pad. That key is
+    // still down on the very next frame, when the capture reads the keyboard
+    // for the first time, so the action was bound to it immediately.
+    //
+    // Which means a player rebinding their controls from the keyboard could
+    // only ever bind Space, and a player rebinding from a pad could only ever
+    // bind the button they press everything with. Those two are most of the
+    // people this feature exists for: gs_bind.h calls remapping "not a luxury
+    // feature here", for four on one sofa and for anybody who cannot reach the
+    // default keys.
+    //
+    // A third of gs_capture_rebind had never run. It could not: it read SDL's
+    // keyboard and a live pad, and no test has either. The rule lives in
+    // gs_bind_pick now, beside the resolution it is the other half of.
+    static bool keys[SDL_SCANCODE_COUNT];
+    SDL_memset(keys, 0, sizeof keys);
+
+    // Space held, the way it is when a keyboard player has just pressed the
+    // control. Nothing is bound while it is still down...
+    keys[SDL_SCANCODE_SPACE] = true;
+    bool armed = false;
+    for (int i = 0; i < 8; i++) {
+        gs_rebind_pick p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+        CHECK(p.what == GS_REBIND_WAIT);
+        CHECK(!armed);
+    }
+
+    // ...it is let go, which arms the capture and binds nothing by itself...
+    keys[SDL_SCANCODE_SPACE] = false;
+    gs_rebind_pick p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+    CHECK(p.what == GS_REBIND_WAIT);
+    CHECK(armed);
+
+    // ...and now the key the player actually wants is the one that lands.
+    keys[SDL_SCANCODE_J] = true;
+    p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+    CHECK(p.what == GS_REBIND_KEY);
+    CHECK(p.which == SDL_SCANCODE_J);
+    keys[SDL_SCANCODE_J] = false;
+
+    // The same on a pad, with its bottom button: held from the press that
+    // started the capture, and it binds nothing until it is released.
+    armed = false;
+    for (int i = 0; i < 8; i++) {
+        p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT,
+                         1u << SDL_GAMEPAD_BUTTON_SOUTH);
+        CHECK(p.what == GS_REBIND_WAIT);
+    }
+    p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+    CHECK(p.what == GS_REBIND_WAIT);
+    CHECK(armed);
+    p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT,
+                     1u << SDL_GAMEPAD_BUTTON_SOUTH);
+    CHECK(p.what == GS_REBIND_BUTTON);
+    CHECK(p.which == (int)SDL_GAMEPAD_BUTTON_SOUTH);
+
+    // **Escape leaves it alone**, which is what the panel says it does - and
+    // not while Escape is the key that is still held from starting the capture,
+    // because that would cancel every rebind a keyboard player ever began.
+    armed = false;
+    keys[SDL_SCANCODE_ESCAPE] = true;
+    p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+    CHECK(p.what == GS_REBIND_WAIT);
+    keys[SDL_SCANCODE_ESCAPE] = false;
+    p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+    CHECK(armed);
+    keys[SDL_SCANCODE_ESCAPE] = true;
+    p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+    CHECK(p.what == GS_REBIND_CANCEL);
+    keys[SDL_SCANCODE_ESCAPE] = false;
+
+    // **Every key on the keyboard can be bound to.** Not a handful of
+    // interesting ones: what a player reaches for is theirs to choose, and a
+    // scancode that cannot be captured is a control somebody cannot have.
+    // Escape is the one exception and it is the documented one.
+    int bindable = 0, refused = 0;
+    for (int k = 1; k < SDL_SCANCODE_COUNT; k++) {
+        if (k == SDL_SCANCODE_ESCAPE) continue;
+        armed = true;
+        keys[k] = true;
+        p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+        keys[k] = false;
+        if (p.what == GS_REBIND_KEY && p.which == k) { bindable++; continue; }
+        refused++;
+        printf("  REBIND scancode %d (%s) could not be bound\n", k,
+               SDL_GetScancodeName((SDL_Scancode)k));
+    }
+    printf("  REBIND %d of %d scancodes bindable, %d refused; Escape is the "
+           "one that means leave it alone\n", bindable,
+           (int)SDL_SCANCODE_COUNT - 2, refused);
+    CHECK(refused == 0);
+    CHECK(bindable == (int)SDL_SCANCODE_COUNT - 2);
+
+    // **And every button a pad has.** Same reason, and the pad is the half a
+    // person on a sofa is holding.
+    int buttons = 0;
+    for (int b = 0; b < (int)SDL_GAMEPAD_BUTTON_COUNT && b < 32; b++) {
+        armed = true;
+        p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 1u << b);
+        if (p.what != GS_REBIND_BUTTON || p.which != b) {
+            printf("  REBIND pad button %d (%s) could not be bound\n", b,
+                   SDL_GetGamepadStringForButton((SDL_GamepadButton)b));
+        }
+        CHECK(p.what == GS_REBIND_BUTTON);
+        CHECK(p.which == b);
+        buttons++;
+    }
+    printf("  REBIND all %d pad buttons bindable\n", buttons);
+    CHECK(buttons == (int)SDL_GAMEPAD_BUTTON_COUNT);
+
+    // Nothing held at all is nothing decided, however long it goes on.
+    armed = true;
+    for (int i = 0; i < 4; i++) {
+        p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT, 0);
+        CHECK(p.what == GS_REBIND_WAIT);
+    }
+
+    // And the keyboard wins over a pad held at the same moment: a player with
+    // both in front of them pressed a key, and the pad is resting.
+    armed = true;
+    keys[SDL_SCANCODE_K] = true;
+    p = gs_bind_pick(&armed, keys, SDL_SCANCODE_COUNT,
+                     1u << SDL_GAMEPAD_BUTTON_NORTH);
+    CHECK(p.what == GS_REBIND_KEY);
+    CHECK(p.which == SDL_SCANCODE_K);
+    keys[SDL_SCANCODE_K] = false;
+
+    // A null keyboard is what a caller gets before SDL has one, and it is not
+    // a crash.
+    armed = true;
+    p = gs_bind_pick(&armed, nullptr, 0, 1u << SDL_GAMEPAD_BUTTON_WEST);
+    CHECK(p.what == GS_REBIND_BUTTON);
+    CHECK(p.which == (int)SDL_GAMEPAD_BUTTON_WEST);
+}
+
 TEST(changed_controls_survive_being_written_and_read_back) {
     (void)ren;
 
@@ -9821,6 +9962,7 @@ int main(void) {
     run_cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half(ren);
     run_the_view_does_not_jump_when_the_screen_merges_or_splits(ren);
     run_every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone(ren);
+    run_a_rebind_waits_for_the_key_that_started_it_to_be_let_go(ren);
     run_changed_controls_survive_being_written_and_read_back(ren);
     run_every_vehicle_has_a_mesh_and_no_two_are_the_same_shape(ren);
     run_a_car_is_drawn_from_its_mesh_and_faces_where_it_is_pointing(ren);

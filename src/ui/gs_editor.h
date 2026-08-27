@@ -95,6 +95,13 @@ typedef struct gs_editor {
     // when nothing is.
     int rebind_player;
     int rebind_action;
+
+    // **Everything let go since the capture began.** The control that starts a
+    // rebind was pressed with something - Space or Enter from the keyboard, the
+    // pad's bottom button from a pad - and that something is still down on the
+    // next frame. Without this, rebinding from the keyboard could only ever
+    // bind Space. See gs_bind_pick.
+    bool rebind_armed;
     bool show_controls;
 
     gs_edit_log *log;

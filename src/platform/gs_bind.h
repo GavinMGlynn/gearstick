@@ -49,6 +49,37 @@ const char *gs_action_name(gs_action a);
 gs_input gs_bind_resolve(const gs_bindings *b, uint8_t player,
                          const bool *keys, int key_count, uint32_t buttons);
 
+// **What a rebind capture should do with whatever is held down right now.**
+//
+// Split out of the editor for the same reason `gs_bind_resolve` is: it is the
+// rule, it is a pure function of "what is down", and where it lived it could
+// not be tested without a keyboard and a pad in somebody's hands. A third of
+// its lines had never run.
+//
+// `armed` is the part that is not obvious and is the whole of the fault this
+// was written for. A capture begins the instant a control is pressed - and the
+// control was pressed *with something*: Space or Enter if the player walked to
+// it with the keyboard, the pad's bottom button if they walked to it with a
+// pad. That key is still down on the very next frame, so the capture bound the
+// action to it immediately, and a player rebinding their controls from the
+// keyboard could only ever bind Space. **So a capture waits for everything to
+// be let go before it accepts anything.** Point `armed` at a bool the caller
+// keeps for the duration of the capture, initialised to false.
+typedef enum gs_rebind_what {
+    GS_REBIND_WAIT = 0,   // nothing yet - still held, or nothing pressed
+    GS_REBIND_CANCEL,     // Escape: leave the binding alone
+    GS_REBIND_KEY,        // `which` is an SDL_Scancode
+    GS_REBIND_BUTTON      // `which` is an SDL_GamepadButton
+} gs_rebind_what;
+
+typedef struct gs_rebind_pick {
+    gs_rebind_what what;
+    int            which;
+} gs_rebind_pick;
+
+gs_rebind_pick gs_bind_pick(bool *armed, const bool *keys, int key_count,
+                            uint32_t buttons);
+
 // Point an action at a new key or button. Rebinding to something another action
 // on the same player already uses clears it there first, because two actions on
 // one button is a control scheme nobody meant to make.

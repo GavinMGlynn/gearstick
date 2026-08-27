@@ -75,6 +75,56 @@ gs_input gs_bind_resolve(const gs_bindings *b, uint8_t player,
     return in;
 }
 
+gs_rebind_pick gs_bind_pick(bool *armed, const bool *keys, int key_count,
+                            uint32_t buttons) {
+    gs_rebind_pick pick = { GS_REBIND_WAIT, 0 };
+
+    // What is held, whatever it is. Escape is not special here: a capture that
+    // began with Escape still down should not read it as "leave it alone".
+    bool anything = buttons != 0;
+    if (keys != nullptr) {
+        for (int k = 0; k < key_count && !anything; k++) {
+            if (keys[k]) anything = true;
+        }
+    }
+
+    // **Let go first.** See the note in gs_bind.h: the control that started
+    // this capture was pressed with something, and that something is still
+    // down now.
+    if (armed != nullptr && !*armed) {
+        if (anything) return pick;
+        *armed = true;
+        return pick;
+    }
+    if (!anything) return pick;
+
+    if (keys != nullptr && key_count > (int)SDL_SCANCODE_ESCAPE &&
+        keys[SDL_SCANCODE_ESCAPE]) {
+        pick.what = GS_REBIND_CANCEL;
+        return pick;
+    }
+
+    // The keyboard first, and the lowest scancode held. A player pressing one
+    // key is the case; a player mashing three gets the first of them, which is
+    // arbitrary but is at least the same arbitrary answer every time.
+    if (keys != nullptr) {
+        for (int k = 0; k < key_count; k++) {
+            if (!keys[k]) continue;
+            pick.what = GS_REBIND_KEY;
+            pick.which = k;
+            return pick;
+        }
+    }
+
+    for (int b = 0; b < 32; b++) {
+        if ((buttons & (1u << b)) == 0) continue;
+        pick.what = GS_REBIND_BUTTON;
+        pick.which = b;
+        return pick;
+    }
+    return pick;
+}
+
 void gs_bind_set_key(gs_bindings *b, uint8_t player, gs_action a, SDL_Scancode key) {
     if (player >= GS_MAX_CARS || a >= GS_ACT_COUNT) return;
 

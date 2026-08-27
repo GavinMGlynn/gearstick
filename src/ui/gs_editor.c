@@ -767,40 +767,53 @@ static void gs_bind_label(const gs_bindings *b, uint8_t player, gs_action a,
 static void gs_capture_rebind(gs_editor *e, gs_input_state *input) {
     if (e->rebind_player < 0) return;
 
+    // **The rule is gs_bind_pick's**, next to the resolution it is the other
+    // half of, and pure so that it can be walked over every key and every
+    // button without a keyboard or a pad. What is left here is the SDL reading
+    // and the two lines that act on the answer.
     int count = 0;
     const bool *keys = SDL_GetKeyboardState(&count);
-    if (keys != nullptr) {
-        if (keys[SDL_SCANCODE_ESCAPE]) {
-            e->rebind_player = -1;
-            e->rebind_action = -1;
-            SDL_snprintf(e->status, sizeof e->status, "%s", "left alone");
-            return;
-        }
-        for (int k = 0; k < count; k++) {
-            if (!keys[k]) continue;
-            gs_bind_set_key(&input->bind, (uint8_t)e->rebind_player,
-                            (gs_action)e->rebind_action, (SDL_Scancode)k);
-            SDL_snprintf(e->status, sizeof e->status, "bound to %s",
-                         SDL_GetScancodeName((SDL_Scancode)k));
-            e->rebind_player = -1;
-            e->rebind_action = -1;
-            return;
-        }
-    }
 
+    uint32_t buttons = 0;
     for (int i = 0; i < input->pads; i++) {
         if (input->pad[i] == nullptr) continue;
         for (int btn = 0; btn < SDL_GAMEPAD_BUTTON_COUNT && btn < 32; btn++) {
-            if (!SDL_GetGamepadButton(input->pad[i], (SDL_GamepadButton)btn)) continue;
-            gs_bind_set_button(&input->bind, (uint8_t)e->rebind_player,
-                               (gs_action)e->rebind_action, (int16_t)btn);
-            SDL_snprintf(e->status, sizeof e->status, "bound to %s",
-                         SDL_GetGamepadStringForButton((SDL_GamepadButton)btn));
-            e->rebind_player = -1;
-            e->rebind_action = -1;
-            return;
+            if (SDL_GetGamepadButton(input->pad[i], (SDL_GamepadButton)btn)) {
+                buttons |= 1u << btn;
+            }
         }
     }
+
+    const gs_rebind_pick pick =
+        gs_bind_pick(&e->rebind_armed, keys, count, buttons);
+
+    switch (pick.what) {
+    case GS_REBIND_WAIT:
+        return;
+
+    case GS_REBIND_CANCEL:
+        SDL_snprintf(e->status, sizeof e->status, "%s", "left alone");
+        break;
+
+    case GS_REBIND_KEY:
+        gs_bind_set_key(&input->bind, (uint8_t)e->rebind_player,
+                        (gs_action)e->rebind_action,
+                        (SDL_Scancode)pick.which);
+        SDL_snprintf(e->status, sizeof e->status, "bound to %s",
+                     SDL_GetScancodeName((SDL_Scancode)pick.which));
+        break;
+
+    case GS_REBIND_BUTTON:
+        gs_bind_set_button(&input->bind, (uint8_t)e->rebind_player,
+                           (gs_action)e->rebind_action, (int16_t)pick.which);
+        SDL_snprintf(e->status, sizeof e->status, "bound to %s",
+                     SDL_GetGamepadStringForButton(
+                         (SDL_GamepadButton)pick.which));
+        break;
+    }
+
+    e->rebind_player = -1;
+    e->rebind_action = -1;
 }
 
 static void gs_controls_panel(gs_editor *e, gs_input_state *input) {
@@ -842,6 +855,10 @@ static void gs_controls_panel(gs_editor *e, gs_input_state *input) {
             if (ImGui_Button(id)) {
                 e->rebind_player = (int)p;
                 e->rebind_action = a;
+                // Not armed until everything is let go: this button was just
+                // pressed, and if that was Space or a pad's bottom button then
+                // it is still down. See gs_bind_pick.
+                e->rebind_armed = false;
             }
         }
     }

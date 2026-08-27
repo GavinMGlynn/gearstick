@@ -5430,6 +5430,51 @@ safe answer for those is part of the claim. The table also asserts that every
 screen appears in it exactly once, so a tenth screen turns the tree red by
 itself.
 
+## Rebinding a control from the keyboard could only ever bind Space
+
+The coverage build put `gs_capture_rebind` at **a third of its 36 lines**. It
+could not be tested where it was: it read SDL's live keyboard and a live pad,
+and no test has either. What that was hiding is a fault in the middle of a
+feature `gs_bind.h` calls "not a luxury feature here" - four people on one sofa,
+a left-handed player, somebody who cannot reach the default keys.
+
+**A capture begins the instant the control is pressed, and that control was
+pressed with something.** Space or Enter, if the player walked to it with the
+keyboard. The pad's bottom button, if they walked to it with a pad. That key is
+still down on the very next frame, when the capture reads the keyboard for the
+first time - so the action was bound to it immediately, before the player had
+touched the key they meant.
+
+Which means rebinding from the keyboard could only ever produce Space, and
+rebinding from a pad could only ever produce the button that pad presses
+everything with. Those two are most of the people the feature exists for. A
+player with a mouse never saw it.
+
+### Where the rule went, and why there
+
+`gs_bind_pick` sits in `gs_bind.c`, beside `gs_bind_resolve`, which is the other
+half of the same idea and was written this way on purpose: *the resolution is a
+pure function of "which keys are down" and "which pad buttons are down", so it
+can be tested without a keyboard or a pad.* `gs_bind.c` is at 98% coverage. The
+capture was the same kind of decision left in the half that talks to SDL, and it
+was at 33%.
+
+It takes an `armed` flag the caller keeps for the duration of the capture:
+nothing is accepted until everything has been let go once. Escape included -
+cancelling on an Escape that is only still held from starting the capture would
+cancel every rebind a keyboard player ever began.
+
+### Every key, not a handful of interesting ones
+
+**510 of 510 scancodes** can be bound to, and **all 26 pad buttons**. Not a
+sample: what a player reaches for is theirs to choose, and a scancode that
+cannot be captured is a control somebody cannot have. Escape is the single
+exception and is the documented one - it means leave the binding alone.
+
+Also pinned: the keyboard wins over a pad held at the same moment, nothing held
+decides nothing however long it goes on, and a null keyboard - what a caller
+gets before SDL has one - is not a crash.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
