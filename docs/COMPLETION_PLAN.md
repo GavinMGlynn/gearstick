@@ -1967,3 +1967,16 @@ worth as much as what was decided about it.
       *Verification: 54 mixes, nine grounds by six machines, four cars each all
       sliding and all being struck; and nine more with a different tune playing
       underneath. Nothing clipped and nothing produced a NaN.*
+- [x] **Nothing had ever read a gamepad.** *(Found by building the tree under a
+      coverage tool and asking which files the suite never touches.)* Opening a
+      pad, closing one, hot-plugging, and every line that reads a physical
+      control had never run in any test, on any platform — a quarter of the
+      input file. Four players on one sofa is the shape of this game, and all
+      of it rested on code nothing had executed. SDL can make a gamepad that
+      exists only in software, so now four of them get plugged in.
+      *Verification: four pads plugged in one at a time and a fifth refused;
+      each pad drives its own car and no other; every button bound by default
+      does what it is bound to; both triggers stand in for the buttons they
+      stand in for; the stick steers past the deadzone and not before it; and
+      somebody trips over a cable mid-race, after which the pad that was third
+      drives the second car and nothing reads a closed one.*

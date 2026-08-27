@@ -5307,6 +5307,71 @@ different enumeration types on the other. Neither reached CI.
 **No physics moved.** `src/audio/` is downstream of the simulation and no part
 of it; the golden replay is untouched.
 
+## Nothing had ever read a gamepad
+
+Built the whole tree under clang's source coverage, ran `ctest`, and asked which
+first-party files the suite never touches. `src/platform/gs_input.c` came back
+at **24% of its lines**: opening a pad, closing one, hotplug, and every line
+that reads a physical control had never been executed by any test, on any
+platform, once. Everything this game says about pads - four players on one sofa
+is the shape of it - rested on code nothing had run.
+
+The reason is obvious once seen. `gs_bind.c` is 98% covered, because resolving
+"which buttons are down" into "what this player is asking for" is a pure
+function and was deliberately written to be testable without hardware. The half
+that talks to SDL was the half nobody could test, so nobody did.
+
+**SDL's own answer is a virtual joystick.** It is a real gamepad as far as every
+call in `gs_input.c` is concerned - opened, polled, closed - and its buttons are
+set from the test instead of by a thumb.
+`a_pad_is_opened_read_and_closed_the_way_a_person_plugs_one_in` plugs in four,
+one at a time, and checks:
+
+- a fifth is refused rather than remembered, because there are four cars;
+- pad N drives car N **and only car N**, walked over every pad rather than
+  checked on one, because that is the whole claim and it is per pad;
+- every button bound by default does what it is bound to;
+- both triggers stand in for the two buttons everybody drives with;
+- the stick steers past the deadzone and **not before it** - a stick resting
+  slightly off centre must not steer, or a worn pad drives into a wall on its
+  own, which is the entire reason there is a deadzone;
+- somebody trips over a cable mid-race: the hole closes, the pad that was third
+  drives the second car, and nothing reads a closed pad afterwards.
+
+24% to 75%.
+
+### Two ways to lose twenty minutes, both worth writing down
+
+**`gs_input_poll` adds the keyboard to the pads** rather than choosing between
+them - deliberately, so a pad and the arrow keys can drive the same car and
+neither disables the other. In a test binary that means every key event an
+earlier test left in SDL's queue, applied the moment anything drains it and then
+held forever because the matching key-up was never queued. It arrives as car one
+accelerating and reads exactly like a pad driving the wrong car.
+
+**A released trigger is not zero.** A gamepad reports a trigger over 0 to 32767
+and SDL maps that from a joystick axis whose range is -32768 to 32767 - so
+writing 0 to the axis, which is the obvious way to say "let go", is a trigger
+held at half travel. Which is over the threshold, and reads as accelerate and
+brake held together on car one, and looks exactly like a pad driving the wrong
+car. Letting go is the minimum. The test asserts it now: letting go really lets
+go.
+
+Neither was a fault in the game. Both looked like one.
+
+### What the coverage build is for
+
+`build/linux-cov` is clang with `-fprofile-instr-generate -fcoverage-mapping`.
+It is not part of `ctest` and is not meant to be a number anybody chases: what
+it is good at is answering "what has never run at all", which is a different
+question from "what is tested" and the only one a coverage tool answers
+honestly. It found this in one pass.
+
+The other thing it says is that **`src/frontend/game/main.c` is at 0% of 1186
+lines** - the client's own event loop and argument handling, never entered by
+any test in the suite. That is the largest untouched thing left in the tree and
+it is not addressed here.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

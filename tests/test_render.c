@@ -3883,6 +3883,248 @@ TEST(no_test_writes_where_a_player_keeps_their_things) {
     CHECK(SDL_strstr(where, GS_TEST_HOME) == where);
 }
 
+// A pad that does not exist, so the code that reads one can be run at all.
+// SDL builds a real gamepad out of this: opened, polled and closed exactly like
+// something plugged into a socket.
+static SDL_JoystickID gs_fake_pad(void) {
+    SDL_VirtualJoystickDesc desc;
+    // SDL's own initialiser: it stamps the interface version into the struct,
+    // which is how SDL tells a caller built against this header from one built
+    // against a later one. Zeroing it by hand says version 0 and is refused.
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = (Uint16)SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.naxes = (Uint16)SDL_GAMEPAD_AXIS_COUNT;
+    desc.nbuttons = (Uint16)SDL_GAMEPAD_BUTTON_COUNT;
+    desc.name = "gearstick test pad";
+    return SDL_AttachVirtualJoystick(&desc);
+}
+
+// Hand SDL's own gamepad events to the game, the way the client does.
+//
+// **And put the keyboard down afterwards.** Draining the queue is what makes
+// SDL notice a pad arriving, and it also makes SDL apply every key event some
+// earlier test left sitting in it - which SDL then reports as held, forever,
+// because the matching key-up was never queued. `gs_input_poll` *adds* the
+// keyboard to the pads rather than choosing between them, deliberately, so a
+// stray Up arrow arrives as car one accelerating and reads exactly like a pad
+// driving the wrong car. It cost twenty minutes to tell those two apart.
+static void gs_pad_events(gs_input_state *in) {
+    SDL_PumpEvents();
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) gs_input_event(in, &e);
+}
+
+// **Read the pads, with the keyboard definitely down.**
+//
+// `gs_input_poll` *adds* the keyboard to the pads rather than choosing between
+// them - deliberately, so a pad and the arrow keys can drive the same car and
+// neither disables the other. In this binary that means every key event some
+// earlier test left sitting in SDL's queue, applied the moment anything drains
+// it and then held forever because the matching key-up was never queued. It
+// arrives as car one accelerating and reads exactly like a pad driving the
+// wrong car, which is a confusing twenty minutes.
+//
+// So the keyboard is put down before every read here. This test is about pads.
+static void gs_pad_poll(gs_input_state *in, gs_input *out) {
+    SDL_PumpEvents();
+    SDL_ResetKeyboard();
+    gs_input_poll(in, out, GS_MAX_CARS);
+}
+
+TEST(a_pad_is_opened_read_and_closed_the_way_a_person_plugs_one_in) {
+    (void)ren;
+    // **None of this had ever run.** Coverage over the whole suite put
+    // src/platform/gs_input.c at 24% of its lines: opening a pad, closing one,
+    // hotplug, and every line that reads a physical control had never been
+    // executed by any test, on any platform, once. Everything the game claims
+    // about pads rested on code nothing had touched.
+    //
+    // A virtual joystick is SDL's own answer to that. It is a real gamepad as
+    // far as every call below is concerned - opened, polled, closed - and its
+    // buttons are set from here instead of by a thumb.
+    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+        printf("  FAIL no gamepad subsystem: %s\n", SDL_GetError());
+        CHECK(false);
+        return;
+    }
+
+    static gs_input_state in;
+    gs_input_init(&in);
+    CHECK(in.pads == 0);
+
+    // **Four of them, which is what this game is for.** Plugged in one at a
+    // time, because that is how a fourth person arriving actually happens.
+    SDL_JoystickID id[GS_MAX_CARS + 1];
+    for (int i = 0; i < GS_MAX_CARS; i++) {
+        id[i] = gs_fake_pad();
+        CHECK(id[i] != 0);
+        gs_pad_events(&in);
+        CHECK(in.pads == i + 1);
+    }
+
+    // **A fifth is refused rather than remembered.** There are four cars.
+    id[GS_MAX_CARS] = gs_fake_pad();
+    CHECK(id[GS_MAX_CARS] != 0);
+    gs_pad_events(&in);
+    CHECK(in.pads == GS_MAX_CARS);
+
+    gs_input out[GS_MAX_CARS];
+
+    // Nothing held: nobody is asking for anything.
+    SDL_UpdateGamepads();
+    gs_pad_poll(&in, out);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) CHECK(out[i] == 0);
+
+    // **Pad N drives car N, and only car N.** Walked over every pad rather
+    // than checked on one, because "the second pad drives the second car" is
+    // the whole claim and it is per pad.
+    for (int i = 0; i < GS_MAX_CARS; i++) {
+        SDL_Joystick *j = SDL_GetJoystickFromID(id[i]);
+        CHECK(j != nullptr);
+        if (j == nullptr) continue;
+
+        CHECK(SDL_SetJoystickVirtualButton(j, (int)SDL_GAMEPAD_BUTTON_SOUTH,
+                                           true));
+        SDL_UpdateGamepads();
+        gs_pad_poll(&in, out);
+
+        for (uint8_t k = 0; k < GS_MAX_CARS; k++) {
+            if ((int)k == i) CHECK((out[k] & GS_IN_ACCEL) != 0);
+            else             CHECK(out[k] == 0);
+        }
+
+        CHECK(SDL_SetJoystickVirtualButton(j, (int)SDL_GAMEPAD_BUTTON_SOUTH,
+                                           false));
+        SDL_UpdateGamepads();
+    }
+
+    SDL_Joystick *one = SDL_GetJoystickFromID(id[0]);
+    CHECK(one != nullptr);
+    if (one == nullptr) return;
+
+    // **Every button that is bound by default**, so a control that stopped
+    // being read shows up here rather than in somebody's first corner.
+    const struct { SDL_GamepadButton button; gs_input want; const char *what; }
+    bound[] = {
+        { SDL_GAMEPAD_BUTTON_SOUTH,      GS_IN_ACCEL, "accelerate" },
+        { SDL_GAMEPAD_BUTTON_EAST,       GS_IN_BRAKE, "brake" },
+        { SDL_GAMEPAD_BUTTON_DPAD_LEFT,  GS_IN_LEFT,  "left" },
+        { SDL_GAMEPAD_BUTTON_DPAD_RIGHT, GS_IN_RIGHT, "right" },
+        { SDL_GAMEPAD_BUTTON_WEST,       GS_IN_FIRE,  "fire" },
+    };
+    for (size_t b = 0; b < SDL_arraysize(bound); b++) {
+        CHECK(SDL_SetJoystickVirtualButton(one, (int)bound[b].button, true));
+        SDL_UpdateGamepads();
+        gs_pad_poll(&in, out);
+        if ((out[0] & bound[b].want) == 0) {
+            printf("  PAD %s did nothing\n", bound[b].what);
+        }
+        CHECK((out[0] & bound[b].want) != 0);
+        CHECK(SDL_SetJoystickVirtualButton(one, (int)bound[b].button, false));
+        SDL_UpdateGamepads();
+    }
+
+    // **The triggers stand in for the two buttons everybody drives with**, so
+    // somebody who accelerates with a trigger is asking for the same thing as
+    // somebody who presses the bottom button.
+    //
+    // **A released trigger is not zero.** A gamepad reports a trigger over 0 to
+    // 32767, and SDL maps that from a joystick axis whose range is -32768 to
+    // 32767 - so writing 0 to the axis, which is the obvious way to say "let
+    // go", is a trigger held at half travel. Which is over the threshold, and
+    // reads as accelerate and brake held together on car one, and looks exactly
+    // like a pad driving the wrong car. Letting go is the minimum.
+    const Sint16 released = SDL_JOYSTICK_AXIS_MIN;
+    const struct { SDL_GamepadAxis axis; gs_input want; const char *what; }
+    trigger[] = {
+        { SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, GS_IN_ACCEL, "right trigger" },
+        { SDL_GAMEPAD_AXIS_LEFT_TRIGGER,  GS_IN_BRAKE, "left trigger" },
+    };
+    for (size_t k = 0; k < SDL_arraysize(trigger); k++) {
+        CHECK(SDL_SetJoystickVirtualAxis(one, (int)trigger[k].axis, 20000));
+        SDL_UpdateGamepads();
+        gs_pad_poll(&in, out);
+        if ((out[0] & trigger[k].want) == 0) {
+            printf("  PAD %s did nothing\n", trigger[k].what);
+        }
+        CHECK((out[0] & trigger[k].want) != 0);
+
+        CHECK(SDL_SetJoystickVirtualAxis(one, (int)trigger[k].axis, released));
+        SDL_UpdateGamepads();
+        gs_pad_poll(&in, out);
+        CHECK(out[0] == 0);            // and letting go really lets go
+    }
+
+    // **And the stick steers, past a deadzone and not before it.** A stick
+    // resting slightly off centre must not steer, or a worn pad drives into a
+    // wall on its own - which is the entire reason there is a deadzone.
+    const struct { Sint16 at; gs_input want; const char *what; } stick[] = {
+        { -30000, GS_IN_LEFT,  "hard left" },
+        {  30000, GS_IN_RIGHT, "hard right" },
+        {  -8000, 0,           "resting a little left" },
+        {   8000, 0,           "resting a little right" },
+        {      0, 0,           "centred" },
+    };
+    for (size_t k = 0; k < SDL_arraysize(stick); k++) {
+        CHECK(SDL_SetJoystickVirtualAxis(one, (int)SDL_GAMEPAD_AXIS_LEFTX,
+                                         stick[k].at));
+        SDL_UpdateGamepads();
+        gs_pad_poll(&in, out);
+        const gs_input steer = out[0] & (gs_input)(GS_IN_LEFT | GS_IN_RIGHT);
+        if (steer != stick[k].want) {
+            printf("  PAD %s steered %u, wanted %u\n", stick[k].what,
+                   (unsigned)steer, (unsigned)stick[k].want);
+        }
+        CHECK(steer == stick[k].want);
+    }
+    CHECK(SDL_SetJoystickVirtualAxis(one, (int)SDL_GAMEPAD_AXIS_LEFTX, 0));
+    SDL_UpdateGamepads();
+
+    // **Somebody trips over a cable.** The hole is closed rather than left, so
+    // the three pads still in somebody's hands drive the first three cars -
+    // and, more to the point, nothing reads a closed pad afterwards.
+    CHECK(SDL_DetachVirtualJoystick(id[1]));
+    gs_pad_events(&in);
+    CHECK(in.pads == GS_MAX_CARS - 1);
+
+    SDL_UpdateGamepads();
+    gs_pad_poll(&in, out);
+    CHECK(out[GS_MAX_CARS - 1] == 0);       // nothing drives the last car now
+
+    // The pad that was third is second now, and it drives the second car.
+    SDL_Joystick *third = SDL_GetJoystickFromID(id[2]);
+    CHECK(third != nullptr);
+    if (third != nullptr) {
+        CHECK(SDL_SetJoystickVirtualButton(third, (int)SDL_GAMEPAD_BUTTON_SOUTH,
+                                           true));
+        SDL_UpdateGamepads();
+        gs_pad_poll(&in, out);
+        CHECK((out[1] & GS_IN_ACCEL) != 0);
+        CHECK(out[0] == 0);
+        CHECK(SDL_SetJoystickVirtualButton(third, (int)SDL_GAMEPAD_BUTTON_SOUTH,
+                                           false));
+    }
+
+    // And unplugging one that was never opened changes nothing.
+    CHECK(SDL_DetachVirtualJoystick(id[GS_MAX_CARS]));
+    gs_pad_events(&in);
+    CHECK(in.pads == GS_MAX_CARS - 1);
+
+    for (int i = 0; i < GS_MAX_CARS; i++) {
+        if (i == 1) continue;
+        SDL_DetachVirtualJoystick(id[i]);
+    }
+    gs_pad_events(&in);
+    CHECK(in.pads == 0);
+
+    printf("  PAD four opened, %d bound buttons, both triggers, %d stick "
+           "positions, one unplugged mid-race\n", (int)SDL_arraysize(bound),
+           (int)SDL_arraysize(stick));
+
+    gs_input_quit(&in);
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+}
+
 TEST(a_pad_can_leave_a_screen_without_walking_to_the_button) {
     (void)ren;
 
@@ -9563,6 +9805,7 @@ int main(void) {
     run_the_empty_seats_on_the_grid_are_filled_with_somebody(ren);
     run_an_opponent_finishes_every_track_that_ships_from_every_grid_slot(ren);
     run_no_test_writes_where_a_player_keeps_their_things(ren);
+    run_a_pad_is_opened_read_and_closed_the_way_a_person_plugs_one_in(ren);
     run_a_pad_can_leave_a_screen_without_walking_to_the_button(ren);
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
     run_the_light_tree_counts_down_and_then_goes_green(ren);
