@@ -56,6 +56,24 @@ typedef struct gs_ui_item {
     // it keeps alive off-screen.
     bool     visible;
 
+    // **All of it on screen, not merely some of it.** ImGui's clip test is an
+    // overlap, so a button hanging half off the right-hand edge of a panel is
+    // "visible" and is pressable by name - and is, to a person, a word cut in
+    // two with nothing to click on. That is the fault the brush palette had and
+    // the fault a gravity button had the day a slider beside it grew: the
+    // control is there, the machine finds it, and nobody can see what it says.
+    //
+    // Only meaningful where nothing scrolls. A row at the top or bottom edge of
+    // a list is cut by the list, and that is what a list is.
+    bool     whole;
+
+    // **Where it is, in pixels.** So a test can ask the question a person asks
+    // by looking: is this control inside the panel it is drawn in? The clip
+    // flags above cannot answer it - what the hook is handed has already been
+    // clipped, so a button hanging off the right-hand edge arrives looking like
+    // a narrower button that fits.
+    float    x0, y0, x1, y1;
+
     // **A table's column heading is not a control.** ImGui submits the heading
     // row as items, reachable and not disabled and looking exactly like
     // buttons, and pressing one sorts the table - or does nothing at all, which
@@ -105,6 +123,11 @@ bool gs_ui_probe_wheel(const char *window, float ticks);
 // means everything it holds is already on screen. False if there is no such
 // window.
 bool gs_ui_probe_scroll_at(const char *window, float *now, float *max);
+
+// Where a window ended up: position and size, in the same pixels as an item's
+// rectangle.
+bool gs_ui_probe_window_box(const char *window, float *x, float *y,
+                            float *w, float *h);
 
 // **Unfold a window somebody folded shut.** A collapsed window draws its title
 // bar and nothing else, and ImGui remembers that under the window's name for

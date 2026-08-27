@@ -1195,6 +1195,15 @@ finished and tested since Phase 8. But every car in a race takes its input from
 a pad: the AI drives only in headless self-play, the editor's background ghost
 and the demo. **A one-player race is one car going round on its own.**
 
+- [x] **Nothing is drawn past the edge of its panel.** *(Found by photographing
+      the setup screen after the skill dial went in.)* A panel can sit inside
+      the window, scroll nowhere, and still draw the last button on a row cut in
+      half — and no item hook can see it, because what they are handed has
+      already been clipped.
+      *Verification: every screen from every seed reports nothing wider than its
+      own panel. Taking the dial out reports nothing; putting it back reports
+      thirty-three pixels in every state, which is Venus and Jupiter ending in
+      the middle of their own names.*
 - [x] **The empty grid slots can be filled with opponents.** A seat on the grid
       is the game's until somebody takes it: the driver list on the setup screen
       offers *computer* alongside the guest and the roster, and it is what an

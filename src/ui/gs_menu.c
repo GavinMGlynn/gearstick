@@ -277,7 +277,7 @@ static void gs_panel_measure(gs_menu *m) {
     ImVec2 size = ImGui_GetWindowSize();
     m->panel = (gs_panel_report){ pos.x, pos.y, size.x, size.y,
                                   vp->WorkSize.x, vp->WorkSize.y,
-                                  ImGui_GetScrollMaxY() };
+                                  ImGui_GetScrollMaxY(), ImGui_GetScrollMaxX() };
 }
 
 // One table row, near enough, for working a panel's height out from its
@@ -832,7 +832,16 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
     #define GS_SETUP_CHROME 528.0f      // everything above and below the grid
     const float grid_row = ImGui_GetFrameHeight() + ImGui_GetStyle()->ItemSpacing.y;
     const int   grid_rows = m->setup.players > 0 ? (int)m->setup.players : 1;
-    gs_centre_window("setup", 760.0f,
+    // **Wide enough for the eight planets to fit beside the rules.** Seven
+    // hundred and sixty was, until a skill dial went in beside the driver
+    // count: the left-hand column grew, the gravity buttons went with it, and
+    // the last two of them were drawn thirty-three pixels past the panel's
+    // right edge - Venus and Jupiter ending in the middle of their own names,
+    // with nothing to press on the other side. Nothing in the item hooks can
+    // see that, because what they are handed has already been clipped. What
+    // sees it is `panel.wider`, and what found it in the first place was a
+    // photograph.
+    gs_centre_window("setup", 800.0f,
                      GS_SETUP_CHROME + grid_row * (float)grid_rows);
 
     if (ImGui_Begin("Race setup", nullptr,

@@ -58,6 +58,15 @@ typedef struct gs_panel_report {
     float x, y, w, h;   // the panel on screen, in pixels
     float view_w, view_h;   // and the window it had to fit inside
     float hidden;       // content below the fold: how far it can be scrolled
+
+    // **And content past the right-hand edge**, which is the same fault turned
+    // ninety degrees and is not visible in any of the numbers above it. A panel
+    // whose contents are wider than it is draws the last thing on a row cut in
+    // half - the word ends in the middle and there is nothing to click on the
+    // other side of it. Nothing in the item hooks can see this: what they are
+    // handed has already been clipped, so a button hanging off the edge arrives
+    // looking like a narrower button that fits.
+    float wider;
 } gs_panel_report;
 
 typedef struct gs_race_setup {

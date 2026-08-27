@@ -4565,6 +4565,7 @@ typedef struct gs_walk_named {
     bool         idled;         // pressing it there changed nothing
     bool         hidden;        // it was drawn there, scrolled out of sight
     bool         stranded;      // drawn off a panel that cannot scroll
+    bool         halved;        // drawn half off the edge of one
     int          tick;          // and how far down the window it was found
     int          company;       // how many other live controls stood with it
 } gs_walk_named;
@@ -4585,6 +4586,7 @@ typedef struct gs_walk {
     uint32_t     unseen[GS_WALK_CTRLS];
     int          n_offered, n_pressed, n_never, n_unseen;
     int          n_stranded;    // drawn where no scroll and no key can reach
+    int          n_halved;      // drawn with part of it past the panel's edge
 
     // **What a press did, as against that it happened.** `pressed` is a fact
     // about the walk. `moved` is a fact about the front end: pressing this
@@ -4708,6 +4710,7 @@ static void gs_walk_note(gs_walk *w, const gs_ui_item *it) {
     w->named[i].idled   = false;
     w->named[i].hidden  = false;
     w->named[i].stranded = false;
+    w->named[i].halved  = false;
     w->named[i].tick    = 0;
     w->named[i].company = -1;
 }
@@ -4976,6 +4979,50 @@ static void gs_walk_screen(gs_ui *ui, const gs_menu *seed, gs_track *t,
         // somewhere nobody can press it, in this state, for good. That is a
         // fault in the screen rather than a gap in the walk, so it is counted
         // apart and asserted at zero.
+        // **And a control the panel cuts in half.** ImGui's clip test is an
+        // overlap, so a button hanging off the right-hand edge is still
+        // "visible" and can still be pressed by name - and to a person it is a
+        // word cut in two. That is the fault the brush palette had, and the one
+        // a gravity button had the day a slider beside it grew: the control is
+        // there, the machine finds it, and nobody can read what it says.
+        //
+        // **Asked in pixels**, because the clip flags cannot answer it: what
+        // the hook is handed has already been clipped, so a button hanging off
+        // the edge arrives looking like a narrower button that fits. So the
+        // item's rectangle is compared with its window's, which is the question
+        // a person answers by looking.
+        //
+        // Only where nothing scrolls: a row at the edge of a list is cut by the
+        // list, which is what a list is.
+        for (int i = 0; i < held; i++) {
+            if (!items[i].visible) continue;
+            if (!items[i].reachable || items[i].disabled) continue;
+            if (items[i].label[0] == '\0') continue;
+            if (gs_chrome(items[i].label, items[i].window)) continue;
+
+            float across = 0.0f, down = 0.0f;
+            if (!gs_ui_probe_scroll_at(items[i].window, &across, &down)) continue;
+            if (down > 0.0f) continue;
+
+            float wx = 0.0f, wy = 0.0f, ww = 0.0f, wh = 0.0f;
+            if (!gs_ui_probe_window_box(items[i].window, &wx, &wy, &ww, &wh)) continue;
+            if (items[i].x0 >= wx - 0.5f && items[i].x1 <= wx + ww + 0.5f &&
+                items[i].y0 >= wy - 0.5f && items[i].y1 <= wy + wh + 0.5f) {
+                continue;
+            }
+
+            gs_walk_named *cut = gs_walk_named_of(w, items[i].id);
+            if (cut == nullptr || !cut->halved) {
+                w->n_halved++;
+                printf("  OVER THE EDGE '%s' in '%s' on screen %s: %.0f..%.0f "
+                       "against a panel %.0f..%.0f\n",
+                       items[i].label, items[i].window, gs_screen_name(m.screen),
+                       (double)items[i].x0, (double)items[i].x1,
+                       (double)wx, (double)(wx + ww));
+            }
+            if (cut != nullptr) cut->halved = true;
+        }
+
         for (int i = 0; i < held; i++) {
             if (items[i].visible) continue;
             if (!items[i].reachable || items[i].disabled) continue;
@@ -7774,6 +7821,7 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     w.n_never   = 0;
     w.n_unseen  = 0;
     w.n_stranded = 0;
+    w.n_halved   = 0;
     w.n_moved   = 0;
     w.states    = 0;
     w.typed     = 0;
@@ -7877,9 +7925,10 @@ TEST(the_walk_goes_as_deep_as_the_front_end_does) {
     // left, so the two rows of buttons under it - New and Back among them -
     // were laid out past the bottom of a window that cannot be moved, resized
     // or scrolled. Everything drew correctly and none of it could be pressed.
-    printf("  WALK %d controls drawn off a panel that cannot scroll\n",
-           w.n_stranded);
+    printf("  WALK %d controls drawn off a panel that cannot scroll, "
+           "%d drawn over the edge of one\n", w.n_stranded, w.n_halved);
     CHECK(w.n_stranded == 0);
+    CHECK(w.n_halved == 0);
 
     printf("  WALK total: %d states, %d actions (%d typed), "
            "%d of %d pressable controls pressed, %d never pressable, "
@@ -8396,6 +8445,20 @@ TEST(no_screen_is_drawn_bigger_than_the_window_it_is_in) {
                        (double)p.hidden);
             }
             CHECK(p.hidden == 0.0f);
+
+            // **And nothing past the right-hand edge either**, which is the
+            // same fault turned ninety degrees. It is not visible in any of the
+            // numbers above: a panel can sit inside the window, scroll nowhere,
+            // and still draw the last button on a row cut in half. Found by
+            // photographing the setup screen after a dial was added beside the
+            // driver count - two of the eight planets ended in the middle of
+            // their own names.
+            if (p.wider != 0.0f) {
+                printf("  PAST THE EDGE %s from '%s': %.0f wider than its panel\n",
+                       gs_screen_name(gs_every_screen[i]), gs_seeds[sd].name,
+                       (double)p.wider);
+            }
+            CHECK(p.wider == 0.0f);
             measured++;
         }
     }

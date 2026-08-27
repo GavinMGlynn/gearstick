@@ -4523,6 +4523,31 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### A photograph found what none of the numbers could
+
+The setup screen gained a skill dial beside the driver count, and it fitted:
+nothing below the fold, nothing off the bottom, the walk pressed all 765
+controls, every panel measured clean over sixteen starting states. Then a
+screenshot of the real client showed **Venus and Jupiter ending in the middle of
+their own names** - the left-hand column had grown, the gravity buttons had gone
+with it, and the last two were drawn thirty-three pixels past the panel's right
+edge with nothing to press on the other side.
+
+**Nothing in the item hooks can see that.** ImGui's clip test is an overlap, so a
+button hanging off the edge is still "visible" and still answers to being pressed
+by name. Reporting whether an item's rectangle sits inside its window does not
+help either: what the hook is handed has *already been clipped*, so the button
+arrives looking like a narrower button that fits.
+
+What sees it is the window's own content size. `gs_panel_report` now carries
+`wider` - `ScrollMaxX`, the horizontal twin of the `hidden` it has always
+carried - and the panel test asserts it is zero for every screen from every
+seed. Removing the dial takes it to zero; putting it back reports 33 in every
+state. The panel is 800 wide now rather than 760.
+
+The lesson is the one the project already wrote down and this is the first time
+it has cost something: **verify on the real output**. Every proxy said yes.
+
 ### Two tests that were skipping now run
 
 `gearstick_transport_document` and `gearstick_noise_interop` both need the

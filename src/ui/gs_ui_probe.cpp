@@ -137,6 +137,19 @@ bool gs_ui_probe_scroll_at(const char *window, float *now, float *max)
     return true;
 }
 
+bool gs_ui_probe_window_box(const char *name, float *x, float *y,
+                            float *w, float *h)
+{
+    if (ImGui::GetCurrentContext() == nullptr || name == nullptr) return false;
+    ImGuiWindow *win = ImGui::FindWindowByName(name);
+    if (win == nullptr) return false;
+    if (x != nullptr) *x = win->Pos.x;
+    if (y != nullptr) *y = win->Pos.y;
+    if (w != nullptr) *w = win->Size.x;
+    if (h != nullptr) *h = win->Size.y;
+    return true;
+}
+
 bool gs_ui_probe_unfold(const char *name)
 {
     if (ImGui::GetCurrentContext() == nullptr || name == nullptr) return false;
@@ -191,7 +204,12 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext *, ImGuiID id, const ImRect &bb,
     it->reachable = (flags & ImGuiItemFlags_NoNav) == 0;
     it->typable   = false;
     it->visible   = true;
+    it->whole     = true;
     it->heading   = false;
+    it->x0        = bb.Min.x;
+    it->y0        = bb.Min.y;
+    it->x1        = bb.Max.x;
+    it->y1        = bb.Max.y;
 
     // The hook runs before ImGui's own clipping test, which is what makes a
     // scrolled-away table row look like a control. **ImGui's rule, copied
@@ -200,10 +218,14 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext *, ImGuiID id, const ImRect &bb,
     // keyboard is on - those stay live so a control does not die under the
     // hand that is using it. An approximation here would report a focused item
     // as unpressable and lose a real control from the count.
-    if (ctx != nullptr && ctx->CurrentWindow != nullptr &&
-        !bb.Overlaps(ctx->CurrentWindow->ClipRect)) {
-        it->visible = id == ctx->ActiveId || id == ctx->ActiveIdPreviousFrame ||
-                      id == ctx->NavId    || id == ctx->NavActivateId;
+    if (ctx != nullptr && ctx->CurrentWindow != nullptr) {
+        const ImRect &clip = ctx->CurrentWindow->ClipRect;
+        if (!bb.Overlaps(clip)) {
+            it->visible = id == ctx->ActiveId || id == ctx->ActiveIdPreviousFrame ||
+                          id == ctx->NavId    || id == ctx->NavActivateId;
+        }
+        it->whole = bb.Min.x >= clip.Min.x && bb.Max.x <= clip.Max.x &&
+                    bb.Min.y >= clip.Min.y && bb.Max.y <= clip.Max.y;
     }
 
     // Inside the row a table opened with ImGuiTableRowFlags_Headers, which is
