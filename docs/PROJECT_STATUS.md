@@ -4628,6 +4628,20 @@ They cannot answer **is it right when you look at it**, and a machine that
 presses by name and winds panels to reach things is structurally the worst
 possible judge of whether a thing is findable at all.
 
+**And then it stopped finding things**, which is the other half of the report.
+Six more states were photographed and every one of them was right: the editor's
+controls panel with all four players and the button that restores the defaults;
+the new-driver form, with the caret already in the name box; choosing a password
+for a driver who has none; the setup screen refusing an unsound track, with GO
+drawn dead and the reason beside it; the records table with times in it; and the
+lobby with four people in it. Nothing to fix in any of them.
+
+So the screens have now been looked at, most of them in more than one state. The
+one visible artefact left is in the instrument rather than the game: a menu drawn
+from a test has ImGui's keyboard-nav cursor sitting on its first item, which the
+game does not show until somebody navigates. Photographs taken through
+`gearstick --shot` do not have it.
+
 ### The suite got better at pressing buttons and started deleting people's work
 
 The construction set saves the track being built, and the controls panel saves
