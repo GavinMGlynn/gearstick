@@ -4555,6 +4555,16 @@ static int gs_ui_exits(gs_ui *ui, gs_menu *fresh, gs_track *t, SDL_Renderer *ren
 // willing to visit.
 #define GS_UI_MAX_ITEMS 512
 
+// What a sweep remembers about one control: whether any scroll position ever
+// showed the whole of it.
+typedef struct gs_reach {
+    uint32_t id;
+    char     label[GS_UI_LABEL];
+    bool     whole;
+    bool     reachable, disabled;
+    float    x0, y0, x1, y1;       // where it was on the frame it arrived on
+} gs_reach;
+
 static int gs_ui_controls(gs_ui *ui, gs_menu *fresh, gs_track *t,
                           SDL_Renderer *ren, gs_screen from, gs_ui_item *into,
                           int cap) {
@@ -7096,7 +7106,9 @@ TEST(the_construction_set_keeps_its_panels_on_the_screen) {
                                      &was[p][2], &was[p][3]));
     }
 
-    int measured = 0, outside = 0, lying = 0;
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+    static gs_reach   reach[GS_UI_MAX_ITEMS];
+    int measured = 0, outside = 0, lying = 0, controls = 0, cut = 0;
 
     for (size_t z = 0; z < SDL_arraysize(sizes); z++) {
         CHECK(SDL_SetWindowSize(gs_win, sizes[z].w, sizes[z].h));
@@ -7109,8 +7121,11 @@ TEST(the_construction_set_keeps_its_panels_on_the_screen) {
         // palette is one height with the gravity dial on it and another with
         // the parts list, and a panel that fits in one configuration says
         // nothing about the one next to it.
-        for (int brush = 0; brush < GS_BRUSH_COUNT; brush++) {
-            e.brush = (gs_brush)brush;
+        // `e.brush` is an int because that is what ImGui edits, and the enum
+        // is unsigned to clang and signed to gcc - so the cast has to name the
+        // type it is being stored in rather than the one it came from.
+        for (int brush = 0; brush < (int)GS_BRUSH_COUNT; brush++) {
+            e.brush = brush;
             for (int i = 0; i < 4; i++) gs_ed_frame(&ed);
 
             for (size_t p = 0; p < SDL_arraysize(panels); p++) {
@@ -7151,17 +7166,93 @@ TEST(the_construction_set_keeps_its_panels_on_the_screen) {
                            panels[p], sizes[z].w, sizes[z].h, brush,
                            (double)max_x, (double)max_y, bar_x, bar_y);
                 }
+
+                // **And every control on it can be got to.** The same standard
+                // the front end's panels are held to: the panel is put at every
+                // scroll position on a grid half its own size apart in both
+                // directions, and each control has to be wholly on the panel at
+                // one of them. A control cut in half by the edge of a tool
+                // window is one nobody can read, whatever the geometry above
+                // says about the window itself.
+                int held = 0;
+                for (float sy = 0.0f; ; sy += bh * 0.5f) {
+                    if (sy > max_y) sy = max_y;
+                    for (float sx = 0.0f; ; sx += bw * 0.5f) {
+                        if (sx > max_x) sx = max_x;
+
+                        gs_ui_probe_scroll_to(panels[p], sx, sy);
+                        gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
+                        gs_ui_probe_frame();
+                        gs_ed_frame(&ed);
+                        const int at = gs_ui_probe_count();
+                        gs_ui_probe_stop();
+                        CHECK(at <= GS_UI_MAX_ITEMS);
+
+                        for (int i = 0; i < at; i++) {
+                            if (SDL_strcmp(items[i].window, panels[p]) != 0) {
+                                continue;
+                            }
+
+                            // ImGui's own structure is unnamed and nobody
+                            // presses it; the title bar is the window.
+                            if (items[i].label[0] == '\0') continue;
+                            if (gs_chrome(items[i].label, items[i].window)) {
+                                continue;
+                            }
+
+                            int k = 0;
+                            for (; k < held; k++) {
+                                if (reach[k].id == items[i].id) break;
+                            }
+                            if (k == held) {
+                                if (held >= GS_UI_MAX_ITEMS) continue;
+                                held++;
+                                reach[k].id = items[i].id;
+                                reach[k].whole = false;
+                                SDL_strlcpy(reach[k].label, items[i].label,
+                                            sizeof reach[k].label);
+                            }
+                            if (items[i].whole) reach[k].whole = true;
+                        }
+
+                        if (sx >= max_x) break;
+                    }
+                    if (sy >= max_y) break;
+                }
+
+                for (int k = 0; k < held; k++) {
+                    controls++;
+                    if (reach[k].whole) continue;
+                    cut++;
+                    printf("  CUT IN HALF '%s' on '%s' at %dx%d with brush %d: "
+                           "never wholly on the panel (can move %.0f x %.0f)\n",
+                           reach[k].label, panels[p], sizes[z].w, sizes[z].h,
+                           brush, (double)max_x, (double)max_y);
+                }
+
+                gs_ui_probe_scroll_to(panels[p], 0.0f, 0.0f);
+                gs_ed_frame(&ed);
             }
         }
     }
 
-    printf("  EDITOR %d panels measured: %d panels x %d brushes x %d window "
-           "sizes\n", measured, (int)SDL_arraysize(panels), GS_BRUSH_COUNT,
+    // **What was left out, named.** An item drawn inside a list or a child
+    // region of a panel is clipped by that list, which is what a list is, and
+    // is reached by scrolling the list rather than the panel - so it is counted
+    // apart rather than folded into a number that would then mean something
+    // else. The parts box has none; the palette's route list has all of them.
+    printf("  EDITOR %d panels measured, %d controls on them all reachable: "
+           "%d panels x %d brushes x %d window sizes. Anything inside a list on "
+           "a panel scrolls with the list rather than the panel and is walked "
+           "by every_control_in_the_construction_set_is_pressed instead.\n",
+           measured, controls, (int)SDL_arraysize(panels), GS_BRUSH_COUNT,
            (int)SDL_arraysize(sizes));
     CHECK(measured == (int)SDL_arraysize(panels) * GS_BRUSH_COUNT *
                       (int)SDL_arraysize(sizes));
+    CHECK(controls > 0);
     CHECK(outside == 0);
     CHECK(lying == 0);
+    CHECK(cut == 0);
 
     e.brush = GS_BRUSH_RAISE;
     CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
@@ -8897,15 +8988,6 @@ static int gs_reach_at(gs_ui *ui, gs_screen hold, const char *window,
     return n;
 }
 
-// What a sweep remembers about one control: whether any scroll position ever
-// showed the whole of it.
-typedef struct gs_reach {
-    uint32_t id;
-    char     label[GS_UI_LABEL];
-    bool     whole;
-    bool     reachable, disabled;
-    float    x0, y0, x1, y1;       // where it was on the frame it arrived on
-} gs_reach;
 
 TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
     // **The fault this was written for, and the one that hid it.** At six

@@ -5195,6 +5195,31 @@ before it starts and restores them at the end, then checks they really did go
 back - because a cleanup nobody verifies is a cleanup that stops working
 silently.
 
+### Every control on those panels, too
+
+The same standard the front end's panels are held to: each panel is put at every
+scroll position on a grid half its own size apart in both directions, and every
+control on it has to be wholly on the panel at one of them. **1548 controls over
+the 72 measurements**, none of them cut in half. Anything drawn inside a *list*
+on a panel scrolls with the list rather than the panel and is walked by
+`every_control_in_the_construction_set_is_pressed` instead, which the test says
+out loud rather than folding into a number that would then mean something else.
+
+### And a compiler difference caught the way the last one was not
+
+`e.brush = (gs_brush)brush` is fine to gcc and an error to clang: **an enum is
+unsigned to one and signed to the other**, and `e.brush` is an `int` because
+that is what ImGui edits. Green here, red on macOS, exactly like the MSVC cast
+two hours earlier - and this time it cost a red main rather than four commits,
+because CI was being watched.
+
+There is a `build/linux-clang` now: the whole tree, built by clang-19, as a
+second opinion before anything is pushed. The `parsers, fed rubbish` job already
+used clang, but it builds the fuzz targets and not the tests, so it never saw
+this file. Two compilers locally is not three platforms and does not pretend to
+be; it is the cheapest way to catch the class of thing that has now bitten
+twice in one day.
+
 **No physics moved.** This is all `src/ui/`.
 
 ## Known risks
