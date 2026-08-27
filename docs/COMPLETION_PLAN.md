@@ -1199,6 +1199,16 @@ finished and tested since Phase 8. But every car in a race takes its input from
 a pad: the AI drives only in headless self-play, the editor's background ghost
 and the demo. **A one-player race is one car going round on its own.**
 
+- [x] **A tool panel that hides something is using the whole screen first.**
+      *(Found by photographing the construction set, which had never been looked
+      at in a picture.)* The palette ended at the route check with save, load,
+      the code buttons and the line telling a new player what the mouse does all
+      below the fold — under a window with a quarter of the screen empty beneath
+      it. The route list scrolls in a box of its own now, the way the library
+      already does.
+      *Verification: asserted in all 46 configurations of the editor walk. Not
+      "nothing scrolls", which would be a lie for a list of any length — a panel
+      may only hide something once it is as tall as the window allows.*
 - [x] **Nothing is drawn past the edge of its panel.** *(Found by photographing
       the setup screen after the skill dial went in.)* A panel can sit inside
       the window, scroll nowhere, and still draw the last button on a row cut in

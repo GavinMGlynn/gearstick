@@ -4530,6 +4530,32 @@ and both sliders are driven by landing on them and stepping with the arrows,
 which is what a person without a mouse does and where a person with one ends up.
 
 
+### And a third, in the construction set
+
+Photographing the editor - which is half the product and had never been looked
+at in a picture - showed the palette ending at the route check. **Save, load,
+the two buttons that move a track as text, the controls checkbox, and the one
+line that tells a new player what the mouse does** were all under the bottom
+edge of a window with two hundred and forty pixels of empty screen beneath it.
+
+    ready
+    Tab races it. Arrows pan. Drag to paint.
+
+That sentence is the most useful thing in the construction set and nobody had
+seen it. The walk had pressed every one of those controls, by name and by
+winding the panel - which is exactly why it did not notice.
+
+The palette is as tall as the window allows now, and the route list scrolls
+inside a box of its own, the way the library and the lobby already do: a track
+can have any number of gates on it, and a panel whose height depends on that is
+a panel that is the right size until somebody lays another one.
+
+**The rule that keeps it that way** is asserted in every one of the editor
+walk's 46 configurations, and it is not "nothing scrolls" - that would be a lie
+for an unbounded list. It is: *a panel may only hide something if it is already
+using the whole screen*. What was wrong was never the scrolling; it was
+scrolling with a quarter of the screen empty underneath.
+
 ### And a second thing, from reading the screen rather than measuring it
 
 The title screen prints its own key list: `Tab  the construction set`, `Escape

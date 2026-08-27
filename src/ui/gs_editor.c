@@ -436,7 +436,14 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
     // measures it - so a one-frame capture of an auto-sized panel renders
     // nothing at all, which looks exactly like the panel being broken.
     ImGui_SetNextWindowPos((ImVec2){ 16.0f, 16.0f }, ImGuiCond_FirstUseEver);
-    ImGui_SetNextWindowSize((ImVec2){ 340.0f, 460.0f }, ImGuiCond_FirstUseEver);
+
+    // **Tall enough for what is on it.** Four hundred and sixty was a guess and
+    // it was a hundred and fifty short: the panel ended at the route check, and
+    // save, load and the two buttons that move a track as text were below the
+    // fold of a window with two hundred and forty pixels of empty screen under
+    // it. A machine that presses by name found them; a person who does not
+    // scroll a tool panel never did.
+    ImGui_SetNextWindowSize((ImVec2){ 340.0f, 688.0f }, ImGuiCond_FirstUseEver);
 
     if (!ImGui_Begin("Construction set", nullptr, 0)) {
         ImGui_End();
@@ -490,6 +497,13 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
         ImGui_SliderFloat("half width", &e->gate_width, 0.5f, 8.0f);
         ImGui_Text("click to place gate %u", t->gate_count);
 
+        // **The route scrolls inside a box of its own.** A track can have any
+        // number of gates on it, and a panel whose height depends on that is a
+        // panel that is the right size until somebody lays another one - which
+        // is how the four buttons under it ended up below the bottom edge. The
+        // same answer the library and the lobby already use.
+        ImGui_BeginChild("route", (ImVec2){ 0.0f, 108.0f }, ImGuiChildFlags_Borders,
+                         0);
         for (uint8_t i = 0; i < t->gate_count; i++) {
             char label[32];
             SDL_snprintf(label, sizeof label, "remove##%u", i);
@@ -501,6 +515,7 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
                 break;
             }
         }
+        ImGui_EndChild();
     } else {
         // The gravity brush. The presets are named because "Jupiter" tells a
         // player something a number does not, and the slider is continuous
@@ -726,7 +741,10 @@ static void gs_controls_panel(gs_editor *e, gs_input_state *input) {
     if (!e->show_controls) return;
 
     ImGui_SetNextWindowPos((ImVec2){ 380.0f, 16.0f }, ImGuiCond_FirstUseEver);
-    ImGui_SetNextWindowSize((ImVec2){ 420.0f, 420.0f }, ImGuiCond_FirstUseEver);
+
+    // Four players of five controls each, and the button that puts them back.
+    // The same guess, and the same two hundred and thirty pixels short.
+    ImGui_SetNextWindowSize((ImVec2){ 420.0f, 688.0f }, ImGuiCond_FirstUseEver);
 
     if (!ImGui_Begin("Controls", &e->show_controls, 0)) {
         ImGui_End();

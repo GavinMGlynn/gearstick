@@ -6820,6 +6820,7 @@ TEST(every_control_in_the_construction_set_is_pressed) {
 
     int configs = 0;
     int actions = 0;
+    int folded  = 0;
     int moved   = 0;
     int chrome  = 0;
     int unnamed = 0;
@@ -6863,6 +6864,44 @@ TEST(every_control_in_the_construction_set_is_pressed) {
                 at = e;
                 at_track = t;
                 configs++;
+
+                // **Nothing on a tool panel is below its fold.** The palette
+                // was four hundred and sixty pixels tall and needed six
+                // hundred: it ended at the route check, and save, load, the two
+                // buttons that move a track as text, and the one line that
+                // tells a new player what the mouse does - "Tab races it.
+                // Arrows pan. Drag to paint." - were all under the bottom edge,
+                // with two hundred and forty pixels of empty screen beneath the
+                // window. A machine pressing by name found them. A person who
+                // does not think to scroll a tool panel never did.
+                //
+                // Checked in every configuration, because which brush is chosen
+                // decides what the panel holds.
+                for (size_t p = 0; p < SDL_arraysize(gs_ed_panels); p++) {
+                    float at_now = 0.0f, at_max = 0.0f;
+                    if (!gs_ui_probe_scroll_at(gs_ed_panels[p], &at_now, &at_max)) {
+                        continue;
+                    }
+                    if (at_max == 0.0f) continue;
+
+                    // **A panel may only hide something if it is already using
+                    // the whole screen.** A route can have any number of gates
+                    // on it, so there is a size of track this panel cannot
+                    // contain and scrolling is the honest answer to that. What
+                    // is not honest is scrolling with two hundred and forty
+                    // pixels of empty screen underneath, which is what it did.
+                    float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
+                    if (!gs_ui_probe_window_box(gs_ed_panels[p], &bx, &by, &bw, &bh)) {
+                        continue;
+                    }
+                    if (by + bh >= 720.0f - 24.0f) continue;
+
+                    printf("  BELOW THE FOLD '%s' with brush %d, sub %d, panel "
+                           "%d: %.0f hidden, and it ends at %.0f of 720\n",
+                           gs_ed_panels[p], brush, sub, panel, (double)at_max,
+                           (double)(by + bh));
+                    folded++;
+                }
 
                 gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
                 gs_ui_probe_frame();
@@ -7051,6 +7090,9 @@ TEST(every_control_in_the_construction_set_is_pressed) {
                n_wanted - missing, n_wanted);
         CHECK(missing == 0);
     }
+
+    printf("  EDITOR %d panels hiding something with room to spare\n", folded);
+    CHECK(folded == 0);
 
     // **What is counted is what moved.** An activation that lands on the floor
     // is not coverage: wired to count attempts instead, this same test reports
