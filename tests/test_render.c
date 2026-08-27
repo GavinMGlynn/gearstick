@@ -30,11 +30,11 @@
 #include "ui/gs_hud.h"
 #include "ui/gs_style.h"
 #include "ui/gs_ui_probe.h"
+#include "gs_sandbox.h"
 #include "core/gs_ai.h"
 #include "dcimgui.h"
 #include "backends/dcimgui_impl_sdl3.h"
 #include "backends/dcimgui_impl_sdlrenderer3.h"
-#include "gs_sandbox.h"
 
 #define GS_W 640
 #define GS_H 480
@@ -3490,6 +3490,154 @@ TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
     w.car[0].wrecked = false;
     w.car[0].damage = 0;
     w.car[0].finish_tick = 0;
+}
+
+TEST(a_hud_stays_inside_the_view_it_belongs_to) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    // **Every state of this panel has been measured, and always in one view
+    // filling the whole window.** Four players on a screen somebody has dragged
+    // smaller do not get that. The window splits four ways, each view is a
+    // quarter of it, and the HUD is drawn ten pixels inside its own view at a
+    // height worked out from its rows and nothing else - so a panel taller than
+    // a quarter-window is drawn over the player below, reading them somebody
+    // else's lap time.
+    //
+    // ImGui clamps a window to the viewport, which is the whole screen. It has
+    // never heard of a view.
+    static gs_track t;
+    gs_flat_pavement(&t, 96, 96);
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    // Four corners of a big track, so the split really is four and stays four.
+    const int32_t at[GS_MAX_CARS][2] = {
+        { 8, 8 }, { 88, 8 }, { 8, 88 }, { 88, 88 },
+    };
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(at[i][0]), GS_INT(at[i][1]), 0);
+    }
+
+    // **At the size the game opens at as well as the size it can be dragged
+    // to.** A quarter of 1280x720 is 638x358, which is not obviously too small
+    // for anything - so if the HUD does not fit there either, that is a fault
+    // in what ships rather than one in an awkward corner.
+    const struct { int w, h; const char *what; } sizes[] = {
+        { 1280, 720, "the window the game opens at" },
+        { GS_W, GS_H, "a window dragged smaller" },
+    };
+
+    // The same states the full-window test walks, because a panel that fits
+    // one way round does not follow from a panel that fits the other.
+    struct { bool wrecked; bool finished; float waited; bool online; bool derby;
+             bool counting; } states[] = {
+        { false, false, 0.0f,  false, false, false },
+        { true,  false, 0.0f,  false, false, false },
+        { true,  false, 0.0f,  true,  false, false },
+        { false, false, 3.0f,  false, false, false },
+        { true,  false, 3.0f,  true,  false, false },
+        { false, true,  0.0f,  false, false, false },
+        { true,  true,  9.0f,  false, false, false },
+        { false, false, 0.0f,  false, false, true  },
+        { false, false, 0.0f,  false, true,  false },
+        { true,  false, 0.0f,  false, true,  false },
+        { false, false, 0.0f,  false, true,  true  },
+        { true,  false, 3.0f,  true,  true,  false },
+    };
+
+    int measured = 0, spilled = 0;
+
+    for (size_t z = 0; z < SDL_arraysize(sizes); z++) {
+    CHECK(SDL_SetWindowSize(gs_win, sizes[z].w, sizes[z].h));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, sizes[z].w, sizes[z].h,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    gs_split sp;
+    gs_split_init(&sp);
+    for (int i = 0; i < 240; i++) {
+        gs_split_update(&sp, &t, &w, &w, 1.0f, sizes[z].w,
+                        sizes[z].h, 1.0f / 60.0f);
+    }
+    gs_view v[GS_MAX_CARS];
+    uint8_t views = gs_split_views(&sp, &t, &w, &w, 1.0f, sizes[z].w,
+                                   sizes[z].h, v);
+    CHECK(views == GS_MAX_CARS);
+    if (views != GS_MAX_CARS) return;
+
+    for (size_t i = 0; i < SDL_arraysize(states); i++) {
+        for (uint8_t c = 0; c < GS_MAX_CARS; c++) {
+            w.car[c].wrecked = states[i].wrecked;
+            w.car[c].damage = states[i].wrecked ? 255 : 0;
+            w.car[c].finish_tick = states[i].finished ? 4200 : 0;
+        }
+        gs_world_set_mode(&w, states[i].derby ? GS_MODE_DESTRUCTION : GS_MODE_RACE);
+        gs_world_set_countdown(&w, states[i].counting ? 200u : 0u);
+
+        for (int frame = 0; frame < 3; frame++) {
+            cImGui_ImplSDLRenderer3_NewFrame();
+            cImGui_ImplSDL3_NewFrame();
+            ImGui_NewFrame();
+            for (uint8_t c = 0; c < views; c++) {
+                gs_hud_draw(&w, &t, &v[c], 600, states[i].waited,
+                            states[i].online);
+            }
+            ImGui_Render();
+        }
+
+        for (uint8_t c = 0; c < views; c++) {
+            char id[32];
+            SDL_snprintf(id, sizeof id, "##hud%u", v[c].car);
+            float x = 0.0f, y = 0.0f, pw = 0.0f, ph = 0.0f;
+            CHECK(gs_ui_probe_window_box(id, &x, &y, &pw, &ph));
+
+            const float left = (float)v[c].rect.x;
+            const float top = (float)v[c].rect.y;
+            const float right = left + (float)v[c].rect.w;
+            const float bottom = top + (float)v[c].rect.h;
+
+            measured++;
+            if (x >= left && y >= top && x + pw <= right && y + ph <= bottom) {
+                continue;
+            }
+            spilled++;
+            printf("  HUD OUT OF ITS VIEW  state %zu (%s%s%s%s) car %u: "
+                   "%.0f,%.0f %.0fx%.0f in a view %.0f,%.0f %dx%d - "
+                   "%.0f past the bottom, %.0f past the right (%s)\n",
+                   i, states[i].derby ? "derby " : "race ",
+                   states[i].wrecked ? "wrecked " : "",
+                   states[i].finished ? "finished " : "",
+                   states[i].counting ? "counting" : "", v[c].car,
+                   (double)x, (double)y, (double)pw, (double)ph,
+                   (double)left, (double)top, v[c].rect.w, v[c].rect.h,
+                   (double)(y + ph - bottom), (double)(x + pw - right),
+                   sizes[z].what);
+        }
+    }
+
+    }
+
+    printf("  HUD %d panels measured: %d states x %d views x %d window sizes\n",
+           measured, (int)SDL_arraysize(states), GS_MAX_CARS,
+           (int)SDL_arraysize(sizes));
+    CHECK(measured == (int)SDL_arraysize(states) * GS_MAX_CARS *
+                      (int)SDL_arraysize(sizes));
+    CHECK(spilled == 0);
+
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_countdown(&w, 0);
+
+    // **Back to the size the suite runs at.** The window is one thing shared by
+    // every test in this binary, and the ones that read a frame back index it
+    // as GS_W wide - so a test that resizes and does not put it back does not
+    // fail itself, it fails whatever runs next. That is what this one did to
+    // `a_start_line_and_a_finish_line_are_different_things`, five checks at
+    // once, in a test about chequered paint.
+    CHECK(SDL_SetWindowSize(gs_win, GS_W, GS_H));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, GS_W, GS_H,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
 }
 
 TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
@@ -9055,6 +9203,7 @@ int main(void) {
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
     run_the_condition_bar_stays_inside_the_hud(ren);
+    run_a_hud_stays_inside_the_view_it_belongs_to(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
     run_the_empty_seats_on_the_grid_are_filled_with_somebody(ren);
     run_an_opponent_finishes_every_track_that_ships_from_every_grid_slot(ren);

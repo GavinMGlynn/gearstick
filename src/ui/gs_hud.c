@@ -17,6 +17,10 @@
 // the widest thing in here.
 #define GS_HUD_W 132.0f
 
+// The condition bar, which is a shape rather than text and so has a height of
+// its own rather than one worked out from a line.
+#define GS_HUD_BAR 8.0f
+
 // How much bigger than the body text the two kinds of number are drawn.
 #define GS_HUD_BIG   2.2f
 #define GS_HUD_SMALL 1.5f
@@ -24,12 +28,19 @@
 // A number and what it is, the number large and the label small under it. The
 // eye reads the number at a glance and only reads the label the first time,
 // which is what the whole thing has to survive: it is looked at while driving.
+// **How much of its natural size this panel is being drawn at.** One for a HUD
+// with room for itself, less than one in a view too small for it - see
+// gs_hud_draw. Everything that sets a font scale multiplies by it, because
+// ImGui's window font scale is absolute rather than relative and a row setting
+// its own would otherwise undo the panel's.
+static float gs_hud_zoom = 1.0f;
+
 static void gs_hud_stat(const char *label, const char *value, float scale) {
     float x = ImGui_GetCursorPosX();
 
-    ImGui_SetWindowFontScale(scale);
+    ImGui_SetWindowFontScale(scale * gs_hud_zoom);
     ImGui_TextUnformatted(value);
-    ImGui_SetWindowFontScale(1.0f);
+    ImGui_SetWindowFontScale(gs_hud_zoom);
 
     ImGui_SetCursorPosX(x);
     float r, g, b;
@@ -46,7 +57,7 @@ static float gs_hud_room;
 // The damage bar. A number from 0 to 255 means nothing to a driver; a bar that
 // is running out means something immediately, and the colour says how worried to
 // be without anybody having to read it.
-static void gs_hud_damage(const gs_car *c, float width) {
+static void gs_hud_damage(const gs_car *c, float width, float bar) {
     float left = 1.0f - (float)c->damage / 255.0f;
     if (left < 0.0f) left = 0.0f;
 
@@ -56,7 +67,7 @@ static void gs_hud_damage(const gs_car *c, float width) {
     if (c->wrecked) tint = (ImVec4){ 0.60f, 0.16f, 0.16f, 1.0f };
 
     ImGui_PushStyleColorImVec4(ImGuiCol_PlotHistogram, tint);
-    ImGui_ProgressBar(left, (ImVec2){ width, 8.0f }, "");
+    ImGui_ProgressBar(left, (ImVec2){ width, bar }, "");
     ImGui_PopStyleColor();
 
     float r, g, b;
@@ -93,6 +104,71 @@ static void gs_hud_way_out(bool online) {
     ImGui_PopStyleColor();
 }
 
+// **The rows this panel is about to draw**, listed in the order it draws them.
+// The size and the contents are one list rather than two that have to be kept
+// in step - which they were not: every state was a little short, the plain one
+// by eleven pixels, and the wreck message by a whole line. What is drawn below
+// adds a row here, or the test that renders every state and asks what did not
+// fit will say so.
+typedef struct gs_hud_rows {
+    float bigs, smalls, gaps;
+    bool  finished, wrecked, waiting, online;
+} gs_hud_rows;
+
+// **What a line of text will actually measure.** ImGui bakes a font at whole
+// pixels and rounds a scaled size to get there, so a line asked for at 12.28
+// comes back at 12 - and a panel sized from the number it asked for is a pixel
+// per row too tall. Fifteen rows of that is fifteen pixels of nothing at the
+// bottom of the box, which is precisely what the test that watches for a hole
+// in this panel is for.
+static float gs_hud_line(float base, float scale) {
+    float h = SDL_roundf(base * scale);
+    return h < 1.0f ? 1.0f : h;
+}
+
+// **Every size it is built from is an argument.** Not for flexibility: it is
+// what lets the panel be fitted to a view too short for it. Halve the four and
+// the answer roughly halves - roughly, because of the rounding above - so the
+// fraction that fits is found by dividing and then stepping, rather than by the
+// panel spilling over the player below.
+static float gs_hud_height(const gs_hud_rows *r, float base, float zoom,
+                           float gap, float pad, float bar) {
+    const float body = gs_hud_line(base, zoom);
+    const float big = gs_hud_line(base, GS_HUD_BIG * zoom);
+    const float small = gs_hud_line(base, GS_HUD_SMALL * zoom);
+
+    const float row_big = big + body + gap * 2.0f;
+    const float row_small = small + body + gap * 2.0f;
+
+    float h = pad * 2.0f
+            + row_big * r->bigs
+            + row_small * r->smalls
+            + bar + gap * 2.0f + body     // the bar, labelled
+            + gap * r->gaps;
+    // A finished car's time, and the gap above it.
+    if (r->finished) h += row_small + gap;
+    // The one or two keys a wrecked driver is offered. Counted here rather than
+    // hoped for: a panel sized before its contents is how a button ends up half
+    // outside the box it is in.
+    if (r->wrecked) h += (body + gap) * (r->online ? 1.0f : 2.0f);
+    // And the race waiting for somebody: what is happening, how long it has
+    // been happening, and - when there is no wreck message already saying it -
+    // the way out.
+    if (r->waiting) {
+        h += gap + (body + gap) * 2.0f;
+        if (!r->wrecked) h += (body + gap) * (r->online ? 1.0f : 2.0f);
+    }
+    return h;
+}
+
+// The same, for a candidate fraction of full size: everything scales together,
+// so a smaller HUD is the same HUD rather than the same text in a squashed box.
+static float gs_hud_at(const gs_hud_rows *r, float base, const ImGuiStyle *st,
+                       float zoom) {
+    return gs_hud_height(r, base, zoom, st->ItemSpacing.y * zoom,
+                         st->WindowPadding.y * zoom, GS_HUD_BAR * zoom);
+}
+
 void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                  uint32_t tick, float waited, bool online) {
     if (w == nullptr || t == nullptr || v == nullptr) return;
@@ -113,60 +189,82 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
     // would be on screen for a player and absent from every capture, which is
     // both a verification that cannot work and a bug nobody would notice. The
     // same trap cost an afternoon on the editor's palette; see gs_menu.c.
-    float line = ImGui_GetTextLineHeight();
-    const ImGuiStyle *st = ImGui_GetStyle();
-
-    // **The rows this is about to draw, listed in the order it draws them.**
-    // The size and the contents are one list rather than two that have to be
-    // kept in step - which they were not: every state was a little short, the
-    // plain one by eleven pixels, and the wreck message by a whole line. What
-    // is drawn below adds a row here, or the test that renders every state and
-    // asks what did not fit will say so.
-    float row_big = line * GS_HUD_BIG + line + st->ItemSpacing.y * 2.0f;
-    float row_small = line * GS_HUD_SMALL + line + st->ItemSpacing.y * 2.0f;
-
-    // **A derby is not a race and its HUD is not the same size.** Where you are
-    // in the order, which lap it is, how long this one is taking and the best
-    // one so far are four rows about getting round a track, and "last one
-    // driving" is not about that. What it draws instead is one row - how many
-    // are left - so it is one row tall plus whatever the countdown is doing.
     const bool derby = w->mode == (uint8_t)GS_MODE_DESTRUCTION;
     const bool counting = gs_world_countdown(w) > 0;
 
-    const float bigs = derby ? 1.0f : 2.0f;      // still driving | position, lap
-    const float smalls = derby ? (counting ? 1.0f : 0.0f)   // get ready
-                               : 2.0f;                      // this lap, best
+    gs_hud_rows rows = {
+        // **A derby is not a race and its HUD is not the same size.** Where you
+        // are in the order, which lap it is, how long this one is taking and
+        // the best one so far are four rows about getting round a track, and
+        // "last one driving" is not about that. What it draws instead is one
+        // row - how many are left - so it is one row tall plus whatever the
+        // countdown is doing.
+        .bigs = derby ? 1.0f : 2.0f,          // still driving | position, lap
+        .smalls = derby ? (counting ? 1.0f : 0.0f)   // get ready
+                        : 2.0f,                       // this lap, best
+        .finished = c->finish_tick != 0,
+        .wrecked = c->wrecked,
+        .waiting = waited > 0.5f,
+        .online = online,
+    };
     // A gap before each small row and one before the bar. An ImGui_Spacing() is
     // an item of no height that still costs a gap, and forgetting them is the
     // whole of the twenty-nine pixels this panel was short in every state it
     // had. In a race there is a gap between the two big rows as well.
-    const float gaps = smalls + 1.0f + (derby ? 0.0f : 1.0f);
+    rows.gaps = rows.smalls + 1.0f + (derby ? 0.0f : 1.0f);
 
-    float height = st->WindowPadding.y * 2.0f
-                 + row_big * bigs
-                 + row_small * smalls
-                 + 8.0f + st->ItemSpacing.y * 2.0f + line   // the bar, labelled
-                 + st->ItemSpacing.y * gaps;
-    // A finished car's time, and the gap above it.
-    if (c->finish_tick != 0) height += row_small + st->ItemSpacing.y;
-    // The way out, when there is a wreck to need one. Counted here rather than
-    // hoped for: a panel sized before its contents is how a button ends up half
-    // outside the box it is in.
-    // The one or two keys a wrecked driver is offered.
-    if (c->wrecked) {
-        height += (line + st->ItemSpacing.y) * (online ? 1.0f : 2.0f);
-    }
-    // And the race waiting for somebody: what is happening, how long it has
-    // been happening, and - when there is no wreck message already saying it -
-    // the way out.
-    if (waited > 0.5f) {
-        height += st->ItemSpacing.y + (line + st->ItemSpacing.y) * 2.0f;
-        if (!c->wrecked) {
-            height += (line + st->ItemSpacing.y) * (online ? 1.0f : 2.0f);
+    // **And it has to fit the view it belongs to, which is not the window.**
+    //
+    // Every state of this panel was measured, and always in one view filling
+    // the whole screen. Four players do not get that: the window splits four
+    // ways and each view is a quarter of it. The HUD was sized from its rows
+    // and nothing else, so at four players it was 331 pixels tall in a view 358
+    // tall - and in six of its twelve states it was taller than that, drawn
+    // over the player below and reading them somebody else's lap time. **At the
+    // size the game opens at**, before anybody drags anything.
+    //
+    // ImGui clamps a window to the viewport, which is the whole screen. It has
+    // never heard of a view.
+    //
+    // So the panel is drawn at whatever fraction of itself fits. Every size it
+    // is built from scales together - the text, the gaps, the padding, the bar
+    // and the width - so a quarter-screen HUD is the same HUD smaller rather
+    // than the same text in a squashed box. There is no floor: the rule is that
+    // it stays inside its view, and a legibility floor would be a rule that
+    // holds until the window gets small enough to break it.
+    const float base = ImGui_GetTextLineHeight();
+    const ImGuiStyle *st = ImGui_GetStyle();
+
+    const float room = (float)v->rect.h - GS_HUD_PAD * 2.0f;
+    const float full = gs_hud_at(&rows, base, st, 1.0f);
+
+    gs_hud_zoom = 1.0f;
+    if (full > room && full > 0.0f) {
+        gs_hud_zoom = room / full;
+        // A hundredth at a time, because the rounding above means the fraction
+        // that fits is near the one the division gives and not always at it.
+        // Bounded, and it stops the moment it fits.
+        for (int i = 0; i < 100 && gs_hud_zoom > 0.05f &&
+                        gs_hud_at(&rows, base, st, gs_hud_zoom) > room; i++) {
+            gs_hud_zoom -= 0.01f;
         }
     }
 
-    ImGui_SetNextWindowSize((ImVec2){ GS_HUD_W, height }, ImGuiCond_Always);
+    float width = GS_HUD_W * gs_hud_zoom;
+    const float across = (float)v->rect.w - GS_HUD_PAD * 2.0f;
+    if (width > across) width = across;
+
+    const float height = gs_hud_at(&rows, base, st, gs_hud_zoom);
+
+    // Pushed before Begin, because a window's padding is read as it opens.
+    ImGui_PushStyleVarImVec2(ImGuiStyleVar_WindowPadding,
+                             (ImVec2){ st->WindowPadding.x * gs_hud_zoom,
+                                       st->WindowPadding.y * gs_hud_zoom });
+    ImGui_PushStyleVarImVec2(ImGuiStyleVar_ItemSpacing,
+                             (ImVec2){ st->ItemSpacing.x * gs_hud_zoom,
+                                       st->ItemSpacing.y * gs_hud_zoom });
+
+    ImGui_SetNextWindowSize((ImVec2){ width, height }, ImGuiCond_Always);
 
     // A window per view: ImGui keys its state by name, so two views sharing one
     // name would be one window drawn twice in the same place.
@@ -273,7 +371,8 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // style, whose window padding is twenty-two a side rather than the
         // eight assumed here, so the bar was twenty-eight pixels wider than the
         // panel it sits in and ran off the edge of it.
-        gs_hud_damage(c, ImGui_GetContentRegionAvail().x);
+        gs_hud_damage(c, ImGui_GetContentRegionAvail().x,
+                      GS_HUD_BAR * gs_hud_zoom);
 
         if (c->wrecked) gs_hud_way_out(online);
 
@@ -309,6 +408,8 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         if (gs_hud_room < 0.0f) gs_hud_room = 0.0f;
     }
     ImGui_End();
+    ImGui_PopStyleVar();
+    ImGui_PopStyleVar();
 }
 
 float gs_hud_overflow(void) { return gs_hud_hidden; }

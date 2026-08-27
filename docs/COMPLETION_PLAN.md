@@ -1894,3 +1894,16 @@ worth as much as what was decided about it.
       *Verification: all three platforms build and pass; running a test binary
       straight from the build directory, with nothing set in the environment,
       keeps its files inside the build tree and says where they went.*
+- [x] **Four players, and every HUD drawn over the player below.** *(Found by
+      measuring the HUD in the view it belongs to rather than in a window of its
+      own.)* Every state of it had been checked for fitting its box, and always
+      in one view filling the whole screen — but four players get a quarter of
+      the screen each, and at the size the game opens at six of the twelve
+      states were taller than the quarter they were drawn in, showing one
+      player another player's lap time. The panel is drawn at whatever fraction
+      of itself fits now: text, gaps, padding, bar and width all together, so a
+      small view gets the same HUD smaller rather than a squashed one.
+      *Verification: four cars in the four corners of a track, the screen split
+      four ways, and all twelve states of the HUD drawn in all four views at
+      both the size the game opens at and a smaller one — 96 panels, every one
+      of them inside the view it belongs to.*

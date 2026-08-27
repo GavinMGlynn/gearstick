@@ -5002,6 +5002,75 @@ of it - `gearstick_tests`, `gearstick_store_tests`, `gearstick_noise_tests` -
 because a binary with no SDL cannot call `gs_pref_dir`, and pulling SDL in to
 say so would break the layering the whole project rests on.
 
+## A HUD too big for the view it is in
+
+Every state of the HUD had been measured - twelve of them, race and derby,
+wrecked, waiting, finished - and asked both halves of the question: did anything
+fall off the bottom, and is there a hole where a row is not being drawn. All
+twelve were clean.
+
+**All twelve were measured in one view filling the whole window.** Four players
+do not get that. The window splits four ways and each view is a quarter of it,
+and the HUD was positioned inside its view and then sized from its rows and
+nothing else. At the size the game opens at, a quarter view is 638x358 and the
+plainest race HUD is 331 tall - and **six of the twelve states were taller than
+the view**, drawn straight over the player below and reading them somebody
+else's lap time. At 640x480 every one of the twelve overflowed, by up to 259
+pixels.
+
+ImGui clamps a window to the viewport, which is the whole screen. It has never
+heard of a view.
+
+### The panel is a fraction of itself now
+
+Not the text alone: the text, the gaps, the window padding, the condition bar
+and the width all scale together, so a quarter-screen HUD is the same HUD
+smaller rather than the same text in a squashed box. `gs_hud_height` takes every
+size it is built from as an argument, which is what makes that one call rather
+than a redesign.
+
+There is deliberately no legibility floor. The rule is that the panel stays
+inside its view, and a floor would be a rule that holds until somebody drags the
+window small enough to break it.
+
+### The pixel per row that ImGui rounds away
+
+The first attempt scaled the numbers and left a fourteen-pixel hole at the
+bottom of the box, which the existing test caught. **ImGui bakes a font at whole
+pixels**: a line asked for at 12.28 comes back at 12, measured rather than
+guessed at -
+
+```
+FONT base 13.0000
+FONT x0.9446  want 12.2798  got 12.0000
+FONT x0.7500  want  9.7500  got 10.0000
+FONT x2.2000  want 28.6000  got 29.0000
+```
+
+- so it rounds to nearest, and a panel sized from the number it *asked* for is a
+pixel per row too tall. Fifteen rows of that is the hole. `gs_hud_line` rounds
+the same way the renderer will, and because that makes the height not quite
+proportional to the fraction, the fraction is found by dividing and then
+stepping down a hundredth at a time until it fits.
+
+### The test, and the one it broke
+
+`a_hud_stays_inside_the_view_it_belongs_to` puts four cars in the four corners
+of a big track, splits the window four ways, and draws all twelve states in all
+four views **at both 1280x720 and 640x480**: 96 panels, each required to sit
+inside the view it belongs to. Named that way because a HUD outside its view is
+not a HUD that overflowed, it is a HUD in somebody else's screen.
+
+It also broke a test about chequered paint, which is worth writing down. The
+window is one object shared by every test in the binary, and the ones that read
+a frame back index it as `GS_W` wide - so a test that resizes and does not put
+the window back does not fail itself, it fails whatever runs next.
+`a_start_line_and_a_finish_line_are_different_things` lost five checks at once
+to a HUD test forty lines away. Every size-changing test puts the window back
+now.
+
+**No physics moved.** This is all `src/ui/`.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
