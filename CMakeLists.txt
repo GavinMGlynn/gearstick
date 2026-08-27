@@ -530,9 +530,18 @@ if(GEARSTICK_TESTS)
     # on the platform, so all three are pointed at a throwaway inside the build
     # tree. `tools/play_check.py` has always done this for the clients it
     # starts; the C tests had not.
+    #
+    # **And on macOS none of the three does anything.** SDL asks the platform
+    # where a user's things live and the platform answers from the password
+    # database, so the run wrote to the real `~/Library/Application Support` and
+    # `no_test_writes_where_a_player_keeps_their_things` went red there and
+    # nowhere else. GEARSTICK_PREF_DIR is read by `gs_pref_dir` itself and means
+    # the same thing on all three platforms; the other three stay because they
+    # also steer everything *else* that looks up a home directory.
     file(MAKE_DIRECTORY "${GS_TEST_HOME}")
+
     set(GS_TEST_SANDBOX
-        "XDG_DATA_HOME=${GS_TEST_HOME};HOME=${GS_TEST_HOME};APPDATA=${GS_TEST_HOME}")
+        "XDG_DATA_HOME=${GS_TEST_HOME};HOME=${GS_TEST_HOME};APPDATA=${GS_TEST_HOME};GEARSTICK_PREF_DIR=${GS_TEST_HOME}/prefs")
 
     set_tests_properties(gearstick PROPERTIES TIMEOUT 120
                          ENVIRONMENT "${GS_TEST_SANDBOX}")
@@ -743,6 +752,22 @@ if(GEARSTICK_TESTS)
         # most of a second here. A budget that fits locally and not on the
         # runner is a red tree that says nothing about the code.
         TIMEOUT 600)
+
+    # **And the binaries know it themselves**, so a test run straight from the
+    # build directory - which is what anybody debugging one does - lands in the
+    # same throwaway rather than in a player's files. See tests/gs_sandbox.h.
+    # Every test target, not only the ones that link the shell.
+    # Only the ones that link SDL: gearstick_tests, gearstick_store_tests and
+    # gearstick_noise_tests deliberately link none of it, and a binary with no
+    # SDL in it cannot call gs_pref_dir either, so there is nothing there to
+    # keep out of a player's files.
+    foreach(_t gearstick_render_tests gearstick_wire_tests
+               gearstick_server_tests gearstick_audio_tests)
+        if(TARGET ${_t})
+            target_compile_definitions(${_t} PRIVATE GS_TEST_HOME="${GS_TEST_HOME}")
+            target_include_directories(${_t} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+        endif()
+    endforeach()
 
     # A track through a real file, not just a buffer: the format is what a
     # shared track travels in, so "it round-trips in memory" is not the claim

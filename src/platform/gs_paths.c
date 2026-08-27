@@ -41,6 +41,32 @@ const char *gs_assets_dir(void) {
 const char *gs_pref_dir(void) {
     if (gs_prefs[0] != '\0') return gs_prefs;
 
+    // **Somewhere else, when something says so.**
+    //
+    // The suite presses every control in the construction set, and two of those
+    // controls save a track and the key bindings into the preferences
+    // directory. Pointing `HOME` at a throwaway inside the build tree keeps
+    // `ctest` out of a real player's files - on Linux. On macOS it does
+    // nothing: SDL asks the platform where a user's things live and the
+    // platform answers from the password database, not from the environment.
+    // So the run wrote to the actual `~/Library/Application Support`, and the
+    // test that says out loud where the suite is allowed to write went red on
+    // macOS and stayed red.
+    //
+    // An override that every platform reads the same way is the fix. A portable
+    // install can use it too - a copy on a memory stick that keeps its
+    // preferences beside itself.
+    const char *set = SDL_getenv("GEARSTICK_PREF_DIR");
+    if (set != nullptr && set[0] != '\0') {
+        size_t n = SDL_strlen(set);
+        bool ends = n > 0 && (set[n - 1] == '/' || set[n - 1] == '\\');
+        // With the trailing separator SDL_GetPrefPath promises, because
+        // everything that builds a filename from this appends straight onto it.
+        SDL_snprintf(gs_prefs, sizeof gs_prefs, "%s%s", set, ends ? "" : "/");
+        SDL_CreateDirectory(gs_prefs);
+        return gs_prefs;
+    }
+
     char *p = SDL_GetPrefPath("gearstick", "gearstick");
     if (p == nullptr) return nullptr;
 

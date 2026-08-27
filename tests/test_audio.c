@@ -14,6 +14,7 @@
 #include <SDL3/SDL.h>
 
 #include <stdio.h>
+#include "gs_sandbox.h"
 
 static int gs_failures = 0;
 static const char *gs_current = "";
@@ -477,6 +478,7 @@ TEST(the_music_and_the_race_together_still_fit_in_a_speaker) {
 }
 
 int main(void) {
+    gs_sandbox();
     printf("gearstick audio tests\n");
 
     // **No device, and not even a dummy one.** These tests call the same render

@@ -4946,6 +4946,62 @@ knowing it is there.
 
 **No physics moved.** The golden replay is untouched; this is all `src/ui/`.
 
+## CI was red on two platforms and nobody was looking
+
+`ctest` was green on this machine for four commits in a row while **every
+Windows build failed to compile and every macOS run failed a test.** The rule
+in CLAUDE.md is that a red tree stops everything; it says nothing about a tree
+that is only red somewhere else, and that is exactly the gap.
+
+### Windows: one cast, in a file the simulation lives in
+
+```c
+in &= (gs_input)~(unsigned)(GS_IN_LEFT | GS_IN_RIGHT);
+```
+
+`gs_input` is a byte. `~` on the promoted `int` makes a constant with the top
+twenty-four bits set, and casting that down to a byte truncates it - which is
+what was meant, and is warning C4310 to MSVC, and warnings are errors here. gcc
+and clang say nothing at all, so nothing on this machine could see it. The
+complement is taken inside the width it is stored in now.
+
+**Nothing on Windows built for four commits**, which also means none of the
+Windows tests ran, which means the only thing that would have caught anything
+*else* platform-specific was also off.
+
+### macOS: the sandbox that only works on Linux
+
+The suite presses every control in the construction set, two of which save a
+track and the key bindings into the preferences directory, so every test runs
+with `HOME`, `XDG_DATA_HOME` and `APPDATA` pointed at a throwaway inside the
+build tree - and `no_test_writes_where_a_player_keeps_their_things` says so out
+loud.
+
+On macOS none of those three does anything. SDL asks the platform where a user's
+things live and the platform answers from the password database, not from the
+environment. So the run wrote to the real `~/Library/Application Support` and
+the test that exists to catch exactly that went red there, correctly, and stayed
+red.
+
+`gs_pref_dir` reads `GEARSTICK_PREF_DIR` now, before it asks SDL anything. One
+override, the same meaning on all three platforms. A portable install - a copy
+on a memory stick keeping its preferences beside itself - gets it for free.
+
+### And the sandbox is in the binaries, not only in ctest
+
+The environment was set by `set_tests_properties`, which covers `ctest` and
+covers nothing else. **Running a test binary straight from the build directory
+is what anybody debugging one does**, all afternoon, and that run had no sandbox
+at all - which is how a player's `current.gstrack` and `controls.gsbind` came to
+be rewritten during this very session. They happened to be byte-identical to
+what the walk writes, which is the same luck the original fault had.
+
+`tests/gs_sandbox.h` sets the override from every test main that links SDL, with
+`overwrite` zero so CMake's choice still wins. Not from the ones that link none
+of it - `gearstick_tests`, `gearstick_store_tests`, `gearstick_noise_tests` -
+because a binary with no SDL cannot call `gs_pref_dir`, and pulling SDL in to
+say so would break the layering the whole project rests on.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

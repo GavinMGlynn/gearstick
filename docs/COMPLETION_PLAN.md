@@ -1882,3 +1882,15 @@ worth as much as what was decided about it.
       apart in both directions, and the test says how many controls it covered
       and how many sit inside lists that scroll themselves. It named four before
       the fix and none after.*
+- [x] **The build was broken on Windows and macOS for four commits.** *(Found by
+      looking at CI rather than at `ctest`.)* Locally green the whole time: one
+      cast in the driver that MSVC refuses and gcc and clang accept without a
+      word, so nothing on Windows compiled at all; and a test sandbox built out
+      of `HOME` and friends, which is how Linux decides where a player's files
+      live and is not how macOS decides, so the suite wrote to a real
+      preferences directory there. The game reads one setting for that now,
+      which means the same thing on all three platforms, and the test binaries
+      set it themselves rather than relying on being launched by `ctest`.
+      *Verification: all three platforms build and pass; running a test binary
+      straight from the build directory, with nothing set in the environment,
+      keeps its files inside the build tree and says where they went.*

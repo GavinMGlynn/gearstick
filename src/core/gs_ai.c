@@ -424,7 +424,14 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
         // and it arrives with its nose already pointed along the wall.
         const bool left = (in & GS_IN_LEFT) != 0;
         const bool right = (in & GS_IN_RIGHT) != 0;
-        in &= (gs_input)~(unsigned)(GS_IN_LEFT | GS_IN_RIGHT);
+        // Complemented inside the width it is going to be stored in. A `~` on
+        // a promoted int makes a constant with the top twenty-four bits set,
+        // and casting that back down to the byte `gs_input` is truncates it -
+        // which is exactly what was meant and is also, to MSVC, warning C4310,
+        // and warnings are errors here. **Every Windows build failed to
+        // compile for four commits on that one cast**, and nothing on this
+        // machine could see it: gcc and clang say nothing at all.
+        in &= (gs_input)(0xFFu & ~(unsigned)(GS_IN_LEFT | GS_IN_RIGHT));
         if (left) in |= GS_IN_RIGHT;
         else if (right) in |= GS_IN_LEFT;
     }

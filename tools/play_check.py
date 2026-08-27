@@ -105,6 +105,10 @@ def quiet_env(store_dir):
     env["XDG_DATA_HOME"] = store_dir
     env["HOME"] = store_dir
     env["APPDATA"] = store_dir
+    # And the one the game reads itself, because on macOS none of the three
+    # above moves the preferences directory: SDL asks the platform, and the
+    # platform answers from the password database rather than the environment.
+    env["GEARSTICK_PREF_DIR"] = os.path.join(store_dir, "prefs")
     return env
 
 

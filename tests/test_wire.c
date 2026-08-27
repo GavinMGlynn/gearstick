@@ -14,6 +14,7 @@
 #include <SDL3_net/SDL_net.h>
 
 #include <stdio.h>
+#include "gs_sandbox.h"
 
 static int gs_failures = 0;
 static const char *gs_current = "";
@@ -370,6 +371,7 @@ TEST(a_name_that_does_not_resolve_says_so_rather_than_hanging) {
 }
 
 int main(void) {
+    gs_sandbox();
     printf("gearstick wire tests\n");
 
     run_two_processes_on_one_machine_race_over_real_sockets();

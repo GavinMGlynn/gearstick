@@ -23,6 +23,7 @@
 #include <SDL3_net/SDL_net.h>
 
 #include <stdio.h>
+#include "gs_sandbox.h"
 
 static int gs_failures = 0;
 static const char *gs_current = "";
@@ -2454,6 +2455,7 @@ TEST(a_published_track_is_browsable_from_another_client_and_can_be_taken_down) {
 }
 
 int main(void) {
+    gs_sandbox();
     printf("gearstick server tests\n");
 
     if (!SDL_Init(0) || !NET_Init()) {

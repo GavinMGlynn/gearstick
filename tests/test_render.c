@@ -34,6 +34,7 @@
 #include "dcimgui.h"
 #include "backends/dcimgui_impl_sdl3.h"
 #include "backends/dcimgui_impl_sdlrenderer3.h"
+#include "gs_sandbox.h"
 
 #define GS_W 640
 #define GS_H 480
@@ -8958,6 +8959,7 @@ TEST(exit_is_something_the_menu_asks_for_rather_than_does) {
 }
 
 int main(void) {
+    gs_sandbox();
     printf("gearstick renderer tests\n");
 
     // No display anywhere in this: the dummy driver and the software renderer
