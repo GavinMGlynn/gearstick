@@ -2125,15 +2125,17 @@ computer never uses any of it.
       states now rather than twelve: every state with weapons and without,
       across two, three and four players at two window sizes, 432 panels, each
       inside its own view with no hole in it.*
-- [ ] **Opponents that use what they are carrying.** `gs_ai_drive` never presses
+- [x] **Opponents that use what they are carrying.** `gs_ai_drive` never presses
       the button, so a derby against the computer is one armed human and three
       unarmed cars. The driver needs a rule for when leaving something behind is
       worth it — roughly, when somebody is close behind.
-      *Verification: an opponent carrying weapons drops them during a race and
-      one carrying none drops nothing; it does not drop them where they cannot
-      help; and the whole grid armed and racing still finishes. Moves the
-      opponents hash, deliberately — that number exists to move when the driver
-      changes.*
+      *Verification: an opponent with somebody right behind it leaves things on
+      the road; the same opponent with the road behind it empty leaves fewer;
+      one carrying nothing leaves none at all. Four armed drivers racing each
+      other still get round rather than paving the track and stopping.*
+      *And the opponents hash did **not** move, which is better than expected:
+      carrying nothing is pressing nothing, so a race with the weapons off is
+      exactly the race it was before.*
 
 ## Phase 20 — The four-player camera, when it cannot merge
 

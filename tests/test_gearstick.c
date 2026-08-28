@@ -3178,6 +3178,104 @@ TEST(a_quicker_driver_carries_more_speed_through_the_same_corner) {
           gs_ai_skill_margin(GS_AI_SKILL_STEPS));
 }
 
+// Race an AI round the circuit for a while with somebody either right behind it
+// or nowhere near, and report how much it left on the road.
+static uint8_t gs_ai_dropped(bool armed, bool chased, uint32_t seconds) {
+    static gs_track t;
+    gs_circuit(&t, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(15), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(15), 0);
+    if (armed) {
+        gs_world_arm(&w, GS_HAZ_OIL, 9);
+        gs_world_arm(&w, GS_HAZ_MINE, 9);
+    }
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * seconds; i++) {
+        // Car one is not driven: it is put where the test wants it, every tick,
+        // so "somebody is behind" is a fact about the situation rather than
+        // something that has to be raced into existence.
+        const gs_car *ai = &w.car[0];
+        const gs_fix ch = gs_cos(ai->heading), sh = gs_sin(ai->heading);
+        const gs_fix reach = chased ? GS_INT(3) : GS_INT(40);
+        const gs_fix sign = chased ? -GS_ONE : GS_ONE;   // behind, or far ahead
+        w.car[1].x = ai->x + gs_fix_mul(gs_fix_mul(ch, reach), sign);
+        w.car[1].y = ai->y + gs_fix_mul(gs_fix_mul(sh, reach), sign);
+        w.car[1].heading = ai->heading;
+
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &t, 0), 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    return w.hazard_count;
+}
+
+TEST(an_opponent_leaves_something_for_whoever_is_behind_it) {
+    // **No opponent had ever dropped anything.** gs_ai_drive never pressed the
+    // button, so a derby against the computer was one armed human and three
+    // cars that could only ram. The weapon is the reason the second mode works
+    // - you cannot shoot forwards, so hurting somebody means getting in front
+    // of them and staying there, which is a race.
+    const uint8_t chased = gs_ai_dropped(true, true, 12);
+    if (chased == 0) {
+        printf("  AI dropped nothing with somebody right behind it\n");
+    }
+    CHECK(chased > 0);
+
+    // **And not when there is nobody to leave it for.** A driver paving the
+    // track behind an empty road wastes what it has by the second lap.
+    const uint8_t alone = gs_ai_dropped(true, false, 12);
+    if (alone >= chased) {
+        printf("  AI dropped %u alone against %u when chased\n", alone, chased);
+    }
+    CHECK(alone < chased);
+
+    // **Carrying nothing is pressing nothing.** This is what keeps a race with
+    // the weapons turned off exactly the race it was before opponents could
+    // use them - and it is why the opponents hash did not move.
+    CHECK(gs_ai_dropped(false, true, 12) == 0);
+}
+
+TEST(a_grid_of_armed_opponents_still_finishes_a_race) {
+    // Four drivers, all armed, all dropping on each other. The thing worth
+    // checking is that the race still ends: a track being paved with mines by
+    // its own competitors is exactly the situation where nobody gets round.
+    static gs_track t;
+    gs_circuit(&t, GS_SURF_PAVEMENT);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    for (int i = 0; i < GS_MAX_CARS; i++) {
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR,
+                         GS_INT(20) + GS_INT(i * 2), GS_INT(15), 0);
+    }
+    gs_world_arm(&w, GS_HAZ_OIL, 9);
+    gs_world_arm(&w, GS_HAZ_MINE, 9);
+    gs_world_set_laps(&w, 2);
+
+    uint32_t moving = 0;
+    for (uint32_t i = 0; i < GS_TICK_HZ * 90 && !w.over; i++) {
+        gs_input in[GS_MAX_CARS];
+        for (uint8_t c = 0; c < GS_MAX_CARS; c++) in[c] = gs_ai_drive(&w, &t, c);
+        gs_world_step(&w, &t, in);
+        for (uint8_t c = 0; c < GS_MAX_CARS; c++) {
+            if (gs_car_speed(&w.car[c]) > GS_INT(1)) moving++;
+        }
+    }
+
+    // They dropped things, they kept driving, and somebody got round.
+    CHECK(w.hazard_count > 0);
+    CHECK(moving > GS_TICK_HZ * 30);
+    uint16_t best = 0;
+    for (uint8_t c = 0; c < GS_MAX_CARS; c++) {
+        if (w.car[c].laps > best) best = w.car[c].laps;
+    }
+    printf("  AI four armed drivers, %u hazards down, best %u laps\n",
+           w.hazard_count, best);
+    CHECK(best >= 1);
+}
+
 TEST(an_ai_race_is_deterministic_like_every_other_race) {
     static gs_track t;
     gs_circuit(&t, GS_SURF_DIRT);
@@ -8037,6 +8135,8 @@ int main(void) {
     run_the_same_corner_is_braked_for_differently_under_different_gravity();
     run_the_same_corner_is_braked_for_differently_in_a_different_car();
     run_a_quicker_driver_carries_more_speed_through_the_same_corner();
+    run_an_opponent_leaves_something_for_whoever_is_behind_it();
+    run_a_grid_of_armed_opponents_still_finishes_a_race();
     run_an_ai_race_is_deterministic_like_every_other_race();
     run_the_analyser_calls_a_jump_nobody_can_clear_impossible();
     run_the_analyser_says_so_when_a_track_cannot_be_got_round_at_all();

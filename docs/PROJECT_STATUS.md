@@ -5699,8 +5699,19 @@ any**, and a race without them hashes exactly the way it always did.
   `gs_replay_restore`, so the conditions it recomputes now match the ones the
   client filed the claim under. Without this a perfectly honest claim from a
   weapons race would have been rejected for not arriving where it said.
-- **No opponent has ever dropped anything.** `gs_ai_drive` never sets
-  `GS_IN_FIRE`, so in a derby against the computer only the human is armed.
+- ~~No opponent has ever dropped anything.~~ **Done.** A driver leaves something
+  behind when somebody is within seven tiles *and behind it*, which is the whole
+  reason the weapon is worth having: you cannot shoot forwards, so hurting
+  somebody means getting in front of them and staying there, and that is a race.
+
+  **Once every forty ticks, not while the condition holds.** The button drops on
+  release and changes the selection when held, so a driver that simply held it
+  down would cycle through its weapons and never leave one - the shape of the
+  control, not a detail of it.
+
+  And the opponents hash did *not* move, which is better than the plan expected:
+  carrying nothing is pressing nothing, so a race with the weapons off is
+  bit-for-bit the race it was.
 - ~~Nothing draws smoke or fire.~~ **Done.** The renderer knew two kinds - oil,
   and a small orange dot for everything else - so smoke and fire looked like
   mines, and smoke, whose entire job is hiding the ground, hid nothing. Four

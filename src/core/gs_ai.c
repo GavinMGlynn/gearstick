@@ -47,6 +47,39 @@ gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
     return gs_ai_drive_style(w, t, car, st);
 }
 
+// **How close somebody has to be behind for it to be worth leaving something.**
+// Seven tiles: near enough that they will drive into it before they can see it
+// coming, far enough that it is not the same as being rammed.
+#define GS_AI_DROP_RANGE GS_INT(7)
+
+// One tick in forty, so the press is a *tap*. The button drops on release and
+// changes the selection when held, so a driver that simply holds it down while
+// somebody is behind would cycle through its weapons and never leave one -
+// which is the shape of the control, not a detail of it.
+#define GS_AI_DROP_EVERY 40u
+
+// **Is anybody close behind?** You cannot shoot forwards, so hurting somebody
+// means getting in front of them and staying there. That is a race, and it is
+// the whole reason the weapon is worth having.
+static bool gs_ai_hunted(const gs_world *w, uint8_t car) {
+    const gs_car *me = &w->car[car];
+    const gs_fix ch = gs_cos(me->heading);
+    const gs_fix sh = gs_sin(me->heading);
+
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        if (i == car) continue;
+        const gs_car *o = &w->car[i];
+        if (!o->active || o->wrecked) continue;
+
+        const gs_fix dx = o->x - me->x, dy = o->y - me->y;
+        if (gs_fix_len2(dx, dy) > GS_AI_DROP_RANGE) continue;
+
+        // Behind: the direction they lie in is against the way this car faces.
+        if (gs_fix_mul(dx, ch) + gs_fix_mul(dy, sh) < 0) return true;
+    }
+    return false;
+}
+
 gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
                            gs_ai_style style) {
     const gs_fix margin = style.margin;
@@ -438,6 +471,15 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
 
     if (must_brake || blocked) in |= GS_IN_BRAKE;
     else in |= GS_IN_ACCEL;
+
+    // **And leave something behind, if there is anybody to leave it for.**
+    // Nothing carried is nothing pressed, so a race with the weapons off is
+    // exactly the race it was before opponents could use them - the button is
+    // never touched and the world never differs by a bit.
+    if (gs_car_selected(c) != GS_HAZ_NONE &&
+        (w->tick % GS_AI_DROP_EVERY) == 0 && gs_ai_hunted(w, car)) {
+        in |= GS_IN_FIRE;
+    }
 
     return in;
 }
