@@ -5882,8 +5882,17 @@ and the test fails if it ever has to be forced.
 
 What that test proves depends on the platform, and it says so rather than
 hiding it: where there are signals, asking is `SIGTERM` and this is the handler
-working; on Windows, asking is `TerminateProcess` and all it shows is that the
-process ends.
+working.
+
+**On Windows it does not work at all, which CI found and is worth recording.**
+SDL's gentle kill there is not a console control event the CRT turns into a
+signal, so nothing reaches the handler and the process has to be terminated.
+Ctrl+C in a console still stops the server - the CRT does deliver that as
+`SIGINT` - so what is missing is one *program* asking another to stop, which is
+what a service manager does. The test asserts what is true there (it ends, and
+quickly) rather than asserting the path as if it held, and the Windows stop goes
+straight to insisting: waiting two seconds first, for each of twenty-six tests,
+is fifty seconds of nothing.
 
 **The dashboard had never been drawn by anything.** Fifty-nine lines - the
 server's only user interface - at zero, while twenty-six tests hammered it.
