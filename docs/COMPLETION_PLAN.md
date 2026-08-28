@@ -2113,14 +2113,18 @@ computer never uses any of it.
       one. Fire is heard while it burns and fades once it is out, rather than
       stopping dead. And four cars dropping and detonating on top of four
       engines still fits in a speaker, on every ground and in every machine.*
-- [ ] **The HUD says what you are carrying.** The control is explained once, on
+- [x] **The HUD says what you are carrying.** The control is explained once, on
       the setup screen, and never again — and there is nothing on screen saying
       which weapon a tap would drop or how many are left. A hold that silently
       changes something invisible is not a control.
-      *Verification: the row appears only in a race with weapons in it, names
-      the selected kind and its count, changes when the selection changes, and
-      the panel still fits its view at every player count and both window sizes
-      — the rule the HUD is already held to.*
+      *Verification: the row appears only when there is something to carry and
+      goes when the last one is spent, rather than sitting there saying zero. It
+      names every kind by the name the setup screen used — one list, so the
+      screen you choose on and the screen you race on cannot drift apart — and
+      counts down as they are used. And the panel is measured in all twenty-four
+      states now rather than twelve: every state with weapons and without,
+      across two, three and four players at two window sizes, 432 panels, each
+      inside its own view with no hole in it.*
 - [ ] **Opponents that use what they are carrying.** `gs_ai_drive` never presses
       the button, so a derby against the computer is one armed human and three
       unarmed cars. The driver needs a rule for when leaving something behind is

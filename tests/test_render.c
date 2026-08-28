@@ -3763,7 +3763,18 @@ TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
         { true,  false, 3.0f,  true,  true,  false },
     };
 
-    for (size_t i = 0; i < SDL_arraysize(states); i++) {
+    // **And each of them with and without weapons**, because carrying
+    // something adds a row and the panel is sized from the rows it has. Walked
+    // as a dimension rather than as six more hand-written states: it is
+    // independent of every other flag here, and hand-picking combinations is
+    // how a state goes unmeasured.
+    for (size_t si = 0; si < SDL_arraysize(states) * 2; si++) {
+        const size_t i = si % SDL_arraysize(states);
+        const bool carrying = si >= SDL_arraysize(states);
+
+        for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+            gs_world_arm(&w, (gs_hazard_kind)k, carrying ? 3 : 0);
+        }
         w.car[0].wrecked = states[i].wrecked;
         w.car[0].damage = states[i].wrecked ? 255 : 0;
         w.car[0].finish_tick = states[i].finished ? 4200 : 0;
@@ -3786,7 +3797,8 @@ TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
         gs_frame_free(&f);
 
         if (gs_hud_overflow() != 0.0f) {
-            printf("  HUD state %zu (%s%s%s%s) hides %.0f\n", i,
+            printf("  HUD state %zu (%s%s%s%s%s) hides %.0f\n", i,
+                   carrying ? "carrying " : "",
                    states[i].derby ? "derby " : "race ",
                    states[i].wrecked ? "wrecked " : "",
                    states[i].finished ? "finished " : "",
@@ -3801,8 +3813,9 @@ TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
         // the room left under the last thing drawn.
         const float spare = gs_hud_spare();
         if (spare > 12.0f) {
-            printf("  HUD state %zu (%s%s%s%s) has %.0f pixels of nothing at "
-                   "the bottom\n", i, states[i].derby ? "derby " : "race ",
+            printf("  HUD state %zu (%s%s%s%s%s) has %.0f pixels of nothing at "
+                   "the bottom\n", i, carrying ? "carrying " : "",
+                   states[i].derby ? "derby " : "race ",
                    states[i].wrecked ? "wrecked " : "",
                    states[i].finished ? "finished " : "",
                    states[i].counting ? "counting" : "", (double)spare);
@@ -3900,7 +3913,12 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
     CHECK(views == cars);
     if (views != cars) return;
 
-    for (size_t i = 0; i < SDL_arraysize(states); i++) {
+    for (size_t si = 0; si < SDL_arraysize(states) * 2; si++) {
+        const size_t i = si % SDL_arraysize(states);
+        const bool carrying = si >= SDL_arraysize(states);
+        for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+            gs_world_arm(&w, (gs_hazard_kind)k, carrying ? 3 : 0);
+        }
         for (uint8_t c = 0; c < cars; c++) {
             w.car[c].wrecked = states[i].wrecked;
             w.car[c].damage = states[i].wrecked ? 255 : 0;
@@ -3937,10 +3955,11 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
             }
             spilled++;
             printf("  HUD OUT OF ITS VIEW  %u players, state %zu "
-                   "(%s%s%s%s) car %u: "
+                   "(%s%s%s%s%s) car %u: "
                    "%.0f,%.0f %.0fx%.0f in a view %.0f,%.0f %dx%d - "
                    "%.0f past the bottom, %.0f past the right (%s)\n",
-                   cars, i, states[i].derby ? "derby " : "race ",
+                   cars, i, carrying ? "carrying " : "",
+                   states[i].derby ? "derby " : "race ",
                    states[i].wrecked ? "wrecked " : "",
                    states[i].finished ? "finished " : "",
                    states[i].counting ? "counting" : "", v[c].car,
@@ -3955,10 +3974,10 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
     }
 
     // Two, three and four players: 2 + 3 + 4 views for each state and size.
-    printf("  HUD %d panels measured: %d states x (2+3+4) views x %d window "
-           "sizes\n", measured, (int)SDL_arraysize(states),
-           (int)SDL_arraysize(sizes));
-    CHECK(measured == (int)SDL_arraysize(states) * (2 + 3 + 4) *
+    printf("  HUD %d panels measured: %d states, each with and without weapons, "
+           "x (2+3+4) views x %d window sizes\n", measured,
+           (int)SDL_arraysize(states), (int)SDL_arraysize(sizes));
+    CHECK(measured == (int)SDL_arraysize(states) * 2 * (2 + 3 + 4) *
                       (int)SDL_arraysize(sizes));
     CHECK(spilled == 0);
 
@@ -9675,6 +9694,20 @@ TEST(every_control_is_known_by_name_and_answers_to_it) {
     }
 }
 
+// The HUD, drawn and nothing else, so what it says can be read back.
+static void gs_hud_frame_only(SDL_Renderer *ren, const gs_track *t,
+                              const gs_world *w, const gs_view *v) {
+    for (int frame = 0; frame < 3; frame++) {
+        cImGui_ImplSDLRenderer3_NewFrame();
+        cImGui_ImplSDL3_NewFrame();
+        ImGui_NewFrame();
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+        SDL_RenderClear(ren);
+        gs_hud_draw(w, t, v, 600, 0.0f, false);
+        ImGui_Render();
+    }
+}
+
 // One frame of a screen with its panel put at a given scroll position, and
 // everything that frame drew.
 static int gs_reach_at(gs_ui *ui, gs_screen hold, const char *window,
@@ -9691,6 +9724,76 @@ static int gs_reach_at(gs_ui *ui, gs_screen hold, const char *window,
     return n;
 }
 
+
+TEST(the_hud_says_what_you_are_carrying_and_only_when_you_are) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    // **A hold that changes something invisible is not a control.** The tap and
+    // hold is explained once, on the setup screen, which is gone by the time
+    // anybody is driving - so the screen has to say what a tap would leave and
+    // how many are left, or half the button is a secret.
+    //
+    // Read back through gs_hud_carrying rather than the item probe: the HUD is
+    // plain text and ImGui names the widgets a person presses, not the words it
+    // prints. Same reason gs_hud_overflow and gs_hud_spare exist.
+    static gs_track t;
+    gs_flat_pavement(&t, 24, 12);
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(6), GS_INT(6), 0);
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    gs_render_track_camera(&v, &t, &w, &w, 1.0f);
+
+    // Carrying nothing: no row at all, rather than a row that says nothing.
+    gs_hud_frame_only(ren, &t, &w, &v);
+    CHECK(gs_hud_carrying()[0] == '\0');
+
+    // **Every kind, named the way the setup screen named it.** One list, so the
+    // screen you choose on and the screen you race on cannot drift apart.
+    int walked = 0;
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        for (int j = GS_HAZ_NONE + 1; j < GS_HAZ_COUNT; j++) {
+            gs_world_arm(&w, (gs_hazard_kind)j, j == k ? 3 : 0);
+        }
+        CHECK(gs_car_selected(&w.car[0]) == (gs_hazard_kind)k);
+
+        gs_hud_frame_only(ren, &t, &w, &v);
+        const char *said = gs_hud_carrying();
+        if (SDL_strstr(said, gs_hazard_name((gs_hazard_kind)k)) == nullptr ||
+            SDL_strstr(said, "3") == nullptr) {
+            printf("  HUD said '%s' while carrying three %s\n", said,
+                   gs_hazard_name((gs_hazard_kind)k));
+        }
+        CHECK(SDL_strstr(said, gs_hazard_name((gs_hazard_kind)k)) != nullptr);
+        CHECK(SDL_strstr(said, "3") != nullptr);
+        walked++;
+    }
+    printf("  HUD names all %d kinds it can be carrying\n", walked);
+    CHECK(walked == GS_HAZ_COUNT - 1);
+
+    // The count follows what is left, so a driver knows when the last one is
+    // the last one.
+    for (int j = GS_HAZ_NONE + 1; j < GS_HAZ_COUNT; j++) {
+        gs_world_arm(&w, (gs_hazard_kind)j, j == GS_HAZ_MINE ? 1 : 0);
+    }
+    gs_hud_frame_only(ren, &t, &w, &v);
+    CHECK(SDL_strstr(gs_hud_carrying(), "mines") != nullptr);
+    CHECK(SDL_strstr(gs_hud_carrying(), "1") != nullptr);
+
+    // And spent, the row goes rather than sitting there saying zero.
+    w.car[0].drop_cooldown = 0;
+    CHECK(gs_world_drop(&w, 0, GS_HAZ_MINE));
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_NONE);
+    gs_hud_frame_only(ren, &t, &w, &v);
+    CHECK(gs_hud_carrying()[0] == '\0');
+}
 
 TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
     // **The fault this was written for, and the one that hid it.** At six
@@ -10258,6 +10361,7 @@ int main(void) {
     run_every_value_of_every_dial_is_pressed_not_three_interesting_ones(ren);
     run_the_walk_goes_as_deep_as_the_front_end_does(ren);
     run_every_control_is_known_by_name_and_answers_to_it(ren);
+    run_the_hud_says_what_you_are_carrying_and_only_when_you_are(ren);
     run_at_the_smallest_window_every_control_can_be_scrolled_to(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);

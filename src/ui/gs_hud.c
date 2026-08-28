@@ -54,6 +54,9 @@ static void gs_hud_stat(const char *label, const char *value, float scale) {
 static float gs_hud_hidden = 0.0f;
 static float gs_hud_room;
 
+// And what the carrying row said - see gs_hud_carrying.
+static char gs_hud_carried[32];
+
 // The damage bar. A number from 0 to 255 means nothing to a driver; a bar that
 // is running out means something immediately, and the colour says how worried to
 // be without anybody having to read it.
@@ -113,6 +116,13 @@ static void gs_hud_way_out(bool online) {
 typedef struct gs_hud_rows {
     float bigs, smalls, gaps;
     bool  finished, wrecked, waiting, online;
+
+    // **What this car is carrying**, when it is carrying anything. A race with
+    // the weapons off does not get the row at all, rather than getting a row
+    // that says nothing - the panel is sized from the rows it has, and a row
+    // that exists for every race and means something in one of them is a hole
+    // in all the others.
+    bool  carrying;
 } gs_hud_rows;
 
 // **What a line of text will actually measure.** ImGui bakes a font at whole
@@ -145,6 +155,17 @@ static float gs_hud_height(const gs_hud_rows *r, float base, float zoom,
             + row_small * r->smalls
             + bar + gap * 2.0f + body     // the bar, labelled
             + gap * r->gaps;
+    // **What it is carrying.** Its own height and no gap after it - unlike the
+    // finished row below, which costs a gap more because it is the last thing
+    // on the panel and ImGui's content ends at the last item rather than after
+    // the spacing that would follow it.
+    //
+    // Measured rather than derived. `gs_hud_spare` reports what the panel has
+    // left over and the test fails on a hole, so the arithmetic here is checked
+    // against what actually got drawn in all twenty-four states - which is how
+    // this row was caught costing a gap too much in exactly the three where
+    // somebody is waiting.
+    if (r->carrying) h += row_small;
     // A finished car's time, and the gap above it.
     if (r->finished) h += row_small + gap;
     // The one or two keys a wrecked driver is offered. Counted here rather than
@@ -203,6 +224,7 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         .smalls = derby ? (counting ? 1.0f : 0.0f)   // get ready
                         : 2.0f,                       // this lap, best
         .finished = c->finish_tick != 0,
+        .carrying = gs_car_selected(c) != GS_HAZ_NONE,
         .wrecked = c->wrecked,
         .waiting = waited > 0.5f,
         .online = online,
@@ -374,6 +396,20 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         gs_hud_damage(c, ImGui_GetContentRegionAvail().x,
                       GS_HUD_BAR * gs_hud_zoom);
 
+        // **What a tap would leave, and how many are left.** Without this the
+        // hold that changes the selection changes something invisible, which is
+        // not a control - and the setup screen, which is the only other place
+        // it is said, is gone by the time anybody is driving.
+        gs_hud_carried[0] = '\0';
+        if (rows.carrying) {
+            ImGui_Spacing();
+            const gs_hazard_kind sel = gs_car_selected(c);
+            SDL_snprintf(text, sizeof text, "%s %u",
+                         gs_hazard_name(sel), gs_car_ammo(c, sel));
+            gs_hud_stat("carrying", text, GS_HUD_SMALL);
+            SDL_snprintf(gs_hud_carried, sizeof gs_hud_carried, "%s", text);
+        }
+
         if (c->wrecked) gs_hud_way_out(online);
 
         // **Waiting, and for how long.** Half a second of it is a bad moment on
@@ -411,6 +447,8 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
     ImGui_PopStyleVar();
     ImGui_PopStyleVar();
 }
+
+const char *gs_hud_carrying(void) { return gs_hud_carried; }
 
 float gs_hud_overflow(void) { return gs_hud_hidden; }
 float gs_hud_spare(void) { return gs_hud_room; }

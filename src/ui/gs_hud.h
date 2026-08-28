@@ -52,4 +52,11 @@ float gs_hud_overflow(void);
 // race - and no amount of asking what fell off the bottom can see it.
 float gs_hud_spare(void);
 
+// **What the carrying row said last time it was drawn**, or an empty string
+// when there was no row. Reported the same way and for the same reason as the
+// two above: the HUD is plain text, and ImGui names the widgets a person
+// presses rather than the words it prints - so what this panel *says* cannot be
+// read back from the item hooks, only from here.
+const char *gs_hud_carrying(void);
+
 #endif // GS_HUD_H

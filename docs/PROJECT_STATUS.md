@@ -5763,6 +5763,43 @@ to hide in. Worth writing down that the local clang build cannot catch this
 class: MSVC's flow analysis is stricter than either compiler here, and the only
 place that runs is CI.
 
+## The HUD says what you are carrying
+
+A hold that changes something invisible is not a control. The tap-and-hold is
+explained once, on the setup screen, which is gone by the time anybody is
+driving - so the screen has to say what a tap would leave and how many are left.
+
+One small row, and **only when there is something to carry**: a race with the
+weapons off does not get a row that says nothing, because the panel is sized
+from the rows it has and a row that means something in one race and nothing in
+every other is a hole in all the others. It goes when the last one is spent
+rather than sitting there saying zero.
+
+It names each kind with `gs_hazard_name`, the same call the setup screen uses,
+so the screen you choose on and the screen you race on cannot drift apart.
+
+### Read back the way the HUD already reports itself
+
+The item probe names the widgets a person *presses*; the HUD is plain text, so
+what it says cannot be read from the hooks at all. `gs_hud_carrying` reports the
+row's text the same way `gs_hud_overflow` and `gs_hud_spare` already report what
+did not fit and what was left over - which is the established shape here, and it
+is why those two exist.
+
+### Twelve states became twenty-four
+
+Carrying something adds a row, so every HUD state is measured with weapons and
+without. Walked as a dimension rather than as six more hand-written states: it
+is independent of every other flag, and hand-picking combinations is how a state
+goes unmeasured. **432 panels** across two, three and four players at two window
+sizes, each inside its own view with no hole in it.
+
+It found one immediately. The row cost a gap too much in exactly the three
+states where somebody is waiting - the last row on a panel pays for a gap the
+others do not, because ImGui's content ends at the last item rather than after
+the spacing that would follow it. Measured against `gs_hud_spare` rather than
+derived, which is what that number is for.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
