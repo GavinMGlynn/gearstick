@@ -665,6 +665,12 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       renders the mixer from its own thread with no device at all, deliberately,
       so that the answers are deterministic. A device is opened and fed at the
       end of the run now, on whatever platform the run is on.
+      **And the claim underneath it is measured now rather than asserted.** Every
+      other sound test compares one thing to another — dirt louder than
+      pavement, a mine going off louder than laying one — so a platform whose
+      whole output came out at a tenth of the level would have passed all of
+      them. One fixed race has its loudness pinned, and MSVC, AppleClang and two
+      gccs all land within a tenth of the same number.
       What is left is what the verification actually asks for and no machine can
       give: somebody listening.
 

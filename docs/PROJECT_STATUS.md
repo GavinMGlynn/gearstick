@@ -6113,6 +6113,11 @@ why sound is allowed them: nothing downstream of the mixer has to agree with
 anything. A tenth is far tighter than a platform going wrong and far looser than
 a last-bit difference.
 
+**It passed on all five CI jobs first time**, which is the result rather than
+the test: MSVC on Windows, AppleClang on macOS and two gccs on Linux all produce
+a race within a tenth of the same loudness. *"The synthesiser is
+platform-independent"* had been a claim in a header; it is a measurement now.
+
 **This does not close the item**, and the item says why: the dummy driver opens,
 runs a thread and consumes what it is given, and what it does not do is make a
 noise. What is left is what the verification asks for and no machine can give.

@@ -76,7 +76,7 @@ one copy.
 | brake / reverse | Down | S |
 | steer left | Left | A |
 | steer right | Right | D |
-| drop a hazard | Right Shift | Left Shift |
+| drop a weapon | Right Shift | Left Shift |
 
 **Players three and four need a gamepad**, or a rebind — there is no sensible
 third and fourth set of keys on one keyboard, so there is not a bad one either.
@@ -125,6 +125,33 @@ rather than hoped for. The sprint car is quickest on pavement and useless on
 rough ground. The lunar rover is slowest everywhere and the only thing that gets
 anywhere at all on Ceres. The baja bug wins nothing on speed and survives a
 staircase of drops that wrecks everything else.
+
+### What you can leave behind
+
+**Weapons are off unless a race turns them on.** On the setup screen there is a
+switch and four counts beside it, and every car on the grid gets the same of
+each. A race with them off is exactly the race it was before they existed.
+
+| | what it does |
+| --- | --- |
+| **oil** | takes the grip away, and gives it back the moment you are off it. Something to be driven *through*, not a punishment to sit out |
+| **mines** | one use. It launches whoever finds it and hurts them, and then it is gone |
+| **smoke** | hides the ground. It does nothing at all to a car — what it takes away is the road, from whoever is behind you |
+| **fire** | burns while you are in it. A mine punishes arriving; fire punishes staying |
+
+**One button does both jobs.** *Tap* it to drop what you are carrying. *Hold* it
+for half a second to change to the next thing you have — the drop happens when
+you let go, which is why a hold leaves nothing. The HUD says what a tap would
+drop and how many are left, and the row disappears when you have nothing.
+
+**You never drive into your own.** Oil you dropped does nothing to you, a mine
+you laid ignores you, and your own fire does not burn you. A weapon that hurt
+the person carrying it is a weapon nobody would use.
+
+**You cannot shoot forwards**, and that is the whole point. Hurting somebody
+means getting in front of them first and staying there — which is a race. The
+computer plays by the same rule: an opponent carrying something drops it when
+you are close behind, and never when the road behind it is empty.
 
 ---
 
