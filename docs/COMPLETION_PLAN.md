@@ -2069,7 +2069,14 @@ worth as much as what was decided about it.
       then burns out, where a mine goes off once; smoke changes nothing about
       how a car drives. A race with the weapons off is every car carrying zero,
       which is why every race that came before behaves identically.*
-      **Not finished:** nothing sets the counts yet (the race setup screen has
-      no dial), a replay does not carry the loadout so a recorded weapons race
-      would re-race without them, opponents never fire, and nothing draws smoke
-      or fire.
+      The race setup screen carries the switch and the four counts, and a race
+      built from it arms everybody on the grid.
+      *Verification: weapons off is every car carrying nothing however the
+      counts are set; on, every car including the one added last carries what
+      the screen says; one count at zero is that weapon absent and the others
+      still there; and a race with weapons files its times apart from a clean
+      one — while a race without them files exactly where it always did, so no
+      record anybody has already set is lost.*
+      **Not finished:** a replay does not carry the loadout so a recorded
+      weapons race would re-race without them, opponents never fire, and nothing
+      draws smoke or fire.

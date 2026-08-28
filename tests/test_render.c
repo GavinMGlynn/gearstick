@@ -3907,6 +3907,72 @@ TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
     m.records_from = GS_SCREEN_TITLE;
 }
 
+TEST(the_weapons_switch_on_the_setup_screen_arms_the_race) {
+    (void)ren;
+
+    // **The switch has to reach the grid**, which is the half a simulation test
+    // cannot see: gs_world_arm was written and tested for a while with nothing
+    // but tests calling it, which is exactly how the mine came to be
+    // implemented and undroppable in the first place.
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+
+    static gs_race_setup s;
+    SDL_zero(s);
+    s.players = GS_MAX_CARS;
+    s.mode = (uint8_t)GS_MODE_RACE;
+    s.laps = 3;
+    s.gravity = GS_ONE;
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        s.ammo[k] = (uint8_t)(k + 1);
+    }
+
+    // **Off is a race with nothing in it**, however the counts are set - which
+    // is what makes the switch a switch rather than a thing you have to zero
+    // four dials to get.
+    static gs_world w;
+    s.weapons = false;
+    gs_setup_build(&s, &t, &w);
+    CHECK(w.car_count == GS_MAX_CARS);
+    for (uint8_t i = 0; i < w.car_count; i++) {
+        CHECK(gs_car_selected(&w.car[i]) == GS_HAZ_NONE);
+        for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+            CHECK(gs_car_ammo(&w.car[i], (gs_hazard_kind)k) == 0);
+        }
+    }
+
+    // On, and **everybody on the grid gets the same**, including the fourth car
+    // added last - the loadout is set before anybody is placed so it cannot
+    // depend on the order this screen happens to build a race in.
+    s.weapons = true;
+    gs_setup_build(&s, &t, &w);
+    CHECK(w.car_count == GS_MAX_CARS);
+    for (uint8_t i = 0; i < w.car_count; i++) {
+        for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+            CHECK(gs_car_ammo(&w.car[i], (gs_hazard_kind)k) == (uint8_t)(k + 1));
+        }
+        CHECK(gs_car_selected(&w.car[i]) == GS_HAZ_OIL);   // the first it has
+    }
+
+    // And a race with weapons is filed apart from one without, so a lap set
+    // with people dropping oil is not offered beside a clean one.
+    static gs_world clean;
+    s.weapons = false;
+    gs_setup_build(&s, &t, &clean);
+    CHECK(gs_conditions_hash(&w) != gs_conditions_hash(&clean));
+
+    // One count at zero is that weapon absent and the others still there,
+    // which is what four dials rather than one switch is for.
+    s.weapons = true;
+    s.ammo[GS_HAZ_OIL] = 0;
+    gs_setup_build(&s, &t, &w);
+    CHECK(gs_car_ammo(&w.car[0], GS_HAZ_OIL) == 0);
+    CHECK(gs_car_ammo(&w.car[0], GS_HAZ_MINE) > 0);
+    CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_MINE);
+}
+
 TEST(the_empty_seats_on_the_grid_are_filled_with_somebody) {
     (void)ren;
 
@@ -10014,6 +10080,7 @@ int main(void) {
     run_the_condition_bar_stays_inside_the_hud(ren);
     run_a_hud_stays_inside_the_view_it_belongs_to(ren);
     run_there_is_always_a_way_back_out_of_wherever_you_are(ren);
+    run_the_weapons_switch_on_the_setup_screen_arms_the_race(ren);
     run_the_empty_seats_on_the_grid_are_filled_with_somebody(ren);
     run_an_opponent_finishes_every_track_that_ships_from_every_grid_slot(ren);
     run_no_test_writes_where_a_player_keeps_their_things(ren);

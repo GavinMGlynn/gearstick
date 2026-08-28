@@ -189,6 +189,17 @@ typedef struct gs_world {
     // again, exactly as it should be. Eight kilobytes, so a snapshot is still a
     // memcpy and rollback is still cheap.
     //
+    // **What this race arms everybody with**, one count per kind of hazard.
+    // A race setting, like the gravity and the lap target above it, and in the
+    // same place for the same reasons: a replay rebuilds a world from the
+    // settings and has to arm it the same way, and a lap set while people were
+    // dropping oil is not a lap to put beside a clean one - so this is part of
+    // the conditions a record is filed under.
+    //
+    // All zero is a race with the weapons turned off, which is what every race
+    // before them was.
+    uint8_t  loadout[GS_HAZ_COUNT];
+
     // Sixteen bits rather than eight, and that is not caution. A tyre marks a
     // tile by well under one part in 255 per tick, so in a byte every single
     // tick truncated to zero and the ground never wore at all - a feature that
@@ -386,12 +397,17 @@ uint8_t gs_world_arc(const gs_world *w, const gs_track *t, uint8_t car,
 // was left behind.
 bool gs_world_drop(gs_world *w, uint8_t car, gs_hazard_kind kind);
 
-// **What a car starts the race carrying.** Zero of everything is a race with no
+// **What this race arms everybody with.** Zero of everything is a race with no
 // weapons in it, which is what every race was before this and what a race with
-// them turned off still is. Selecting settles on the first kind there is any
-// of, so a car carrying only mines has mines selected without anybody pressing
-// anything.
-void gs_world_arm(gs_world *w, uint8_t car, gs_hazard_kind kind, uint8_t count);
+// them turned off still is. Set before the flag; every car on the grid gets the
+// same, and so does a car added afterwards. Selecting settles on the first kind
+// there is any of, so a car carrying only mines has mines selected without
+// anybody pressing anything.
+void gs_world_arm(gs_world *w, gs_hazard_kind kind, uint8_t count);
+
+// What a kind of hazard is called, for a screen that has to offer it. The
+// simulation's own list, so the setup screen and the HUD cannot drift from it.
+const char *gs_hazard_name(gs_hazard_kind kind);
 
 // Which kind a tap would leave, and how many of it are left. GS_HAZ_NONE when
 // the car is carrying nothing at all.

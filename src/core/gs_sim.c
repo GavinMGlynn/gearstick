@@ -71,6 +71,10 @@ void gs_world_set_mode(gs_world *w, gs_mode mode) {
     w->winner = GS_NO_WINNER;
 }
 
+// Settle a car's selection on something it actually has - see the definition
+// below, beside the arming it belongs to.
+static void gs_car_select_first(gs_car *c);
+
 int gs_world_add_car(gs_world *w, const gs_track *t,
                      uint8_t vehicle, gs_fix x, gs_fix y, gs_angle heading) {
     if (w->car_count >= GS_MAX_CARS) return -1;
@@ -86,6 +90,13 @@ int gs_world_add_car(gs_world *w, const gs_track *t,
     c->vehicle  = vehicle < GS_VEH_COUNT ? vehicle : (uint8_t)GS_VEH_STOCK_CAR;
     c->grounded = true;
     c->active   = true;
+
+    // **Armed with whatever this race arms people with**, so a car put on the
+    // grid after the loadout was set is carrying the same as everybody else.
+    // Otherwise it would depend on the order the race was built in, which is
+    // the sort of thing that works until the day somebody reorders two lines.
+    for (int k = 0; k < GS_HAZ_COUNT; k++) c->ammo[k] = w->loadout[k];
+    gs_car_select_first(c);
 
     return (int)i;
 }
@@ -154,18 +165,35 @@ static uint16_t gs_haz_life(gs_hazard_kind kind) {
     return 0;
 }
 
-void gs_world_arm(gs_world *w, uint8_t car, gs_hazard_kind kind, uint8_t count) {
-    if (car >= w->car_count || kind == GS_HAZ_NONE || kind >= GS_HAZ_COUNT) return;
-
-    gs_car *c = &w->car[car];
-    c->ammo[kind] = count;
-
-    // Settle the selection on something the car actually has. Kept in kind
-    // order rather than remembered, so arming is not sensitive to the order the
-    // race happens to hand the counts over in.
+// Settle a car's selection on something it actually has. In kind order rather
+// than remembered, so arming does not depend on the order the race hands the
+// counts over in.
+static void gs_car_select_first(gs_car *c) {
     c->selected = (uint8_t)GS_HAZ_NONE;
     for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
         if (c->ammo[k] > 0) { c->selected = (uint8_t)k; break; }
+    }
+}
+
+const char *gs_hazard_name(gs_hazard_kind kind) {
+    switch (kind) {
+    case GS_HAZ_OIL:   return "oil";
+    case GS_HAZ_MINE:  return "mines";
+    case GS_HAZ_SMOKE: return "smoke";
+    case GS_HAZ_FLAME: return "fire";
+    case GS_HAZ_NONE:  return "nothing";
+    case GS_HAZ_COUNT: break;
+    }
+    return "?";
+}
+
+void gs_world_arm(gs_world *w, gs_hazard_kind kind, uint8_t count) {
+    if (kind == GS_HAZ_NONE || kind >= GS_HAZ_COUNT) return;
+
+    w->loadout[kind] = count;
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        w->car[i].ammo[kind] = count;
+        gs_car_select_first(&w->car[i]);
     }
 }
 
@@ -1054,6 +1082,7 @@ uint64_t gs_world_hash(const gs_world *w) {
     gs_hash_u64(&h, (uint64_t)w->over);
     gs_hash_u64(&h, w->winner);
     gs_hash_u64(&h, w->laps_to_win);
+    for (int k = 0; k < GS_HAZ_COUNT; k++) gs_hash_u64(&h, w->loadout[k]);
 
     // Wear is state that changes the race, so two machines disagreeing about it
     // is a desync exactly as much as a car in the wrong place would be.

@@ -60,6 +60,15 @@ void gs_menu_init(gs_menu *m) {
     m->setup.players = 2;
     m->setup.mode = (uint8_t)GS_MODE_RACE;
     m->setup.laps = 3;
+
+    // **Off, and stocked for when it is turned on.** A first race should be a
+    // race; the numbers are here so that switching weapons on is one press
+    // rather than one press and then four dials from zero.
+    m->setup.weapons = false;
+    m->setup.ammo[GS_HAZ_OIL]   = 3;
+    m->setup.ammo[GS_HAZ_MINE]  = 2;
+    m->setup.ammo[GS_HAZ_SMOKE] = 3;
+    m->setup.ammo[GS_HAZ_FLAME] = 2;
     m->setup.gravity = GS_ONE;
     m->setup.gravity_preset = 4;                 // Earth
     m->setup.skill = GS_AI_SKILL_DEFAULT;
@@ -882,7 +891,11 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
     // with the Race button on the far side of the fold. Found by measuring
     // every screen from every state the walk is seeded in rather than from the
     // one state that happened to be two.
-    #define GS_SETUP_CHROME 528.0f      // everything above and below the grid
+    // Everything above and below the grid. The weapons row went in under the
+    // gravity buttons and is worth sixty of it: a heading, a switch and a row
+    // of counts.
+    #define GS_SETUP_CHROME 564.0f
+    #define GS_SETUP_MAX_AMMO 9
     const float grid_row = ImGui_GetFrameHeight() + ImGui_GetStyle()->ItemSpacing.y;
     const int   grid_rows = m->setup.players > 0 ? (int)m->setup.players : 1;
     // **Wide enough for the eight planets to fit beside the rules.** Seven
@@ -906,6 +919,13 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         // --- The track, in its own box, because it is context rather than a
         // thing being chosen here. Choosing tracks is the library's job and it
         // does not exist yet - see docs/FEATURES.md, the platform section.
+        // **Fifty-six, and it needs all of it.** It was cut to fifty to pay for
+        // the weapons row, on the reasoning that two lines of text do not need
+        // fifty-six pixels - and the second line came out with its descenders
+        // sliced off. Nothing could see that: a child region clipping its own
+        // contents is what a child region is for, so no panel measurement is
+        // looking. A photograph was. The six pixels came from the gap above the
+        // buttons instead, which had them to give.
         ImGui_BeginChild("track", (ImVec2){ 0.0f, 56.0f }, ImGuiChildFlags_Borders, 0);
         ImGui_Text("%s", gs_track_label(m, t));
         if (ok) {
@@ -1024,6 +1044,41 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         ImGui_PopStyleColor();
 
         ImGui_EndGroup();
+
+        // --- What everybody is carrying. **One line, and no heading of its
+        // own**, because there is not the height for one: this panel already
+        // fills a 720-tall screen at four drivers, and the rule that nothing on
+        // it sits below the fold at the size the game opens at is worth more
+        // than a section title. It is a race setting like the mode and the
+        // gravity above it, so it sits with them.
+        //
+        // One switch and four counts: "no weapons this time" is a thing
+        // somebody says out loud before a race and should be one thing to
+        // press, and three slicks and one mine is a different race from one
+        // slick and three mines - choosing that is the point.
+        ImGui_Checkbox("weapons", &m->setup.weapons);
+
+        ImGui_BeginDisabled(!m->setup.weapons);
+        for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+            ImGui_SameLine();
+            ImGui_PushIDInt(3100 + k);
+            ImGui_SetNextItemWidth(70.0f);
+            int n = (int)m->setup.ammo[k];
+            if (ImGui_SliderInt(gs_hazard_name((gs_hazard_kind)k), &n, 0,
+                                GS_SETUP_MAX_AMMO)) {
+                m->setup.ammo[k] = (uint8_t)GS_CLAMP(n, 0, GS_SETUP_MAX_AMMO);
+            }
+            ImGui_PopID();
+        }
+        ImGui_EndDisabled();
+
+        // Where the control is said out loud. The HUD says it again while the
+        // race is on, because this screen is gone by then.
+        ImGui_SameLine();
+        ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                   ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+        ImGui_TextUnformatted("tap to drop, hold to swap");
+        ImGui_PopStyleColor();
 
         // --- The grid, as a table. One row per driver, columns that line up,
         // which is the whole difference between a form and a pile of widgets.
@@ -1165,7 +1220,10 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         }
 
         // --- The one loud button, on its own line at the bottom.
-        ImGui_Dummy((ImVec2){ 0.0f, 8.0f });
+        // Two rather than eight. Six pixels, given back to the box at the top
+        // of this screen that was cut into to pay for the weapons row - see
+        // there. A gap above a separator is the cheapest height on the panel.
+        ImGui_Dummy((ImVec2){ 0.0f, 2.0f });
         ImGui_Separator();
         ImGui_Spacing();
 
@@ -2125,6 +2183,14 @@ void gs_setup_build(const gs_race_setup *s, const gs_track *t, gs_world *w) {
     gs_world_init(w, s->gravity);
     gs_world_set_mode(w, (gs_mode)s->mode);
     gs_world_set_laps(w, s->mode == (uint8_t)GS_MODE_RACE ? s->laps : 0);
+
+    // **Armed before anybody is on the grid**, so every car added below gets
+    // the loadout without this having to remember to do it twice. Turned off
+    // means zero of everything, which is the same world every race had before
+    // weapons existed - not a special case anywhere in the simulation.
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        gs_world_arm(w, (gs_hazard_kind)k, s->weapons ? s->ammo[k] : 0);
+    }
 
     for (uint8_t i = 0; i < s->players && i < GS_MAX_CARS; i++) {
         gs_fix sx, sy;

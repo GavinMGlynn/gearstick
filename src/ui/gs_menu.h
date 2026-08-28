@@ -88,6 +88,15 @@ typedef struct gs_race_setup {
 
     uint8_t  mode;                  // gs_mode
     uint16_t laps;
+
+    // **Whether anybody is armed, and with what.** Off is the default and is
+    // what every race was before there were weapons; on, everybody gets the
+    // same of each, which is what `weapons` and the counts beside it are.
+    // Kept as one switch and four counts rather than as four switches, because
+    // "no weapons this time" is a thing somebody says out loud before a race
+    // and should be one thing to press.
+    bool     weapons;
+    uint8_t  ammo[GS_HAZ_COUNT];    // indexed by gs_hazard_kind
     gs_fix   gravity;
     int      gravity_preset;        // which button is lit, or -1
 } gs_race_setup;

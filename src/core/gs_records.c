@@ -29,6 +29,26 @@ uint64_t gs_conditions_hash(const gs_world *w) {
             h *= 1099511628211ULL;
         }
     }
+
+    // **And what everybody was carrying, but only if they were carrying
+    // anything.** A lap set while the others were dropping oil is not a lap to
+    // put beside a clean one, so the loadout belongs in the key.
+    //
+    // Folded in unconditionally it would give a weapons-*off* race a different
+    // key from the one it had before weapons existed - and every record anybody
+    // has set would stop being found, which is somebody's best lap quietly
+    // vanishing off their own records screen. A race with none of them hashes
+    // exactly the way it always did.
+    bool armed = false;
+    for (int k = 0; k < GS_HAZ_COUNT; k++) {
+        if (w->loadout[k] != 0) { armed = true; break; }
+    }
+    if (armed) {
+        for (int k = 0; k < GS_HAZ_COUNT; k++) {
+            h ^= (uint64_t)w->loadout[k];
+            h *= 1099511628211ULL;
+        }
+    }
     return h;
 }
 

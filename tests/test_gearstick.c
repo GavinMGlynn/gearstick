@@ -2015,7 +2015,7 @@ static double gs_turn_over_hazard(gs_hazard_kind kind, int dropper) {
         // Dropped exactly where the first car is about to be. Armed first,
         // because a car carrying none of something drops none of it - which is
         // what a race with the weapons turned off is.
-        gs_world_arm(&w, (uint8_t)dropper, kind, 4);
+        gs_world_arm(&w, kind, 4);
         w.car[(uint8_t)dropper].x = GS_INT(30);
         w.car[(uint8_t)dropper].y = GS_INT(30);
         CHECK(gs_world_drop(&w, (uint8_t)dropper, kind));
@@ -2058,7 +2058,7 @@ TEST(oil_gives_the_grip_back_the_moment_you_are_off_it) {
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(10), 0);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
-    gs_world_arm(&w, 1, GS_HAZ_OIL, 4);
+    gs_world_arm(&w, GS_HAZ_OIL, 4);
     CHECK(gs_world_drop(&w, 1, GS_HAZ_OIL));
 
     // Drive the first car through the slick and out the far side.
@@ -2097,7 +2097,7 @@ TEST(a_mine_goes_off_once_and_hurts_whoever_found_it) {
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(16), 0);
 
     // Car one leaves a mine where it stands, then gets out of the way.
-    gs_world_arm(&w, 1, GS_HAZ_MINE, 4);
+    gs_world_arm(&w, GS_HAZ_MINE, 4);
     CHECK(gs_world_drop(&w, 1, GS_HAZ_MINE));
     w.car[1].x = GS_INT(50);
     w.car[1].y = GS_INT(16);
@@ -2144,8 +2144,8 @@ TEST(a_tap_leaves_a_hazard_and_a_hold_changes_which_one) {
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
-    gs_world_arm(&w, 0, GS_HAZ_OIL, 3);
-    gs_world_arm(&w, 0, GS_HAZ_MINE, 2);
+    gs_world_arm(&w, GS_HAZ_OIL, 3);
+    gs_world_arm(&w, GS_HAZ_MINE, 2);
 
     // Armed with two kinds, the first of them is what a tap would leave.
     CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_OIL);
@@ -2190,7 +2190,7 @@ TEST(fire_burns_while_you_are_in_it_and_then_burns_out) {
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(10), 0);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(40), GS_INT(10), 0);
 
-    gs_world_arm(&w, 1, GS_HAZ_FLAME, 1);
+    gs_world_arm(&w, GS_HAZ_FLAME, 1);
     w.car[1].x = GS_INT(20);
     w.car[1].y = GS_INT(10);
     CHECK(gs_world_drop(&w, 1, GS_HAZ_FLAME));
@@ -2238,7 +2238,7 @@ TEST(smoke_hides_the_ground_and_does_nothing_to_the_car) {
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
-    gs_world_arm(&w, 0, GS_HAZ_SMOKE, 1);
+    gs_world_arm(&w, GS_HAZ_SMOKE, 1);
     CHECK(gs_world_drop(&w, 0, GS_HAZ_SMOKE));
     CHECK(w.hazard[0].spent == 0);
     CHECK(w.hazard[0].life > 0);
@@ -2257,8 +2257,8 @@ TEST(oil_and_mines_stay_where_they_were_left) {
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
-    gs_world_arm(&w, 0, GS_HAZ_OIL, 1);
-    gs_world_arm(&w, 0, GS_HAZ_MINE, 1);
+    gs_world_arm(&w, GS_HAZ_OIL, 1);
+    gs_world_arm(&w, GS_HAZ_MINE, 1);
 
     CHECK(gs_world_drop(&w, 0, GS_HAZ_OIL));
     for (int i = 0; i < GS_TICK_HZ; i++) gs_world_step(&w, &t, nullptr);
@@ -2270,6 +2270,47 @@ TEST(oil_and_mines_stay_where_they_were_left) {
         CHECK(w.hazard[i].life == 0);
         CHECK(w.hazard[i].spent == 0);
     }
+}
+
+TEST(a_race_with_weapons_files_its_times_apart_from_a_clean_one) {
+    // **Weapons are conditions.** A lap set while the others were dropping oil
+    // is not a lap to put beside a clean one, so what everybody was carrying is
+    // part of the key a record is filed under - the same argument as the
+    // gravity it was set at.
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+
+    gs_world clean;
+    gs_world_init(&clean, GS_ONE);
+    gs_world_add_car(&clean, &t, GS_VEH_STOCK_CAR, GS_INT(5), GS_INT(10), 0);
+    const uint64_t quiet = gs_conditions_hash(&clean);
+
+    gs_world armed;
+    gs_world_init(&armed, GS_ONE);
+    gs_world_add_car(&armed, &t, GS_VEH_STOCK_CAR, GS_INT(5), GS_INT(10), 0);
+    gs_world_arm(&armed, GS_HAZ_OIL, 3);
+    CHECK(gs_conditions_hash(&armed) != quiet);
+
+    // And a different loadout is different conditions again: three mines is
+    // not three oil slicks.
+    gs_world other;
+    gs_world_init(&other, GS_ONE);
+    gs_world_add_car(&other, &t, GS_VEH_STOCK_CAR, GS_INT(5), GS_INT(10), 0);
+    gs_world_arm(&other, GS_HAZ_MINE, 3);
+    CHECK(gs_conditions_hash(&other) != gs_conditions_hash(&armed));
+    CHECK(gs_conditions_hash(&other) != quiet);
+
+    // **And a race with the weapons off files exactly where it always did.**
+    // This is the half that protects somebody's existing records: folding an
+    // all-zero loadout into the key would give every clean race a new one, and
+    // every best lap anybody has set would quietly stop being found.
+    gs_world off;
+    gs_world_init(&off, GS_ONE);
+    gs_world_add_car(&off, &t, GS_VEH_STOCK_CAR, GS_INT(5), GS_INT(10), 0);
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        gs_world_arm(&off, (gs_hazard_kind)k, 0);
+    }
+    CHECK(gs_conditions_hash(&off) == quiet);
 }
 
 TEST(every_kind_of_hazard_can_be_carried_dropped_and_told_apart) {
@@ -2288,7 +2329,7 @@ TEST(every_kind_of_hazard_can_be_carried_dropped_and_told_apart) {
 
         // Carried, selected without anybody pressing anything, and dropped by
         // a tap - the whole way a weapon reaches the ground in a real race.
-        gs_world_arm(&w, 0, (gs_hazard_kind)kind, 2);
+        gs_world_arm(&w, (gs_hazard_kind)kind, 2);
         CHECK(gs_car_selected(&w.car[0]) == (gs_hazard_kind)kind);
         CHECK(gs_car_ammo(&w.car[0], (gs_hazard_kind)kind) == 2);
 
@@ -2341,8 +2382,8 @@ TEST(a_weapon_runs_out_and_the_button_moves_on) {
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
-    gs_world_arm(&w, 0, GS_HAZ_OIL, 1);
-    gs_world_arm(&w, 0, GS_HAZ_SMOKE, 1);
+    gs_world_arm(&w, GS_HAZ_OIL, 1);
+    gs_world_arm(&w, GS_HAZ_SMOKE, 1);
     CHECK(gs_car_selected(&w.car[0]) == GS_HAZ_OIL);
 
     gs_fire_for(&w, &t, 6);
@@ -2372,7 +2413,7 @@ TEST(one_a_second_however_fast_the_button_is_tapped) {
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
-    gs_world_arm(&w, 0, GS_HAZ_OIL, 200);
+    gs_world_arm(&w, GS_HAZ_OIL, 200);
 
     // Tapped as fast as a button can be tapped: down one tick, up the next,
     // for five seconds.
@@ -7891,6 +7932,7 @@ int main(void) {
     run_fire_burns_while_you_are_in_it_and_then_burns_out();
     run_smoke_hides_the_ground_and_does_nothing_to_the_car();
     run_oil_and_mines_stay_where_they_were_left();
+    run_a_race_with_weapons_files_its_times_apart_from_a_clean_one();
     run_every_kind_of_hazard_can_be_carried_dropped_and_told_apart();
     run_a_car_carrying_nothing_leaves_nothing();
     run_a_weapon_runs_out_and_the_button_moves_on();

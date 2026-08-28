@@ -60,19 +60,25 @@
 // Every replay and ghost time recorded before that is invalid, which is what
 // this number failing is for. See docs/PROJECT_STATUS.md.
 // And when a race gained weapons. Four things a driver can leave behind rather
-// than one, a count of each on every car, and which one a tap would drop - all
-// of it state that decides a race, so all of it hashed. A race with the weapons
-// turned off is every car carrying zero of everything and behaves exactly as
-// every race did before, which is why the *track* hash did not move and the
-// cars in the selftest race end up in the same places: what moved is the number
-// that describes them, because there is more of them to describe.
+// than one, a count of each on every car, which one a tap would drop, and the
+// loadout the race arms everybody with - all of it state that decides a race,
+// so all of it hashed. A race with the weapons turned off is every car carrying
+// zero of everything and behaves exactly as every race did before, which is why
+// the *track* hash did not move and the cars in the selftest race end up in the
+// same places: what moved is the number that describes them, because there is
+// more of them to describe.
+//
+// It moved twice while that landed - once for what a car carries and once for
+// what the race arms it with - which is one feature and should have been one
+// move. The second is here rather than hidden because a number like this one is
+// worth more than a tidy history.
 //
 // And once more when the world stopped going on forever. There is now a run-off
 // outside a track and a drop past it, so the ground a car finds off the edge is
 // sand at the edge's height for ten tiles and then falling away - where before
 // it was the edge tile's own surface, level, without end. The selftest race has
 // a car that leaves the track, so its hash moves. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0x5cde014baa706c26ULL
+#define GS_SELFTEST_WORLD_HASH 0xaf296762fbe007a6ULL
 
 // The track generator, folded over its first two hundred seeds.
 //
@@ -138,6 +144,6 @@
 // anything - gs_ai_drive does not press the button - so the race itself is
 // unchanged, and that is a gap written down in docs/PROJECT_STATUS.md rather
 // than a thing this number is hiding.
-#define GS_OPPONENTS_WORLD_HASH 0x7deda8f2e3e392b4ULL
+#define GS_OPPONENTS_WORLD_HASH 0xdabc972dd12a3a54ULL
 
 #endif // GS_GOLDEN_H

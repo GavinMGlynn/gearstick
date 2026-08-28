@@ -5656,14 +5656,41 @@ earlier, failed the moment the fields went in: *"a car is 68 bytes and the hash
 reads 52 of them"*. That is precisely the job it was written for, and it caught
 its author.
 
+### The switch, and where it had to go
+
+The loadout is a race setting now - it lives on `gs_world` beside the gravity
+and the lap target, for the same reasons: a replay rebuilds a world from the
+settings and has to arm it the same way, and a record has to be filed under it.
+Every car on the grid gets the same, **including one added after the loadout was
+set**, so it cannot depend on the order the setup screen happens to build a race
+in.
+
+On the setup screen it is one line: a switch and four counts. **No heading of
+its own, and that is the height budget talking** - the panel already fills a
+720-tall screen at four drivers, and the rule that nothing sits below the fold
+at the size the game opens at is worth more than a section title.
+
+Paying for that line cost six pixels, and the first place they came from was the
+box at the top that names the track. It holds two lines of text and looked like
+it had room; it did not, and the second line came out with its descenders sliced
+off. **Nothing could have caught that**: a child region clipping its own
+contents is what a child region is for, so no panel measurement is looking. A
+photograph was. The six pixels came from a gap above a separator instead, which
+had them to give.
+
+### A lap set among the oil is filed apart from a clean one
+
+Weapons are conditions, like the gravity a time was set at. Folded into the
+record key unconditionally they would have given every *weapons-off* race a new
+key - and every best lap anybody has ever set would quietly stop being found on
+their own records screen. So the loadout is folded in **only when there is
+any**, and a race without them hashes exactly the way it always did.
+
 ### What is not done yet
 
-- **Nothing sets the counts.** `gs_world_arm` exists and only tests call it; the
-  race setup screen has no weapons dial yet, so no race a player can start has
-  any. That is the next item.
-- **A replay does not carry the loadout.** A replay stores the setup and re-races
-  it, so a recording of a race with weapons would re-race without them. The
-  format needs a version.
+- **A replay does not carry the loadout.** A replay stores the setup and
+  re-races it, so a recording of a race with weapons would re-race without them.
+  The format needs a version.
 - **No opponent has ever dropped anything.** `gs_ai_drive` never sets
   `GS_IN_FIRE`, so in a derby against the computer only the human is armed.
 - **Nothing draws smoke or fire.** They exist in the world and the renderer has
