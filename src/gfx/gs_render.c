@@ -1253,6 +1253,27 @@ uint8_t gs_render_layout(uint8_t views, int w, int h, SDL_Rect *out) {
         return 2;
     }
 
+    // **Three, and this is the answer to the open question.** Three players
+    // used to get the four-player grid with one quarter of the screen left
+    // blank - a quarter of a 1280x720 window, 230,400 pixels of nothing, and
+    // the three people racing each squeezed into a box a quarter the size while
+    // it sat there.
+    //
+    // Three columns instead: equal area and equal shape, because an unequal
+    // pane is an advantage and this is a game people play on one sofa. Columns
+    // rather than rows to match the two-player split, so going from two players
+    // to three changes how many panes there are and not which way they run.
+    //
+    // The last one takes the remainder, so the three of them tile the window
+    // exactly rather than leaving a seam that widens with the window.
+    if (views == 3) {
+        const int third = (w - gap * 2) / 3;
+        out[0] = (SDL_Rect){ 0, 0, third, h };
+        out[1] = (SDL_Rect){ third + gap, 0, third, h };
+        out[2] = (SDL_Rect){ (third + gap) * 2, 0, w - (third + gap) * 2, h };
+        return 3;
+    }
+
     int hw = w / 2, hh = h / 2;
     const int cx[4] = { 0, 1, 0, 1 };
     const int cy[4] = { 0, 0, 1, 1 };

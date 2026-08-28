@@ -5811,6 +5811,54 @@ others do not, because ImGui's content ends at the last item rather than after
 the spacing that would follow it. Measured against `gs_hud_spare` rather than
 derived, which is what that number is for.
 
+## Three players, and a quarter of the screen doing nothing
+
+The one open question in `FEATURES.md` that was a defect rather than a choice:
+*"what the merged four-player camera does when it cannot merge. The failure
+mode is the design, and it has not been thought about yet."*
+
+What it did was give three players the four-player grid and stop after three
+panes. **A quarter of the window - 230,400 pixels at 1280x720 - blank for the
+whole race**, while the three people racing were each squeezed into a box a
+quarter the size. Nobody chose that; it fell out of a loop that stops at
+`views`.
+
+The decision, as three rules:
+
+- **every pane is the same size**, because an unequal pane is an advantage and
+  this is a game people play on one sofa;
+- **the panes fill the screen**, apart from the divider between them;
+- **no pane overlaps another**, or two players are looking at the same pixels
+  and one of them is wrong.
+
+Three columns rather than rows, to match the two-player split: going from two
+players to three then changes how many panes there are and not which way they
+run. The last column takes the remainder so the three tile exactly.
+
+### The rule it replaced, and why that was the wrong trade
+
+`four_players_get_four_views_that_tile_the_window_without_overlapping` said it
+outright: *"Three and four take the same grid: a player joining should not
+rearrange everybody else's screen."* That sounds right and is not.
+
+**A player does not join a race.** The grid is settled on the setup screen or in
+the lobby before the flag, and a machine that leaves a race in progress goes
+back to the lobby rather than into one. So the rearrangement being avoided
+happens between races, where it costs nothing - and it was being paid for with a
+blank quarter for the whole of every three-player race.
+
+The reasoning is in the test rather than in a commit message, because the next
+person to read that test is the one who needs it.
+
+### What was considered and not taken
+
+Panes that hold whichever cars happen to be *together* - three cars in one pane
+and the fourth in its own, changing as the race spreads and closes. It uses the
+screen better still, and it makes the shape of the screen something a player
+cannot predict: two panes, then three, then two. Predictability is the whole
+ethic, and it is written down in `FEATURES.md` beside the decision rather than
+left to be re-proposed.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

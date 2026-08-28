@@ -2146,12 +2146,22 @@ that will not fit one view split into four, and nobody has decided whether that
 is right, what happens on the way, or what a two-player race does when one car
 is left behind at the far end of a long track.
 
-- [ ] **Decide what happens, then make it happen.** The failure mode is the
-      design and it is currently whatever fell out.
-      *Verification: to be written with the decision — but at minimum, every
-      number of cars from one to four, together and far apart, gets a view that
-      shows its own car, and the moment of splitting and merging is walked
-      rather than assumed.*
+- [x] **Decide what happens, then make it happen.** What it did was give three
+      players the four-player grid with one quarter left blank — a quarter of
+      the window, for the whole race, while the three people racing were each
+      squeezed into a box a quarter the size. Nobody chose that; it fell out of
+      a loop that stops early. Three players get three columns now.
+      The decision, in three rules: every pane is the same size, because an
+      unequal pane is an advantage and this is a game played on one sofa; the
+      panes fill the screen apart from the divider; and no pane overlaps
+      another, or two players are looking at the same pixels and one of them is
+      wrong.
+      *Verification: every player count from one to four at three window sizes —
+      twelve layouts, each filling the screen, sharing it evenly, and never
+      overlapping. The old rule that three and four share a grid so a joining
+      player does not rearrange the screen is gone, with the reasoning recorded:
+      nobody joins a race, so that rearrangement happens between races where it
+      costs nothing, and it was being paid for with a blank quarter all race.*
 
 ## Phase 21 — Where the tests are not
 

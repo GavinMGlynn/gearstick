@@ -364,5 +364,11 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
 - **Whether surface wear and persistent wreckage are one system or two.** Both
   change the track mid-race. They may want to be the same idea.
 
-- **What the merged four-player camera does when it cannot merge.** The failure
-  mode is the design, and it has not been thought about yet.
+- ~~**What the merged four-player camera does when it cannot merge.**~~
+  *Decided.* It splits one pane per player, and every pane is the same size and
+  fills its share of the screen. Three players used to get the four-player grid
+  with a quarter of the window blank; they get three columns. What was
+  considered and not taken: panes that hold whichever cars happen to be together,
+  so a race would run with two panes, then three, then two again. That is a
+  screen whose shape a player cannot predict, and predictability is the whole
+  ethic.

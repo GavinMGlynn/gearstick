@@ -1252,15 +1252,29 @@ TEST(four_players_get_four_views_that_tile_the_window_without_overlapping) {
     CHECK(r[0].h == 720 && r[1].h == 720);
     CHECK(r[0].x + r[0].w < r[1].x);            // a gap, not an overlap
 
-    // Three and four take the same grid: a player joining should not rearrange
-    // everybody else's screen.
+    // **Three and four used to take the same grid**, so that a player joining
+    // would not rearrange everybody else's screen. That was the wrong trade and
+    // it is worth writing down why, because the reasoning sounded right.
+    //
+    // A player does not join a race. The grid is settled on the setup screen or
+    // in the lobby *before* the flag, and a machine that leaves a race in
+    // progress goes back to the lobby rather than into it - so the
+    // rearrangement being avoided happens between races, where it costs
+    // nothing. What it was being paid for was a quarter of the window left
+    // blank for the whole of every three-player race: 230,400 pixels at
+    // 1280x720, while the three people racing were each squeezed into a box a
+    // quarter the size.
+    //
+    // Three columns now. Every count and every window size is walked by
+    // `every_number_of_players_gets_the_whole_screen_and_a_fair_share_of_it`;
+    // what is pinned here is that three is no longer the four-player grid.
     SDL_Rect three[GS_MAX_CARS], four[GS_MAX_CARS];
     CHECK(gs_render_layout(3, 1280, 720, three) == 3);
     CHECK(gs_render_layout(4, 1280, 720, four) == 4);
-    for (int i = 0; i < 3; i++) {
-        CHECK(three[i].x == four[i].x && three[i].y == four[i].y);
-        CHECK(three[i].w == four[i].w && three[i].h == four[i].h);
-    }
+    CHECK(three[0].h == 720);                   // full height, not a quarter
+    CHECK(three[1].h == 720);
+    CHECK(three[2].h == 720);
+    CHECK(three[1].w != four[1].w);             // and not the four-player grid
 
     // Four quarters, none overlapping, all inside the window.
     for (int i = 0; i < 4; i++) {
@@ -1394,6 +1408,98 @@ TEST(the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not) {
     gs_split_init(&sp);
     gs_split_update(&sp, &t, &solo, &solo, 1.0f, GS_W, GS_H, dt);
     CHECK(gs_split_views(&sp, &t, &solo, &solo, 1.0f, GS_W, GS_H, v) == 1);
+}
+
+TEST(every_number_of_players_gets_the_whole_screen_and_a_fair_share_of_it) {
+    (void)ren;
+
+    // **The open question in FEATURES.md, answered.** *"What the merged
+    // four-player camera does when it cannot merge. The failure mode is the
+    // design, and it has not been thought about yet."*
+    //
+    // What it did was give three players the four-player grid with one quarter
+    // left blank: 230,400 pixels of nothing at 1280x720, while the three people
+    // racing were each squeezed into a box a quarter the size. Nobody chose
+    // that; it fell out of a loop that stops at `views`.
+    //
+    // The decision, stated as three rules and checked here at every count and
+    // at every window size the game is measured at:
+    //
+    //   - **every pane is the same size**, because an unequal pane is an
+    //     advantage and this is a game people play on one sofa;
+    //   - **the panes fill the screen**, apart from the divider between them;
+    //   - **no pane overlaps another**, or two players are looking at the same
+    //     pixels and one of them is wrong.
+    const struct { int w, h; const char *what; } sizes[] = {
+        { 1280, 720, "the window the game opens at" },
+        { GS_W,  GS_H, "a window dragged smaller" },
+        { 960, 600, "an ordinary one in between" },
+    };
+
+    int walked = 0;
+    for (size_t z = 0; z < SDL_arraysize(sizes); z++) {
+        for (uint8_t n = 1; n <= GS_MAX_CARS; n++) {
+            SDL_Rect r[GS_MAX_CARS];
+            const uint8_t got = gs_render_layout(n, sizes[z].w, sizes[z].h, r);
+            CHECK(got == n);
+
+            long covered = 0, biggest = 0, smallest = 0;
+            for (uint8_t i = 0; i < got; i++) {
+                CHECK(r[i].w > 0);
+                CHECK(r[i].h > 0);
+
+                // Inside the window, all of it.
+                CHECK(r[i].x >= 0);
+                CHECK(r[i].y >= 0);
+                CHECK(r[i].x + r[i].w <= sizes[z].w);
+                CHECK(r[i].y + r[i].h <= sizes[z].h);
+
+                const long area = (long)r[i].w * (long)r[i].h;
+                covered += area;
+                if (i == 0 || area > biggest) biggest = area;
+                if (i == 0 || area < smallest) smallest = area;
+
+                // **Nobody overlapping anybody.**
+                for (uint8_t k = 0; k < i; k++) {
+                    const bool apart =
+                        r[i].x >= r[k].x + r[k].w || r[k].x >= r[i].x + r[i].w ||
+                        r[i].y >= r[k].y + r[k].h || r[k].y >= r[i].y + r[i].h;
+                    if (!apart) {
+                        printf("  SPLIT %u players at %dx%d: pane %u overlaps "
+                               "pane %u\n", n, sizes[z].w, sizes[z].h, i, k);
+                    }
+                    CHECK(apart);
+                }
+            }
+
+            // **The screen is used.** What may be left over is the divider
+            // between panes and nothing else - a couple of pixels along one or
+            // two seams, not a quarter of the window.
+            const long whole = (long)sizes[z].w * (long)sizes[z].h;
+            const long slack = whole - covered;
+            const long seams = 4L * 2L * (sizes[z].w + sizes[z].h);
+            if (slack > seams) {
+                printf("  SPLIT %u players at %dx%d leaves %ld of %ld unused\n",
+                       n, sizes[z].w, sizes[z].h, slack, whole);
+            }
+            CHECK(slack <= seams);
+
+            // **And a fair share each.** Within a pixel row of each other,
+            // which is all the rounding of an odd window width can cost.
+            const long uneven = biggest - smallest;
+            if (uneven > (long)sizes[z].w + (long)sizes[z].h) {
+                printf("  SPLIT %u players at %dx%d: biggest pane %ld, "
+                       "smallest %ld\n", n, sizes[z].w, sizes[z].h, biggest,
+                       smallest);
+            }
+            CHECK(uneven <= (long)sizes[z].w + (long)sizes[z].h);
+            walked++;
+        }
+    }
+    printf("  SPLIT %d layouts: every player count from 1 to %d at %d window "
+           "sizes, each filling the screen and sharing it evenly\n", walked,
+           GS_MAX_CARS, (int)SDL_arraysize(sizes));
+    CHECK(walked == GS_MAX_CARS * (int)SDL_arraysize(sizes));
 }
 
 TEST(cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half) {
@@ -10312,6 +10418,7 @@ int main(void) {
     run_four_players_get_four_views_that_tile_the_window_without_overlapping(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);
     run_the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not(ren);
+    run_every_number_of_players_gets_the_whole_screen_and_a_fair_share_of_it(ren);
     run_cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half(ren);
     run_the_view_does_not_jump_when_the_screen_merges_or_splits(ren);
     run_every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone(ren);
