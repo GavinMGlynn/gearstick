@@ -15,6 +15,18 @@ static bool gs_dir_exists(const char *path) {
 const char *gs_assets_dir(void) {
     if (gs_assets[0] != '\0') return gs_assets;
 
+    // **Somewhere else, when something says so** - the same override
+    // `gs_pref_dir` carries, and for the same reason. What the game ships is an
+    // input to the library the player ends up with, so the rule about *which*
+    // shipped tracks survive a new version cannot be checked without staging a
+    // different set of them. Pointing this at a copy is how that is done
+    // without a test writing into the repository it is testing.
+    const char *set = SDL_getenv("GEARSTICK_ASSETS_DIR");
+    if (set != nullptr && set[0] != '\0' && gs_dir_exists(set)) {
+        SDL_snprintf(gs_assets, sizeof gs_assets, "%s", set);
+        return gs_assets;
+    }
+
     const char *base = SDL_GetBasePath();
     if (base != nullptr) {
         // Beside the executable, which is how a package is laid out. On macOS

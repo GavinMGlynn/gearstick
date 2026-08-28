@@ -6004,11 +6004,18 @@ static gs_library gs_lib;
 
 // A track that differs from its neighbours by something real, so two of them
 // are never accidentally the same track.
+// **A different track for every seed, inside the biggest track there is.**
+// The width used to be 32 + seed, which walks past GS_TRACK_MAX as soon as a
+// library holds more than thirty-two of these: every seed past that built the
+// same clamped track, the library folded them into one entry - it is content
+// addressed - and the test that wanted a full library quietly got a short one
+// and still passed its first few checks.
 static void gs_make_track(gs_track *t, uint8_t seed) {
-    gs_track_init(t, (uint8_t)(32 + seed), 16, GS_SURF_PAVEMENT);
+    gs_track_init(t, (uint8_t)(24 + seed % 32u), (uint8_t)(12 + (seed / 32u) * 2u),
+                  GS_SURF_PAVEMENT);
     for (uint8_t y = 0; y <= t->h; y++) {
         for (uint8_t x = 0; x <= t->w; x++) {
-            gs_fix h = (x % (uint8_t)(4 + seed) == 0) ? GS_INT(1) : 0;
+            gs_fix h = (x % (uint8_t)(4 + seed % 16u) == 0) ? GS_INT(1) : 0;
             gs_track_set_corner(t, x, y, h);
         }
     }
@@ -6176,6 +6183,99 @@ TEST(a_track_that_came_with_the_game_is_not_yours_to_change) {
     CHECK(gs_library_put_builtin(&copied, &shipped, "first light", "gearstick") == 0);
     CHECK(gs_library_put(&copied, &mine, "first light (copy)", "") == 1);
     CHECK(!gs_library_is_builtin(&copied, gs_track_hash(&mine)));
+}
+
+TEST(a_shipped_track_that_is_withdrawn_goes_and_nothing_else_does) {
+    // **The whole space, walked rather than sampled.** Two facts decide what
+    // happens to an entry: whose it is, and whether the set the game ships now
+    // still names it. Two by two is four cells, and the loop counts them, so a
+    // third fact added later leaves this claim visibly short.
+    //
+    // The player's own track *named in the shipped set* is the cell that looks
+    // pointless and is not: what protects an entry has to be who it belongs to
+    // and not whether the game happens to ship the same ground.
+    unsigned cells = 0;
+    for (int mine = 0; mine < 2; mine++) {
+        for (int named = 0; named < 2; named++) {
+            gs_library_clear(&gs_lib);
+
+            static gs_track t;
+            gs_make_track(&t, (uint8_t)(mine * 2 + named + 1));
+
+            if (mine) {
+                CHECK(gs_library_put(&gs_lib, &t, "one", "ada") == 0);
+            } else {
+                CHECK(gs_library_put_builtin(&gs_lib, &t, "one", "gearstick") == 0);
+            }
+
+            // A hash that is nobody's, for the cell where the shipped set has
+            // moved on. It has to be a real miss rather than an empty list -
+            // an empty list means something else entirely.
+            uint64_t keep[1] = { named ? gs_track_hash(&t) : 0x5eedbeefu };
+
+            bool should_go = !mine && !named;
+            CHECK(gs_library_retire_builtins(&gs_lib, keep, 1) ==
+                  (should_go ? 1u : 0u));
+            CHECK(gs_lib.count == (should_go ? 0u : 1u));
+            CHECK((gs_library_find(&gs_lib, gs_track_hash(&t)) >= 0) != should_go);
+            cells++;
+        }
+    }
+    CHECK(cells == 4);
+}
+
+TEST(withdrawing_half_a_library_leaves_exactly_the_other_half) {
+    // **Removing compacts the list.** A loop that stepped forward after a
+    // removal would look at the entry after the one that moved up, so every
+    // second withdrawn track would survive - and with one withdrawn track in
+    // the test, which is the tempting way to write it, that is invisible.
+    gs_library_clear(&gs_lib);
+
+    static gs_track track[8];
+    for (uint8_t i = 0; i < 8; i++) {
+        gs_make_track(&track[i], (uint8_t)(i + 1));
+        char name[GS_LIBRARY_NAME];
+        snprintf(name, sizeof name, "track %u", i);
+        CHECK(gs_library_put_builtin(&gs_lib, &track[i], name, "gearstick") == i);
+    }
+
+    // Every other one still ships, so the withdrawn ones are adjacent to
+    // survivors in both directions.
+    uint64_t keep[4];
+    for (uint8_t i = 0; i < 4; i++) keep[i] = gs_track_hash(&track[i * 2]);
+
+    CHECK(gs_library_retire_builtins(&gs_lib, keep, 4) == 4);
+    CHECK(gs_lib.count == 4);
+    for (uint8_t i = 0; i < 8; i++) {
+        CHECK((gs_library_find(&gs_lib, gs_track_hash(&track[i])) >= 0) ==
+              (i % 2 == 0));
+    }
+}
+
+TEST(a_shipped_set_that_could_not_be_read_withdraws_nothing) {
+    // An assets directory that produced nothing is a broken install, and
+    // emptying somebody's library on the strength of a path that did not
+    // resolve is not a thing to do on a guess.
+    gs_library_clear(&gs_lib);
+
+    static gs_track t;
+    gs_make_track(&t, 9);
+    CHECK(gs_library_put_builtin(&gs_lib, &t, "one", "gearstick") == 0);
+
+    uint64_t none[1] = { 0 };
+    CHECK(gs_library_retire_builtins(&gs_lib, none, 0) == 0);
+    CHECK(gs_library_retire_builtins(&gs_lib, nullptr, 1) == 0);
+    CHECK(gs_lib.count == 1);
+}
+
+TEST(the_library_holds_the_shipped_set_and_room_to_build) {
+    // **The cap is a promise about the shipped set, not a number.** Twenty-four
+    // tracks ship. At thirty-two, a player whose library also held the tracks
+    // an older version shipped had no room for the ones that replaced them, and
+    // gs_library_put returning -1 is a track that never appears - which is what
+    // this was found by. The room left over is the answer to "and how many of
+    // my own?", and forty is a long afternoon.
+    CHECK(GS_LIBRARY_MAX >= 24 + 40);
 }
 
 TEST(a_library_that_is_full_says_so_rather_than_losing_something) {
@@ -8306,6 +8406,10 @@ int main(void) {
     run_three_tracks_are_kept_and_all_three_survive_a_restart();
     run_editing_one_track_leaves_the_others_alone();
     run_a_track_that_came_with_the_game_is_not_yours_to_change();
+    run_a_shipped_track_that_is_withdrawn_goes_and_nothing_else_does();
+    run_withdrawing_half_a_library_leaves_exactly_the_other_half();
+    run_a_shipped_set_that_could_not_be_read_withdraws_nothing();
+    run_the_library_holds_the_shipped_set_and_room_to_build();
     run_a_library_that_is_full_says_so_rather_than_losing_something();
     run_a_chunk_the_reassembler_refuses_does_not_poison_the_transfer();
     run_the_chunk_reader_refuses_a_datagram_that_does_not_add_up();

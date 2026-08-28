@@ -175,6 +175,12 @@ typedef struct gs_app {
     bool        net_settling;
     uint32_t    net_settle_frames;
     bool        quit;
+    // **What the game ships, by hash, as of this start.** Filled by walking
+    // assets/tracks/ and used twice: to withdraw the shipped tracks an older
+    // version left in somebody's library, and to put the current ones in.
+    uint64_t    stock[GS_LIBRARY_MAX];
+    uint16_t    stock_count;
+    bool        stock_listing;    // walking to list them, not to add them
 } gs_app;
 
 // The demo track, until the editor exists to make a real one. It is a
@@ -203,6 +209,25 @@ static SDL_EnumerationResult SDLCALL gs_take_track(void *userdata, const char *d
 
     static gs_track loaded;
     if (gs_track_deserialize(&loaded, (const uint8_t *)bytes, len)) {
+        // **Listing, not adding.** The walk happens twice: once to learn what
+        // the game ships now, so anything it no longer ships can go, and once
+        // to put what it does ship in. Doing it the other way round means the
+        // withdrawn tracks are still occupying slots when the new ones arrive,
+        // and a full library refuses them.
+        if (a->stock_listing) {
+            if (a->stock_count < GS_LIBRARY_MAX) {
+                a->stock[a->stock_count++] = gs_track_hash(&loaded);
+            } else {
+                // More tracks ship than the library can hold. Said out loud,
+                // because the ones past the end would be read as tracks the
+                // game no longer ships and withdrawn on sight.
+                SDL_Log("library: more than %u tracks ship - %s and any after "
+                        "it cannot be offered", (unsigned)GS_LIBRARY_MAX, name);
+            }
+            SDL_free(bytes);
+            return SDL_ENUM_CONTINUE;
+        }
+
         // The file name is the track's name, tidied: "the-long-drop.gstrack"
         // reads as "the long drop".
         char label[GS_LIBRARY_NAME];
@@ -216,7 +241,14 @@ static SDL_EnumerationResult SDLCALL gs_take_track(void *userdata, const char *d
         // theirs to change or throw away: editing one takes a copy and edits
         // that, and deleting one is refused, so the library a player came with
         // is still there after an afternoon of building.
-        gs_library_put_builtin(&a->menu.library, &loaded, label, "gearstick");
+        if (gs_library_put_builtin(&a->menu.library, &loaded, label,
+                                   "gearstick") < 0) {
+            // A track that ships and is not offered is worth a line. This was
+            // silent, and a library full of tracks an older version shipped is
+            // exactly how it filled up.
+            SDL_Log("library: no room for %s - %u of %u slots are taken", label,
+                    (unsigned)a->menu.library.count, (unsigned)GS_LIBRARY_MAX);
+        }
     }
     SDL_free(bytes);
     return SDL_ENUM_CONTINUE;
@@ -232,6 +264,48 @@ static void gs_load_stock_tracks(gs_app *a) {
 
     SDL_snprintf(dir, sizeof dir, "%s/tracks/", assets);
     SDL_EnumerateDirectory(dir, gs_take_track, a);
+}
+
+// **The library, reconciled with what the game ships now.**
+//
+// Run once on start and again after the store is read, because reading the
+// store *replaces* the library - `gs_library_deserialize` clears it first, and
+// has to, since a saved library is the whole of what somebody has. So the stock
+// tracks loaded before it were being thrown away on every start by everybody
+// who had ever played before: the comment above `gs_load_stock_tracks` promised
+// a shipped track would come back if it was deleted, and for a returning player
+// it never did. Nothing the game shipped after somebody's first run had any way
+// of reaching them, which is how a library of two-gate routes outlived the
+// generator that made them by six days.
+//
+// Withdrawing first and adding second, because the two have to happen in that
+// order for a library near its limit - see gs_take_track.
+static void gs_sync_stock_tracks(gs_app *a) {
+    a->stock_count = 0;
+    a->stock_listing = true;
+    gs_load_stock_tracks(a);
+    a->stock_listing = false;
+
+    // Nothing found is a broken install, not a library the game has emptied.
+    if (a->stock_count == 0) {
+        SDL_Log("library: no tracks in %s/tracks/ - keeping what is here",
+                gs_assets_dir());
+        return;
+    }
+
+    uint16_t gone = gs_library_retire_builtins(&a->menu.library, a->stock,
+                                               a->stock_count);
+    uint16_t was = a->menu.library.count;
+    gs_load_stock_tracks(a);
+
+    if (gone > 0 || a->menu.library.count != was) {
+        SDL_Log("library: %u shipped track(s), %u withdrawn, %u here now",
+                (unsigned)a->stock_count, (unsigned)gone,
+                (unsigned)a->menu.library.count);
+        // Written down, so the next start does not do it again - and so the
+        // library on disk is the one the player is looking at.
+        a->menu.store_dirty = true;
+    }
 }
 
 static void gs_layout(gs_app *a);static void gs_layout(gs_app *a);
@@ -944,8 +1018,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
     // The stock tracks, and the first of them as the one loaded. A fresh
     // install has something to race on; a returning player has whatever their
-    // library already held as well.
-    gs_load_stock_tracks(a);
+    // library already held as well - which is put back over the top of this
+    // when the store is read, and is why the shipped set is synced again there.
+    gs_sync_stock_tracks(a);
 
     // **A track asked for by name wins over the library's first**, and says so
     // if it cannot be read rather than quietly racing something else. For
@@ -1128,6 +1203,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         a->menu.screen = GS_SCREEN_RACE;
     } else {
         gs_store_load(a);
+
+        // **The store just replaced the library, so the shipped set goes back
+        // in.** In this order and not the other: what somebody saved is the
+        // authority on their own tracks, and what the game ships is the
+        // authority on the game's.
+        gs_sync_stock_tracks(a);
+
         a->menu.online = a->online;
         a->menu.screen = a->want_screen ? (gs_screen)a->shot_screen
                                         : GS_SCREEN_LOGIN;

@@ -22,7 +22,14 @@
 // all were before the game shipped any.
 #define GS_LIBRARY_VERSION 2u
 
-#define GS_LIBRARY_MAX    32
+// **Room for the shipped set and a long afternoon on top of it.** This was
+// thirty-two, which the twenty-four tracks that ship had quietly grown into: a
+// player with a store from an older build carried its withdrawn tracks as well
+// as the current ones, and `gs_library_put` returning -1 is a track that simply
+// does not appear. Sixty-four is the shipped set plus forty of your own, and
+// costs about a megabyte held resident - see the note on the struct below.
+// Whatever the shipped set becomes, this stays comfortably above it.
+#define GS_LIBRARY_MAX    64
 #define GS_LIBRARY_NAME   48
 #define GS_LIBRARY_AUTHOR 24
 
@@ -42,9 +49,9 @@ typedef struct gs_library_entry {
     gs_track track;
 } gs_library_entry;
 
-// About half a megabyte, so a heap or static object rather than a local - the
-// same rule the replay carries. On disk it is far smaller: each track is
-// serialised, and a track compresses to a few kilobytes.
+// About a megabyte, so a heap or static object rather than a local - the same
+// rule the replay carries. On disk it is far smaller: each track is serialised,
+// and a track compresses to a few kilobytes.
 typedef struct gs_library {
     uint16_t         count;
     gs_library_entry entry[GS_LIBRARY_MAX];
@@ -67,6 +74,24 @@ int gs_library_put_builtin(gs_library *l, const gs_track *t, const char *name,
 // Is this one the game's rather than the player's? False for anything not here,
 // which is the safe way round: an entry nobody can find is not protected.
 bool gs_library_is_builtin(const gs_library *l, uint64_t hash);
+
+// **A track the game no longer ships stops being in the library.** `keep` is
+// every track the game ships now, by hash; every entry marked as the game's
+// that is not among them is removed, and the player's own work is never
+// touched. Returns how many went.
+//
+// Without this a library only grows: the shipped set is content addressed, so
+// improving a track makes a *new* entry and leaves the old one in place for
+// ever. A player who started before the generator was fixed was still being
+// offered its two-gate routes months later, alongside the ones that replaced
+// them, with no way to tell which was which.
+//
+// **An empty `keep` withdraws nothing.** It means the assets directory could
+// not be read, which is a broken install rather than a library the game has
+// stopped shipping - and emptying somebody's library because a path was wrong
+// is not a thing to do on a guess.
+uint16_t gs_library_retire_builtins(gs_library *l, const uint64_t *keep,
+                                    uint16_t n);
 
 // Replace what is in a slot with an edited version of it, keeping the name and
 // author. Returns the new index, or -1 if `was` is not here.

@@ -891,7 +891,7 @@ is not evidence, and a test sends one to make sure it stays that way.
 
 ### The library
 
-Tracks are a collection rather than a save slot: up to thirty-two of them, kept
+Tracks are a collection rather than a save slot: up to sixty-four of them, kept
 by content hash, with a name and an author beside each. Stored in the same file
 as the drivers and the records, because they are one thing — a record with a
 name on it is only a record if the name still means somebody, and it is only a
@@ -917,6 +917,61 @@ is the thing that is there.
 The store is version 2 and refuses a version 1 file rather than half-reading it.
 That is correct and it is also the first real reason to build the migration path
 the tails have been asking for.
+
+#### What the game ships reaches somebody who has played before
+
+**It did not, and had not since the library existed.** The stock tracks are read
+out of `assets/tracks/` at start-up and the store is read a hundred and eighty
+lines later — and reading a store *replaces* the library, because a saved
+library is the whole of what somebody has. So every shipped track loaded at
+start-up was thrown away before the menu appeared, for everybody except a
+player on their very first run. The comment over the loader promised a shipped
+track would come back if it was deleted; for a returning player it never did,
+and nothing the game shipped after their first start ever reached them. The
+generator was fixed on 22 August and a player who started on the 19th was still
+being offered its two-gate routes six days and one release later.
+
+The library is now reconciled with the shipped set twice — once at start-up and
+once immediately after the store is read. In that order and not the other: what
+somebody saved is the authority on their own tracks, and what the game ships is
+the authority on the game's.
+
+**And a track the game stops shipping goes.** `gs_library_retire_builtins` takes
+the hashes of everything that ships now and removes every entry marked as the
+game's that is not among them; the player's own work is never touched. Without
+it the library only grows, because the shipped set is content addressed and
+improving a track makes a *new* entry rather than changing one — so a library
+would end up holding every track every version ever shipped, with nothing to say
+which was which. An empty shipped set withdraws nothing: that is an assets
+directory that could not be read, which is a broken install rather than a
+library the game has stopped shipping.
+
+Withdrawing happens before adding, which matters for a library near its limit —
+the withdrawn tracks are still holding slots otherwise. And a shipped track that
+cannot be added now says so in the log, because a track that ships and is not
+offered was exactly the silence this was found inside.
+
+**The cap is sixty-four rather than thirty-two.** Twenty-four tracks ship. At
+thirty-two, a player carrying the tracks an older version shipped had no room
+for the ones that replaced them, and `gs_library_put` returning -1 is a track
+that simply never appears. Sixty-four is the shipped set and forty of your own,
+and costs about a megabyte held resident.
+
+Two test helpers were quietly wrong as soon as the cap moved, both the same way:
+they built "different" tracks by varying something a wider library index pushed
+outside the track — a width past `GS_TRACK_MAX`, and a corner past the
+right-hand edge, which is not serialised. Both folded into one entry and both
+tests asked for a full library and got a short one. They are fixed, and the
+reason is written where the next person will read it.
+
+And the front-end walk is now seeded with a named thirty-two tracks rather than
+"as many as a library holds". A list twice as long takes more wheel actions to
+reach the end of, so paths get longer — and a breadth-first walk over longer
+paths is not twice the work: at sixty-four it stopped finishing, and the budget
+it would have taken to finish ran for half an hour without ending. What the walk
+needs from the tracks screen is a list that scrolls with rows below the fold,
+which thirty-two gives it. The largest library that can exist is still pinned,
+by the round-trip test, for a hundredth of the cost.
 
 ### Choosing a track
 

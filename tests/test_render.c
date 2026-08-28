@@ -2173,7 +2173,16 @@ TEST(a_store_with_tracks_in_it_is_saved_whole) {
         CHECK(gs_track_deserialize(&t, (const uint8_t *)bytes, len));
         SDL_free(bytes);
 
-        t.corner[i] = (int16_t)(t.corner[i] + 1);
+        // **A corner inside the track, or it is not a different track.** Only
+        // (w + 1) by (h + 1) corners are serialised, so bumping one past the
+        // right-hand edge changes a byte nobody writes down: two entries hash
+        // the same, the library folds them into one - it is content addressed -
+        // and a loop that asked for a full library quietly got a short one.
+        // Invisible while the library held thirty-two and every index was
+        // inside the narrowest shipped track.
+        int cx = i % (t.w + 1), cy = i / (t.w + 1);
+        size_t corner = (size_t)cy * GS_CORNER_STRIDE + (size_t)cx;
+        t.corner[corner] = (int16_t)(t.corner[corner] + 1);
         char name[GS_LIBRARY_NAME];
         SDL_snprintf(name, sizeof name, "track number %d", i + 1);
         CHECK(gs_library_put(&gs_m.library, &t, name, "ada") >= 0);
@@ -5167,6 +5176,13 @@ static gs_panel_report gs_panel_of(SDL_Renderer *ren, gs_menu *m,
 // which is not the size anything goes wrong at.
 static gs_lobby gs_panel_lobby;
 
+// How many tracks the panel menu and the walk are given. Enough that the list
+// scrolls and has rows below the fold, which is the state the tracks screen has
+// to be measured and walked in; deliberately not GS_LIBRARY_MAX, which costs a
+// great deal and shows the walk nothing it has not already seen. See the seed
+// below for the whole reason.
+#define GS_WALK_LIBRARY 32
+
 // The lobby the panel menu points at, filled the same way every time.
 static void gs_panel_lobby_fill(void) {
     gs_panel_lobby = (gs_lobby){ 0 };
@@ -5211,17 +5227,29 @@ static void gs_panel_menu(gs_menu *m, gs_track *t) {
     CHECK(gs_menu_set_password(m, 0, "a good one", "a good one"));
     CHECK(gs_menu_sign_in(m, 0, "a good one", ""));
 
-    // A full library, because the library is the thing that grows. Each track
-    // differs by one corner so that each one hashes differently and the library
-    // keeps all of them rather than folding them into one entry.
-    for (int i = 0; i < GS_LIBRARY_MAX; i++) {
+    // **A library longer than the panel can show, which is what the walk needs
+    // from it.** It used to be GS_LIBRARY_MAX, and when that went from
+    // thirty-two to sixty-four the walk stopped finishing: a list twice as long
+    // takes more wheel actions to reach the end of, so paths get longer, and a
+    // breadth-first walk over longer paths is not twice the work. What the
+    // tracks screen has to be shown here is a list that scrolls and rows below
+    // the fold - not the largest library that can exist, which is pinned by
+    // a_store_with_tracks_in_it_is_saved_whole for a hundredth of the cost.
+    //
+    // Each track differs by one corner so that each one hashes differently and
+    // the library keeps all of them rather than folding them into one entry.
+    for (int i = 0; i < GS_WALK_LIBRARY; i++) {
         gs_track_init(t, 32, 32, GS_SURF_PAVEMENT);
-        t->corner[i] = (int16_t)(i + 1);
+        // Inside the track, for the reason written out in
+        // a_store_with_tracks_in_it_is_saved_whole: a corner outside it is not
+        // serialised and two entries then fold into one.
+        t->corner[(size_t)(i / 33) * GS_CORNER_STRIDE + (size_t)(i % 33)] =
+            (int16_t)(i + 1);
         char name[GS_LIBRARY_NAME];
         SDL_snprintf(name, sizeof name, "track number %d", i + 1);
         CHECK(gs_library_put(&m->library, t, name, "somebody") >= 0);
     }
-    CHECK(m->library.count == GS_LIBRARY_MAX);
+    CHECK(m->library.count == GS_WALK_LIBRARY);
     gs_track_init(t, 32, 32, GS_SURF_PAVEMENT);
 
     // **With one of them picked, and online.** The tracks screen only draws
@@ -5605,6 +5633,7 @@ typedef struct gs_walk_path {
 } gs_walk_path;
 
 #define GS_WALK_CTRLS 4096          // a power of two, ids offered anywhere
+
 
 // **How many different states are explored per offering.**
 //

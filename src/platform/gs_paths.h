@@ -11,6 +11,8 @@
 
 // Absolute path to the assets directory, probed once. Never null; if nothing is
 // found it returns the last place it looked, so the failure names a path.
+// `GEARSTICK_ASSETS_DIR` overrides it, the way `GEARSTICK_PREF_DIR` overrides
+// the other one.
 const char *gs_assets_dir(void);
 
 // Where the player's tracks, replays and settings live - the OS's preferences

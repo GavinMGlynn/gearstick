@@ -673,6 +673,23 @@ if(GEARSTICK_TESTS)
                              TIMEOUT 180 SKIP_RETURN_CODE 77)
     endif()
 
+    # **The shipped tracks reach somebody who has played before.** Loading the
+    # stock tracks and then reading the store puts the store's library over the
+    # top of them, so for a returning player every track the game shipped after
+    # their first start was thrown away before the menu appeared. That is
+    # start-up order in the frontend, which links a window system and is not
+    # reachable from a test executable - it takes two real starts with a store
+    # in between, which is what this is.
+    if(Python3_FOUND AND TARGET gearstick)
+        add_test(NAME gearstick_library_refresh
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/library_refresh_check.py
+                         $<TARGET_FILE:gearstick>
+                         ${CMAKE_CURRENT_SOURCE_DIR}/assets)
+        set_tests_properties(gearstick_library_refresh PROPERTIES
+                             TIMEOUT 180 SKIP_RETURN_CODE 77)
+    endif()
+
     # **The game plays itself, and says what it is showing.** Everything that
     # has gone wrong in front of a player went wrong after the green flag - a
     # camera pointed elsewhere, controls that did nothing, a race frozen two

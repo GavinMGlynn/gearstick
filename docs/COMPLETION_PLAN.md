@@ -2289,3 +2289,23 @@ are the places a fault could sit unnoticed.
       never touches a player's roster. It can now be told to keep what it did,
       which is consent given on a command line by something that has already
       pointed its preferences at a throwaway.
+- [x] **The tracks the game ships reach a player who already has a library.**
+      They did not. The stock tracks were read at start-up and the player's
+      store was read afterwards, and reading a store replaces the library — so
+      for everybody past their first ever run, every track the game shipped was
+      thrown away before the menu appeared. A library built on the 19th was
+      still all that a player saw a release later. The library is now reconciled
+      with the shipped set after the store is read as well as before it, a track
+      the game no longer ships is withdrawn, and the shelf holds sixty-four
+      rather than thirty-two — twenty-four ship, and thirty-two left no room for
+      the ones replacing what an older version shipped.
+      *Verification: the game is started twice against two different shipped
+      sets, with a store carried between them. The second start withdraws the
+      track that stopped shipping, adds the one that started, and the player is
+      left with the current set — not the set they were given the first time
+      they ever ran the game. Removing the fix makes the check fail, which was
+      confirmed by removing it.*
+      A player's own tracks are never withdrawn, which is walked over all four
+      combinations of whose a track is and whether the shipped set still names
+      it, and an assets directory that reads as empty withdraws nothing rather
+      than emptying somebody's library on a guess.

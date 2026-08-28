@@ -62,6 +62,32 @@ bool gs_library_is_builtin(const gs_library *l, uint64_t hash) {
     return at >= 0 && l->entry[at].builtin;
 }
 
+uint16_t gs_library_retire_builtins(gs_library *l, const uint64_t *keep,
+                                    uint16_t n) {
+    if (l == nullptr || keep == nullptr || n == 0) return 0;
+
+    uint16_t gone = 0;
+    uint16_t i = 0;
+    while (i < l->count) {
+        const gs_library_entry *e = &l->entry[i];
+        if (!e->builtin) { i++; continue; }
+
+        bool still_ships = false;
+        for (uint16_t k = 0; k < n; k++) {
+            if (keep[k] == e->hash) { still_ships = true; break; }
+        }
+        if (still_ships) { i++; continue; }
+
+        // Removing compacts the list, so the next entry is now at `i` and this
+        // must not step over it. A loop that advanced anyway skipped every
+        // second withdrawn track, which is the kind of thing that looks like it
+        // works on a library with one of them in it.
+        gs_library_remove(l, e->hash);
+        gone++;
+    }
+    return gone;
+}
+
 int gs_library_replace(gs_library *l, uint64_t was, const gs_track *now) {
     int at = gs_library_find(l, was);
     if (at < 0) return -1;
