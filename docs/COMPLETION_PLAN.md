@@ -2054,7 +2054,7 @@ worth as much as what was decided about it.
       out — when the lights go green — is named with its reason, and the thing
       that covers it is asserted rather than assumed: take that away and the
       test goes red.*
-- [ ] **Four things to leave behind.** *(Found by asking which enums no test
+- [x] **Four things to leave behind.** *(Found by asking which enums no test
       walks — nothing had ever asked about hazard kinds.)* The mine was written,
       hashed and tested, and no player could drop one: the fire button was
       hard-coded to oil. There are four now — oil, a mine, smoke that hides the
@@ -2083,7 +2083,9 @@ worth as much as what was decided about it.
       tapped, re-races to the same world hash — from the recording in memory and
       from the bytes it is written to. A recording made by the released beta,
       which came before weapons, still reads and reads as a race with none.*
-      **Not finished:** the four items under Phase 19 below.
+      **Finished by the four items under Phase 19 below:** they can be seen,
+      they can be heard, the screen says what you are carrying, and the
+      computer uses what it has.
 
 ## Phase 19 — Weapons a player can see, hear and be beaten by
 
