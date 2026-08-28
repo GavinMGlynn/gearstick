@@ -964,6 +964,14 @@ right-hand edge, which is not serialised. Both folded into one entry and both
 tests asked for a full library and got a short one. They are fixed, and the
 reason is written where the next person will read it.
 
+**And a menu no longer travels on the stack.** Doubling the library doubled the
+menu that holds it, and four places in the render tests copied a whole menu into
+a local. At half a megabyte those copies fitted inside the one megabyte Windows
+gives a thread by default; at a megabyte they did not, and the render tests
+segfaulted on MSVC while every other platform — eight megabytes of stack — stayed
+green. The rule was already written over `gs_library`: a heap or static object
+rather than a local. It is now obeyed in the four places that did not.
+
 And the front-end walk is now seeded with a named thirty-two tracks rather than
 "as many as a library holds". A list twice as long takes more wheel actions to
 reach the end of, so paths get longer — and a breadth-first walk over longer

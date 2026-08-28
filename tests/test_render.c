@@ -5380,7 +5380,15 @@ static int gs_ui_exits(gs_ui *ui, gs_menu *fresh, gs_track *t, SDL_Renderer *ren
     for (int steps = 0; steps < GS_UI_MAX_STEPS; steps++) {
         // A clean menu every time, so one activation cannot colour the next -
         // signing out, say, would change what every later press did.
-        gs_menu m = *fresh;
+        // **A menu is a megabyte and Windows gives a thread one.** So it is
+        // static and assigned rather than a local copy: at half a megabyte
+        // this was inside the stack a Windows thread gets by default and at a
+        // megabyte it is not, and the render tests segfaulted on MSVC while
+        // every other platform, with its eight-megabyte stack, was green. The
+        // header over gs_library says a heap or static object rather than a
+        // local; this is that rule, and the reason it is written down.
+        static gs_menu m;
+        m = *fresh;
         m.screen = from;
         gs_ui_begin(ui, &m, t, ren);
 
@@ -5424,7 +5432,10 @@ typedef struct gs_reach {
 static int gs_ui_controls(gs_ui *ui, gs_menu *fresh, gs_track *t,
                           SDL_Renderer *ren, gs_screen from, gs_ui_item *into,
                           int cap) {
-    gs_menu m = *fresh;
+    // Static rather than a local, for the reason in gs_ui_exits: a menu does
+    // not fit on a Windows thread's stack.
+    static gs_menu m;
+    m = *fresh;
     m.screen = from;
     gs_ui_begin(ui, &m, t, ren);
 
@@ -5446,7 +5457,9 @@ static void gs_ui_exits_by_name(gs_ui *ui, gs_menu *fresh, gs_track *t,
     for (int i = 0; i < n; i++) {
         if (!items[i].reachable || items[i].disabled) continue;
 
-        gs_menu m = *fresh;
+        // Static rather than a local - see gs_ui_exits.
+        static gs_menu m;
+        m = *fresh;
         m.screen = from;
         gs_ui_begin(ui, &m, t, ren);
 
@@ -9986,7 +9999,9 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
     for (size_t si = 0; si < SDL_arraysize(gs_every_screen); si++) {
         gs_panel_menu(&fresh, &t);
         gs_seeds[sd].set(&fresh);
-        gs_menu m = fresh;
+        // Static rather than a local - see gs_ui_exits.
+        static gs_menu m;
+        m = fresh;
         m.screen = gs_every_screen[si];
         gs_ui_begin(&ui, &m, &t, ren);
 
