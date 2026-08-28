@@ -2202,12 +2202,22 @@ are the places a fault could sit unnoticed.
       be listed once and then visited; and "wholly inside" cannot be asked of
       ImGui's own clip test, because a list's clip stops short of its own
       scrollbar and every full-width row overlaps it by a pixel.
-- [ ] **The server's library.** `src/net/gs_store.c` runs at 80%. It is the
-      thing that holds what people have published, so what is not exercised
-      there is a place somebody's track could be lost or shown to the wrong
-      person.
-      *Verification: the paths that are never taken are named, and the ones that
-      can lose or leak a track are taken deliberately.*
+- [x] **The server's library.** Measured across everything that uses it rather
+      than one binary, it runs at 81% of its lines and 53 of its 54 functions —
+      and the paths that could *leak* a track were already walked. The one that
+      could **lose** one was not: opening a database made by an older build.
+      Every test made a fresh one, so the migration that adds six columns and
+      turns the old published flag into the new visibility had only ever run
+      against a database that already had them, where it does nothing.
+      *Verification: a database is built in the old shape, by hand, with two
+      tracks in it — one published and one not — and opened by today's code. It
+      comes forward rather than being refused, both tracks are still there with
+      their bytes intact, the published one is still published and the private
+      one still private, and opening it a second time is the same store rather
+      than a second migration doing something else.*
+      What is left under 80% is three SQL helpers whose remainder is error
+      handling — a statement that will not prepare, a row that is not there —
+      and that is named here rather than counted as covered.
 - [ ] **The rollback netcode over a bad link.** There is a link simulator with
       latency, jitter and loss, and it has not been audited for how far it is
       actually pushed — a netcode tested only over a good link is a netcode

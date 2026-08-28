@@ -7,6 +7,8 @@
 #include "net/gs_auth.h"
 #include "net/gs_store.h"
 
+#include <sqlite3.h>   // to build a database this code did not make
+
 #include <stdio.h>
 #include <string.h>
 
@@ -611,6 +613,110 @@ TEST(a_shared_track_is_visible_to_exactly_who_it_was_shared_with) {
     gs_store_close(s);
 }
 
+// A database in the shape this code used to make, before tracks had an owner,
+// a shipped flag or a visibility - written with SQLite directly, because the
+// point is to produce something *this* code did not.
+static bool gs_old_store(const char *path) {
+    remove(path);
+
+    sqlite3 *db = nullptr;
+    if (sqlite3_open(path, &db) != SQLITE_OK) return false;
+
+    // The schema as it was: a track had `published` and nothing else about who
+    // could see it. Everything a store carried then, so that what survives the
+    // migration can be checked rather than assumed.
+    const char *sql =
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);"
+        "INSERT INTO meta (key, value) VALUES ('schema', 1);"
+        "CREATE TABLE driver ("
+        "  name  TEXT PRIMARY KEY,"
+        "  seen  INTEGER NOT NULL DEFAULT 0,"
+        "  races INTEGER NOT NULL DEFAULT 0,"
+        "  wins  INTEGER NOT NULL DEFAULT 0);"
+        "INSERT INTO driver (name, races, wins) VALUES ('ada', 4, 2);"
+        "CREATE TABLE track ("
+        "  hash      INTEGER PRIMARY KEY,"
+        "  name      TEXT NOT NULL DEFAULT '',"
+        "  author    TEXT NOT NULL DEFAULT '',"
+        "  added     INTEGER NOT NULL DEFAULT 0,"
+        "  published INTEGER NOT NULL DEFAULT 0,"
+        "  bytes     BLOB NOT NULL);"
+        "INSERT INTO track (hash, name, author, published, bytes)"
+        "  VALUES (111, 'up', 'ada', 1, x'0102030405');"
+        "INSERT INTO track (hash, name, author, published, bytes)"
+        "  VALUES (222, 'mine', 'ada', 0, x'0607080910');";
+
+    char *err = nullptr;
+    const bool ok = sqlite3_exec(db, sql, nullptr, nullptr, &err) == SQLITE_OK;
+    sqlite3_free(err);
+    sqlite3_close(db);
+    return ok;
+}
+
+TEST(a_store_from_an_older_build_keeps_everything_it_had) {
+    // **Nobody had ever opened an old one.** Every test here makes a fresh
+    // database, so the migration - six columns added, and the old `published`
+    // flag turned into the new visibility - had only ever run against a
+    // database that already had all of them, where it does nothing at all.
+    //
+    // What it is for is the person upgrading. Their store is the old shape,
+    // and if this is wrong their tracks are gone or their published ones have
+    // quietly gone private, on a server they were running for other people.
+    const char *path = "store_old.db";
+    if (!gs_old_store(path)) { gs_failures++; return; }
+
+    gs_store *s = gs_store_open(path);
+    CHECK(s != nullptr);
+    if (s == nullptr) return;
+
+    // It came forward to today's schema rather than being refused.
+    CHECK(gs_store_version(s) == 3);
+
+    // **Everything that was in it is still in it.**
+    CHECK(gs_store_driver_count(s) == 1);
+    CHECK(gs_store_track_count(s) == 2);
+
+    uint8_t bytes[64];
+    size_t n = 0;
+    CHECK(gs_store_get_track(s, 111, bytes, sizeof bytes, &n));
+    CHECK(n == 5);
+    CHECK(bytes[0] == 0x01 && bytes[4] == 0x05);
+    CHECK(gs_store_get_track(s, 222, bytes, sizeof bytes, &n));
+    CHECK(n == 5);
+    CHECK(bytes[0] == 0x06);
+
+    // **And what was up is still up, and what was not is not.** This is the
+    // half that would go wrong silently: a track somebody published before the
+    // upgrade going private is not a crash, it is a track that stops being
+    // there for everybody else.
+    gs_track_row rows[8];
+    const int up = gs_store_list_published(s, rows, 8);
+    CHECK(up == 1);
+    if (up == 1) {
+        CHECK(rows[0].hash == 111);
+        CHECK(strcmp(rows[0].name, "up") == 0);
+    }
+    CHECK(gs_store_is_published(s, 111));
+    CHECK(!gs_store_is_published(s, 222));
+
+    // Nobody owns them, which is what an old row means: they were stored
+    // before a track had an owner at all.
+    uint8_t owner[GS_STORE_KEY_BYTES];
+    CHECK(!gs_store_track_owner(s, 111, owner));
+    CHECK(!gs_store_track_owner(s, 222, owner));
+
+    // And the upgrade is not a one-off: closing and opening it again is the
+    // same store, not a second migration doing something else.
+    gs_store_close(s);
+    s = gs_store_open(path);
+    CHECK(s != nullptr);
+    if (s == nullptr) return;
+    CHECK(gs_store_track_count(s) == 2);
+    CHECK(gs_store_list_published(s, rows, 8) == 1);
+    gs_store_close(s);
+    remove(path);
+}
+
 TEST(a_track_that_shipped_with_the_game_is_outside_all_of_it) {
     gs_store *s = gs_store_open(":memory:");
     CHECK(s != nullptr);
@@ -739,6 +845,7 @@ int main(void) {
     run_a_one_time_code_works_once_inside_the_window_it_is_valid_for();
     run_a_track_belongs_to_whoever_built_it_and_to_nobody_else();
     run_a_shared_track_is_visible_to_exactly_who_it_was_shared_with();
+    run_a_store_from_an_older_build_keeps_everything_it_had();
     run_a_track_that_shipped_with_the_game_is_outside_all_of_it();
     run_a_session_token_is_good_once_and_only_for_who_it_was_issued_to();
     run_a_session_outlives_the_process_that_issued_it();

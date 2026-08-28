@@ -5952,6 +5952,39 @@ reading its enumeration from. A different three rows of thirty-two were
 "unreachable" every time the number of frames changed, which is the shape of a
 test measuring itself.
 
+## The store, and the upgrade nobody had ever done
+
+`gs_store.c` measures 81% of its lines and 53 of its 54 functions once it is
+measured across everything that uses it rather than one binary. The item that
+sent me here worried about two things: a track *leaked* to the wrong person, and
+a track *lost*.
+
+The leaking was already walked - a track belongs to whoever built it and to
+nobody else, a shared track is visible to exactly who it was shared with, a
+track that shipped with the game is outside all of it.
+
+**The losing was not.** `gs_store_open` migrates: six columns that did not exist
+in an older schema are added, and the old `published` flag becomes the new
+three-state visibility. Every test in the suite made a *fresh* database, so that
+code had only ever run against one that already had all six columns - where it
+does nothing at all.
+
+What it is for is the person upgrading. Their store is the old shape, and if the
+migration is wrong their tracks are gone, or the ones they published have
+quietly gone private on a server they were running for other people. Neither
+fails loudly.
+
+So there is now a database built in the old shape by hand, with SQLite directly,
+because the point is to produce something *this* code did not make. Two tracks,
+one published and one not. It comes forward rather than being refused, both
+tracks keep their bytes, the published one is still published and the private
+one still private - and opening it a second time is the same store rather than a
+second migration doing something else.
+
+`gs_add_column` went from 62% to covered. What is left below 80% is three SQL
+helpers whose remainder is error handling: a statement that will not prepare, a
+row that is not there. Named here rather than counted.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
