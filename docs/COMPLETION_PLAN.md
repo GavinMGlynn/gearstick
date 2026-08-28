@@ -2083,4 +2083,100 @@ worth as much as what was decided about it.
       tapped, re-races to the same world hash — from the recording in memory and
       from the bytes it is written to. A recording made by the released beta,
       which came before weapons, still reads and reads as a race with none.*
-      **Not finished:** opponents never fire, and nothing draws smoke or fire.
+      **Not finished:** the four items under Phase 19 below.
+
+## Phase 19 — Weapons a player can see, hear and be beaten by
+
+The simulation, the dial and the recording are done. What is missing is
+everything a person actually experiences: two of the four weapons are invisible,
+none of them makes a sound, the screen never says what you are carrying, and the
+computer never uses any of it.
+
+- [ ] **Smoke and fire you can see.** The renderer knows two kinds of hazard —
+      oil, and a small dot for everything else — so smoke and fire currently
+      look like mines. Smoke is the one that has to read at a glance, because
+      hiding the ground is the whole of what it does.
+      *Verification: each of the four is drawn as itself and told apart from the
+      other three in a photographed frame, and smoke actually obscures what is
+      under it. Every kind walked, not a sample, so a fifth is drawn the day it
+      exists.*
+- [ ] **Weapons you can hear.** `src/audio/` has never heard of a hazard: there
+      is no sound for dropping one, for a mine going off, or for fire burning.
+      A mine you cannot hear behind you is a mine that feels like the game
+      cheating.
+      *Verification: dropping each kind makes a noise and each is distinguishable
+      from the others; a mine going off is louder than laying one; four cars
+      dropping and detonating at once still fits in a speaker on every ground
+      and in every machine.*
+- [ ] **The HUD says what you are carrying.** The control is explained once, on
+      the setup screen, and never again — and there is nothing on screen saying
+      which weapon a tap would drop or how many are left. A hold that silently
+      changes something invisible is not a control.
+      *Verification: the row appears only in a race with weapons in it, names
+      the selected kind and its count, changes when the selection changes, and
+      the panel still fits its view at every player count and both window sizes
+      — the rule the HUD is already held to.*
+- [ ] **Opponents that use what they are carrying.** `gs_ai_drive` never presses
+      the button, so a derby against the computer is one armed human and three
+      unarmed cars. The driver needs a rule for when leaving something behind is
+      worth it — roughly, when somebody is close behind.
+      *Verification: an opponent carrying weapons drops them during a race and
+      one carrying none drops nothing; it does not drop them where they cannot
+      help; and the whole grid armed and racing still finishes. Moves the
+      opponents hash, deliberately — that number exists to move when the driver
+      changes.*
+
+## Phase 20 — The four-player camera, when it cannot merge
+
+The one open question in `FEATURES.md` that is a live defect rather than a
+choice: *"what the merged four-player camera does when it cannot merge. The
+failure mode is the design, and it has not been thought about yet."* Four cars
+that will not fit one view split into four, and nobody has decided whether that
+is right, what happens on the way, or what a two-player race does when one car
+is left behind at the far end of a long track.
+
+- [ ] **Decide what happens, then make it happen.** The failure mode is the
+      design and it is currently whatever fell out.
+      *Verification: to be written with the decision — but at minimum, every
+      number of cars from one to four, together and far apart, gets a view that
+      shows its own car, and the moment of splitting and merging is walked
+      rather than assumed.*
+
+## Phase 21 — Where the tests are not
+
+Five places the suite does not reach, found by building the tree under a
+coverage tool and asking what never runs. None of these is a known fault; they
+are the places a fault could sit unnoticed.
+
+- [ ] **The server's own loop.** `src/frontend/server/main.c` runs at 42% of its
+      lines. There are 26 server tests and they exercise the pieces; the loop
+      that ties them together is mostly reached only by two end-to-end checks
+      that kill the process, which is also why the number is hard to trust.
+      *Verification: the parts of it that decide something — accepting a player,
+      losing one, starting and ending a race — are reached by a test that can
+      assert, and the number is measured rather than guessed at.*
+- [ ] **Controls inside lists, at a small window.** The panels are walked
+      exhaustively for reach at 640×480; the 1095 controls drawn *inside* lists
+      on those panels are counted and skipped, because a list scrolls itself.
+      Nothing checks they can all be got to.
+      *Verification: every control inside every list is wholly on screen at some
+      scroll position of the list holding it, at the smallest window — the same
+      standard the panels themselves are held to.*
+- [ ] **The server's library.** `src/net/gs_store.c` runs at 80%. It is the
+      thing that holds what people have published, so what is not exercised
+      there is a place somebody's track could be lost or shown to the wrong
+      person.
+      *Verification: the paths that are never taken are named, and the ones that
+      can lose or leak a track are taken deliberately.*
+- [ ] **The rollback netcode over a bad link.** There is a link simulator with
+      latency, jitter and loss, and it has not been audited for how far it is
+      actually pushed — a netcode tested only over a good link is a netcode
+      tested where it cannot fail.
+      *Verification: the worst link the game claims to survive is written down
+      and raced over, and the race still agrees on every machine at the end.*
+- [ ] **The game played from the door to the results.** `play_check.py` races
+      the real client, but nothing walks the whole thing a person does: sign in,
+      build a track, save it, race it, and find the time afterwards in the
+      records.
+      *Verification: one check that does exactly that against the real binaries,
+      and fails if any step stops leading to the next.*
