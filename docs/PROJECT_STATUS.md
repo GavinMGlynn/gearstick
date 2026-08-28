@@ -6095,6 +6095,24 @@ the leak checker four allocations belonging to PulseAudio. Same reasoning as the
 sandbox in every test main: a binary should not behave differently for being
 started by hand.
 
+### And one absolute number, because fourteen relative ones are not enough
+
+Every other audio test asserts a *relative* property: dirt louder than pavement,
+ice brighter than dirt, a mine going off louder than laying one. **A platform
+whose whole output came out at a tenth of the level would pass every single one
+of them.** The claim the sound item rests on - *"the synthesiser is
+platform-independent"* - had nothing checking it across platforms at all.
+
+So one fixed race, and its loudness pinned: rms 0.3738, peak 0.6667, with a
+tenth either way allowed. That runs on all three platforms in CI, which is the
+only way the question gets asked of Windows and macOS at all.
+
+A band rather than a value, because this is float arithmetic and the last bits
+are a compiler's business - which is exactly why `src/core/` forbids floats and
+why sound is allowed them: nothing downstream of the mixer has to agree with
+anything. A tenth is far tighter than a platform going wrong and far looser than
+a last-bit difference.
+
 **This does not close the item**, and the item says why: the dummy driver opens,
 runs a thread and consumes what it is given, and what it does not do is make a
 noise. What is left is what the verification asks for and no machine can give.

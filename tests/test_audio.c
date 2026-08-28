@@ -314,6 +314,60 @@ TEST(a_car_further_away_is_quieter_than_the_one_being_driven) {
     CHECK(far_level < near_level * 0.5f);
 }
 
+// The loudest the buffer got. An rms over a long buffer hides a short bang, and
+// some of what is measured here - a mine going off - is exactly that.
+static float gs_peak(const float *buf, int frames) {
+    float peak = 0.0f;
+    for (int i = 0; i < frames * GS_AUDIO_CHANNELS; i++) {
+        const float a = buf[i] < 0.0f ? -buf[i] : buf[i];
+        if (a > peak) peak = a;
+    }
+    return peak;
+}
+
+TEST(a_race_sounds_the_same_loudness_on_every_platform) {
+    // **The claim the sound item rests on, and nothing checked it.**
+    // *"The synthesiser is platform-independent and the device path is not"* -
+    // and every one of the fourteen tests around this one asserts a *relative*
+    // property. Dirt louder than pavement, ice brighter than dirt, a mine
+    // louder than laying one. A platform whose whole output came out at a tenth
+    // of the level, or ten times it, would pass every single one of them.
+    //
+    // So one absolute number, pinned, from a fixed race. It runs on all three
+    // platforms in CI, which is the only way this gets asked of Windows and
+    // macOS at all.
+    //
+    // **A band rather than a value.** This is float arithmetic - `sinf` and a
+    // filter - and the last bits of it are a compiler's business, which is
+    // exactly why src/core/ forbids floats and why sound is allowed to use
+    // them: nothing downstream of the mixer has to agree with anything. A
+    // tenth either way is far tighter than a platform going wrong and far
+    // looser than a last-bit difference.
+    gs_world w;
+    gs_scene(&w, GS_SURF_DIRT);
+    w.car[0].vx = GS_INT(6);
+    w.car[0].vy = GS_INT(4);          // sideways, so the tyres are working too
+    gs_settle(&w, &gs_t);
+
+    const float rms = gs_rms(gs_buf, FRAMES);
+    const float peak = gs_peak(gs_buf, FRAMES);
+
+    // Taken on Linux with gcc, and the band is what a platform is allowed to
+    // differ by. If this moves, either the synthesiser changed - which is a
+    // decision, and the note goes here - or a platform is producing something
+    // else, which is the fault this exists to catch.
+    const float want_rms = 0.3738f, want_peak = 0.6667f;
+
+    printf("  LOUDNESS a dirt race at speed: rms %.4f, peak %.4f "
+           "(pinned %.4f and %.4f)\n", (double)rms, (double)peak,
+           (double)want_rms, (double)want_peak);
+
+    CHECK(rms > want_rms * 0.9f);
+    CHECK(rms < want_rms * 1.1f);
+    CHECK(peak > want_peak * 0.9f);
+    CHECK(peak < want_peak * 1.1f);
+}
+
 TEST(nothing_the_synthesiser_produces_can_blow_a_speaker) {
     gs_world w;
 
@@ -388,18 +442,6 @@ TEST(nothing_the_synthesiser_produces_can_blow_a_speaker) {
            (int)GS_VEH_COUNT);
     CHECK(mixes == (int)GS_SURF_COUNT * (int)GS_VEH_COUNT);
     gs_audio_set_volume(0.8f);
-}
-
-// Settle the mixer on a world, then drop something and render what that makes.
-// The level returned is the loudest the buffer got, because these are struck
-// sounds and an rms over a long buffer hides a short bang.
-static float gs_peak(const float *buf, int frames) {
-    float peak = 0.0f;
-    for (int i = 0; i < frames * GS_AUDIO_CHANNELS; i++) {
-        const float a = buf[i] < 0.0f ? -buf[i] : buf[i];
-        if (a > peak) peak = a;
-    }
-    return peak;
 }
 
 TEST(every_weapon_makes_a_noise_and_no_two_sound_the_same) {
@@ -849,6 +891,7 @@ int main(void) {
     run_the_ground_a_car_is_on_changes_what_it_sounds_like();
     run_a_car_in_the_air_makes_no_tyre_noise_at_all();
     run_a_car_further_away_is_quieter_than_the_one_being_driven();
+    run_a_race_sounds_the_same_loudness_on_every_platform();
     run_nothing_the_synthesiser_produces_can_blow_a_speaker();
     run_every_weapon_makes_a_noise_and_no_two_sound_the_same();
     run_a_mine_going_off_is_louder_than_a_mine_being_laid();
