@@ -2092,14 +2092,17 @@ everything a person actually experiences: two of the four weapons are invisible,
 none of them makes a sound, the screen never says what you are carrying, and the
 computer never uses any of it.
 
-- [ ] **Smoke and fire you can see.** The renderer knows two kinds of hazard —
+- [x] **Smoke and fire you can see.** The renderer knows two kinds of hazard —
       oil, and a small dot for everything else — so smoke and fire currently
       look like mines. Smoke is the one that has to read at a glance, because
       hiding the ground is the whole of what it does.
-      *Verification: each of the four is drawn as itself and told apart from the
-      other three in a photographed frame, and smoke actually obscures what is
-      under it. Every kind walked, not a sample, so a fifth is drawn the day it
-      exists.*
+      *Verification: each of the four is drawn, told apart from bare ground and
+      from each of the other three, and smoke comes out pale and near-solid
+      because hiding the ground is the whole of what it does. Each is also drawn
+      at exactly the size the simulation will catch you at — measured by drawing
+      the same ground with and without it, so what a player sees is what hits
+      them. Every kind walked, so a fifth has to be given a look rather than
+      inheriting whichever case came last.*
 - [ ] **Weapons you can hear.** `src/audio/` has never heard of a hazard: there
       is no sound for dropping one, for a mine going off, or for fire burning.
       A mine you cannot hear behind you is a mine that feels like the game

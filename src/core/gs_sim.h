@@ -409,6 +409,14 @@ void gs_world_arm(gs_world *w, gs_hazard_kind kind, uint8_t count);
 // simulation's own list, so the setup screen and the HUD cannot drift from it.
 const char *gs_hazard_name(gs_hazard_kind kind);
 
+// **How big it is, and how long it lasts** - the simulation's own numbers, so
+// that what a player sees on the ground is the thing that will actually catch
+// them. A renderer with its own idea of how wide a slick is draws a lie, and
+// the lie is exactly the kind a player learns to distrust the physics over.
+// A life of zero is something that stays until the race ends.
+gs_fix   gs_hazard_radius(gs_hazard_kind kind);
+uint16_t gs_hazard_life(gs_hazard_kind kind);
+
 // Which kind a tap would leave, and how many of it are left. GS_HAZ_NONE when
 // the car is carrying nothing at all.
 gs_hazard_kind gs_car_selected(const gs_car *c);

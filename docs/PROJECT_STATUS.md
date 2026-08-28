@@ -5701,8 +5701,22 @@ any**, and a race without them hashes exactly the way it always did.
   weapons race would have been rejected for not arriving where it said.
 - **No opponent has ever dropped anything.** `gs_ai_drive` never sets
   `GS_IN_FIRE`, so in a derby against the computer only the human is armed.
-- **Nothing draws smoke or fire.** They exist in the world and the renderer has
-  not been told.
+- ~~Nothing draws smoke or fire.~~ **Done.** The renderer knew two kinds - oil,
+  and a small orange dot for everything else - so smoke and fire looked like
+  mines, and smoke, whose entire job is hiding the ground, hid nothing. Four
+  looks now, named one by one with no `default`, so a fifth kind has to be given
+  one.
+
+  And each is drawn **at the size the simulation will catch you at**, asked of
+  `gs_hazard_radius` rather than guessed at in the renderer. A slick drawn
+  narrower than it is is the kind of lie a player learns to distrust the whole
+  physics over. Smoke and fire fade over their last third, so a driver can tell
+  the fire they can wait out from the fire they cannot.
+
+  The test measures by drawing the same ground **with and without** the hazard
+  and comparing the same pixel. Comparing two different patches instead measures
+  the terrain's own shading, which is how the test first told itself smoke was
+  four tiles wider than it is.
 
 ## Known risks
 

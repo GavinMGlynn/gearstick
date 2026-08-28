@@ -151,13 +151,25 @@ static gs_fix gs_steer_authority(const gs_vehicle_def *v, gs_fix speed) {
 // One a second. Holding the button should leave a trail, not a carpet.
 #define GS_DROP_COOLDOWN (GS_TICK_HZ)
 
-// How long a hazard of each kind lasts. Zero is "until the race ends".
-static uint16_t gs_haz_life(gs_hazard_kind kind) {
+uint16_t gs_hazard_life(gs_hazard_kind kind) {
     switch (kind) {
     case GS_HAZ_SMOKE: return (uint16_t)GS_SMOKE_LIFE;
     case GS_HAZ_FLAME: return (uint16_t)GS_FLAME_LIFE;
     case GS_HAZ_OIL:
     case GS_HAZ_MINE:
+    case GS_HAZ_NONE:
+    case GS_HAZ_COUNT:
+        break;
+    }
+    return 0;      // stays until the race ends
+}
+
+gs_fix gs_hazard_radius(gs_hazard_kind kind) {
+    switch (kind) {
+    case GS_HAZ_OIL:   return GS_OIL_RADIUS;
+    case GS_HAZ_MINE:  return GS_MINE_RADIUS;
+    case GS_HAZ_SMOKE: return GS_SMOKE_RADIUS;
+    case GS_HAZ_FLAME: return GS_FLAME_RADIUS;
     case GS_HAZ_NONE:
     case GS_HAZ_COUNT:
         break;
@@ -247,7 +259,7 @@ bool gs_world_drop(gs_world *w, uint8_t car, gs_hazard_kind kind) {
 
     w->hazard[at] = (gs_hazard){ .x = c->x, .y = c->y, .kind = (uint8_t)kind,
                                  .owner = car, .spent = 0,
-                                 .life = gs_haz_life(kind) };
+                                 .life = gs_hazard_life(kind) };
     c->drop_cooldown = GS_DROP_COOLDOWN;
     c->ammo[kind]--;
 

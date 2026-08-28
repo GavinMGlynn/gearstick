@@ -1398,17 +1398,30 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         }
     }
 
-    // Hazards, drawn on the ground under everything that moves. Flat, dark and
-    // slightly translucent for oil, so it reads as something on the road rather
-    // than something standing on it; a mine is small and bright, because the
-    // one thing a player must be able to do is see it in time.
+    // Hazards, drawn on the ground under everything that moves. Flat, because
+    // they are things on the road rather than things standing on it - and each
+    // one **at the size the simulation will actually catch you at**, asked of
+    // gs_hazard_radius rather than guessed at here. A slick drawn narrower than
+    // it is is a lie, and it is the kind a player learns to distrust the
+    // physics over.
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
     for (uint8_t i = 0; i < now->hazard_count; i++) {
         const gs_hazard *h = &now->hazard[i];
         if (h->kind == GS_HAZ_NONE || h->spent) continue;
 
+        const gs_hazard_kind kind = (gs_hazard_kind)h->kind;
         float hx = gs_to_f(h->x), hy = gs_to_f(h->y);
-        float r = h->kind == GS_HAZ_OIL ? 1.3f : 0.45f;
+        float r = gs_to_f(gs_hazard_radius(kind));
+
+        // **Going out is something you can see.** Smoke and fire have a clock,
+        // and one about to expire fades over its last third - so a driver can
+        // tell the fire they can wait out from the fire they cannot.
+        float fade = 1.0f;
+        const uint16_t full = gs_hazard_life(kind);
+        if (full > 0) {
+            const float left = (float)h->life / (float)full;
+            if (left < 0.34f) fade = left / 0.34f;
+        }
 
         static const float ox[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
         static const float oy[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
@@ -1420,9 +1433,36 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
             gs_iso_project(&cam, px, py, gs_to_f(pz) + 0.02f, &p[k].x, &p[k].y);
         }
 
-        SDL_FColor col = h->kind == GS_HAZ_OIL
-                             ? (SDL_FColor){ 0.05f, 0.04f, 0.10f, 0.72f }
-                             : (SDL_FColor){ 1.0f, 0.45f, 0.1f, 0.95f };
+        // **Four things, four looks**, named one by one so a fifth kind has to
+        // be given one rather than inheriting whatever the last case was.
+        SDL_FColor col;
+        switch (kind) {
+        case GS_HAZ_OIL:
+            // Dark and see-through: the road is still under it, which is what
+            // makes it something to be driven through rather than avoided.
+            col = (SDL_FColor){ 0.05f, 0.04f, 0.10f, 0.72f };
+            break;
+        case GS_HAZ_MINE:
+            // Small and bright. The one thing a player must be able to do is
+            // see it in time.
+            col = (SDL_FColor){ 1.0f, 0.45f, 0.1f, 0.95f };
+            break;
+        case GS_HAZ_SMOKE:
+            // **Pale and nearly solid, because hiding the ground is the whole
+            // of what it does.** Anything you can see the road through is a
+            // grey patch rather than a screen.
+            col = (SDL_FColor){ 0.78f, 0.79f, 0.82f, 0.93f };
+            break;
+        case GS_HAZ_FLAME:
+            // Hot: yellow where a mine is orange, and wider, so the two are
+            // told apart at a glance by colour and by size at once.
+            col = (SDL_FColor){ 1.0f, 0.82f, 0.20f, 0.88f };
+            break;
+        case GS_HAZ_NONE:
+        case GS_HAZ_COUNT:
+            continue;
+        }
+        col.a *= fade;
         gs_quad(ren, p, col);
     }
 

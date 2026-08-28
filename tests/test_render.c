@@ -31,6 +31,8 @@
 #include "ui/gs_style.h"
 #include "ui/gs_ui_probe.h"
 #include "gs_sandbox.h"
+
+#include <stdlib.h>   // abs, for comparing two colours
 #include "core/gs_ai.h"
 #include "dcimgui.h"
 #include "backends/dcimgui_impl_sdl3.h"
@@ -3384,6 +3386,188 @@ TEST(a_start_line_and_a_finish_line_are_different_things) {
     CHECK(black[1][0] > 40);
     CHECK(white[1][1] == 0);
     CHECK(black[1][1] == 0);
+}
+
+// The colour at a point on the ground, as the frame drew it.
+static void gs_pixel_at(const gs_frame *f, const gs_camera *cam,
+                        const gs_track *t, float x, float y,
+                        int *r, int *g, int *b) {
+    *r = *g = *b = -1;
+    gs_fix z = gs_track_height(t, (gs_fix)(x * (float)GS_ONE),
+                               (gs_fix)(y * (float)GS_ONE));
+    float sx = 0.0f, sy = 0.0f;
+    gs_iso_project(cam, x, y, gs_to_f(z), &sx, &sy);
+    if (sx < 0 || sy < 0 || sx >= GS_W || sy >= GS_H) return;
+    const uint8_t *p = &f->px[((int)sy * GS_W + (int)sx) * 4];
+    *r = p[0]; *g = p[1]; *b = p[2];
+}
+
+TEST(every_kind_of_hazard_is_drawn_as_itself) {
+    // **Two of the four were invisible.** The renderer knew oil and drew a
+    // small orange dot for everything else, so smoke and fire looked like
+    // mines - and smoke, whose entire job is hiding the ground, hid nothing at
+    // all. Nothing could see that from the simulation's side: the hazards were
+    // there, hashed, doing what they should.
+    //
+    // Walked from GS_HAZ_COUNT, so a fifth kind has to be given a look rather
+    // than inheriting whichever case came last.
+    static gs_track t;
+    gs_flat_pavement(&t, 60, 60);
+
+    static gs_world w;
+    gs_park_car(&w, &t, GS_INT(50), GS_INT(50));      // parked well clear
+
+    // One of each, spread far enough apart that none overlaps another - smoke
+    // is over two tiles across, so eight tiles between them is room to spare.
+    const float at[GS_HAZ_COUNT][2] = {
+        { 0.0f, 0.0f },                                // GS_HAZ_NONE: unused
+        { 20.0f, 20.0f }, { 28.0f, 20.0f },
+        { 20.0f, 28.0f }, { 28.0f, 28.0f },
+    };
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        gs_world_arm(&w, (gs_hazard_kind)k, 1);
+        w.car[0].x = (gs_fix)(at[k][0] * (float)GS_ONE);
+        w.car[0].y = (gs_fix)(at[k][1] * (float)GS_ONE);
+        w.car[0].drop_cooldown = 0;
+        CHECK(gs_world_drop(&w, 0, (gs_hazard_kind)k));
+    }
+    CHECK(w.hazard_count == GS_HAZ_COUNT - 1);
+    w.car[0].x = GS_INT(50);
+    w.car[0].y = GS_INT(50);
+
+    gs_camera cam = gs_camera_on(24.0f, 24.0f, 0.0f);
+    cam.zoom = 1.1f;
+    gs_frame f = gs_render_frame(ren, &t, &w, &w, 1.0f, &cam);
+    CHECK(f.px != nullptr);
+    if (f.px == nullptr) return;
+
+    // The bare ground, somewhere none of them reaches.
+    int gr = 0, gg = 0, gb = 0;
+    gs_pixel_at(&f, &cam, &t, 24.0f, 24.0f, &gr, &gg, &gb);
+    CHECK(gr >= 0);
+
+    int seen[GS_HAZ_COUNT][3];
+    int drawn = 0;
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        gs_pixel_at(&f, &cam, &t, at[k][0], at[k][1],
+                    &seen[k][0], &seen[k][1], &seen[k][2]);
+        CHECK(seen[k][0] >= 0);
+
+        // **Something is there.** A hazard that draws as the ground is a
+        // hazard nobody can avoid.
+        const int off = abs(seen[k][0] - gr) + abs(seen[k][1] - gg) +
+                        abs(seen[k][2] - gb);
+        if (off <= 30) {
+            printf("  HAZARD %s draws as bare ground\n",
+                   gs_hazard_name((gs_hazard_kind)k));
+        }
+        CHECK(off > 30);
+        drawn++;
+    }
+
+    // **And no two of them look alike**, which is the half that was false: a
+    // player who cannot tell fire from a mine cannot decide whether to drive
+    // round it or wait it out.
+    int alike = 0;
+    for (int a = GS_HAZ_NONE + 1; a < GS_HAZ_COUNT; a++) {
+        for (int b = a + 1; b < GS_HAZ_COUNT; b++) {
+            const int off = abs(seen[a][0] - seen[b][0]) +
+                            abs(seen[a][1] - seen[b][1]) +
+                            abs(seen[a][2] - seen[b][2]);
+            if (off > 40) continue;
+            alike++;
+            printf("  HAZARD %s and %s look the same: %d,%d,%d against "
+                   "%d,%d,%d\n", gs_hazard_name((gs_hazard_kind)a),
+                   gs_hazard_name((gs_hazard_kind)b), seen[a][0], seen[a][1],
+                   seen[a][2], seen[b][0], seen[b][1], seen[b][2]);
+        }
+    }
+    CHECK(alike == 0);
+
+    // **Smoke hides the ground**, which is the whole of what it does and the
+    // one of the four whose look *is* its behaviour. Pale and nearly solid:
+    // anything the road shows through is a grey patch rather than a screen.
+    CHECK(seen[GS_HAZ_SMOKE][0] > 150);
+    CHECK(seen[GS_HAZ_SMOKE][1] > 150);
+    CHECK(seen[GS_HAZ_SMOKE][2] > 150);
+
+    // Oil is the opposite: dark, and the road still under it.
+    CHECK(seen[GS_HAZ_OIL][0] < 90);
+
+    printf("  HAZARDS all %d kinds drawn, told apart from the ground and from "
+           "each other\n", drawn);
+    CHECK(drawn == GS_HAZ_COUNT - 1);
+    gs_frame_free(&f);
+}
+
+TEST(a_hazard_is_drawn_the_size_it_will_catch_you_at) {
+    // **What you see is what hits you.** The renderer used to carry its own
+    // idea of how wide a slick was; it asks the simulation now. A slick drawn
+    // narrower than it is is the sort of lie a player learns to distrust the
+    // whole physics over.
+    //
+    // Measured by drawing the same ground twice - once with the hazard on it
+    // and once without - and comparing the *same* pixel. Comparing two
+    // different patches of ground instead measures the terrain's own shading,
+    // which is how this test first told itself that smoke was four tiles wider
+    // than it is.
+    static gs_track t;
+    gs_flat_pavement(&t, 60, 60);
+
+    int checked = 0;
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        static gs_world bare;
+        gs_park_car(&bare, &t, GS_INT(50), GS_INT(50));
+
+        static gs_world one;
+        gs_park_car(&one, &t, GS_INT(50), GS_INT(50));
+        gs_world_arm(&one, (gs_hazard_kind)k, 1);
+        one.car[0].x = GS_INT(24);
+        one.car[0].y = GS_INT(24);
+        CHECK(gs_world_drop(&one, 0, (gs_hazard_kind)k));
+        one.car[0].x = GS_INT(50);
+        one.car[0].y = GS_INT(50);
+
+        gs_camera cam = gs_camera_on(24.0f, 24.0f, 0.0f);
+        cam.zoom = 1.6f;
+
+        gs_frame with = gs_render_frame(ren, &t, &one, &one, 1.0f, &cam);
+        gs_frame without = gs_render_frame(ren, &t, &bare, &bare, 1.0f, &cam);
+        CHECK(with.px != nullptr);
+        CHECK(without.px != nullptr);
+        if (with.px == nullptr || without.px == nullptr) return;
+
+        const float r = gs_to_f(gs_hazard_radius((gs_hazard_kind)k));
+        CHECK(r > 0.0f);
+
+        // Well inside the edge it catches you at, and well outside it. The
+        // same number on both sides, because both come from gs_hazard_radius.
+        int ar = 0, ag = 0, ab = 0, br = 0, bg = 0, bb = 0;
+        gs_pixel_at(&with, &cam, &t, 24.0f + r * 0.6f, 24.0f, &ar, &ag, &ab);
+        gs_pixel_at(&without, &cam, &t, 24.0f + r * 0.6f, 24.0f, &br, &bg, &bb);
+        CHECK(ar >= 0 && br >= 0);
+        const int inside = abs(ar - br) + abs(ag - bg) + abs(ab - bb);
+
+        int cr = 0, cg = 0, cb = 0, dr = 0, dg = 0, db = 0;
+        gs_pixel_at(&with, &cam, &t, 24.0f + r * 1.8f, 24.0f, &cr, &cg, &cb);
+        gs_pixel_at(&without, &cam, &t, 24.0f + r * 1.8f, 24.0f, &dr, &dg, &db);
+        CHECK(cr >= 0 && dr >= 0);
+        const int outside = abs(cr - dr) + abs(cg - dg) + abs(cb - db);
+
+        if (inside <= 20 || outside != 0) {
+            printf("  HAZARD %s at radius %.2f: %d inside, %d outside\n",
+                   gs_hazard_name((gs_hazard_kind)k), (double)r, inside,
+                   outside);
+        }
+        CHECK(inside > 20);      // inside the radius, it is drawn
+        CHECK(outside == 0);     // past it, the ground is exactly as it was
+        checked++;
+
+        gs_frame_free(&with);
+        gs_frame_free(&without);
+    }
+    printf("  HAZARDS all %d drawn at the size the simulation uses\n", checked);
+    CHECK(checked == GS_HAZ_COUNT - 1);
 }
 
 TEST(a_car_on_the_near_side_of_a_line_is_drawn_in_front_of_it) {
@@ -10089,6 +10273,8 @@ int main(void) {
     run_the_hud_fits_what_is_in_it_in_every_state_it_has(ren);
     run_the_light_tree_counts_down_and_then_goes_green(ren);
     run_a_start_line_and_a_finish_line_are_different_things(ren);
+    run_every_kind_of_hazard_is_drawn_as_itself(ren);
+    run_a_hazard_is_drawn_the_size_it_will_catch_you_at(ren);
     run_a_car_on_the_near_side_of_a_line_is_drawn_in_front_of_it(ren);
     run_a_car_is_drawn_whole_wherever_it_sits_within_its_tile(ren);
     run_a_track_says_where_it_ends_and_which_way_it_goes(ren);
