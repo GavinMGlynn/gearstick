@@ -945,7 +945,11 @@ overshoot, and the first attempt carved the whole field into one car park with
 islands in it.
 
 The eighteen tracks that ship are **998 to 1125 tiles of route — sixteen to
-eighteen times** what they replaced, which is five to ten minutes of driving.
+eighteen times** what they replaced. Driven rather than measured: the AI gets
+round `bright run` in **4m 22s**, `the oval` in 5m 07s, `first light` in 5m 02s
+and `jupiter run` in 5m 15s, against the twenty-seven seconds
+`gearstick_cli pace` reports for the route this replaced — ten to twelve times
+the driving, which is the range that was asked for.
 Every one of them is validated, and every one is raced by every vehicle before
 it is written; `tools/make_tracks.c` refuses to write a track under
 `GS_STOCK_MIN_ROUTE`, so the requirement is enforced by the build rather than

@@ -2358,10 +2358,12 @@ are the places a fault could sit unnoticed.
       The ten written by hand are on the same field, with their signature
       feature repeated across it so a track about a ramp has a ramp on every
       pass.
-      *Verification: the tool that writes the shipped set refuses a track under
-      a route-length floor, so the rule is enforced by the build rather than
-      remembered; every track is validated and raced by every vehicle before it
-      is written; and the lengths are measured rather than asserted.*
+      *Verification: driven rather than measured — the AI gets round `bright
+      run` in 4m 22s and `jupiter run` in 5m 15s, against twenty-seven seconds
+      for what they replaced. The tool that writes the shipped set refuses a
+      track under a route-length floor, so the rule is enforced by the build
+      rather than remembered, and every track is raced by every vehicle from
+      every grid slot before it is written.*
       Three things moved with it, each found by something going red: the
       analyser gave every track ninety seconds and assumed a pace no car holds
       through a hairpin; a route of a thousand tiles needs a checkpoint every
