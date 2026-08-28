@@ -1926,7 +1926,7 @@ TEST(the_guide_tells_people_to_press_the_keys_the_game_listens_for) {
           SDL_SCANCODE_LEFT, SDL_SCANCODE_A },
         { "| steer right | Right | D |",          GS_ACT_RIGHT,
           SDL_SCANCODE_RIGHT, SDL_SCANCODE_D },
-        { "| drop a hazard | Right Shift | Left Shift |", GS_ACT_FIRE,
+        { "| drop a weapon | Right Shift | Left Shift |", GS_ACT_FIRE,
           SDL_SCANCODE_RSHIFT, SDL_SCANCODE_LSHIFT },
     };
 
