@@ -2218,12 +2218,23 @@ are the places a fault could sit unnoticed.
       What is left under 80% is three SQL helpers whose remainder is error
       handling — a statement that will not prepare, a row that is not there —
       and that is named here rather than counted as covered.
-- [ ] **The rollback netcode over a bad link.** There is a link simulator with
-      latency, jitter and loss, and it has not been audited for how far it is
-      actually pushed — a netcode tested only over a good link is a netcode
-      tested where it cannot fail.
-      *Verification: the worst link the game claims to survive is written down
-      and raced over, and the race still agrees on every machine at the end.*
+- [x] **The rollback netcode over a bad link.** It was raced over exactly one
+      link — 200 ms each way, 40 ms of jitter, one packet in eight gone — which
+      says nothing about half a second, or a third of the packets, or no
+      latency at all. Forty-eight links are raced now, and every one of them
+      ends in the same world on both machines.
+      **And the documented tolerance was wrong by nearly three times.** Every
+      datagram repeats a quarter second of *inputs*, and the note over that
+      number said a blackout shorter than a quarter second never needs asking
+      for again. It does not follow: a quarter second of input history is worth
+      nothing if the *promise* for one of those ticks never arrived, and the
+      promises ride twelve times, not thirty-two. Eleven ticks of total silence
+      is survived and twelve is not.
+      *Verification: forty-eight links — four latencies, three jitters, four
+      loss rates — all agreeing at the end; every blackout length from one to
+      eleven absorbed without a retransmission; and every longer one stopping
+      both machines at the same tick in the same world rather than letting them
+      disagree, which is the half that makes the bound liveable.*
 - [ ] **The game played from the door to the results.** `play_check.py` races
       the real client, but nothing walks the whole thing a person does: sign in,
       build a track, save it, race it, and find the time afterwards in the

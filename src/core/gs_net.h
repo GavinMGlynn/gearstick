@@ -39,9 +39,19 @@
 
 // How many ticks of input every packet repeats. Loss is absorbed rather than
 // retransmitted: at 120 Hz this is a quarter second of history in every
-// datagram, so anything short of a quarter second of total blackout never needs
-// asking for again. Retransmission requests are a round trip, which is the one
-// thing rollback exists to avoid.
+// datagram. Retransmission requests are a round trip, which is the one thing
+// rollback exists to avoid.
+//
+// **This is not the blackout the race survives, and it used to say it was.**
+// Thirty-two ticks of *input* history is worthless if the *commitment* for one
+// of those ticks never arrived, because a reveal without an admitted promise in
+// front of it is inadmissible for ever. Commitments ride GS_NET_COMMITS times,
+// which is twelve - so twelve consecutive ticks of total silence is where a
+// race stops being recoverable, not thirty-two.
+//
+// Measured, not reasoned about: `a_blackout_shorter_than_the_redundancy_is_
+// absorbed` walks every length of blackout up to and past the bound, and finds
+// it at exactly eleven surviving and twelve not.
 #define GS_NET_REDUNDANCY 32u
 
 // --- commit, then reveal ----------------------------------------------------

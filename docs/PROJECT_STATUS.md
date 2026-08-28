@@ -5985,6 +5985,45 @@ second migration doing something else.
 helpers whose remainder is error handling: a statement that will not prepare, a
 row that is not there. Named here rather than counted.
 
+## A netcode tested on one link, and a bound that was wrong
+
+The rollback netcode was raced over **exactly one** bad link: 200 ms each way,
+40 ms of jitter, one packet in eight thrown away. Passing that says nothing
+about half a second, or a third of the packets, or no latency at all - and *"it
+works on the connection we picked"* is the shape of a claim that fails in front
+of somebody. Forty-eight links are raced now, four latencies by three jitters by
+four loss rates, and every one ends in the same world on both machines.
+
+### The number in the header was out by nearly three times
+
+Scattered loss cannot find the limit, and that is why it had not been found. At
+any percentage most datagrams still get through, and each carries the same
+history - so the redundancy is never the thing being leaned on. **Total silence,
+both ways at once, is.**
+
+The note over `GS_NET_REDUNDANCY` said it plainly: thirty-two ticks of input in
+every datagram, *"so anything short of a quarter second of total blackout never
+needs asking for again"*.
+
+It does not follow, and the answer was already written down eleven lines below
+it. Thirty-two ticks of *input* history is worth nothing if the **commitment**
+for one of those ticks never arrived: a reveal with no admitted promise in front
+of it is inadmissible for ever, and the race stops there. Commitments ride
+`GS_NET_COMMITS` times, which is twelve - *"twelve chances for a commitment to
+survive the network before its reveal comes due"*.
+
+So the real bound is twelve ticks, a tenth of a second, not thirty-two. The test
+walks every length and finds it at exactly **eleven surviving and twelve not**.
+The header says the right number now, and says that it was measured.
+
+### And past the bound it stops rather than disagreeing
+
+This is the half that makes a tenth of a second liveable. A blackout longer than
+the promises can outlast leaves **both machines waiting at the same tick with
+the same world** - a race somebody can see has stopped. Two machines silently
+carrying on with two different races is the outcome none of this is allowed to
+have, and now that is asserted rather than assumed.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

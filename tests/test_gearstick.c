@@ -3825,6 +3825,7 @@ typedef struct gs_link {
     uint32_t latency;     // ticks
     uint32_t jitter;      // ticks, added at random
     uint32_t loss_pct;
+    uint32_t black_at, black_for;   // a run of ticks where nothing gets through
     uint32_t sent, dropped, delivered;
 
     // Packets too big for the link. Not loss - loss is deliberate here and has
@@ -3841,6 +3842,20 @@ static uint32_t gs_link_rand(gs_link *l) {
 static void gs_link_send(gs_link *l, uint32_t now, const uint8_t *b, size_t n) {
     l->sent++;
     if (n > GS_LINK_MTU) { l->oversize++; return; }
+
+    // **A blackout: everything gone, for a run of ticks.** Random loss at any
+    // percentage still lets most datagrams through, and each carries a quarter
+    // second of history - so scattered loss is absorbed by design and says
+    // nothing about the limit. What the design actually claims is a *bound*:
+    // anything short of GS_NET_REDUNDANCY ticks of total silence never needs
+    // asking for again. Testing that needs total silence, not more of the same
+    // dice.
+    if (l->black_for > 0 && now >= l->black_at &&
+        now < l->black_at + l->black_for) {
+        l->dropped++;
+        return;
+    }
+
     if (l->loss_pct > 0 && gs_link_rand(l) % 100u < l->loss_pct) {
         l->dropped++;
         return;
@@ -3916,6 +3931,10 @@ static gs_input gs_net_drive(uint8_t player, uint32_t tick) {
 // Run both machines for `ticks`, over a link with the given conditions, and
 // hand back what each ended up believing. Static because two worlds and two
 // sessions are the better part of a hundred kilobytes.
+// A run of ticks where nothing gets through, set on both links by the caller
+// before a race. Zero for a link that only loses at random.
+static uint32_t gs_net_black_at = 0, gs_net_black_for = 0;
+
 static void gs_net_race(uint32_t ticks, uint32_t latency, uint32_t jitter,
                         uint32_t loss_pct, gs_net *a, gs_net *b, gs_link *ab,
                         gs_link *ba, gs_track *t) {
@@ -3931,6 +3950,8 @@ static void gs_net_race(uint32_t ticks, uint32_t latency, uint32_t jitter,
     ab->latency = ba->latency = latency;
     ab->jitter  = ba->jitter  = jitter;
     ab->loss_pct = ba->loss_pct = loss_pct;
+    ab->black_at = ba->black_at = gs_net_black_at;
+    ab->black_for = ba->black_for = gs_net_black_for;
 
     for (uint32_t tick = 0; tick < ticks; tick++) {
         gs_link_deliver(ab, tick, b, t);
@@ -3982,6 +4003,146 @@ static void gs_net_race(uint32_t ticks, uint32_t latency, uint32_t jitter,
         gs_link_deliver(ab, tick, b, t);
         gs_link_deliver(ba, tick, a, t);
     }
+}
+
+TEST(the_worst_link_the_game_claims_to_survive_is_raced_over) {
+    // **One bad link is one sample.** The test below races over 200 ms of
+    // latency with 40 ms of jitter and one packet in eight gone, and passing
+    // that says nothing about 400 ms, or a third of the packets, or no latency
+    // at all - and "it works on the connection we picked" is the shape of a
+    // claim that fails in front of somebody.
+    //
+    // So the space is walked. What is asserted for every point in it is the
+    // whole claim of the netcode: two machines, no shared authority, and the
+    // same world at the end.
+    static const uint32_t latency[] = { 0, 6, 24, 60 };   // 0 to 500 ms
+    static const uint32_t jitter[]  = { 0, 5, 20 };       // up to 170 ms
+    static const uint32_t loss[]    = { 0, 12, 30, 50 };  // up to half of it
+
+    static gs_net a, b;
+    static gs_link ab, ba;
+    static gs_track t;
+
+    const uint32_t ticks = GS_TICK_HZ * 6;
+    int raced = 0, split = 0;
+
+    for (size_t li = 0; li < GS_ARRAY_LEN(latency); li++) {
+        for (size_t ji = 0; ji < GS_ARRAY_LEN(jitter); ji++) {
+            for (size_t pi = 0; pi < GS_ARRAY_LEN(loss); pi++) {
+                gs_net_race(ticks, latency[li], jitter[ji], loss[pi],
+                            &a, &b, &ab, &ba, &t);
+
+                const bool agreed =
+                    a.confirmed_tick == ticks && b.confirmed_tick == ticks &&
+                    gs_world_hash(&a.confirmed) == gs_world_hash(&b.confirmed) &&
+                    !a.desynced && !b.desynced;
+                if (!agreed) {
+                    split++;
+                    printf("  LINK %u ticks late, %u jitter, %u%% lost: "
+                           "a at %u, b at %u, %s\n", latency[li], jitter[ji],
+                           loss[pi], a.confirmed_tick, b.confirmed_tick,
+                           (a.desynced || b.desynced) ? "desynced"
+                                                      : "different worlds");
+                }
+                CHECK(agreed);
+                raced++;
+            }
+        }
+    }
+    printf("  LINK %d races: %d latencies x %d jitters x %d loss rates, all "
+           "ending in the same world on both machines\n", raced,
+           (int)GS_ARRAY_LEN(latency), (int)GS_ARRAY_LEN(jitter),
+           (int)GS_ARRAY_LEN(loss));
+    CHECK(raced == (int)(GS_ARRAY_LEN(latency) * GS_ARRAY_LEN(jitter) *
+                         GS_ARRAY_LEN(loss)));
+    CHECK(split == 0);
+}
+
+TEST(a_blackout_is_survived_up_to_the_bound_and_stalls_past_it) {
+    // **The bound is the commitments, not the inputs - and the header said
+    // otherwise.** Every datagram repeats GS_NET_REDUNDANCY ticks of input, a
+    // quarter second at 120 Hz, and the note over it used to say that anything
+    // short of a quarter second of total blackout never needs asking for again.
+    //
+    // It does not follow. Thirty-two ticks of input history is worth nothing if
+    // the *commitment* for one of those ticks never arrived: a reveal with no
+    // admitted promise in front of it is inadmissible for ever, and the race
+    // stops there. Commitments ride GS_NET_COMMITS times - twelve - so twelve
+    // is the real number, and the documented tolerance was out by nearly three
+    // times.
+    //
+    // Scattered loss cannot find that. At any percentage most datagrams still
+    // get through and each carries the same twelve promises, so the bound is
+    // never the thing being leaned on. Total silence, both ways at once, is.
+    static gs_net a, b;
+    static gs_link ab, ba;
+    static gs_track t;
+
+    const uint32_t ticks = GS_TICK_HZ * 6;
+
+    // **Every length up to the bound**, so the edge is walked rather than
+    // sampled - and it is the edge the header now names.
+    int survived = 0;
+    for (uint32_t dark = 1; dark < GS_NET_COMMITS; dark++) {
+        gs_net_black_at = GS_TICK_HZ * 2;
+        gs_net_black_for = dark;
+        gs_net_race(ticks, 6, 0, 0, &a, &b, &ab, &ba, &t);
+        gs_net_black_at = gs_net_black_for = 0;
+
+        const bool agreed =
+            a.confirmed_tick == ticks && b.confirmed_tick == ticks &&
+            gs_world_hash(&a.confirmed) == gs_world_hash(&b.confirmed) &&
+            !a.desynced && !b.desynced;
+        if (!agreed) {
+            printf("  BLACKOUT %u ticks of silence both ways lost the race: "
+                   "a at %u of %u, b at %u\n", dark, a.confirmed_tick, ticks,
+                   b.confirmed_tick);
+        }
+        CHECK(agreed);
+        survived++;
+    }
+    printf("  BLACKOUT every length from 1 to %u ticks of total silence both "
+           "ways, %d of them, all absorbed without a retransmission\n",
+           GS_NET_COMMITS - 1u, survived);
+    CHECK(survived == (int)GS_NET_COMMITS - 1);
+
+    // **And past it, the race stops rather than disagreeing.** This is the half
+    // that makes the bound liveable: a blackout longer than the promises can
+    // outlast leaves both machines waiting at the same tick with the same
+    // world, which is a race somebody can see has stopped. Silently carrying on
+    // with two different races is the outcome none of this is allowed to have.
+    int stalled = 0;
+    for (uint32_t dark = GS_NET_COMMITS; dark <= GS_NET_COMMITS * 3u;
+         dark += 6u) {
+        gs_net_black_at = GS_TICK_HZ * 2;
+        gs_net_black_for = dark;
+        gs_net_race(ticks, 6, 0, 0, &a, &b, &ab, &ba, &t);
+        gs_net_black_at = gs_net_black_for = 0;
+
+        // Neither got to the end...
+        CHECK(a.confirmed_tick < ticks);
+        CHECK(b.confirmed_tick < ticks);
+
+        // ...they stopped at the same place...
+        if (a.confirmed_tick != b.confirmed_tick) {
+            printf("  BLACKOUT %u ticks: a stopped at %u and b at %u, which is "
+                   "two machines telling two different stories\n", dark,
+                   a.confirmed_tick, b.confirmed_tick);
+        }
+        CHECK(a.confirmed_tick == b.confirmed_tick);
+
+        // ...with the same world, and neither calling it a desync: a stall is
+        // a race waiting, and waiting is recoverable in a way disagreeing is
+        // not.
+        CHECK(gs_world_hash(&a.confirmed) == gs_world_hash(&b.confirmed));
+        CHECK(!a.desynced);
+        CHECK(!b.desynced);
+        stalled++;
+    }
+    printf("  BLACKOUT %d longer ones, every one stopping both machines at the "
+           "same tick in the same world rather than letting them disagree\n",
+           stalled);
+    CHECK(stalled > 0);
 }
 
 TEST(two_machines_race_to_the_same_finish_over_a_bad_connection) {
@@ -8175,6 +8336,8 @@ int main(void) {
     run_a_track_survives_being_pasted_into_a_chat_window();
     run_a_damaged_code_never_becomes_a_different_track();
     run_a_code_is_the_same_code_on_every_machine();
+    run_the_worst_link_the_game_claims_to_survive_is_raced_over();
+    run_a_blackout_is_survived_up_to_the_bound_and_stalls_past_it();
     run_two_machines_race_to_the_same_finish_over_a_bad_connection();
     run_four_machines_race_to_the_same_finish_over_a_bad_connection();
     run_rollback_costs_nothing_when_the_guess_is_right();
