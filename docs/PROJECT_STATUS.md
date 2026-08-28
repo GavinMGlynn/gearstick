@@ -5688,9 +5688,17 @@ any**, and a race without them hashes exactly the way it always did.
 
 ### What is not done yet
 
-- **A replay does not carry the loadout.** A replay stores the setup and
-  re-races it, so a recording of a race with weapons would re-race without them.
-  The format needs a version.
+- ~~A replay does not carry the loadout.~~ **Done.** Version six appends what
+  the race armed everybody with, and the world is armed before anybody is placed
+  because that is what puts ammunition on a car. A recording made before weapons
+  reads as all zero, which is a race with none - which is what those races were.
+  The version anybody actually has a file of is five, and there is a test that
+  builds one and reads it.
+
+  Verification gets it for free: `gs_verify` rebuilds the race through
+  `gs_replay_restore`, so the conditions it recomputes now match the ones the
+  client filed the claim under. Without this a perfectly honest claim from a
+  weapons race would have been rejected for not arriving where it said.
 - **No opponent has ever dropped anything.** `gs_ai_drive` never sets
   `GS_IN_FIRE`, so in a derby against the computer only the human is armed.
 - **Nothing draws smoke or fire.** They exist in the world and the renderer has

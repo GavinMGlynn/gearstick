@@ -2272,6 +2272,70 @@ TEST(oil_and_mines_stay_where_they_were_left) {
     }
 }
 
+TEST(a_recorded_weapons_race_re_races_as_the_race_it_was) {
+    // **A replay stores the settings and races them again.** So a recording of
+    // a race with weapons in it has to arm the world the same way, or it
+    // re-races a different race - and gs_verify, which re-races a log and
+    // checks it arrives where it said, would reject a perfectly honest claim.
+    static gs_track t;
+    gs_track_init(&t, 40, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(6), GS_INT(10), 0);
+    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(6), GS_INT(14), 0);
+    gs_world_arm(&w, GS_HAZ_OIL, 4);
+    gs_world_arm(&w, GS_HAZ_MINE, 2);
+
+    static gs_replay rec;
+    gs_replay_begin(&rec, &w, &t);
+
+    // Drive, and drop things: tap the button every so often so the log has
+    // hazards in it rather than just steering.
+    for (int i = 0; i < GS_TICK_HZ * 4; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, GS_IN_ACCEL, 0, 0 };
+        if ((i % 90) < 3) in[0] = (gs_input)(GS_IN_ACCEL | GS_IN_FIRE);
+        CHECK(gs_replay_record(&rec, in));
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.hazard_count > 0);
+    const uint64_t ended = gs_world_hash(&w);
+
+    // Raced again from the recording alone: the same race, to the bit.
+    static gs_world again;
+    CHECK(gs_replay_restore(&rec, &again, &t));
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        CHECK(again.loadout[k] == w.loadout[k]);
+        CHECK(gs_car_ammo(&again.car[0], (gs_hazard_kind)k) ==
+              (k == GS_HAZ_OIL ? 4 : k == GS_HAZ_MINE ? 2 : 0));
+    }
+    for (uint32_t i = 0; i < rec.meta.tick_count; i++) {
+        gs_world_step(&again, &t, gs_replay_at(&rec, i));
+    }
+    CHECK(gs_world_hash(&again) == ended);
+
+    // **And through the file it travels in**, which is the version this is
+    // really about: the loadout has to survive being written down.
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    const size_t n = gs_replay_serialize(&rec, bytes, sizeof bytes);
+    CHECK(n > 0);
+
+    static gs_replay read;
+    CHECK(gs_replay_deserialize(&read, bytes, n));
+    for (int k = 0; k < GS_HAZ_COUNT; k++) {
+        CHECK(read.meta.loadout[k] == rec.meta.loadout[k]);
+    }
+
+    static gs_world third;
+    CHECK(gs_replay_restore(&read, &third, &t));
+    for (uint32_t i = 0; i < read.meta.tick_count; i++) {
+        gs_world_step(&third, &t, gs_replay_at(&read, i));
+    }
+    CHECK(gs_world_hash(&third) == ended);
+}
+
 TEST(a_race_with_weapons_files_its_times_apart_from_a_clean_one) {
     // **Weapons are conditions.** A lap set while the others were dropping oil
     // is not a lap to put beside a clean one, so what everybody was carrying is
@@ -6254,6 +6318,26 @@ TEST(the_driver_survives_the_wire_and_an_older_recording_still_loads) {
     CHECK(gs_replay_deserialize(&old_one, older, n - names));
     CHECK(old_one.meta.tick_count == gs_proof.meta.tick_count);
     CHECK(gs_replay_driver(&old_one, 0)[0] == '\0');
+
+    // **And version five, which is what v0.1.0-beta1 writes.** It came before
+    // weapons, so it carries no loadout - and reads as a race with none, which
+    // is what those races were. This is the version anybody actually has a file
+    // of, so it is the one worth being sure about.
+    static uint8_t beta[sizeof(gs_replay) + 4096];
+    memcpy(beta, bytes, n);
+    beta[4] = 5; beta[5] = 0; beta[6] = 0; beta[7] = 0;
+
+    // Its header is shorter by exactly the loadout, so the inputs move up.
+    const size_t arms = (size_t)GS_HAZ_COUNT;
+    memmove(beta + head - arms, beta + head, n - head);
+
+    static gs_replay from_beta;
+    CHECK(gs_replay_deserialize(&from_beta, beta, n - arms));
+    CHECK(from_beta.meta.tick_count == gs_proof.meta.tick_count);
+    CHECK(strcmp(gs_replay_driver(&from_beta, 0), "ada") == 0);
+    for (int k = 0; k < GS_HAZ_COUNT; k++) {
+        CHECK(from_beta.meta.loadout[k] == 0);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -7932,6 +8016,7 @@ int main(void) {
     run_fire_burns_while_you_are_in_it_and_then_burns_out();
     run_smoke_hides_the_ground_and_does_nothing_to_the_car();
     run_oil_and_mines_stay_where_they_were_left();
+    run_a_recorded_weapons_race_re_races_as_the_race_it_was();
     run_a_race_with_weapons_files_its_times_apart_from_a_clean_one();
     run_every_kind_of_hazard_can_be_carried_dropped_and_told_apart();
     run_a_car_carrying_nothing_leaves_nothing();

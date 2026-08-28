@@ -2077,6 +2077,10 @@ worth as much as what was decided about it.
       still there; and a race with weapons files its times apart from a clean
       one — while a race without them files exactly where it always did, so no
       record anybody has already set is lost.*
-      **Not finished:** a replay does not carry the loadout so a recorded
-      weapons race would re-race without them, opponents never fire, and nothing
-      draws smoke or fire.
+      A recording carries the loadout, so a race with weapons in it replays as
+      the race it was.
+      *Verification: a recorded weapons race, driven with the button being
+      tapped, re-races to the same world hash — from the recording in memory and
+      from the bytes it is written to. A recording made by the released beta,
+      which came before weapons, still reads and reads as a race with none.*
+      **Not finished:** opponents never fire, and nothing draws smoke or fire.

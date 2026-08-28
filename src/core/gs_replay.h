@@ -31,7 +31,7 @@
 // Versions four and three are still read, with the agreed hash zero - which
 // means "this recording does not say" and not "this recording agrees with
 // anything", so a claim is checked against it only when it is there.
-#define GS_REPLAY_VERSION   5u
+#define GS_REPLAY_VERSION   6u
 #define GS_REPLAY_OLDEST    3u
 #define GS_REPLAY_MAX_TICKS (GS_TICK_HZ * 60 * 10)   // ten minutes
 
@@ -78,6 +78,15 @@ typedef struct gs_replay_meta {
     // three recording, and every race run on one machine, where there is nobody
     // to have agreed with.
     uint64_t agreed_hash;
+
+    // **What the race armed everybody with.** A replay stores the settings and
+    // re-races them, so a recording of a race with weapons in it has to arm the
+    // world the same way or it re-races a different race - and gs_verify would
+    // then reject a perfectly honest claim for not arriving where it said.
+    //
+    // Version six. A recording made before them reads as all zero, which is a
+    // race with the weapons off, which is exactly what those races were.
+    uint8_t  loadout[GS_HAZ_COUNT];
 } gs_replay_meta;
 
 // Fixed capacity and no allocation, because src/core/ owns no allocator. Nearly

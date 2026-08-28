@@ -13,6 +13,7 @@ void gs_replay_begin(gs_replay *r, const gs_world *w, const gs_track *t) {
     r->meta.mode           = w->mode;
     r->meta.laps_to_win    = w->laps_to_win;
     r->meta.car_count      = w->car_count;
+    for (int k = 0; k < GS_HAZ_COUNT; k++) r->meta.loadout[k] = w->loadout[k];
     for (uint8_t i = 0; i < w->car_count; i++) {
         r->meta.vehicle[i]       = w->car[i].vehicle;
         r->meta.start_x[i]       = w->car[i].x;
@@ -50,6 +51,12 @@ bool gs_replay_restore(const gs_replay *r, gs_world *w, const gs_track *t) {
     w->damage_scale   = r->meta.damage_scale;
     w->mode           = r->meta.mode;
     w->laps_to_win    = r->meta.laps_to_win;
+
+    // **Armed before anybody is placed**, because that is what puts the ammo on
+    // a car: gs_world_add_car takes the race's loadout as it goes on the grid.
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        gs_world_arm(w, (gs_hazard_kind)k, r->meta.loadout[k]);
+    }
 
     for (uint8_t i = 0; i < r->meta.car_count; i++) {
         gs_world_add_car(w, t, r->meta.vehicle[i], r->meta.start_x[i],
@@ -108,7 +115,11 @@ static uint64_t gs_get_u64(const uint8_t *p) {
     (GS_REPLAY_HEADER_V3 + GS_MAX_CARS * GS_REPLAY_NAME)
 // Version five appends the agreed ending. Again everything before it is where
 // it was, which is what lets one reader handle all three.
-#define GS_REPLAY_HEADER_BYTES (GS_REPLAY_HEADER_V4 + 8)
+#define GS_REPLAY_HEADER_V5 (GS_REPLAY_HEADER_V4 + 8)
+// And version six appends what the race armed everybody with. Same rule, and
+// the reason it keeps being possible to add one: nothing here is a struct laid
+// out by a compiler, it is bytes in an order somebody wrote down.
+#define GS_REPLAY_HEADER_BYTES (GS_REPLAY_HEADER_V5 + GS_HAZ_COUNT)
 
 void gs_replay_set_driver(gs_replay *r, uint8_t car, const char *name) {
     if (car >= GS_MAX_CARS) return;
@@ -164,6 +175,7 @@ size_t gs_replay_serialize(const gs_replay *r, uint8_t *buf, size_t cap) {
 
     // Version five: the ending everybody agreed on.
     gs_put_u64(p, r->meta.agreed_hash);          p += 8;
+    for (int k = 0; k < GS_HAZ_COUNT; k++) *p++ = r->meta.loadout[k];
 
     for (uint32_t i = 0; i < r->meta.tick_count; i++) {
         for (uint8_t c = 0; c < GS_MAX_CARS; c++) *p++ = r->input[i][c];
@@ -182,7 +194,8 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     uint32_t version = gs_get_u32(p); p += 4;
     if (version < GS_REPLAY_OLDEST || version > GS_REPLAY_VERSION) return false;
 
-    size_t header = version >= 5 ? GS_REPLAY_HEADER_BYTES
+    size_t header = version >= 6 ? GS_REPLAY_HEADER_BYTES
+                  : version >= 5 ? GS_REPLAY_HEADER_V5
                   : version >= 4 ? GS_REPLAY_HEADER_V4
                                  : GS_REPLAY_HEADER_V3;
     if (len < header) return false;
@@ -217,6 +230,13 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     // means "does not say" - so they are checked for the lap they claim and not
     // for a race nobody wrote down.
     if (version >= 5) { r->meta.agreed_hash = gs_get_u64(p); p += 8; }
+
+    // A recording made before weapons existed is a race with none, which is
+    // what all-zero means everywhere else too.
+    for (int k = 0; k < GS_HAZ_COUNT; k++) r->meta.loadout[k] = 0;
+    if (version >= 6) {
+        for (int k = 0; k < GS_HAZ_COUNT; k++) r->meta.loadout[k] = *p++;
+    }
 
     if (r->meta.car_count > GS_MAX_CARS) return false;
     if (ticks > GS_REPLAY_MAX_TICKS) return false;
