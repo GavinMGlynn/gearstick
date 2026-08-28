@@ -267,6 +267,43 @@ bool gs_track_remove_gate(gs_track *t, uint8_t index);
 // makes a gate a gate rather than an infinite tripwire across the world.
 bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny);
 
+// **Face every gate the way the route goes through it.**
+//
+// A gate is a plane whose normal is its heading - `gs_gate_crossed` is written
+// against that, and so is the arrow drawn on the ground - so a gate facing
+// somewhere the route does not go is a gate you have to cross sideways and an
+// arrow pointing at nothing. Every gate on the tracks written by hand in
+// tools/make_tracks.c was given a heading of zero, which is east; `the
+// crossing` is a figure of eight and all four of its gates faced east, one of
+// them ninety degrees off the way anybody drives through it. It shipped like
+// that, because nothing had ever compared a gate's facing to its route.
+//
+// The way through a gate is the tangent of the route there, and the chord from
+// the gate before it to the gate after it is that tangent to within a degree on
+// anything anybody would call a track. A loop wraps; a path takes the first and
+// last gates from the ends.
+void gs_track_face_along_route(gs_track *t);
+
+// **Where the route is, a fraction of the way along one leg of it.**
+//
+// `leg` is the gate the leg starts at and `s` runs from zero at that gate to
+// GS_ONE at the next; a loop's last leg returns to gate zero. The curve is a
+// Catmull-Rom through the gate positions, because a straight chord between
+// gates cuts the corner - on a four gate loop it would run straight across the
+// infield - and because the road a generated track carves is a curve of the
+// same shape.
+//
+// **One definition, so everything that says where the route is agrees.** The
+// line painted on the ground and the line drawn on the minimap are the same
+// line; two of them computed separately would be two routes, and the one you
+// could see from the car would not be the one you were steering by.
+void gs_track_route_point(const gs_track *t, uint8_t leg, gs_fix s,
+                          gs_fix *out_x, gs_fix *out_y);
+
+// How many legs a route has: one fewer than its gates for a path, and one per
+// gate for a loop, which comes back to where it started.
+uint8_t gs_track_route_legs(const gs_track *t);
+
 // **Where a car waits for the flag.** Behind the start line, abreast across it,
 // facing the way the route runs through it - so the first thing a car does is
 // cross the line it has to cross, at whatever speed it managed on the way.
@@ -300,7 +337,8 @@ typedef enum gs_track_problem {
     GS_TRACK_TOO_FEW_GATES,   // one gate is a line, not a route
     GS_TRACK_GATE_OFF_TRACK,  // a gate, or an end of one, hangs off the world
     GS_TRACK_GATE_TOO_NARROW, // a gate nothing can fit through
-    GS_TRACK_GATES_COINCIDE   // two gates in the same place: the order is ambiguous
+    GS_TRACK_GATES_COINCIDE,  // two gates in the same place: the order is ambiguous
+    GS_TRACK_GATE_FACING      // a gate turned across the route rather than along it
 } gs_track_problem;
 
 typedef struct gs_track_issue {
@@ -308,6 +346,16 @@ typedef struct gs_track_issue {
     int gate;    // which gate is at fault, or -1 when it is the route as a whole
     int other;   // the second gate, for problems about a pair; otherwise -1
 } gs_track_issue;
+
+// **How far a gate may be turned from the route before it is a fault.**
+//
+// Ninety degrees is what the geometry forbids outright: at ninety a car driving
+// the route travels along the gate's plane rather than through it, and past it
+// the gate cannot be crossed in the direction of travel at all. Sixty is where
+// the line is drawn, because a gate approached at sixty degrees has already
+// lost half its width to the angle, and a track that only just works is one
+// that will not survive being edited.
+#define GS_GATE_FACING_MAX GS_DEG(60)
 
 gs_track_issue gs_track_validate(const gs_track *t);
 const char *gs_track_problem_text(gs_track_problem p);

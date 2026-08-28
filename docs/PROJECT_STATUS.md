@@ -918,6 +918,104 @@ The store is version 2 and refuses a version 1 file rather than half-reading it.
 That is correct and it is also the first real reason to build the migration path
 the tails have been asking for.
 
+#### A minimap, the way the original had one
+
+The ground line answers "which way now". It does not answer "where am I on
+this", which is a different question and wants a different picture — so there is
+a map in the corner of each view, top down rather than isometric, because a map
+is for reading and an isometric map is a picture of a map.
+
+It draws the whole route, the finish line across it, and every car as a dot in
+the colour it is being driven in, with this machine's ringed in white so it is
+findable at a glance rather than counted out. It is sized to the track's own
+shape, so a long thin track gets a long thin map. It sits in the corner the
+stats panel is not in, and at four players each view gets its own of both.
+
+**The route on the map and the route on the ground are the same curve**, from
+`gs_track_route_point` in the simulation. Two of them worked out separately
+would be two routes, and the one you could see from the car would not be the one
+you were steering by.
+
+The test looks for the route's blue in the corner the map lives in — not over
+the whole frame, where the line painted on the ground would answer for it — and
+then renders a track with no route at all and requires that corner to be empty,
+because a panel that is always there proves nothing by being there.
+
+#### The way round is painted on the ground
+
+**One arrow at a time is not a route.** A gate carries an arrow saying which way
+through it, and at racing zoom — one tile to 64 pixels, about ten tiles in the
+window — a player sees one arrow, no road edge and nothing between. A player
+looked at `bright run`, which is a gentle left-to-right sprint, and read it as
+two tight switchback turns. Nothing on the screen said otherwise: the corridor
+is ten tiles wide, so the only thing that shows the curve is an edge that is off
+screen almost the whole way round, and the ragged per-tile surface boundary in
+the middle of the frame reads as two parallel roads.
+
+The route is now drawn along the ground the whole way, dashed, in the blue a
+waypoint post's head has always been. Dashed rather than solid because a solid
+strip across a track reads as a kerb or a wall — the two things already painted
+that way — and because a dash has a direction you can see it marching in.
+
+**Through the gates rather than between them.** A straight chord cuts the
+corner: on a four-gate loop it would draw a line across the infield and point
+the player into the scenery. The line is a Catmull-Rom through the gate
+positions, which is the same shape the generator lays its road along and close
+enough to a hand-built route to sit on the tarmac. It sorts onto the ground with
+every other mark the route puts down, so a dash beyond a rise is hidden by the
+rise rather than floating over it, and it is drawn before the gates so a gate's
+own line and arrow sit on top.
+
+The test walks every leg of a four-gate loop, looks for the line at the midpoint
+of each — away from the gates, where a post's own blue head cannot answer for it
+— and states how many legs it found painted, so a route drawn on three sides of
+a square fails rather than passes.
+
+#### Every gate faces the way the route goes through it
+
+**Nothing had ever asked.** A gate is a plane whose normal is its heading:
+`gs_gate_crossed` wants the car to start behind it and finish in front, and the
+arrow drawn on the ground points the same way. Turn a gate ninety degrees and a
+car driving the route travels *along* its plane rather than through it — the
+crossing becomes a coin toss decided by which side of centre the car happened to
+be on — and past ninety it cannot be crossed in the direction of travel at all.
+
+Every hand-written stock track passed `0` for the heading of every gate, which
+is east, whatever the route did. **`the crossing` is a figure of eight and all
+four of its gates faced east**, one of them square across the way anybody drives
+through it. It shipped in that state.
+
+Nothing caught it because nothing looked. `gs_track_validate` checked width,
+that both ends of a gate are on the map, that two gates are not in the same
+place, that there is a start — never which way a gate faced. `gs_analyse` asks
+whether a vehicle can get from gate to gate, which is completability, the exact
+trap the "Tracks that go somewhere" commit already named. The AI races every
+track but steers at gate *positions*, and a twelve-tile gate still gets clipped
+somewhere inside its width even when its plane is turned, so the lap counted and
+the check went green. And the test that reads the shipped tracks read four of
+the twenty-four by name — a sample, and not one containing the broken one.
+
+Three things now hold it:
+
+- **A validation rule.** `GS_TRACK_GATE_FACING`: a gate more than
+  `GS_GATE_FACING_MAX` (sixty degrees) from the route tangent through it is a
+  fault, for a loop and for a path alike. Sixty rather than the ninety the
+  geometry forbids, because a gate approached at sixty has already lost half its
+  width to the angle. The editor gets this for nothing — it is the same
+  validation an edited track already goes through.
+- **`gs_track_face_along_route`**, which derives every gate's heading from the
+  chord through it, and which `tools/make_tracks.c` now calls on every
+  hand-written track instead of a typed zero. Two shipped tracks changed as a
+  result — the crossing and the long way round — and their hashes moved with
+  them. The generated tracks already faced their own centreline and are
+  untouched.
+- **The whole set, walked.** The render test enumerates `assets/tracks/` rather
+  than naming four files, validates every track it finds, states how many it
+  found and how many it checked, and fails if those differ. The core tests walk
+  the rule over both route kinds, every gate of a four-gate route and the angle
+  right round the turn — 720 cases, counted — and every one of the generator's
+  two hundred seeds.
+
 #### What the game ships reaches somebody who has played before
 
 **It did not, and had not since the library existed.** The stock tracks are read

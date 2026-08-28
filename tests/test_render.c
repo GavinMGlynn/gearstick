@@ -2226,23 +2226,144 @@ TEST(a_store_with_tracks_in_it_is_saved_whole) {
     SDL_free(buf);
 }
 
+// Every .gstrack in the assets directory, collected so the test can say how
+// many there were as well as that each one was sound.
+typedef struct gs_stock_walk {
+    char  name[64][64];
+    int   count;
+    bool  overflowed;
+} gs_stock_walk;
+
+static SDL_EnumerationResult SDLCALL gs_take_stock(void *userdata, const char *dir,
+                                                   const char *name) {
+    (void)dir;
+    gs_stock_walk *w = (gs_stock_walk *)userdata;
+
+    size_t n = SDL_strlen(name);
+    if (n < 9 || SDL_strcmp(name + n - 8, ".gstrack") != 0) {
+        return SDL_ENUM_CONTINUE;
+    }
+    if (w->count >= (int)SDL_arraysize(w->name)) {
+        w->overflowed = true;
+        return SDL_ENUM_CONTINUE;
+    }
+    SDL_strlcpy(w->name[w->count++], name, sizeof w->name[0]);
+    return SDL_ENUM_CONTINUE;
+}
+
+// The blue the route is painted in, as it lands in a frame. Matched loosely
+// because it is drawn over whatever ground is under it with an alpha.
+static bool gs_is_route_blue(const uint8_t *p) {
+    return p[2] > 120 && p[2] > p[0] + 40 && p[1] > p[0] + 10 && p[1] < p[2];
+}
+
+TEST(the_way_round_is_painted_between_the_gates_and_not_only_at_them) {
+    // **The fault this exists for.** A gate carries an arrow saying which way
+    // through it, and at racing zoom a player sees one arrow at a time with no
+    // road edge in frame. Somebody read a gentle left-to-right sprint as two
+    // switchback turns and was right to - nothing on the screen said otherwise.
+    // So the route is painted along the ground the whole way round, and this
+    // walks every leg of it rather than checking that some blue exists
+    // somewhere.
+    static gs_track t;
+    gs_track_init(&t, 20, 16, GS_SURF_PAVEMENT);
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+    gs_track_add_gate(&t, GS_INT(4),  GS_INT(4),  0, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(16), GS_INT(4),  0, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(16), GS_INT(12), 0, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(4),  GS_INT(12), 0, GS_INT(3));
+    gs_track_face_along_route(&t);
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+    gs_world w;
+    gs_park_car(&w, &t, GS_INT(10), GS_INT(8));
+
+    // Small track, half zoom: the whole loop inside 640 by 480 with the dashes
+    // still several pixels across, since the claim is about every leg of it and
+    // a leg off the edge of the frame proves nothing either way.
+    gs_camera cam = gs_camera_on(10.0f, 8.0f, 0.0f);
+    cam.zoom = 0.5f;
+
+    gs_frame f = gs_render_frame(ren, &t, &w, &w, 1.0f, &cam);
+    CHECK(f.px != nullptr);
+    if (f.px == nullptr) return;
+
+    // Midway along each leg - away from the gates, where a waypoint post's own
+    // blue head could otherwise answer for the line.
+    int legs = 0, painted = 0;
+    for (uint8_t i = 0; i < t.gate_count; i++) {
+        const gs_gate *a = &t.gate[i];
+        const gs_gate *b = &t.gate[(i + 1) % t.gate_count];
+        float mx = (gs_to_f(a->x) + gs_to_f(b->x)) * 0.5f;
+        float my = (gs_to_f(a->y) + gs_to_f(b->y)) * 0.5f;
+
+        float sx = 0.0f, sy = 0.0f;
+        gs_iso_project(&cam, mx, my, gs_to_f(gs_track_height(&t, (gs_fix)(mx * (float)GS_ONE),
+                                                             (gs_fix)(my * (float)GS_ONE))),
+                       &sx, &sy);
+
+        int found = 0;
+        for (int y = (int)sy - 20; y <= (int)sy + 20; y++) {
+            for (int x = (int)sx - 20; x <= (int)sx + 20; x++) {
+                if (x < 0 || y < 0 || x >= GS_W || y >= GS_H) continue;
+                if (gs_is_route_blue(&f.px[((size_t)y * GS_W + (size_t)x) * 4])) found++;
+            }
+        }
+        if (found > 0) painted++;
+        legs++;
+    }
+    // How much of it landed anywhere at all, so a failure says which half is
+    // wrong: none in the frame is a line that is not drawn, and some in the
+    // frame but none at the midpoints is a line drawn somewhere else.
+    int anywhere = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        if (gs_is_route_blue(&f.px[(size_t)i * 4])) anywhere++;
+    }
+    gs_frame_free(&f);
+
+    // Every leg, and the count said out loud, so a route drawn on three sides
+    // of a square cannot pass this.
+    CHECK(anywhere > 0);
+    CHECK(legs == 4);
+    CHECK(painted == legs);
+    printf("  ROUTE %d of %d legs painted between their gates, %d pixels of it\n",
+           painted, legs, anywhere);
+}
+
 TEST(the_stock_tracks_ship_and_are_worth_racing) {
     (void)ren;
 
     // **The tracks that ship are data, not C.** This reads the files as
     // installed - if the frontend went back to carrying a track, or the tracks
     // stopped being copied into a package, this is what notices.
+    //
+    // **Every one of them, not four of them.** This used to name first light,
+    // the long drop, ice house and jupiter run, which is four of the twenty-four
+    // that ship and none of the interesting ones. `the crossing` - a figure of
+    // eight whose four gates all faced east, one of them square across the
+    // route - was not in the list, so nothing ever validated it and it shipped
+    // broken. A sample is not a set: the directory is walked, every file in it
+    // is checked, and the count is stated so a track added next month is walked
+    // by this test without anybody remembering to add it.
     char dir[1024];
     const char *assets = gs_assets_dir();
     CHECK(assets != nullptr);
     if (assets == nullptr) return;
 
-    static const char *const names[] = {
-        "first-light", "the-long-drop", "ice-house", "jupiter-run",
-    };
+    static gs_stock_walk walk;
+    walk.count = 0;
+    walk.overflowed = false;
+    SDL_snprintf(dir, sizeof dir, "%s/tracks/", assets);
+    CHECK(SDL_EnumerateDirectory(dir, gs_take_stock, &walk));
 
-    for (size_t i = 0; i < SDL_arraysize(names); i++) {
-        SDL_snprintf(dir, sizeof dir, "%s/tracks/%s.gstrack", assets, names[i]);
+    // A floor, so an assets directory that could not be read cannot pass this
+    // by walking nothing at all.
+    CHECK(walk.count >= 20);
+    CHECK(!walk.overflowed);
+
+    int checked = 0;
+    for (int i = 0; i < walk.count; i++) {
+        SDL_snprintf(dir, sizeof dir, "%s/tracks/%s", assets, walk.name[i]);
 
         size_t len = 0;
         void *bytes = SDL_LoadFile(dir, &len);
@@ -2254,24 +2375,32 @@ TEST(the_stock_tracks_ship_and_are_worth_racing) {
         SDL_free(bytes);
 
         // A route somebody can actually drive, which is the difference between
-        // a track and a field.
-        CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+        // a track and a field - and, since the facing rule joined it, a route
+        // whose gates face the way it goes.
+        gs_track_issue issue = gs_track_validate(&t);
+        if (issue.problem != GS_TRACK_OK) {
+            printf("  %s: %s (gate %d)\n", walk.name[i],
+                   gs_track_problem_text(issue.problem), issue.gate);
+        }
+        CHECK(issue.problem == GS_TRACK_OK);
         CHECK(t.gate_count >= 2);
         CHECK(t.w >= 24 && t.h >= 12);
 
-        // And it is not flat: a stock track with no elevation would mean the
-        // generator wrote nothing and nobody looked.
-        bool raised = false;
-        for (uint8_t y = 0; y <= t.h && !raised; y++) {
-            for (uint8_t x = 0; x <= t.w; x++) {
-                if (t.corner[(size_t)y * GS_CORNER_STRIDE + x] != 0) {
-                    raised = true;
-                    break;
-                }
-            }
-        }
-        CHECK(raised);
+        // **Flatness is not asked here.** It used to be, over the four tracks
+        // this named, and all four are generated ground. Three of the
+        // twenty-four that ship are flat on purpose - `the crossing` is a
+        // figure of eight after the original's `dirt8`, and a figure of eight
+        // is about the crossing rather than about the terrain. That the
+        // *generator* writes ground is a claim about the generator, and it is
+        // made over its two hundred seeds where it belongs.
+        checked++;
     }
+
+    // Walked as many as were found, which is the claim this test is allowed to
+    // make and the one a count on its own does not.
+    CHECK(checked == walk.count);
+    printf("  STOCK %d track(s) on disk, %d checked, every gate facing its route\n",
+           walk.count, checked);
 }
 
 TEST(choosing_a_track_from_the_library_changes_what_is_raced) {
@@ -2991,6 +3120,92 @@ TEST(no_two_grounds_are_drawn_the_same_colour) {
             CHECK(SDL_sqrtf(dr * dr + dg * dg + db * db) > 0.15f);
         }
     }
+}
+
+TEST(the_minimap_shows_the_whole_route_and_where_everybody_is_on_it) {
+    // **The question the race view cannot answer.** Isometric and zoomed to the
+    // car is right for driving and useless for knowing where you are: a player
+    // sees about ten tiles of a track sixty across. This is the picture the
+    // original game had, and it is checked in the corner it lives in - drawn
+    // for a track with a route, and absent for one without, because a panel
+    // that is always there proves nothing by being there.
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    static gs_track t;
+    gs_track_init(&t, 40, 32, GS_SURF_PAVEMENT);
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+    gs_track_add_gate(&t, GS_INT(8),  GS_INT(8),  0, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(32), GS_INT(8),  0, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(32), GS_INT(24), 0, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(8),  GS_INT(24), 0, GS_INT(3));
+    gs_track_face_along_route(&t);
+    CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_fix sx, sy; gs_angle facing;
+    gs_track_grid(&t, 0, &sx, &sy, &facing);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
+
+    gs_view view = { 0 };
+    view.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    view.cam.vw = GS_W; view.cam.vh = GS_H;
+    view.cam.cx = gs_to_f(w.car[0].x); view.cam.cy = gs_to_f(w.car[0].y);
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+
+    gs_frame mapped;
+    gs_hud_frame(ren, &t, &w, &view, &mapped);
+    CHECK(mapped.px != nullptr);
+    if (mapped.px == nullptr) return;
+
+    // The corner it lives in, which is the one the stats are not in. Counted
+    // there rather than over the whole frame, so the line painted on the ground
+    // - the same blue, by design - cannot answer for the map.
+    int in_corner = 0, elsewhere = 0;
+    for (int y = 0; y < GS_H; y++) {
+        for (int x = 0; x < GS_W; x++) {
+            if (!gs_is_route_blue(&mapped.px[((size_t)y * GS_W + (size_t)x) * 4])) continue;
+            if (x > GS_W - 180 && y < 160) in_corner++;
+            else elsewhere++;
+        }
+    }
+    (void)elsewhere;
+    gs_frame_free(&mapped);
+    CHECK(in_corner > 100);
+
+    // **And it is not simply a blue rectangle.** A track with no route on it -
+    // the blank field the construction set starts from - has nothing to show
+    // and shows nothing, so what was counted above is the route rather than the
+    // panel it is drawn in.
+    static gs_track blank;
+    gs_track_init(&blank, 40, 32, GS_SURF_PAVEMENT);
+
+    gs_world empty;
+    gs_world_init(&empty, GS_ONE);
+    gs_world_add_car(&empty, &blank, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(10),
+                     GS_INT(10), 0);
+
+    gs_view plain = view;
+    plain.cam.cx = 10.0f; plain.cam.cy = 10.0f;
+
+    gs_frame bare;
+    gs_hud_frame(ren, &blank, &empty, &plain, &bare);
+    CHECK(bare.px != nullptr);
+    if (bare.px == nullptr) return;
+
+    int bare_corner = 0;
+    for (int y = 0; y < 160; y++) {
+        for (int x = GS_W - 179; x < GS_W; x++) {
+            if (gs_is_route_blue(&bare.px[((size_t)y * GS_W + (size_t)x) * 4])) bare_corner++;
+        }
+    }
+    gs_frame_free(&bare);
+    CHECK(bare_corner == 0);
+
+    printf("  MAP %d pixels of route in the corner, %d with no route to draw\n",
+           in_corner, bare_corner);
 }
 
 TEST(the_hud_says_what_lap_it_is_and_changes_when_the_lap_does) {
@@ -4312,6 +4527,13 @@ TEST(the_empty_seats_on_the_grid_are_filled_with_somebody) {
     gs_track_add_gate(&t, GS_INT(45), GS_INT(45), GS_QUARTER, GS_INT(6));
     gs_track_add_gate(&t, GS_INT(15), GS_INT(45), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
     gs_track_add_gate(&t, GS_INT(15), GS_INT(15), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
+
+    // **A loop, and now it has to say so.** Four gates round a square with the
+    // headings of a loop, left as a path: read as a path, the way through the
+    // first gate is the line to the second, which is ninety degrees from where
+    // it points. Validation says so now, and this fixture always meant a
+    // circuit.
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
     CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
 
     static gs_menu m;
@@ -7484,11 +7706,14 @@ TEST(a_track_is_built_from_nothing_and_raced_without_leaving_the_editor) {
                            GS_INT(39) + GS_ONE / 2) < GS_ONE);
 
     // --- A route: two gates on the circle a car will drive round. ------------
+    // Both facing the way the route between them goes, which is what
+    // validation now asks of an edited track: a gate is a plane you cross, so
+    // one turned across the route is one you drive along instead of through.
+    // These used to be zero and a hundred and eighty, chosen for no reason.
     ed.brush        = GS_BRUSH_GATE;
     ed.gate_width   = 4.0f;
-    ed.gate_heading = 0.0f;
+    ed.gate_heading = 126.0f;
     gs_editor_paint(&ed, &t, 32.0f, 32.0f);
-    ed.gate_heading = 180.0f;
     gs_editor_paint(&ed, &t, 22.0f, 46.0f);
     CHECK(t.gate_count == 2);
     t.route = (uint8_t)GS_ROUTE_CIRCUIT;
@@ -10601,6 +10826,7 @@ int main(void) {
     run_a_time_reads_the_way_people_say_it(ren);
     run_a_finished_race_becomes_a_table_in_the_order_it_finished(ren);
     run_the_store_remembers_drivers_and_records_between_runs(ren);
+    run_the_way_round_is_painted_between_the_gates_and_not_only_at_them(ren);
     run_the_stock_tracks_ship_and_are_worth_racing(ren);
     run_choosing_a_track_from_the_library_changes_what_is_raced(ren);
     run_loading_a_track_throws_away_the_undo_history(ren);
@@ -10622,6 +10848,7 @@ int main(void) {
     run_there_is_no_arc_drawn_for_a_car_on_the_ground(ren);
     run_a_wreck_is_drawn_as_wide_as_the_obstacle_it_actually_is(ren);
     run_no_two_grounds_are_drawn_the_same_colour(ren);
+    run_the_minimap_shows_the_whole_route_and_where_everybody_is_on_it(ren);
     run_the_hud_says_what_lap_it_is_and_changes_when_the_lap_does(ren);
     run_the_hud_says_what_place_you_are_in_and_changes_when_you_are_passed(ren);
     run_the_analyser_refuses_a_track_with_no_route_rather_than_guessing(ren);

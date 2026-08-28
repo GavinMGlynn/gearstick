@@ -112,6 +112,101 @@ bool gs_track_remove_gate(gs_track *t, uint8_t index) {
     return true;
 }
 
+// **Which way the route goes through gate `i`.** The chord from the gate before
+// it to the gate after it, which is the tangent to within a degree on anything
+// anybody would call a track. A loop wraps; a path takes its first and last
+// gates from the ends, where there is only one direction to be had.
+//
+// A loop with two gates has no chord through either of them - the gate before
+// and the gate after are the same gate - so it is read as a path, which is the
+// only answer the geometry allows.
+static gs_angle gs_route_tangent(const gs_track *t, uint8_t i) {
+    uint8_t n = t->gate_count;
+    bool loop = t->route == (uint8_t)GS_ROUTE_CIRCUIT && n >= 3;
+
+    const gs_gate *a, *c;
+    if (loop) {
+        a = &t->gate[(uint8_t)((i + n - 1) % n)];
+        c = &t->gate[(uint8_t)((i + 1) % n)];
+    } else if (i == 0) {
+        a = &t->gate[0]; c = &t->gate[1];
+    } else if (i + 1 == n) {
+        a = &t->gate[n - 2]; c = &t->gate[n - 1];
+    } else {
+        a = &t->gate[i - 1]; c = &t->gate[i + 1];
+    }
+    return gs_atan2(c->y - a->y, c->x - a->x);
+}
+
+// The angle between two headings, the short way round, which is the only way a
+// wrapping type can be compared without a modulus appearing in the physics.
+static gs_angle gs_angle_apart(gs_angle a, gs_angle b) {
+    uint16_t d = (uint16_t)((uint16_t)a - (uint16_t)b);
+    if (d > 32768u) d = (uint16_t)(65536 - (int32_t)d);
+    return (gs_angle)d;
+}
+
+uint8_t gs_track_route_legs(const gs_track *t) {
+    if (t == nullptr || t->gate_count < 2) return 0;
+    bool loop = t->route == (uint8_t)GS_ROUTE_CIRCUIT && t->gate_count >= 3;
+    return loop ? t->gate_count : (uint8_t)(t->gate_count - 1);
+}
+
+void gs_track_route_point(const gs_track *t, uint8_t leg, gs_fix s,
+                          gs_fix *out_x, gs_fix *out_y) {
+    if (out_x != nullptr) *out_x = 0;
+    if (out_y != nullptr) *out_y = 0;
+    if (t == nullptr || t->gate_count < 2) return;
+
+    uint8_t n = t->gate_count;
+    bool loop = t->route == (uint8_t)GS_ROUTE_CIRCUIT && n >= 3;
+    if (leg >= gs_track_route_legs(t)) return;
+
+    // The four gates the curve is fitted through. A loop wraps; a path repeats
+    // its end gates, which pins the curve to the ends rather than letting it
+    // overshoot past the finish.
+    uint8_t i1 = leg, i2 = (uint8_t)((leg + 1) % n), i0, i3;
+    if (loop) {
+        i0 = (uint8_t)((leg + n - 1) % n);
+        i3 = (uint8_t)((leg + 2) % n);
+    } else {
+        i0 = leg == 0 ? leg : (uint8_t)(leg - 1);
+        i3 = (uint8_t)(i2 + 1 < n ? i2 + 1 : i2);
+    }
+
+    if (s < 0) s = 0;
+    if (s > GS_ONE) s = GS_ONE;
+    gs_fix s2 = gs_fix_mul(s, s), s3 = gs_fix_mul(s2, s);
+
+    // The Catmull-Rom basis, halved at the end rather than in each term, so the
+    // rounding of the fixed point divide happens once.
+    for (int axis = 0; axis < 2; axis++) {
+        gs_fix p0 = axis ? t->gate[i0].y : t->gate[i0].x;
+        gs_fix p1 = axis ? t->gate[i1].y : t->gate[i1].x;
+        gs_fix p2 = axis ? t->gate[i2].y : t->gate[i2].x;
+        gs_fix p3 = axis ? t->gate[i3].y : t->gate[i3].x;
+
+        int64_t v = (int64_t)2 * p1;
+        v += (int64_t)gs_fix_mul(p2 - p0, s);
+        v += (int64_t)gs_fix_mul((gs_fix)(2 * p0 - 5 * p1 + 4 * p2 - p3), s2);
+        v += (int64_t)gs_fix_mul((gs_fix)(-p0 + 3 * p1 - 3 * p2 + p3), s3);
+        v /= 2;
+
+        if (axis == 0) { if (out_x != nullptr) *out_x = (gs_fix)v; }
+        else           { if (out_y != nullptr) *out_y = (gs_fix)v; }
+    }
+}
+
+void gs_track_face_along_route(gs_track *t) {
+    if (t == nullptr || t->gate_count < 2) return;
+
+    // Positions are read and only headings are written, so this needs no
+    // scratch copy: nothing it reads is anything it has changed.
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        t->gate[i].heading = gs_route_tangent(t, i);
+    }
+}
+
 bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny) {
     gs_fix fx = gs_cos(g->heading);
     gs_fix fy = gs_sin(g->heading);
@@ -574,6 +669,8 @@ const char *gs_track_problem_text(gs_track_problem p) {
     case GS_TRACK_GATE_OFF_TRACK:   return "a gate hangs off the edge of the track";
     case GS_TRACK_GATE_TOO_NARROW:  return "a gate is too narrow to drive through";
     case GS_TRACK_GATES_COINCIDE:   return "two gates are in the same place";
+    case GS_TRACK_GATE_FACING:      return "a gate faces across the route rather "
+                                           "than along it";
     }
     return "something is wrong with the route";
 }
@@ -621,6 +718,36 @@ gs_track_issue gs_track_validate(const gs_track *t) {
             gs_fix dy = t->gate[j].y - g->y;
             if (gs_fix_len2(dx, dy) < GS_GATE_MIN_APART) {
                 return (gs_track_issue){ GS_TRACK_GATES_COINCIDE, (int)i, (int)j };
+            }
+        }
+    }
+
+    // **And every gate faces the way the route goes through it.**
+    //
+    // A gate is a plane whose normal is its heading: gs_gate_crossed wants the
+    // car to start behind it and finish in front, and the arrow drawn on the
+    // ground points the same way. Turn a gate ninety degrees and a car driving
+    // the route travels *along* its plane rather than through it - the crossing
+    // becomes a coin toss decided by which side of the centre the car happened
+    // to be - and past ninety it cannot be crossed in the direction of travel
+    // at all. The arrow, meanwhile, points somewhere nobody drives.
+    //
+    // Every hand-written stock track was authored with a heading of zero on
+    // every gate, and `the crossing` - a figure of eight - shipped with all
+    // four of its gates facing east, one of them square across the route. This
+    // is the check that was missing: the route was asked whether it could be
+    // *finished*, never whether its gates faced the way it went.
+    //
+    // Sixty degrees rather than the ninety the geometry forbids, because a gate
+    // approached at sixty degrees has already lost half its width to the angle,
+    // and a track that only just works is a track that will not survive being
+    // edited. Both kinds are covered: the tangent through a loop wraps and a
+    // path takes its ends from its ends.
+    if (t->gate_count >= 2) {
+        for (uint8_t i = 0; i < t->gate_count; i++) {
+            if (gs_angle_apart(t->gate[i].heading, gs_route_tangent(t, i)) >
+                GS_GATE_FACING_MAX) {
+                return (gs_track_issue){ GS_TRACK_GATE_FACING, (int)i, -1 };
             }
         }
     }

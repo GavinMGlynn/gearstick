@@ -2309,3 +2309,41 @@ are the places a fault could sit unnoticed.
       combinations of whose a track is and whether the shipped set still names
       it, and an assets directory that reads as empty withdraws nothing rather
       than emptying somebody's library on a guess.
+- [x] **Every gate faces the way the route goes through it.** A gate is a plane
+      you cross, and its heading is which way through — so a gate turned across
+      the route is one you drive along instead of through, with an arrow on the
+      ground pointing where nobody goes. Every hand-written stock track gave
+      every gate a heading of zero, and `the crossing`, which is a figure of
+      eight, shipped with all four gates facing east. Validation now refuses a
+      gate more than sixty degrees off the route, for loops and for paths, so
+      the construction set catches it too.
+      *Verification: the whole shipped set is walked rather than four files
+      named — every track in `assets/tracks/` is validated, and the test states
+      how many it found and how many it checked so a track added later is
+      covered without anybody remembering. The rule itself is walked over both
+      route kinds, every gate, and the angle right round the turn, and over all
+      two hundred generator seeds.*
+      The two tracks that were wrong were rewritten by deriving their headings
+      from their own route, which moved their hashes; every other shipped track
+      is byte for byte what it was.
+- [x] **The way round is painted on the ground.** A gate's arrow says which way
+      through that gate, and at racing zoom you see one of them at a time with
+      no road edge in the window — which is a hint you have to have already
+      understood rather than a route. A player read a gentle left-to-right
+      sprint as two switchback turns, and nothing on the screen contradicted
+      them. The route is now a dashed line along the ground the whole way,
+      curved through the gates so it does not cut corners across the infield.
+      *Verification: every leg of a four-gate loop is checked for the line at
+      its midpoint, away from the gates where a waypoint post's own blue could
+      otherwise answer for it, and the test states how many legs it found
+      painted — so a route drawn on three sides of a square fails.*
+- [x] **A minimap, the way the original had one.** The line on the ground says
+      which way to go next; it does not say where you are on the track. Each
+      view now carries a map in the corner the stats are not in: the whole
+      route seen from above, the finish line across it, and every car as a dot
+      in its own colour with yours ringed. The map and the ground line are the
+      same curve, so what you steer by and what you read agree.
+      *Verification: the route's blue is counted in the corner the map lives in
+      — not over the whole frame, where the line on the ground would answer for
+      it — and a track with no route on it leaves that corner empty, so the
+      test cannot be passed by a panel that is always there.*

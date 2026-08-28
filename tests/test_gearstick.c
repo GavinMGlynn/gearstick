@@ -6185,6 +6185,137 @@ TEST(a_track_that_came_with_the_game_is_not_yours_to_change) {
     CHECK(!gs_library_is_builtin(&copied, gs_track_hash(&mine)));
 }
 
+TEST(a_gate_turned_across_its_route_is_refused_on_a_loop_and_on_a_path) {
+    // **The whole space of the rule: both kinds of route, every gate in each,
+    // and the angle walked right round the turn.** A gate is a plane whose
+    // normal is its heading, so one turned across the route is one a car drives
+    // along instead of through - and an arrow, drawn from the same heading,
+    // pointing where nobody goes. Every hand-written stock track was authored
+    // with a heading of zero on every gate and `the crossing` shipped with a
+    // gate square across its own route, because nothing had ever compared the
+    // two.
+    //
+    // The cases are counted rather than trusted: two route kinds by four gates
+    // by ninety angles is what this claims to walk.
+    unsigned walked = 0, refused = 0;
+
+    for (int loop = 0; loop < 2; loop++) {
+        for (int which = 0; which < 4; which++) {
+            for (int deg = 0; deg < 360; deg += 4) {
+                static gs_track t;
+                gs_track_init(&t, 48, 40, GS_SURF_PAVEMENT);
+                t.route = (uint8_t)(loop ? GS_ROUTE_CIRCUIT : GS_ROUTE_SPRINT);
+
+                // A square loop, or the same four gates as a path across it.
+                gs_track_add_gate(&t, GS_INT(8),  GS_INT(8),  0, GS_INT(4));
+                gs_track_add_gate(&t, GS_INT(40), GS_INT(8),  0, GS_INT(4));
+                gs_track_add_gate(&t, GS_INT(40), GS_INT(32), 0, GS_INT(4));
+                gs_track_add_gate(&t, GS_INT(8),  GS_INT(32), 0, GS_INT(4));
+
+                // Faced along the route first, so the only thing wrong with any
+                // of these tracks is the one gate turned away from it.
+                gs_track_face_along_route(&t);
+                CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+                gs_angle right = t.gate[which].heading;
+                t.gate[which].heading = (gs_angle)(right + GS_DEG(deg));
+
+                // The bound in the turn's own steps rather than in degrees:
+                // GS_DEG truncates, so an angle a degree either side of the
+                // bound is decided by that truncation and not by the degree
+                // anybody typed. Asking the same arithmetic the rule asks is
+                // the only way the edge of the range is a claim rather than a
+                // coincidence.
+                uint16_t turned = (uint16_t)GS_DEG(deg);
+                uint16_t off = turned > 32768u ? (uint16_t)(65536 - (int32_t)turned)
+                                               : turned;
+                gs_track_issue issue = gs_track_validate(&t);
+
+                if (off > GS_GATE_FACING_MAX) {
+                    CHECK(issue.problem == GS_TRACK_GATE_FACING);
+                    CHECK(issue.gate == which);
+                    refused++;
+                } else {
+                    // Inside the bound it is a gate at an angle, which is a
+                    // thing somebody is allowed to build.
+                    CHECK(issue.problem == GS_TRACK_OK);
+                }
+                walked++;
+            }
+        }
+    }
+
+    CHECK(walked == 2u * 4u * 90u);
+    CHECK(refused > 0);
+}
+
+TEST(every_track_the_generator_can_make_has_its_gates_facing_its_route) {
+    // Two hundred seeds, which is the set the generator is claimed to be
+    // driveable over. Validation now includes the facing rule, so this says
+    // the arrows on every generated track point the way it goes as well as
+    // that the route can be finished.
+    unsigned walked = 0;
+    for (uint32_t seed = 1; seed <= 200; seed++) {
+        static gs_track t;
+        gs_generate(&t, seed);
+
+        gs_track_issue issue = gs_track_validate(&t);
+        if (issue.problem != GS_TRACK_OK) {
+            printf("  seed %u: %s (gate %d)\n", seed,
+                   gs_track_problem_text(issue.problem), issue.gate);
+        }
+        CHECK(issue.problem == GS_TRACK_OK);
+
+        // **And it wrote ground.** A generated track with every corner at zero
+        // is a generator that ran and did nothing, which no route check would
+        // notice. This claim used to be made over four shipped files, three of
+        // which are flat on purpose; it belongs here, over what the generator
+        // actually makes.
+        bool raised = false;
+        for (uint8_t y = 0; y <= t.h && !raised; y++) {
+            for (uint8_t x = 0; x <= t.w; x++) {
+                if (t.corner[(size_t)y * GS_CORNER_STRIDE + x] != 0) {
+                    raised = true;
+                    break;
+                }
+            }
+        }
+        CHECK(raised);
+        walked++;
+    }
+    CHECK(walked == 200u);
+}
+
+TEST(facing_a_route_leaves_a_track_the_way_it_found_it_when_it_was_already_right) {
+    // The fix is idempotent, and it is not a way of quietly moving a track:
+    // running it over a route already faced correctly changes no heading, so a
+    // hash does not move under anybody who has already been fixed.
+    static gs_track t;
+    gs_track_init(&t, 48, 40, GS_SURF_PAVEMENT);
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+    gs_track_add_gate(&t, GS_INT(8),  GS_INT(8),  0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(8),  0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(32), 0, GS_INT(4));
+    gs_track_add_gate(&t, GS_INT(8),  GS_INT(32), 0, GS_INT(4));
+
+    gs_track_face_along_route(&t);
+    uint64_t once = gs_track_hash(&t);
+    gs_track_face_along_route(&t);
+    CHECK(gs_track_hash(&t) == once);
+
+    // And a two gate path, where the way through both gates is the line
+    // between them - the case a loop's wrapping arithmetic cannot answer.
+    static gs_track path;
+    gs_track_init(&path, 32, 16, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&path, GS_INT(6), GS_INT(8), GS_DEG(90), GS_INT(4));
+    gs_track_add_gate(&path, GS_INT(26), GS_INT(8), GS_DEG(90), GS_INT(4));
+    CHECK(gs_track_validate(&path).problem == GS_TRACK_GATE_FACING);
+    gs_track_face_along_route(&path);
+    CHECK(path.gate[0].heading == 0);
+    CHECK(path.gate[1].heading == 0);
+    CHECK(gs_track_validate(&path).problem == GS_TRACK_OK);
+}
+
 TEST(a_shipped_track_that_is_withdrawn_goes_and_nothing_else_does) {
     // **The whole space, walked rather than sampled.** Two facts decide what
     // happens to an entry: whose it is, and whether the set the game ships now
@@ -8406,6 +8537,9 @@ int main(void) {
     run_three_tracks_are_kept_and_all_three_survive_a_restart();
     run_editing_one_track_leaves_the_others_alone();
     run_a_track_that_came_with_the_game_is_not_yours_to_change();
+    run_a_gate_turned_across_its_route_is_refused_on_a_loop_and_on_a_path();
+    run_every_track_the_generator_can_make_has_its_gates_facing_its_route();
+    run_facing_a_route_leaves_a_track_the_way_it_found_it_when_it_was_already_right();
     run_a_shipped_track_that_is_withdrawn_goes_and_nothing_else_does();
     run_withdrawing_half_a_library_leaves_exactly_the_other_half();
     run_a_shipped_set_that_could_not_be_read_withdraws_nothing();

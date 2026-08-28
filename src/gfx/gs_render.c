@@ -508,6 +508,69 @@ static bool gs_gate_is_chequered(gs_gate_role role) {
 // line". Each block and each piece of the arrow now sorts on the ground it
 // actually lies on, so a car on this side of the line is drawn in front of it
 // and a car beyond it is drawn behind.
+// **The route between the gates, not only at them.**
+//
+// A gate carries an arrow saying which way through it, and at racing zoom you
+// see one arrow at a time with no road edge in frame - which is not a route
+// indicator, it is a hint you have to have already understood. A player looked
+// at a gentle left-to-right sprint and read it as two switchback turns, and was
+// right to: nothing on the screen said otherwise. So the way round is painted
+// on the ground the whole way, and reads at any zoom from anywhere on it.
+//
+// **Through the gates rather than between them.** A straight chord cuts the
+// corner - on a four gate loop it would draw a line straight across the infield
+// and tell the player to drive into the scenery - so the line is a Catmull-Rom
+// through the gate positions, which is the same shape the generator lays its
+// road along and close enough to a hand-built one to sit on the tarmac.
+// Dashed rather than solid, because a solid line across a track reads as a kerb
+// or a wall - the two things already painted as continuous strips - and because
+// a dash has a direction a player can see it marching in.
+#define GS_ROUTE_STEPS 16          // samples along one leg
+#define GS_ROUTE_HALF  0.16f       // half the width of the line, in tiles
+
+static void gs_draw_route(SDL_Renderer *ren, const gs_camera *cam,
+                          const gs_track *t, int world_d) {
+    if (t->gate_count < 2) return;
+
+    uint8_t legs = gs_track_route_legs(t);
+
+    // The blue the route has always been painted in - the same blue as a
+    // waypoint post's head - so a player who has learned that colour keeps it.
+    static const SDL_FColor ink = { 0.30f, 0.65f, 0.95f, 0.75f };
+
+    for (uint8_t leg = 0; leg < legs; leg++) {
+        for (int k = 0; k < GS_ROUTE_STEPS; k++) {
+            // Every other sample, which is what makes it dashed. The first and
+            // last of each leg are left out so the dashes do not run into the
+            // gate's own line and arrow.
+            if ((k & 1) != 0 || k == 0 || k == GS_ROUTE_STEPS - 1) continue;
+
+            // The curve itself comes from the simulation, so the line drawn
+            // here and the line drawn on the minimap are the same line.
+            gs_fix fax, fay, fbx, fby;
+            gs_track_route_point(t, leg, (gs_fix)((int64_t)k * GS_ONE / GS_ROUTE_STEPS),
+                                 &fax, &fay);
+            gs_track_route_point(t, leg, (gs_fix)((int64_t)(k + 1) * GS_ONE / GS_ROUTE_STEPS),
+                                 &fbx, &fby);
+            float ax = gs_to_f(fax), ay = gs_to_f(fay);
+            float bx = gs_to_f(fbx), by = gs_to_f(fby);
+
+            float dx = bx - ax, dy = by - ay;
+            float len = SDL_sqrtf(dx * dx + dy * dy);
+            if (len < 0.0001f) continue;
+            float px = -dy / len * GS_ROUTE_HALF, py = dx / len * GS_ROUTE_HALF;
+
+            float qx[4] = { ax + px, bx + px, bx - px, ax - px };
+            float qy[4] = { ay + py, by + py, by - py, ay - py };
+
+            // Sorted onto the ground it is painted on, like every other mark
+            // the route puts down, or a dash beyond a rise floats over it.
+            if (gs_ground_quad_diagonal(qx, qy) != world_d) continue;
+            gs_ground_quad(ren, cam, t, qx, qy, 0.03f, ink);
+        }
+    }
+}
+
 static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
                          const gs_track *t, const gs_gate *g,
                          gs_gate_role role, int world_d) {
@@ -1375,6 +1438,10 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         // gate beyond a rise is hidden by the rise rather than floating over
         // it. Same trick as the cars below: drawn when the sweep reaches the
         // diagonal the gate is on.
+        // The way round, painted before the gates so a gate's own line and
+        // arrow sit on top of it rather than under it.
+        gs_draw_route(ren, &cam, t, d - fringe * 2);
+
         for (uint8_t gi = 0; gi < t->gate_count; gi++) {
             gs_draw_gate(ren, &cam, t, &t->gate[gi], gs_gate_role_of(t, gi),
                          d - fringe * 2);

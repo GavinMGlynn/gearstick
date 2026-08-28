@@ -160,6 +160,22 @@ static int gs_finishers_at_earth(const gs_track *t) {
 #define GS_STOCK_GENERATED 12
 #define GS_STOCK_PER_SHAPE (GS_STOCK_GENERATED / GS_SHAPE_COUNT)
 
+// **A track written by hand has its gates faced along its own route.**
+//
+// Every one of them used to pass a heading of zero, which is east, whatever the
+// route did - and `the crossing` is a figure of eight, so all four of its gates
+// faced east and the one at the start was square across the way anybody drives
+// through it. A gate is a plane whose normal is its heading, so that is a gate
+// crossed sideways and an arrow pointing at nothing, not a cosmetic slip.
+//
+// Derived rather than typed, because typed is what produced ten tracks' worth
+// of zeroes. The generated tracks already face their own centreline and are
+// left alone: re-facing them would move hashes for nothing.
+static bool gs_write_authored(const char *path) {
+    gs_track_face_along_route(&gs_t);
+    return gs_write(path);
+}
+
 static bool gs_write_generated(const char *dir) {
     uint8_t taken[GS_SHAPE_COUNT] = { 0 };
     int written = 0;
@@ -216,7 +232,7 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(6), GS_INT(12), 0, GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(34), GS_INT(12), 0, GS_INT(6));
     snprintf(path, sizeof path, "%s/first-light.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- the long drop: a shelf that ends. What the landing does decides the
     // run, which is the whole argument for building a downhill one.
@@ -233,7 +249,7 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(6), GS_INT(10), 0, GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(42), GS_INT(10), 0, GS_INT(6));
     snprintf(path, sizeof path, "%s/the-long-drop.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- ice house: grip is the whole problem, and the machines sort
     // themselves out by it.
@@ -244,7 +260,7 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(5), GS_INT(12), 0, GS_INT(7));
     gs_track_add_gate(&gs_t, GS_INT(38), GS_INT(12), 0, GS_INT(7));
     snprintf(path, sizeof path, "%s/ice-house.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- jupiter run: a painted low-gravity pocket over the jump, which is
     // the feature this game has and the original could not.
@@ -256,7 +272,7 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(6), GS_INT(12), 0, GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(42), GS_INT(12), 0, GS_INT(6));
     snprintf(path, sizeof path, "%s/jupiter-run.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- the crossing: a figure of eight, after the original's `dirt8`. The
     // route crosses itself, so the two halves of the field meet in the middle
@@ -271,7 +287,7 @@ int main(int argc, char **argv) {
     // A circuit: a figure of eight closes on itself, so the line it starts on is the line it ends on.
     gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
     snprintf(path, sizeof path, "%s/the-crossing.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- head on: after `headon`, which "aims drivers directly at each other".
     // A corridor with the far gate at the end of it, so an out-and-back puts
@@ -287,7 +303,7 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(7), 0, GS_INT(5));
     gs_track_add_gate(&gs_t, GS_INT(48), GS_INT(7), 0, GS_INT(5));
     snprintf(path, sizeof path, "%s/head-on.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- which way: after `whichway`, "seven different routes". Three here, and
     // three is enough to make the question real: the short way is over a ramp,
@@ -310,7 +326,7 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(18), 0, GS_INT(12));
     gs_track_add_gate(&gs_t, GS_INT(52), GS_INT(18), 0, GS_INT(12));
     snprintf(path, sizeof path, "%s/which-way.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- the oval: after `indy`. The shortest thing that is still a race, and
     // the one to hand somebody who has never driven this. Four gates, no
@@ -326,7 +342,7 @@ int main(int argc, char **argv) {
     // A circuit: an oval is a loop and a loop has one line, crossed at the start of every lap and the end of every lap.
     gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
     snprintf(path, sizeof path, "%s/the-oval.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- the big one: after `jumps`, described in the manual as "big ones". One
     // ramp, one landing, and nothing else to think about - so the only question
@@ -338,7 +354,7 @@ int main(int argc, char **argv) {
     gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(10), 0, GS_INT(6));
     gs_track_add_gate(&gs_t, GS_INT(52), GS_INT(10), 0, GS_INT(6));
     snprintf(path, sizeof path, "%s/the-big-one.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- the long way round: after the Grand Prix circuits, which the manual
     // notes are all pavement, no jumps, Earth gravity, five laps. That is a
@@ -353,7 +369,7 @@ int main(int argc, char **argv) {
     // A circuit: five corners back to where you began, which is what makes it a lap rather than a journey.
     gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
     snprintf(path, sizeof path, "%s/the-long-way-round.gstrack", dir);
-    if (!gs_write(path)) return 1;
+    if (!gs_write_authored(path)) return 1;
 
     // --- and a dozen from the generator, chosen by driving them.
     if (!gs_write_generated(dir)) return 1;

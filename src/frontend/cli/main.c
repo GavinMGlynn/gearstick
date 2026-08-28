@@ -428,6 +428,7 @@ static int cmd_validate(void) {
         { "a gate off the edge",       GS_TRACK_GATE_OFF_TRACK },
         { "a gate too narrow",         GS_TRACK_GATE_TOO_NARROW },
         { "two gates in one place",    GS_TRACK_GATES_COINCIDE },
+        { "a gate across the route",   GS_TRACK_GATE_FACING },
     };
 
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
@@ -447,6 +448,9 @@ static int cmd_validate(void) {
         case GS_TRACK_GATE_TOO_NARROW: t.gate[2].half_width = GS_ONE / 16; break;
         case GS_TRACK_GATES_COINCIDE:  t.gate[2].x = t.gate[0].x;
                                        t.gate[2].y = t.gate[0].y; break;
+        // Square across a route that runs east: the gate a car drives along
+        // rather than through.
+        case GS_TRACK_GATE_FACING:     t.gate[1].heading = GS_DEG(90); break;
         default: break;
         }
 

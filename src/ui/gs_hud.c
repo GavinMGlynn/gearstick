@@ -3,6 +3,7 @@
 #include "ui/gs_hud.h"
 
 #include "dcimgui.h"
+#include "gfx/gs_render.h"
 #include "ui/gs_menu.h"
 #include "ui/gs_style.h"
 
@@ -188,6 +189,123 @@ static float gs_hud_at(const gs_hud_rows *r, float base, const ImGuiStyle *st,
                        float zoom) {
     return gs_hud_height(r, base, zoom, st->ItemSpacing.y * zoom,
                          st->WindowPadding.y * zoom, GS_HUD_BAR * zoom);
+}
+
+// --- the minimap ------------------------------------------------------------
+//
+// **The whole track, seen from above, the way the original showed it.**
+//
+// The race is isometric and zoomed to where the car is, which is right for
+// driving and useless for knowing where you are: at one tile to sixty-four
+// pixels a player sees about ten tiles of a track sixty across, one gate arrow
+// at a time and no road edge. Somebody read a gentle left-to-right sprint as
+// two switchback turns from that view and had no way to find out otherwise.
+// The line painted on the ground answers "which way now"; this answers "where
+// am I on it", which is a different question and wants a different picture.
+//
+// Top down and not isometric, because a map is for reading and an isometric map
+// is a picture of a map.
+
+// The longest side of the map, in pixels, before the track's own shape is
+// fitted into it.
+#define GS_MAP_MAX  132.0f
+#define GS_MAP_EDGE 6.0f          // inside the panel, so nothing touches the frame
+
+// How many samples of the route curve one leg gets. Enough that a corner reads
+// as a curve at this size rather than as two straight lines.
+#define GS_MAP_STEPS 10
+
+static ImU32 gs_map_rgba(float r, float g, float b, float a) {
+    return (ImU32)((uint32_t)(a * 255.0f) << 24 | (uint32_t)(b * 255.0f) << 16 |
+                   (uint32_t)(g * 255.0f) << 8 | (uint32_t)(r * 255.0f));
+}
+
+static void gs_hud_minimap(const gs_world *w, const gs_track *t, const gs_view *v) {
+    // A track with no route on it has nothing to draw and no shape to say
+    // where you are in - the construction set's blank field, before anybody has
+    // put a gate down.
+    if (t->w == 0 || t->h == 0 || gs_track_route_legs(t) == 0) return;
+
+    float tw = (float)t->w, th = (float)t->h;
+    float scale = GS_MAP_MAX / (tw > th ? tw : th);
+    float bw = tw * scale, bh = th * scale;
+
+    // **The corner the stats panel is not in.** Two panels in one corner is one
+    // panel with the other one hidden behind it, and at four players each view
+    // has its own of both.
+    ImGui_SetNextWindowPos(
+        (ImVec2){ (float)(v->rect.x + v->rect.w) - GS_HUD_PAD - bw - GS_MAP_EDGE * 2.0f,
+                  (float)v->rect.y + GS_HUD_PAD },
+        ImGuiCond_Always);
+    ImGui_SetNextWindowSize((ImVec2){ bw + GS_MAP_EDGE * 2.0f, bh + GS_MAP_EDGE * 2.0f },
+                            ImGuiCond_Always);
+    ImGui_SetNextWindowBgAlpha(0.45f);
+
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+
+    char id[32];
+    SDL_snprintf(id, sizeof id, "##map%d", (int)v->car);
+    if (ImGui_Begin(id, nullptr, flags)) {
+        ImDrawList *dl = ImGui_GetWindowDrawList();
+        ImVec2 at = ImGui_GetWindowPos();
+        float ox = at.x + GS_MAP_EDGE, oy = at.y + GS_MAP_EDGE;
+
+        // The route, in the blue it is painted in on the ground - the same
+        // curve from the same function, so the map and the track agree.
+        const ImU32 ink = gs_map_rgba(0.30f, 0.65f, 0.95f, 0.95f);
+        uint8_t legs = gs_track_route_legs(t);
+        for (uint8_t leg = 0; leg < legs; leg++) {
+            for (int k = 0; k < GS_MAP_STEPS; k++) {
+                gs_fix ax, ay, bx, by;
+                gs_track_route_point(t, leg, (gs_fix)((int64_t)k * GS_ONE / GS_MAP_STEPS),
+                                     &ax, &ay);
+                gs_track_route_point(t, leg,
+                                     (gs_fix)((int64_t)(k + 1) * GS_ONE / GS_MAP_STEPS),
+                                     &bx, &by);
+                ImDrawList_AddLineEx(dl,
+                    (ImVec2){ ox + gs_to_f(ax) * scale, oy + gs_to_f(ay) * scale },
+                    (ImVec2){ ox + gs_to_f(bx) * scale, oy + gs_to_f(by) * scale },
+                    ink, 2.0f);
+            }
+        }
+
+        // The line you cross to finish, marked across the route rather than
+        // along it, so a loop says where it begins.
+        const gs_gate *fin = &t->gate[gs_track_finish_gate(t)];
+        float fx = gs_to_f(gs_cos(fin->heading)), fy = gs_to_f(gs_sin(fin->heading));
+        float hw = gs_to_f(fin->half_width);
+        ImDrawList_AddLineEx(dl,
+            (ImVec2){ ox + (gs_to_f(fin->x) - fy * hw) * scale,
+                      oy + (gs_to_f(fin->y) + fx * hw) * scale },
+            (ImVec2){ ox + (gs_to_f(fin->x) + fy * hw) * scale,
+                      oy + (gs_to_f(fin->y) - fx * hw) * scale },
+            gs_map_rgba(0.95f, 0.95f, 0.95f, 0.95f), 2.0f);
+
+        // Everybody on it, in the colour they are driving, and this machine's
+        // car ringed so it is findable at a glance rather than counted out.
+        for (uint8_t i = 0; i < w->car_count; i++) {
+            const gs_car *c = &w->car[i];
+            if (!c->active) continue;
+
+            // The colour this car is being drawn in, asked of the renderer
+            // rather than of the car: paint is presentation, and the world
+            // state is deliberately free of it.
+            SDL_FColor paint = gs_render_paint_colour(gs_render_car_paint(i));
+            ImVec2 p = { ox + gs_to_f(c->x) * scale, oy + gs_to_f(c->y) * scale };
+
+            if (i == v->car) {
+                ImDrawList_AddCircleFilled(dl, p, 4.5f,
+                                           gs_map_rgba(1.0f, 1.0f, 1.0f, 0.9f), 0);
+            }
+            ImDrawList_AddCircleFilled(
+                dl, p, 3.0f, gs_map_rgba(paint.r, paint.g, paint.b, 1.0f), 0);
+        }
+    }
+    ImGui_End();
 }
 
 void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
@@ -446,6 +564,13 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
     ImGui_End();
     ImGui_PopStyleVar();
     ImGui_PopStyleVar();
+
+    // **And where that is on the track**, in the corner the stats are not in.
+    // Drawn after them so that if the two ever meet - a view narrow enough for
+    // both to want the same pixels - the map is the one on top, and a map with
+    // a corner over the lap counter is a great deal less confusing than a lap
+    // counter over the map.
+    gs_hud_minimap(w, t, v);
 }
 
 const char *gs_hud_carrying(void) { return gs_hud_carried; }
