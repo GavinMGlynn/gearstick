@@ -26,7 +26,22 @@
 // A track is at most 64 tiles square. That is four times the original's usable
 // area and keeps the whole thing - shape, surface and gravity - inside 22 KB,
 // small enough to hash, copy and send without anyone thinking about it.
-#define GS_TRACK_MAX     64
+// **How big a track may be, in tiles.**
+//
+// This was sixty-four, and sixty-four is why every default track was a
+// thirty-second drive. A route has to fit inside the field, and a field of
+// 64x64 is 4096 tiles: with a road four tiles wide and a verge either side, the
+// longest route that can be folded into it is about five hundred tiles, which
+// at the speeds in gs_parts.c is well under a minute of driving. Every attempt
+// to make the shipped tracks longer was clipped by this number, and nothing
+// said so - the generator simply laid the longest arc the field allowed.
+//
+// A hundred and ninety-two is 36864 tiles, which holds a serpentine of thirteen
+// hundred - ten to twenty times the old set, which is what a playable track
+// needs. A hundred and twenty-eight was tried first and reached only ten times,
+// at the bottom of the range. It costs nine times the memory per track: a track
+// is about 148 KB rather than 17, and the library holds GS_LIBRARY_MAX of them.
+#define GS_TRACK_MAX     192
 #define GS_TRACK_TILES   (GS_TRACK_MAX * GS_TRACK_MAX)
 #define GS_TRACK_CORNERS ((GS_TRACK_MAX + 1) * (GS_TRACK_MAX + 1))
 
@@ -141,7 +156,15 @@ extern const gs_surface_def gs_surfaces[GS_SURF_COUNT];
 // Gates leave the ground alone and say only which way round it goes, which is
 // also the more predictable of the two: the order is authored rather than
 // inferred from a shape.
-#define GS_TRACK_MAX_GATES 32
+// **How many checkpoints a route may have.** Thirty-two was plenty for a route
+// fifty tiles long and is not for one of eight hundred: a gate every ninety
+// tiles is a route with nothing on it between checkpoints, and it is also too
+// coarse for anything to tell which way the route goes from the gates alone.
+// Ninety-six costs a kilobyte and a half in a track that is already a hundred
+// and fifty, and one every dozen tiles is close enough together that the gates
+// describe the route - which is what both the validator and the driver read
+// them as.
+#define GS_TRACK_MAX_GATES 96
 
 // **What kind of route this is, which is the difference between a track that
 // goes somewhere and one that does not.**

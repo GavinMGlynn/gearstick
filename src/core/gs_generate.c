@@ -138,47 +138,189 @@ static void gs_lay_bowl(gs_track *t, gs_fix depth) {
 
 // How far in from the edge a route runs, so a car that goes wide has ground to
 // go wide onto rather than a kerb and then the drop.
-#define GS_GEN_INSET 7
+// **Wider than a gate is half wide**, or a gate laid on the outermost leg of
+// the route has an end past the edge of the world and the track is refused. It
+// was seven, and a gate's half width is six or seven.
+#define GS_GEN_INSET 10
 
 // How finely the centreline is sampled. Fine enough that the stamped discs
 // overlap into a continuous road at the tightest corner an oval has.
-#define GS_GEN_SAMPLES 192
+// **Scaled to the route, not to the picture.** A hundred and ninety-two discs
+// along a fifty-tile route is one every quarter tile and they overlap into a
+// road; along twelve hundred tiles it is one every six, and what gets carved is
+// a dotted line. The route is now as long as the field allows, so the sampling
+// has to be too.
+#define GS_GEN_SAMPLES 2048
 
-// Where the route goes, as a point and the direction of travel there.
+// **Where the route goes: a serpentine, because length is the whole point.**
 //
-// One definition for both kinds, because the road and the gates have to agree
-// about where the route is: gates laid on one curve and tarmac on another is a
-// route with the checkpoints off the road.
-static void gs_route_at(const gs_track *t, bool loop, gs_fix swing, gs_fix along,
-                        gs_fix *x, gs_fix *y) {
-    if (loop) {
-        gs_fix cx = GS_INT(t->w) / 2;
-        gs_fix cy = GS_INT(t->h) / 2;
-        gs_fix a = cx - GS_INT(GS_GEN_INSET);
-        gs_fix b = cy - GS_INT(GS_GEN_INSET);
+// This used to be a straight run with half a sine of swing on it, or an ellipse
+// inset from the edges. Both are as long as the field is wide - fifty tiles,
+// twenty-seven seconds of driving - and no amount of shaping the terrain makes
+// a fifty-tile route into a race. Length comes from *turns*, and a turn a car
+// can take has a radius, so the passes are laid a fixed pitch apart and joined
+// by half circles.
+//
+// **Straights and arcs, not a spline through the corners.** The first attempt
+// fitted a Catmull-Rom through the serpentine's corners, which overshoots by
+// about a sixth of the segment either side of a right angle - and with passes a
+// hundred tiles long that is sixteen tiles of overshoot, so every pass bulged
+// into its neighbours and the carve turned the whole field into one car park
+// with islands in it. Exact geometry has no overshoot to reason about: a
+// straight is a straight and a turn is a circle of a radius a car can hold.
 
-        gs_angle th = (gs_angle)(along & 0xffff);
-        *x = cx + gs_fix_mul(a, gs_cos(th));
-        *y = cy + gs_fix_mul(b, gs_sin(th));
-        return;
+// Tiles between passes. Two things set this and the larger wins: a turn from
+// one pass to the next has half of it as its radius, and the road is four tiles
+// wide with four of verge either side, so passes closer than sixteen apart
+// merge into each other. Twenty leaves four tiles of ground between them.
+#define GS_GEN_PITCH   30
+
+#define GS_GEN_MAX_SEG 64
+
+typedef struct gs_seg {
+    bool     arc;
+    gs_fix   ax, ay, bx, by;     // a line's ends
+    gs_fix   cx, cy, radius;     // an arc's centre
+    gs_angle from;               // and where it starts
+    int32_t  sweep;              // signed, in angle units; 32768 is half a turn
+    gs_fix   len;                // in tiles, for walking the route by distance
+} gs_seg;
+
+typedef struct gs_route_plan {
+    gs_seg  seg[GS_GEN_MAX_SEG];
+    uint8_t count;
+    uint8_t passes;
+    gs_fix  total;               // the whole route, in tiles
+    bool    loop;
+} gs_route_plan;
+
+static void gs_seg_line(gs_route_plan *p, gs_fix ax, gs_fix ay, gs_fix bx, gs_fix by) {
+    if (p->count >= GS_GEN_MAX_SEG) return;
+    gs_seg *g = &p->seg[p->count++];
+    *g = (gs_seg){ .arc = false, .ax = ax, .ay = ay, .bx = bx, .by = by };
+    g->len = gs_fix_len2(bx - ax, by - ay);
+    p->total += g->len;
+}
+
+// An arc of `sweep` starting where `from` points, around a centre. Its length is
+// the radius times the angle in radians, and a turn of 65536 units is two pi.
+static void gs_seg_arc(gs_route_plan *p, gs_fix cx, gs_fix cy, gs_fix radius,
+                       gs_angle from, int32_t sweep) {
+    if (p->count >= GS_GEN_MAX_SEG) return;
+    gs_seg *g = &p->seg[p->count++];
+    *g = (gs_seg){ .arc = true, .cx = cx, .cy = cy, .radius = radius,
+                   .from = from, .sweep = sweep };
+
+    int32_t turn = sweep < 0 ? -sweep : sweep;
+    // radius * (turn / 65536) * 2pi, with 2pi as 411775 / 65536.
+    g->len = (gs_fix)(((int64_t)radius * turn / 65536) * 411775 / 65536);
+    p->total += g->len;
+}
+
+static void gs_plan_route(const gs_track *t, bool loop, gs_route_plan *p) {
+    p->count = 0;
+    p->total = 0;
+    p->loop = loop;
+
+    const gs_fix x0 = GS_INT(GS_GEN_INSET);
+    const gs_fix x1 = GS_INT(t->w - GS_GEN_INSET);
+    const gs_fix y0 = GS_INT(GS_GEN_INSET);
+    const gs_fix y1 = GS_INT(t->h - GS_GEN_INSET);
+    const gs_fix pitch = GS_INT(GS_GEN_PITCH);
+    const gs_fix r = pitch / 2;
+
+    // A loop gives up a corridor down the right-hand side and a row across the
+    // top to come home along; a path uses the whole field.
+    const gs_fix xm = loop ? x1 - pitch : x1;
+    const gs_fix ys = loop ? y0 + pitch : y0;
+
+    int rows = (int)((y1 - ys) / pitch) + 1;
+    if (rows < 2) rows = 2;
+    if (rows > (GS_GEN_MAX_SEG - 8) / 2) rows = (GS_GEN_MAX_SEG - 8) / 2;
+
+    // **A loop needs an odd number of passes**, or its last one ends on the far
+    // side from the corridor that takes it home, and the return leg would have
+    // to cross every pass to reach it.
+    if (loop && (rows & 1) == 0) rows--;
+    p->passes = (uint8_t)rows;
+
+    // **The passes stop a turn's radius short of the field.** A half circle
+    // joining one pass to the next bulges out by its radius past the end of
+    // both, so passes that ran the full width put their turns off the edge of
+    // the world - and a gate laid at the apex went with them.
+    const gs_fix px0 = x0 + r, pxm = xm - r;
+
+    for (int i = 0; i < rows; i++) {
+        gs_fix y = ys + (gs_fix)((int64_t)pitch * i);
+        bool rightward = (i & 1) == 0;
+        gs_fix a = rightward ? px0 : pxm;
+        gs_fix b = rightward ? pxm : px0;
+
+        gs_seg_line(p, a, y, b, y);
+
+        // The half circle onto the next pass, bulging the way the pass was
+        // going so the car turns rather than reverses.
+        if (i + 1 < rows) {
+            // **Both start where the pass ended**, which is due south of the
+            // turn's centre; what changes with the direction is which side the
+            // arc bulges out. Starting a leftward turn at the *other* end of
+            // its own arc walks it backwards, and the route then doubles back
+            // on itself for half a turn - which laid gate nine of a serpentine
+            // behind gate eight and validation caught it.
+            gs_seg_arc(p, b, y + r, r, GS_DEG(270), rightward ? 32768 : -32768);
+        }
     }
 
-    gs_fix x0 = GS_INT(GS_GEN_INSET);
-    gs_fix x1 = GS_INT(t->w - GS_GEN_INSET);
-    gs_fix cy = GS_INT(t->h) / 2;
+    if (!loop) return;
 
-    gs_fix at = along > GS_ONE ? GS_ONE : along;
-    *x = x0 + gs_fix_mul(x1 - x0, at);
+    // Home along the corridor: out to it, up the right-hand side, back across
+    // the top, and down onto the first pass. Every corner a quarter circle.
+    gs_fix y_last = ys + (gs_fix)((int64_t)pitch * (rows - 1));
+    gs_seg_line(p, pxm, y_last, x1 - r, y_last);
+    gs_seg_arc(p, x1 - r, y_last - r, r, GS_DEG(90), -16384);
+    gs_seg_line(p, x1, y_last - r, x1, y0 + r);
+    gs_seg_arc(p, x1 - r, y0 + r, r, 0, -16384);
+    gs_seg_line(p, x1 - r, y0, px0, y0);
+    gs_seg_arc(p, px0, y0 + r, r, GS_DEG(270), -16384);
+    gs_seg_line(p, px0 - r, y0 + r, px0 - r, ys);
+    gs_seg_arc(p, px0, ys, r, GS_DEG(180), 16384);
+}
 
-    // Half a turn of sine along the length, so the path leaves the middle and
-    // comes back to it and never doubles back on itself. A route that crosses
-    // itself is a route with two answers to "which way now".
-    *y = cy + gs_fix_mul(swing, gs_sin((gs_angle)(at / 2)));
+// A point on the plan, `along` running from zero to GS_ONE over the whole
+// route - by distance, so the samples that carve the road are evenly spaced
+// whatever the route is doing.
+static void gs_route_at(const gs_route_plan *p, gs_fix along, gs_fix *x, gs_fix *y) {
+    *x = 0; *y = 0;
+    if (p->count == 0 || p->total <= 0) return;
+
+    if (along < 0) along = 0;
+    if (along > GS_ONE) along = GS_ONE;
+
+    gs_fix want = gs_fix_mul(p->total, along);
+    for (uint8_t i = 0; i < p->count; i++) {
+        const gs_seg *g = &p->seg[i];
+        if (want > g->len && i + 1 < p->count) { want -= g->len; continue; }
+
+        gs_fix s = g->len > 0 ? gs_fix_div(want, g->len) : 0;
+        if (s > GS_ONE) s = GS_ONE;
+
+        if (!g->arc) {
+            *x = g->ax + gs_fix_mul(g->bx - g->ax, s);
+            *y = g->ay + gs_fix_mul(g->by - g->ay, s);
+        } else {
+            gs_angle a = (gs_angle)((int32_t)g->from +
+                                    (int32_t)(((int64_t)g->sweep * s) >> 16));
+            *x = g->cx + gs_fix_mul(g->radius, gs_cos(a));
+            *y = g->cy + gs_fix_mul(g->radius, gs_sin(a));
+        }
+        return;
+    }
 }
 
 // How wide the verge is: the tiles either side of the road where its level
 // blends back into whatever the ground was doing.
 #define GS_GEN_VERGE 4
+
 
 // Flatten the road across its width without flattening it along its length, and
 // let it back down into the terrain either side.
@@ -204,7 +346,7 @@ static void gs_route_at(const gs_track *t, bool loop, gs_fix swing, gs_fix along
 // every corner, the nearest point of the route and what height the road has
 // there; the second applies it. What comes out does not depend on which end the
 // route was walked from.
-static void gs_carve(gs_track *t, bool loop, gs_fix swing, gs_surface road) {
+static void gs_carve(gs_track *t, const gs_route_plan *plan, gs_surface road) {
     const int32_t reach = GS_GEN_ROAD + GS_GEN_VERGE;
 
     // Nearest route sample per corner: how far, and what the road is doing
@@ -214,12 +356,12 @@ static void gs_carve(gs_track *t, bool loop, gs_fix swing, gs_surface road) {
     for (size_t i = 0; i < GS_TRACK_CORNERS; i++) near2[i] = INT32_MAX;
 
     for (uint16_t i = 0; i < GS_GEN_SAMPLES; i++) {
-        gs_fix along = loop
+        gs_fix along = plan->loop
             ? (gs_fix)(((int64_t)i * 65536) / GS_GEN_SAMPLES)
             : (gs_fix)(((int64_t)i * GS_ONE) / (GS_GEN_SAMPLES - 1));
 
         gs_fix px = 0, py = 0;
-        gs_route_at(t, loop, swing, along, &px, &py);
+        gs_route_at(plan, along, &px, &py);
         gs_fix here = gs_track_height(t, px, py);
 
         int32_t cx = gs_fix_floor(px), cy = gs_fix_floor(py);
@@ -332,11 +474,21 @@ static void gs_relax(gs_track *t) {
 
 // The gates, laid on the same centreline the road was cut along, each facing
 // the way a car is travelling when it arrives.
-static void gs_lay_gates(gs_track *t, gs_rng *r, bool loop, gs_fix swing) {
+static void gs_lay_gates(gs_track *t, gs_rng *r, const gs_route_plan *plan) {
     // Enough that the way round is never in doubt from any one of them, few
     // enough that they are not a fence.
-    uint8_t gates = loop ? (uint8_t)(8 + gs_pick(r, 3))
-                         : (uint8_t)(6 + gs_pick(r, 3));
+    // **Scaled to the route rather than fixed.** Eight gates over fifty tiles is
+    // one every six; eight over eight hundred is one every hundred, which is a
+    // route with nothing on it between checkpoints - and too coarse for the
+    // validator, which has only the gates to work out which way the route goes
+    // and reads a serpentine's neighbouring passes as a route doubling back.
+    // One every dozen tiles or so, which is also close enough together that
+    // the gates describe the route rather than merely marking it.
+    bool loop = plan->loop;
+    int want = (int)(plan->total / GS_INT(12)) + (int)gs_pick(r, 3);
+    if (want > GS_TRACK_MAX_GATES - 4) want = GS_TRACK_MAX_GATES - 4;
+    if (want < 6) want = 6;
+    uint8_t gates = (uint8_t)want;
 
     // **Wider than the road, always.** A gate is finite across its line - that
     // is what makes it a gate rather than a tripwire across the world - and
@@ -368,8 +520,8 @@ static void gs_lay_gates(gs_track *t, gs_rng *r, bool loop, gs_fix swing) {
         }
 
         gs_fix x = 0, y = 0, nx = 0, ny = 0;
-        gs_route_at(t, loop, swing, along, &x, &y);
-        gs_route_at(t, loop, swing, ahead, &nx, &ny);
+        gs_route_at(plan, along, &x, &y);
+        gs_route_at(plan, ahead, &nx, &ny);
 
         gs_angle heading = gs_atan2(ny - y, nx - x);
         if (loop || i + 1 < gates) {
@@ -383,8 +535,6 @@ static void gs_lay_gates(gs_track *t, gs_rng *r, bool loop, gs_fix swing) {
 }
 
 static void gs_lay_route(gs_track *t, gs_rng *r, bool loop, gs_surface base) {
-    gs_fix cy = GS_INT(t->h) / 2;
-
     // What the road is made of. Never the same as the ground it crosses, or
     // there is no road to see - and drawn from the surfaces a road is plausibly
     // made of rather than from all nine, because a route surfaced in slush is a
@@ -396,38 +546,41 @@ static void gs_lay_route(gs_track *t, gs_rng *r, bool loop, gs_surface base) {
     if (road == base) road = (base == GS_SURF_PAVEMENT) ? GS_SURF_DIRT
                                                         : GS_SURF_PAVEMENT;
 
-    // How far a path swings off centre, and which way. Kept inside the inset so
-    // the whole route has ground either side of it. A loop does not swing: it
-    // is already going everywhere.
-    gs_fix swing = 0;
-    if (!loop) {
-        swing = (gs_fix)((int64_t)(cy - GS_INT(GS_GEN_INSET)) *
-                         (int64_t)(45 + (int64_t)gs_pick(r, 40)) / 100);
-        if (gs_pick(r, 2) == 0) swing = -swing;
-    }
+    static gs_route_plan plan;
+    gs_plan_route(t, loop, &plan);
 
-    gs_carve(t, loop, swing, road);
+    gs_carve(t, &plan, road);
     gs_relax(t);
-    gs_lay_gates(t, r, loop, swing);
+    gs_lay_gates(t, r, &plan);
+}
+
+void gs_generate_route(gs_track *t, uint32_t seed, bool loop) {
+    gs_rng r = { seed != 0 ? seed : 0x9e3779b9u };
+    for (int i = 0; i < 4; i++) gs_next(&r);
+
+    // The road is whatever the ground under the start is not, so there is a
+    // road to see - the same rule gs_lay_route follows.
+    gs_surface base = gs_track_surface(t, GS_INT(t->w) / 2, GS_INT(t->h) / 2);
+    gs_lay_route(t, &r, loop, base);
 }
 
 void gs_generate_shape(gs_track *t, uint32_t seed, gs_track_shape shape) {
     gs_rng r = { seed != 0 ? seed : 0x9e3779b9u };
     for (int i = 0; i < 4; i++) gs_next(&r);      // shake off a poor first value
 
-    // **Big enough for the route to be a drive.** These used to be 36-52 by
-    // 18-24, which is a field with two gates on it - and with a loop inset far
-    // enough from the edge to have run-off, a 18-tall track leaves an oval
-    // three tiles across. A circuit is given most of the board in both
-    // directions; a path is given the length instead, because what a sprint
-    // wants is distance between its two ends.
+    // **Big enough for the route to be a drive.** These were 52-64 by 26-52,
+    // and a serpentine folded into that is still under two hundred tiles of
+    // route - a minute at most. The field is what decides how long a route can
+    // be: every pass costs twelve tiles of height, so the height *is* the pass
+    // count and the width is what each pass is worth. Both kinds get most of
+    // the board now, because both kinds need the room to be long.
     uint8_t w, h;
     if (shape == GS_SHAPE_CIRCUIT) {
-        w = (uint8_t)(52 + gs_pick(&r, 4) * 4);       // 52 to 64
-        h = (uint8_t)(44 + gs_pick(&r, 3) * 4);       // 44 to 52
+        w = (uint8_t)(174 + gs_pick(&r, 4) * 5);      // 174 to 189
+        h = (uint8_t)(174 + gs_pick(&r, 4) * 5);      // 174 to 189
     } else {
-        w = (uint8_t)(56 + gs_pick(&r, 3) * 4);       // 56 to 64
-        h = (uint8_t)(26 + gs_pick(&r, 4) * 2);       // 26 to 32
+        w = (uint8_t)(178 + gs_pick(&r, 3) * 5);      // 178 to 188
+        h = (uint8_t)(170 + gs_pick(&r, 4) * 5);      // 170 to 185
     }
 
     // **Every ground, not the three there used to be.** A generator that only
@@ -441,7 +594,13 @@ void gs_generate_shape(gs_track *t, uint32_t seed, gs_track_shape shape) {
         // Raised edges and a dip through the middle: a loop you are pushed back
         // into rather than one drawn with walls, because there are no walls.
         gs_lay_flat(t, w, h, base);
-        gs_lay_bowl(t, GS_RATIO(75, 100));
+
+        // **No bowl.** A dish across the field was how a loop kept cars in it
+        // when the loop was an ellipse in the middle of open ground. A
+        // serpentine already goes everywhere, so all a bowl adds is a long
+        // adverse gradient on half the passes - and the one seed in six that
+        // came back "nobody can get round it" was the one with the deepest one.
+        gs_lay_bowl(t, GS_RATIO(25, 100));
         for (uint8_t k = 0; k < 3; k++) {
             uint8_t at = (uint8_t)(GS_GEN_RUNUP + k * (w / 5));
             uint8_t width = (uint8_t)(5 + gs_pick(&r, 4));

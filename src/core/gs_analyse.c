@@ -6,13 +6,25 @@
 // track rather than merely slowed by it. Cars cruise at four or five tiles a
 // second on the flat; two is what is left after the climbs, the lightest gravity
 // on the dial and an AI that is not trying to be quick.
-#define GS_ANALYSIS_PACE GS_INT(2)
+// **How fast a car is assumed to get round, in tiles a second.** Two was
+// measured on a route that was nearly a straight line. A serpentine spends its
+// length in hairpins, where a car is braking, turning and getting back on the
+// power rather than holding speed - so the same machine averages closer to one
+// and a quarter, and a budget built on two declares a track nobody can finish
+// when what actually happened is that the stopwatch ran out.
+#define GS_ANALYSIS_PACE GS_RATIO(125, 100)
 
 // A floor and a ceiling. The floor gives a very short track a fair go at the
 // heavy end of the gravity dial, where everything is slow; the ceiling stops one
 // enormous route from turning a fifty-track sweep into a coffee break.
 #define GS_ANALYSIS_MIN_SECONDS 20u
-#define GS_ANALYSIS_MAX_SECONDS 90u
+// **Long enough for a track that is a race.** This was ninety seconds, which
+// was generous for a fifty-tile route and is a stopwatch running out halfway
+// round an eight-hundred-tile one: every generated track came back "nobody can
+// get round it" the moment the routes got long, and the fault was the clock
+// rather than the track. Fifteen minutes covers the longest route the biggest
+// field can hold, driven by the slowest thing on the heaviest gravity.
+#define GS_ANALYSIS_MAX_SECONDS 2400u
 
 uint32_t gs_analyse_seconds(const gs_track *t) {
     if (t->gate_count == 0) return GS_ANALYSIS_MIN_SECONDS;

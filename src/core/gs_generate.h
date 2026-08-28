@@ -46,6 +46,15 @@ void gs_generate(gs_track *t, uint32_t seed);
 // The same, with the shape chosen rather than drawn from the seed.
 void gs_generate_shape(gs_track *t, uint32_t seed, gs_track_shape shape);
 
+// **The route, laid onto ground somebody else built.**
+//
+// A serpentine of the same shape the generator uses, carved into whatever
+// terrain is already there, with its gates. It is public because the tracks
+// written by hand in tools/make_tracks.c need to be as long as the generated
+// ones - each of them demonstrates one idea, and a route that crosses that idea
+// five times is a better demonstration than one that crosses it once.
+void gs_generate_route(gs_track *t, uint32_t seed, bool loop);
+
 // Which shape a seed gives, without building it - for a sweep that wants to
 // report what failed rather than merely that something did.
 gs_track_shape gs_generate_shape_for(uint32_t seed);

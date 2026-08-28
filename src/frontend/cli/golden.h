@@ -78,7 +78,21 @@
 // sand at the edge's height for ten tiles and then falling away - where before
 // it was the edge tile's own surface, level, without end. The selftest race has
 // a car that leaves the track, so its hash moves. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0xaf296762fbe007a6ULL
+// **And the world hash moved, once, when the world got bigger.**
+//
+// GS_TRACK_MAX went from 64 tiles to 192, because no route folded into a 64 by
+// 64 field is longer than about five hundred tiles and every default track was
+// therefore a twenty-seven second drive. The physics is untouched; what changed
+// is the size of the arrays the physics indexes. Surface wear is stored per
+// tile in an array of GS_TRACK_TILES, and a point off the edge of the track is
+// clamped into it by GS_TRACK_MAX rather than by the track's own width - so a
+// car that leaves the ground the selftest race puts it on (it ends at y = -1.08,
+// which is off the track by a tile) now reads a different wear cell than it did.
+// Same physics, different cupboard.
+//
+// The track hash above did not move: a track's identity is its own contents and
+// has never depended on how big a track is allowed to be.
+#define GS_SELFTEST_WORLD_HASH 0x44526ece9b8519bcULL
 
 // The track generator, folded over its first two hundred seeds.
 //
@@ -127,7 +141,14 @@
 // number that names that ground is different, which is what the fold measures.
 // So unlike the three moves above, nobody's shared seed opens a different track,
 // and the warning this failure prints is worth reading with that in mind.
-#define GS_SELFTEST_GENERATOR_HASH 0x84b090da5b530ccfULL
+// **The generator fold moved deliberately, with the routes.** It is a fold of
+// gs_track_hash over two hundred seeds and names nothing on its own; it moves
+// whenever the generator makes different ground, which it now does: every seed
+// builds a serpentine of about a thousand tiles on a field of a hundred and
+// eighty rather than a fifty-tile arc on a field of sixty. That was the point of
+// the change - a default track that takes twenty-seven seconds to drive is not
+// a race - and it is what a share code for a generated track will now open as.
+#define GS_SELFTEST_GENERATOR_HASH 0x6a90c44a51a3469cULL
 
 // **A race with nobody at the keyboard**, four opponents spread across the
 // skill dial, on a circuit none of them has seen.
@@ -144,6 +165,9 @@
 // anything - gs_ai_drive does not press the button - so the race itself is
 // unchanged, and that is a gap written down in docs/PROJECT_STATUS.md rather
 // than a thing this number is hiding.
-#define GS_OPPONENTS_WORLD_HASH 0xdabc972dd12a3a54ULL
+// Moved with the one above, and for the same reason: a bigger world means a
+// different wear cell for a car that has left the track, and the opponents race
+// puts one there too. The driver and the physics are both untouched.
+#define GS_OPPONENTS_WORLD_HASH 0x3953f0a568bc1d2fULL
 
 #endif // GS_GOLDEN_H

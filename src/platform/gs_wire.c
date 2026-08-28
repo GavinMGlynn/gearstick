@@ -1190,8 +1190,16 @@ void gs_wire_poll(gs_wire *w) {
         // Asking for the track until it is here. There is nothing that
         // acknowledges a chunk, so a piece that went missing is recovered by
         // asking again rather than by anybody keeping a list.
+        // **Asked for again often enough to finish.** A track was eight
+        // kilobytes in eight chunks and one ask every two seconds recovered a
+        // lost piece in no time. A track is a hundred and forty kilobytes now -
+        // a hundred and forty chunks, sent as fast as the socket will take them
+        // - so a burst loses several, and at one ask every two seconds a client
+        // could sit at "receiving the track" until it gave up. Every twenty
+        // polls is a third of a second, which is a retransmit rate rather than
+        // a heartbeat.
         if (w->want_track != 0 && !gs_carrier_done(&w->carrier) &&
-            (w->asked_at == 0 || w->retry - w->asked_at > 120u)) {
+            (w->asked_at == 0 || w->retry - w->asked_at > 20u)) {
             uint8_t buf[GS_PROTO_MTU];
             gs_to_server(w, buf,
                          gs_proto_want_track(buf, sizeof buf, w->want_track));

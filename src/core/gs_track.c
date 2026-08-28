@@ -120,24 +120,6 @@ bool gs_track_remove_gate(gs_track *t, uint8_t index) {
 // A loop with two gates has no chord through either of them - the gate before
 // and the gate after are the same gate - so it is read as a path, which is the
 // only answer the geometry allows.
-static gs_angle gs_route_tangent(const gs_track *t, uint8_t i) {
-    uint8_t n = t->gate_count;
-    bool loop = t->route == (uint8_t)GS_ROUTE_CIRCUIT && n >= 3;
-
-    const gs_gate *a, *c;
-    if (loop) {
-        a = &t->gate[(uint8_t)((i + n - 1) % n)];
-        c = &t->gate[(uint8_t)((i + 1) % n)];
-    } else if (i == 0) {
-        a = &t->gate[0]; c = &t->gate[1];
-    } else if (i + 1 == n) {
-        a = &t->gate[n - 2]; c = &t->gate[n - 1];
-    } else {
-        a = &t->gate[i - 1]; c = &t->gate[i + 1];
-    }
-    return gs_atan2(c->y - a->y, c->x - a->x);
-}
-
 // The angle between two headings, the short way round, which is the only way a
 // wrapping type can be compared without a modulus appearing in the physics.
 static gs_angle gs_angle_apart(gs_angle a, gs_angle b) {
@@ -145,6 +127,43 @@ static gs_angle gs_angle_apart(gs_angle a, gs_angle b) {
     if (d > 32768u) d = (uint16_t)(65536 - (int32_t)d);
     return (gs_angle)d;
 }
+
+// **Which way traffic goes through gate `i`, as three chords rather than one.**
+//
+// A gate's heading is compared against the route to catch one turned across it.
+// The route between checkpoints is not recorded anywhere, so the chords through
+// the neighbouring gates are all there is to go on - and no single chord is the
+// tangent everywhere. Through a gate on a straight all three agree. On a curve
+// the chord from the gate before to the gate after cuts the corner, and the two
+// half chords lean the other way by about half the turn. A gate turned ninety
+// degrees disagrees with all three, which is what this has to catch; a gate on a
+// hairpin agrees with one of them, which is what it must not report.
+static bool gs_faces_route(const gs_track *t, uint8_t i) {
+    uint8_t n = t->gate_count;
+    bool loop = t->route == (uint8_t)GS_ROUTE_CIRCUIT && n >= 3;
+    gs_angle facing = t->gate[i].heading;
+
+    uint8_t before = loop ? (uint8_t)((i + n - 1) % n)
+                          : (uint8_t)(i == 0 ? 0 : i - 1);
+    uint8_t after = loop ? (uint8_t)((i + 1) % n)
+                         : (uint8_t)(i + 1 < n ? i + 1 : i);
+
+    const gs_gate *a = &t->gate[before];
+    const gs_gate *b = &t->gate[i];
+    const gs_gate *c = &t->gate[after];
+
+    const gs_gate *pairs[3][2] = { { a, c }, { a, b }, { b, c } };
+    for (int k = 0; k < 3; k++) {
+        gs_fix dx = pairs[k][1]->x - pairs[k][0]->x;
+        gs_fix dy = pairs[k][1]->y - pairs[k][0]->y;
+        if (dx == 0 && dy == 0) continue;
+        if (gs_angle_apart(facing, gs_atan2(dy, dx)) <= GS_GATE_FACING_MAX) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 uint8_t gs_track_route_legs(const gs_track *t) {
     if (t == nullptr || t->gate_count < 2) return 0;
@@ -200,10 +219,25 @@ void gs_track_route_point(const gs_track *t, uint8_t leg, gs_fix s,
 void gs_track_face_along_route(gs_track *t) {
     if (t == nullptr || t->gate_count < 2) return;
 
-    // Positions are read and only headings are written, so this needs no
-    // scratch copy: nothing it reads is anything it has changed.
-    for (uint8_t i = 0; i < t->gate_count; i++) {
-        t->gate[i].heading = gs_route_tangent(t, i);
+    uint8_t n = t->gate_count;
+    bool loop = t->route == (uint8_t)GS_ROUTE_CIRCUIT && n >= 3;
+
+    // The chord from the gate before to the gate after, which is the tangent to
+    // within a degree on anything anybody would call a track. Positions are read
+    // and only headings are written, so this needs no scratch copy.
+    for (uint8_t i = 0; i < n; i++) {
+        const gs_gate *a, *c;
+        if (loop) {
+            a = &t->gate[(uint8_t)((i + n - 1) % n)];
+            c = &t->gate[(uint8_t)((i + 1) % n)];
+        } else if (i == 0) {
+            a = &t->gate[0]; c = &t->gate[1];
+        } else if (i + 1 == n) {
+            a = &t->gate[n - 2]; c = &t->gate[n - 1];
+        } else {
+            a = &t->gate[i - 1]; c = &t->gate[i + 1];
+        }
+        t->gate[i].heading = gs_atan2(c->y - a->y, c->x - a->x);
     }
 }
 
@@ -745,8 +779,7 @@ gs_track_issue gs_track_validate(const gs_track *t) {
     // path takes its ends from its ends.
     if (t->gate_count >= 2) {
         for (uint8_t i = 0; i < t->gate_count; i++) {
-            if (gs_angle_apart(t->gate[i].heading, gs_route_tangent(t, i)) >
-                GS_GATE_FACING_MAX) {
+            if (!gs_faces_route(t, i)) {
                 return (gs_track_issue){ GS_TRACK_GATE_FACING, (int)i, -1 };
             }
         }

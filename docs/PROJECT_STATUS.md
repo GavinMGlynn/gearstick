@@ -918,6 +918,83 @@ The store is version 2 and refuses a version 1 file rather than half-reading it.
 That is correct and it is also the first real reason to build the migration path
 the tails have been asking for.
 
+#### A default track is a race, not a demonstration
+
+**Every track that shipped was a twenty-seven second drive.** `gearstick_cli
+pace` had been printing that number in every test run — 27.27s for a normal
+driver on pavement — and it was read as a passing check rather than as a verdict.
+The routes measured 28 to 173 tiles and averaged 63. That is not a race whatever
+is painted on it, and it had been raised repeatedly and lost repeatedly, because
+it was written down nowhere: not in `CLAUDE.md`, not here, not in a commit
+message. It is in `CLAUDE.md` now, with the measurement attached.
+
+**The world was the reason.** `GS_TRACK_MAX` was 64, so a field was at most
+64x64 — 4096 tiles — and with a road four tiles wide and a verge either side the
+longest route that can be folded into that is about five hundred tiles. Every
+attempt to make the shipped set longer was clipped by that ceiling and nothing
+said so; the generator simply laid the longest arc the field allowed. The world
+is 192 now: 36,864 tiles, and a track is about 148 KB rather than 17.
+
+**The route is a serpentine.** Length comes from turns, and a turn a car can
+take has a radius, so the passes are laid thirty tiles apart — twice the tightest
+radius, and wide enough that the road and its verge do not merge one pass into
+the next — and joined by half circles. Straights and arcs walked by distance,
+not a spline through the corners: a Catmull-Rom overshoots a right angle by a
+sixth of the segment, which at a hundred tiles a pass is sixteen tiles of
+overshoot, and the first attempt carved the whole field into one car park with
+islands in it.
+
+The eighteen tracks that ship are **998 to 1125 tiles of route — sixteen to
+eighteen times** what they replaced, which is five to ten minutes of driving.
+Every one of them is validated, and every one is raced by every vehicle before
+it is written; `tools/make_tracks.c` refuses to write a track under
+`GS_STOCK_MIN_ROUTE`, so the requirement is enforced by the build rather than
+remembered by whoever is here next.
+
+**The ten written by hand are on the same field.** Each of them demonstrates one
+idea and used to do it on forty by twenty-four with two gates. Their signature
+feature is repeated across the big field and the same serpentine is laid through
+it, so a track about a ramp puts a ramp on every pass. A demonstration you meet
+five times is a better one than a demonstration you meet once.
+
+Three things had to move with it, and each was found by something going red:
+
+- **The analyser's clock.** It gave a track ninety seconds and assumed two tiles
+  a second. A serpentine spends its length in hairpins, where a car brakes and
+  turns rather than holding speed, so the pace is nearer one and a quarter — and
+  ninety seconds is a stopwatch running out a quarter of the way round. Every
+  generated track came back "nobody can get round it", and the fault was the
+  clock rather than the track.
+- **How many checkpoints a route has.** Eight gates over fifty tiles is one
+  every six; eight over a thousand is one every hundred and twenty-five, which
+  is a route with nothing on it between checkpoints and too coarse for anything
+  to read the route's direction from. `GS_TRACK_MAX_GATES` is 96 and the
+  generator lays one every dozen tiles — which is also what its driver steers by.
+- **What the generator promises.** It proposes a candidate; what decides whether
+  one ships is racing it. About one seed in twelve now puts a hairpin somewhere
+  the driver cannot hold, and that seed is thrown away rather than shipped. The
+  check states the rate and holds it to one in six, so a generator that started
+  refusing a quarter of its own output would fail.
+
+#### A track goes over the wire a burst at a time
+
+**And the red tree went green with it.** A track was eight kilobytes and went
+out in one go: the server looped over its chunks and wrote all eight to the
+socket. A track is a hundred and thirty kilobytes now — a hundred and
+twenty-seven datagrams written in a tight loop — which overruns the receive
+buffer at the other end. Most are dropped, the client asks again, and the same
+burst is lost the same way, so the transfer never completes and a client sits at
+"Receiving the track..." until it gives up.
+
+A burst is bounded now — thirty-two chunks, carrying on from where the last one
+stopped — and the client asks again every twenty polls rather than every hundred
+and twenty, which is a retransmit rate rather than a heartbeat.
+
+That also fixed the ten server tests that had been failing before any of this
+work started: they are the ones that move a track or a replay between two
+clients, and a replay behind a claimed lap time is far bigger than a track ever
+was. The whole suite is green — twenty-one of twenty-one.
+
 #### A minimap, the way the original had one
 
 The ground line answers "which way now". It does not answer "where am I on

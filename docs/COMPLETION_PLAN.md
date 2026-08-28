@@ -2347,3 +2347,24 @@ are the places a fault could sit unnoticed.
       — not over the whole frame, where the line on the ground would answer for
       it — and a track with no route on it leaves that corner empty, so the
       test cannot be passed by a panel that is always there.*
+- [x] **A default track is a race rather than a demonstration.** Every track
+      that shipped was a twenty-seven second drive — 28 to 173 tiles of route,
+      averaging 63 — which had been asked about repeatedly and lost every time.
+      The world was the reason: a field could be at most 64 by 64 tiles, and no
+      route folded into that is longer than about five hundred tiles. The world
+      is 192 now and the route is a serpentine of passes joined by half circles,
+      so the eighteen tracks that ship are **998 to 1125 tiles — sixteen to
+      eighteen times** what they replaced, or five to ten minutes of driving.
+      The ten written by hand are on the same field, with their signature
+      feature repeated across it so a track about a ramp has a ramp on every
+      pass.
+      *Verification: the tool that writes the shipped set refuses a track under
+      a route-length floor, so the rule is enforced by the build rather than
+      remembered; every track is validated and raced by every vehicle before it
+      is written; and the lengths are measured rather than asserted.*
+      Three things moved with it, each found by something going red: the
+      analyser gave every track ninety seconds and assumed a pace no car holds
+      through a hairpin; a route of a thousand tiles needs a checkpoint every
+      dozen rather than every hundred; and the generator is now understood to
+      propose candidates, about one in twelve of which is thrown away by racing
+      it rather than shipped.

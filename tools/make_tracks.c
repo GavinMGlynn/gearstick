@@ -23,6 +23,11 @@
 
 static gs_track gs_t;
 
+// **How long a default track has to be, in tiles of route.** Ten times the set
+// this replaced, which averaged sixty-three. See gs_write for why it is a rule
+// the build enforces rather than a thing anybody is asked to remember.
+#define GS_STOCK_MIN_ROUTE 630
+
 static void gs_flat(uint8_t w, uint8_t h, gs_surface s) {
     gs_track_init(&gs_t, w, h, s);
     for (uint8_t y = 0; y <= h; y++) {
@@ -45,6 +50,18 @@ static void gs_ridge(uint8_t from, uint8_t to, uint8_t ramp, gs_fix height) {
             }
             if (h != 0) gs_track_set_corner(&gs_t, x, y, h);
         }
+    }
+}
+
+// **The same feature, across a field big enough to hold several of it.** A
+// track about a ramp used to have one ramp on it because the field was forty
+// tiles wide; on a field of a hundred and eighty a single ramp is a thing you
+// meet once in a twelve hundred tile route and forget. Repeating it is what
+// makes the idea the track is about the thing you are actually driving.
+static void gs_ridges_across(uint8_t first, uint8_t spacing, uint8_t width,
+                             uint8_t ramp, gs_fix height) {
+    for (uint8_t x = first; (uint32_t)x + width < gs_t.w; x = (uint8_t)(x + spacing)) {
+        gs_ridge(x, (uint8_t)(x + width), ramp, height);
     }
 }
 
@@ -71,6 +88,29 @@ static bool gs_write(const char *path) {
     // somebody moved while editing the numbers above.
     if (gs_track_validate(&gs_t).problem != GS_TRACK_OK) {
         printf("  %s: the route is not sound\n", path);
+        return false;
+    }
+
+    // **And refuse to ship one that is over in thirty seconds.** Every track
+    // that shipped in August 2026 was between twenty-eight and a hundred and
+    // seventy-three tiles of route - twenty-seven seconds of driving on
+    // pavement, which `gearstick_cli pace` had been printing all along. It was
+    // asked for repeatedly that a default track be ten to twenty times that,
+    // and the requirement kept being lost between one piece of work and the
+    // next. It is not a thing to remember any more: a track under the floor is
+    // not written, and the build fails.
+    gs_fix route = 0;
+    for (uint8_t i = 0; i + 1 < gs_t.gate_count; i++) {
+        route += gs_fix_len2(gs_t.gate[i + 1].x - gs_t.gate[i].x,
+                             gs_t.gate[i + 1].y - gs_t.gate[i].y);
+    }
+    if (gs_t.route == (uint8_t)GS_ROUTE_CIRCUIT && gs_t.gate_count > 1) {
+        route += gs_fix_len2(gs_t.gate[0].x - gs_t.gate[gs_t.gate_count - 1].x,
+                             gs_t.gate[0].y - gs_t.gate[gs_t.gate_count - 1].y);
+    }
+    if (route < GS_INT(GS_STOCK_MIN_ROUTE)) {
+        printf("  %s: %d tiles of route, and the floor is %d\n", path,
+               (int)(route / GS_ONE), GS_STOCK_MIN_ROUTE);
         return false;
     }
 
@@ -139,26 +179,55 @@ static int gs_finishers_at_earth(const gs_track *t) {
     uint32_t seconds = gs_analyse_seconds(t);
     int n = 0;
 
+    // **Every machine, from every slot on the grid.** This used to race each
+    // vehicle from pole. A grid is staggered back from the line and across it,
+    // so the car in the last slot has a different corner to make and different
+    // ground to make it on - and on a route that folds back every thirty tiles
+    // that is a different track. Opponents start in those slots, so a track
+    // that ships has to be drivable from all of them.
+    //
+    // Pole first for each machine, because a track that fails there fails
+    // cheaply and most candidates fail.
     for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
-        gs_world w;
-        gs_world_init(&w, GS_ONE);
+        bool everywhere = true;
 
-        gs_fix x, y;
-        gs_angle heading;
-        gs_track_grid(t, 0, &x, &y, &heading);
-        gs_world_add_car(&w, t, v, x, y, heading);
+        for (uint8_t slot = 0; slot < GS_MAX_CARS && everywhere; slot++) {
+            gs_world w;
+            gs_world_init(&w, GS_ONE);
 
-        for (uint32_t i = 0; i < GS_TICK_HZ * seconds; i++) {
-            gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, t, 0), 0, 0, 0 };
-            gs_world_step(&w, t, in);
-            if (w.car[0].laps > 0) { n++; break; }
+            gs_fix x, y;
+            gs_angle heading;
+            gs_track_grid(t, slot, &x, &y, &heading);
+            gs_world_add_car(&w, t, v, x, y, heading);
+
+            bool round = false;
+            for (uint32_t i = 0; i < GS_TICK_HZ * seconds; i++) {
+                gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, t, 0), 0, 0, 0 };
+                gs_world_step(&w, t, in);
+                if (w.car[0].laps > 0) { round = true; break; }
+            }
+            everywhere = round;
         }
+
+        if (everywhere) n++;
     }
     return n;
 }
 
-#define GS_STOCK_GENERATED 12
-#define GS_STOCK_PER_SHAPE (GS_STOCK_GENERATED / GS_SHAPE_COUNT)
+// **Six rather than twelve.** Every candidate is raced by every vehicle before
+// it is allowed to ship, and a candidate is now a thirteen hundred tile route
+// rather than a fifty tile one, so the choosing costs twenty-five times what it
+// did. Six is what a scan of six thousand seeds finds in a couple of minutes:
+// every shape is generated and every one of them is driveable, but not every
+// shape produces two that *all six machines* can finish, which is the bar for
+// shipping one. The ten written by hand make the set up to sixteen.
+#define GS_STOCK_GENERATED 8
+// **A ceiling per shape, not a share of the total.** This was the total divided
+// by the number of shapes, which with six wanted and four shapes is one each -
+// so one shape that cannot produce a track every machine can finish caps the
+// whole set at three. Three each lets the shapes that do work cover for the one
+// that does not, while still keeping any single shape from filling the library.
+#define GS_STOCK_PER_SHAPE 3
 
 // **A track written by hand has its gates faced along its own route.**
 //
@@ -182,7 +251,7 @@ static bool gs_write_generated(const char *dir) {
 
     // Seeds in order, so the set is reproducible and so adding a shape later
     // does not reshuffle the tracks anybody already has.
-    for (uint32_t n = 1; written < GS_STOCK_GENERATED && n < 4000; n++) {
+    for (uint32_t n = 1; written < GS_STOCK_GENERATED && n < 6000; n++) {
         uint32_t seed = n * 7919u;
 
         gs_track_shape shape = gs_generate_shape_for(seed);
@@ -223,151 +292,148 @@ int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "assets/tracks";
     char path[512];
 
-    // --- first light: the one a new player sees. A ramp, a landing, and
-    // enough room either side to work out what the car does before it matters.
-    gs_flat(40, 24, GS_SURF_PAVEMENT);
-    gs_ridge(12, 26, 4, GS_INT(2));
-    gs_band(0, 6, GS_SURF_DIRT);
-    gs_band(30, 40, GS_SURF_DIRT);
-    gs_track_add_gate(&gs_t, GS_INT(6), GS_INT(12), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(34), GS_INT(12), 0, GS_INT(6));
+    // **The tracks written by hand, on the same big field as the generated
+    // ones.** Each of these demonstrates one idea, and they used to do it on
+    // forty by twenty-four with two gates: twenty-eight tiles of route, under
+    // thirty seconds of driving, which is not a race whatever is painted on it.
+    // They are laid on a field of the size the world now allows, their signature
+    // feature is repeated across it, and the route is the same serpentine the
+    // generator lays - so a track about a ramp puts a ramp on every pass rather
+    // than one ramp in a field. A demonstration you meet five times is a better
+    // demonstration than one you meet once.
+    //
+    // The seed after each is only there to shake the route's incidental choices
+    // apart, so no two of these come out identically shaped.
+    //
+    // **Every feature starts well down the field.** The route begins at the
+    // inset, so a ridge twenty tiles in is a wall six tiles in front of a
+    // standing start - and `jupiter run` shipped with one, unfinishable from
+    // two of the four grid slots. The generator keeps its own features clear of
+    // the line with GS_GEN_RUNUP for the same reason.
+
+    // --- first light: the one a new player sees. A ramp, a landing, and enough
+    // room either side to work out what the car does before it matters.
+    gs_flat(184, 176, GS_SURF_PAVEMENT);
+    gs_ridges_across(44, 44, 14, 4, GS_INT(2));
+    gs_band(0, 10, GS_SURF_DIRT);
+    gs_band(174, 184, GS_SURF_DIRT);
+    gs_generate_route(&gs_t, 101u, false);
     snprintf(path, sizeof path, "%s/first-light.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
-    // --- the long drop: a shelf that ends. What the landing does decides the
+    // --- the long drop: shelves that end. What the landing does decides the
     // run, which is the whole argument for building a downhill one.
-    gs_flat(48, 20, GS_SURF_DIRT);
+    gs_flat(184, 172, GS_SURF_DIRT);
     for (uint8_t y = 0; y <= gs_t.h; y++) {
         for (uint8_t x = 0; x <= gs_t.w; x++) {
-            gs_fix h = 0;
-            if (x <= 18) h = GS_INT(6);
-            else if (x < 24) h = (gs_fix)((int64_t)GS_INT(6) * (24 - x) / 6);
+            // Four terraces down the field, each with a lip to fall off.
+            uint8_t step = (uint8_t)(x / 46);
+            gs_fix h = GS_INT(6) - (gs_fix)((int64_t)GS_INT(2) * step);
+            uint8_t into = (uint8_t)(x % 46);
+            if (into > 40) h -= (gs_fix)((int64_t)GS_INT(2) * (into - 40) / 6);
+            if (h < 0) h = 0;
             gs_track_set_corner(&gs_t, x, y, h);
         }
     }
-    gs_band(24, 34, GS_SURF_PAVEMENT);
-    gs_track_add_gate(&gs_t, GS_INT(6), GS_INT(10), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(42), GS_INT(10), 0, GS_INT(6));
+    gs_band(46, 92, GS_SURF_PAVEMENT);
+    gs_generate_route(&gs_t, 102u, false);
     snprintf(path, sizeof path, "%s/the-long-drop.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
     // --- ice house: grip is the whole problem, and the machines sort
     // themselves out by it.
-    gs_flat(44, 24, GS_SURF_ICE);
-    gs_ridge(16, 28, 5, GS_INT(1));
-    gs_band(0, 8, GS_SURF_PAVEMENT);
-    gs_band(36, 44, GS_SURF_PAVEMENT);
-    gs_track_add_gate(&gs_t, GS_INT(5), GS_INT(12), 0, GS_INT(7));
-    gs_track_add_gate(&gs_t, GS_INT(38), GS_INT(12), 0, GS_INT(7));
+    gs_flat(180, 176, GS_SURF_ICE);
+    gs_ridges_across(48, 50, 16, 5, GS_INT(1));
+    gs_band(0, 12, GS_SURF_PAVEMENT);
+    gs_band(168, 180, GS_SURF_PAVEMENT);
+    gs_generate_route(&gs_t, 103u, false);
     snprintf(path, sizeof path, "%s/ice-house.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
-    // --- jupiter run: a painted low-gravity pocket over the jump, which is
-    // the feature this game has and the original could not.
-    gs_flat(48, 24, GS_SURF_PAVEMENT);
-    gs_ridge(14, 24, 3, GS_INT(3));
-    gs_gravity_patch(24, 32, GS_RATIO(30, 100));
-    gs_gravity_patch(36, 44, GS_RATIO(180, 100));
-    gs_band(32, 40, GS_SURF_DIRT);
-    gs_track_add_gate(&gs_t, GS_INT(6), GS_INT(12), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(42), GS_INT(12), 0, GS_INT(6));
+    // --- jupiter run: painted low-gravity pockets over the jumps, which is the
+    // feature this game has and the original could not.
+    gs_flat(184, 176, GS_SURF_PAVEMENT);
+    // **A pocket, not a launchpad.** Three tenths of Earth over a three-tile
+    // ramp threw a car high enough that it came down somewhere it could not
+    // drive out of, and the track was unfinishable from every grid slot. Half
+    // gravity over a two-tile ramp is the same idea at a size a car survives -
+    // and the heavy patch after it is what brings the jump back down rather
+    // than a second thing to be caught out by.
+    gs_ridges_across(46, 46, 12, 3, GS_INT(2));
+    // Light gravity only. The heavy patch on the far side was meant to bring
+    // the jump back down and instead drove a car into the ground it had just
+    // left, from every grid slot: painted gravity is a thing you fly through,
+    // not a thing that lands you.
+    // **Between the ramps, not off the end of them.** A pocket that begins
+    // where a ramp ends turns every crossing into a launch, and a launch on a
+    // route that turns thirty tiles later is a car in the scenery - it was
+    // unfinishable from every grid slot twice over. Landing the pocket on the
+    // flat between two ramps is the same feature to drive through and a
+    // survivable one.
+    for (uint8_t x = 70; x + 12 < gs_t.w; x = (uint8_t)(x + 46)) {
+        gs_gravity_patch(x, (uint8_t)(x + 12), GS_RATIO(55, 100));
+    }
+    gs_generate_route(&gs_t, 104u, false);
     snprintf(path, sizeof path, "%s/jupiter-run.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
-    // --- the crossing: a figure of eight, after the original's `dirt8`. The
-    // route crosses itself, so the two halves of the field meet in the middle
-    // going different ways. That is the whole point of the shape and the reason
-    // it is the first one in their list.
-    gs_flat(56, 40, GS_SURF_DIRT);
-    gs_band(0, 6, GS_SURF_PAVEMENT);
-    gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(8), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(48), GS_INT(8), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(32), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(48), GS_INT(32), 0, GS_INT(6));
-    // A circuit: a figure of eight closes on itself, so the line it starts on is the line it ends on.
-    gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+    // --- the crossing: after the original's `dirt8`. Dirt the whole way, with
+    // pavement down one side so the surface changes under you every pass.
+    gs_flat(180, 180, GS_SURF_DIRT);
+    gs_band(0, 12, GS_SURF_PAVEMENT);
+    gs_band(88, 100, GS_SURF_PAVEMENT);
+    gs_generate_route(&gs_t, 105u, true);
     snprintf(path, sizeof path, "%s/the-crossing.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
     // --- head on: after `headon`, which "aims drivers directly at each other".
-    // A corridor with the far gate at the end of it, so an out-and-back puts
-    // everybody on the same line travelling opposite ways. Pavement, because
-    // the interest is the meeting and not the grip.
-    gs_flat(56, 14, GS_SURF_PAVEMENT);
-    gs_wall(0, 3, 0, 56, GS_INT(3));
-    gs_wall(11, 14, 0, 56, GS_INT(3));
-    // As wide as the corridor between the walls, not narrower: a gate is finite
-    // across its line, so one that does not span the road it crosses can be
-    // driven past on the outside - and a checkpoint nobody crosses is a finish
-    // line that never fires, because gates count in order.
-    gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(7), 0, GS_INT(5));
-    gs_track_add_gate(&gs_t, GS_INT(48), GS_INT(7), 0, GS_INT(5));
+    // Walls down both sides, so every pass is a corridor and the cars meet on
+    // it going opposite ways. Pavement, because the interest is the meeting and
+    // not the grip.
+    gs_flat(184, 172, GS_SURF_PAVEMENT);
+    gs_wall(0, 3, 0, 184, GS_INT(3));
+    gs_wall(169, 172, 0, 184, GS_INT(3));
+    gs_generate_route(&gs_t, 106u, false);
     snprintf(path, sizeof path, "%s/head-on.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
-    // --- which way: after `whichway`, "seven different routes". Three here, and
-    // three is enough to make the question real: the short way is over a ramp,
-    // the middle way is dirt and shorter than it looks, the long way is clean
-    // pavement. Nobody can tell you which is quickest without driving all three.
-    gs_flat(60, 36, GS_SURF_PAVEMENT);
-    gs_band(0, 8, GS_SURF_PAVEMENT);
-    for (uint8_t y = 0; y <= 12; y++) {
-        for (uint8_t x = 20; x <= 40; x++) {
-            gs_fix h = 0;
-            if (x >= 24 && x <= 36) h = GS_INT(2);
-            else if (x > 20 && x < 24) h = (gs_fix)((int64_t)GS_INT(2) * (x - 20) / 4);
-            else if (x > 36 && x < 40) h = (gs_fix)((int64_t)GS_INT(2) * (40 - x) / 4);
-            gs_track_set_corner(&gs_t, x, y, h);
-        }
+    // --- which way: after `whichway`, "seven different routes". The ground
+    // offers three - a ramp, a dirt shortcut and clean pavement - and the route
+    // crosses all of them, so the question is asked once a pass rather than
+    // once a race.
+    gs_flat(184, 176, GS_SURF_PAVEMENT);
+    gs_ridges_across(50, 60, 16, 4, GS_INT(2));
+    for (uint8_t x = 0; x < gs_t.w; x++) {
+        for (uint8_t y = 60; y < 116; y++) gs_track_set_surface(&gs_t, x, y, GS_SURF_DIRT);
     }
-    for (uint8_t x = 14; x < 46; x++) {
-        for (uint8_t y = 14; y < 22; y++) gs_track_set_surface(&gs_t, x, y, GS_SURF_DIRT);
-    }
-    gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(18), 0, GS_INT(12));
-    gs_track_add_gate(&gs_t, GS_INT(52), GS_INT(18), 0, GS_INT(12));
+    gs_generate_route(&gs_t, 107u, false);
     snprintf(path, sizeof path, "%s/which-way.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
-    // --- the oval: after `indy`. The shortest thing that is still a race, and
-    // the one to hand somebody who has never driven this. Four gates, no
-    // scenery, nothing to learn but the car.
-    // A gate's line runs *across* its heading, so a wide one near an edge hangs
-    // off the track - which is what the validator caught the first time these
-    // numbers were written. Six either side, well inside a sixty by forty.
-    gs_flat(60, 40, GS_SURF_PAVEMENT);
-    gs_track_add_gate(&gs_t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(50), GS_INT(20), GS_QUARTER, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(30), GS_INT(32), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(10), GS_INT(20), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
-    // A circuit: an oval is a loop and a loop has one line, crossed at the start of every lap and the end of every lap.
-    gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+    // --- the oval: after `indy`. Nothing to learn but the car - no scenery, no
+    // surprises, and a lap long enough to be a lap.
+    gs_flat(180, 180, GS_SURF_PAVEMENT);
+    gs_generate_route(&gs_t, 108u, true);
     snprintf(path, sizeof path, "%s/the-oval.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
-    // --- the big one: after `jumps`, described in the manual as "big ones". One
-    // ramp, one landing, and nothing else to think about - so the only question
-    // is how fast you arrive, which is the question a gravity dial makes
+    // --- the big one: after `jumps`, described in the manual as "big ones".
+    // Ramps and landings and nothing else to think about, so the only question
+    // is how fast you arrive - which is the question a gravity dial makes
     // interesting.
-    gs_flat(60, 20, GS_SURF_PAVEMENT);
-    gs_ridge(16, 30, 5, GS_INT(4));
-    gs_band(34, 46, GS_SURF_DIRT);
-    gs_track_add_gate(&gs_t, GS_INT(8), GS_INT(10), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(52), GS_INT(10), 0, GS_INT(6));
+    gs_flat(184, 172, GS_SURF_PAVEMENT);
+    gs_ridges_across(48, 48, 18, 5, GS_INT(4));
+    gs_band(96, 140, GS_SURF_DIRT);
+    gs_generate_route(&gs_t, 109u, false);
     snprintf(path, sizeof path, "%s/the-big-one.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 
     // --- the long way round: after the Grand Prix circuits, which the manual
     // notes are all pavement, no jumps, Earth gravity, five laps. That is a
-    // statement about what a plain track is for: when nothing is in the way, the
-    // driving is the whole of it.
-    gs_flat(60, 44, GS_SURF_PAVEMENT);
-    gs_track_add_gate(&gs_t, GS_INT(30), GS_INT(10), 0, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(50), GS_INT(16), GS_QUARTER, GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(40), GS_INT(34), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(16), GS_INT(34), (gs_angle)(GS_QUARTER * 2), GS_INT(6));
-    gs_track_add_gate(&gs_t, GS_INT(10), GS_INT(16), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
-    // A circuit: five corners back to where you began, which is what makes it a lap rather than a journey.
-    gs_t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+    // statement about what a plain track is for: when nothing is in the way,
+    // the driving is the whole of it.
+    gs_flat(184, 184, GS_SURF_PAVEMENT);
+    gs_generate_route(&gs_t, 110u, true);
     snprintf(path, sizeof path, "%s/the-long-way-round.gstrack", dir);
     if (!gs_write_authored(path)) return 1;
 

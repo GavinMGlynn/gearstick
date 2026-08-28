@@ -855,7 +855,12 @@ TEST(a_server_nobody_has_set_up_still_has_a_library_to_offer) {
     gs_wire *w = gs_wire_server("127.0.0.1", 47840, "ada", gs_test_server_pub());
     CHECK(w != nullptr);
 
-    uint64_t until = SDL_GetTicks() + 8000;
+    // **Long enough for a track to arrive.** Eight seconds was generous for a
+    // track of eight kilobytes in eight chunks. A track is a hundred and forty
+    // now - a hundred and forty chunks, asked for again whenever one goes
+    // missing - so the same transfer takes appreciably longer, and a window
+    // sized for the old one reports a server with nothing to serve.
+    uint64_t until = SDL_GetTicks() + 40000;
     while (SDL_GetTicks() < until && !gs_wire_ready(w)) {
         gs_wire_poll(w);
         SDL_Delay(10);

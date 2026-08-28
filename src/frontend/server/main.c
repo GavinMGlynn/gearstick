@@ -94,6 +94,9 @@ typedef struct gs_tunnel {
     uint8_t          key[GS_NOISE_KEY_BYTES];
 } gs_tunnel;
 
+// How many track chunks go out for one ask. See gs_client::sending.
+#define GS_SRV_CHUNK_BURST 32
+
 typedef struct gs_client {
     bool         used;
     NET_Address *addr;
@@ -109,6 +112,15 @@ typedef struct gs_client {
 
     uint32_t in, out;          // datagrams
     uint64_t in_bytes, out_bytes;
+
+    // **Where the last burst of track chunks got to.** A track was eight
+    // kilobytes and went out in one go; it is a hundred and thirty now, and a
+    // hundred and twenty-seven datagrams written to a socket in a tight loop
+    // overruns the buffer at the other end - most of them are dropped, the
+    // client asks again, and the same burst is lost the same way. A track
+    // transfer never completed and a client sat at "receiving the track" until
+    // it gave up. So a burst is bounded and the next ask carries on from here.
+    uint16_t sending;
 
     // The replay behind whatever time this client last claimed. Per client,
     // because two people can finish a race at the same moment and each one's
@@ -1104,13 +1116,22 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
             break;
         }
 
+        // A bounded burst, carrying on from where the last one stopped, so a
+        // track of any size arrives over a few asks rather than being lost in
+        // one. Thirty-two kilobytes at a time is comfortably inside any
+        // receive buffer and still fills a track in four or five asks.
         uint16_t chunks = gs_carrier_chunks(bytes_len);
-        for (uint16_t i = 0; i < chunks; i++) {
+        uint16_t burst = chunks < GS_SRV_CHUNK_BURST ? chunks : GS_SRV_CHUNK_BURST;
+        gs_client *to = &gs_srv.client[at];
+
+        for (uint16_t k = 0; k < burst; k++) {
+            uint16_t i = (uint16_t)((to->sending + k) % chunks);
             uint8_t out[GS_PROTO_MTU];
             size_t n = gs_carrier_chunk(out, sizeof out, want, bytes, bytes_len, i);
-            gs_send(&gs_srv.client[at], out, n);
+            gs_send(to, out, n);
             gs_srv.chunks_sent++;
         }
+        to->sending = (uint16_t)((to->sending + burst) % chunks);
         break;
     }
 

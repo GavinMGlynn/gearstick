@@ -2357,8 +2357,10 @@ TEST(the_stock_tracks_ship_and_are_worth_racing) {
     CHECK(SDL_EnumerateDirectory(dir, gs_take_stock, &walk));
 
     // A floor, so an assets directory that could not be read cannot pass this
-    // by walking nothing at all.
-    CHECK(walk.count >= 20);
+    // by walking nothing at all. Sixteen rather than twenty: every candidate is
+    // now raced by every vehicle from every grid slot before it is allowed to
+    // ship, which is a bar a route of a thousand tiles does not always clear.
+    CHECK(walk.count >= 16);
     CHECK(!walk.overflowed);
 
     int checked = 0;
@@ -4618,7 +4620,7 @@ TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
     // The set that ships, asserted rather than assumed: a directory that has
     // quietly emptied would otherwise pass this in no time at all.
     printf("  STOCK %d tracks in assets/tracks\n", count);
-    CHECK(count >= 20);
+    CHECK(count >= 16);
 
     int raced = 0, stuck = 0;
     for (int i = 0; i < count; i++) {
@@ -4648,7 +4650,14 @@ TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
             gs_track_grid(&t, slot, &sx, &sy, &facing);
             gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
 
-            for (uint32_t k = 0; k < (uint32_t)GS_TICK_HZ * 240u; k++) {
+            // **As long as the track says a lap of it takes.** Four minutes
+            // was generous for a fifty-tile route and is a quarter of a
+            // thousand-tile one, so every shipped track came back "stuck" the
+            // day the routes got long. gs_analyse_seconds is the project's own
+            // answer, and it scales with the route rather than with a number
+            // typed here.
+            uint32_t budget = gs_analyse_seconds(&t) * (uint32_t)GS_TICK_HZ;
+            for (uint32_t k = 0; k < budget; k++) {
                 gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &t, 0), 0, 0, 0 };
                 gs_world_step(&w, &t, in);
                 if (w.car[0].finish_tick != 0) break;

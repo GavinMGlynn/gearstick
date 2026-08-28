@@ -103,6 +103,14 @@ line — physics that runs per frame is a desync with extra steps.
 - **Trigonometry comes from a generated, committed table.** A table built at
   start-up is a table a different libm can build differently. Re-generate with
   `tools/make_tables.py` and commit the result.
+- **A default track is long.** Every track that ships must be at least ten to
+  twenty times the route length of the August 2026 set, which measured 28 to 173
+  tiles and averaged 63 — so **630 to 1260 tiles of route**, not a start, a jump
+  and a finish. This has been asked for repeatedly and lost repeatedly; it is a
+  hard acceptance criterion for anything touching the generator or the shipped
+  set, and `tools/make_tracks.c` refuses a track shorter than
+  `GS_STOCK_MIN_ROUTE`. Note that `GS_TRACK_MAX` bounds the world at 64x64
+  tiles, which cannot hold such a route: the cap is part of the work.
 - **Gravity is sampled, not read.** It is a per-tile field with a global scale
   over it — the gravity brush — so the physics asks the track what gravity is
   *here* rather than consulting a race setting. Anything that caches gravity for
