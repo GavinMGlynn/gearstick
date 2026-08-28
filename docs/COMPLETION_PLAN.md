@@ -1390,6 +1390,10 @@ worth as much as what was decided about it.
       not. Windows and macOS need a human with speakers, and nothing in this
       repository can substitute for that. It is the only tail left, and it is
       left for the same reason the phase item is.
+      **The device path itself is now exercised on all three**, which is as far
+      as a machine can take this: a device is opened at the end of the audio run
+      and the callback has to have actually fed it. What no driver can do is
+      make a noise somebody hears.
 - [x] **The store is one file with no migration path.** *(Closed in Phase 13,
       and exercised for real in Phase 14.)* There is now a schema version and an
       upgrade path: new tables appear by `CREATE TABLE IF NOT EXISTS`, new
@@ -2173,6 +2177,25 @@ is left behind at the far end of a long track.
       player does not rearrange the screen is gone, with the reasoning recorded:
       nobody joins a race, so that rearrangement happens between races where it
       costs nothing, and it was being paid for with a blank quarter all race.*
+
+## What is left, and who has to do it
+
+Three items are open and **none of them can be closed by writing code.** They
+are listed above in the phases they belong to; this is the summary, because a
+plan whose remaining work is invisible at the end is a plan nobody can act on.
+
+- **Sound listened to on Windows and macOS** — listed twice, one thing. Everything
+  a machine can check is checked: the synthesiser to the sample on every ground
+  and in every machine, and now the device path on all three platforms. What is
+  left is a person with speakers on a Windows machine and a person with speakers
+  on a Mac, each saying it sounds right.
+- **The transport has a written specification** — `docs/TRANSPORT.md` is written,
+  the byte sizes it quotes are pinned by a test so it cannot drift from the code,
+  and a client built from it completes a handshake with a real server. What is
+  left is somebody who has **not read `gs_noise.c`** doing that, because the
+  person who wrote the document wrote the code and cannot unsee it.
+
+Everything else in this plan is done.
 
 ## Phase 21 — Where the tests are not
 
