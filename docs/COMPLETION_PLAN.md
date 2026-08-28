@@ -2171,13 +2171,22 @@ Five places the suite does not reach, found by building the tree under a
 coverage tool and asking what never runs. None of these is a known fault; they
 are the places a fault could sit unnoticed.
 
-- [ ] **The server's own loop.** `src/frontend/server/main.c` runs at 42% of its
-      lines. There are 26 server tests and they exercise the pieces; the loop
-      that ties them together is mostly reached only by two end-to-end checks
-      that kill the process, which is also why the number is hard to trust.
-      *Verification: the parts of it that decide something — accepting a player,
-      losing one, starting and ending a race — are reached by a test that can
-      assert, and the number is measured rather than guessed at.*
+- [x] **The server's own loop.** The 42% this item was written against was
+      wrong, and wrong for a reason worth keeping: every test ended by *killing*
+      the server, and a process killed outright records nothing for a coverage
+      tool to read. Asked to stop instead, it measures 83% of its lines and 24
+      of its 25 functions — twenty-six tests were driving it hard all along.
+      What the killing hid was worse than a number: the server's shutdown path,
+      which catches a signal and asks its own loop to finish, had never once
+      run. A server that stopped stopping would have hung forever on somebody's
+      machine with nothing to say so. And its dashboard — fifty-nine lines, the
+      only interface it has — had never been drawn by anything, because drawing
+      it needs a terminal and no test gave it one.
+      *Verification: the server stops within a second and a half of being asked
+      and is never forced; `--help` names every flag it has and exits; and given
+      a terminal it draws its dashboard and repaints. The one function left is
+      the once-a-minute heartbeat, which no test runs long enough to see, and it
+      is named here rather than counted as covered.*
 - [ ] **Controls inside lists, at a small window.** The panels are walked
       exhaustively for reach at 640×480; the 1095 controls drawn *inside* lists
       on those panels are counted and skipped, because a list scrolls itself.

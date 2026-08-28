@@ -281,11 +281,23 @@ static gs_input gs_drive(uint8_t player, uint32_t tick) {
 // the real bound.
 #define GS_SERVER_LIFETIME "120"
 
+// Where the server binary is: next to this one, not next to whatever directory
+// somebody happened to run the test from. ctest runs it from the build
+// directory and a person runs it from wherever they are, and only one of those
+// finds "./".
+static void gs_server_path(char *out, size_t cap) {
+    const char *base = SDL_GetBasePath();
+    SDL_snprintf(out, cap, "%sgearstick_server%s",
+                 base != nullptr ? base : "./",
+#ifdef _WIN32
+                 ".exe");
+#else
+                 "");
+#endif
+}
+
 static bool gs_server_start_full(const char *port, const char *seconds,
                                  const char *players, const char *timeout) {
-    // Next to this binary, not next to whatever directory somebody happened to
-    // run the test from. ctest runs it from the build directory and a person
-    // runs it from wherever they are, and only one of those finds "./".
     static char exe[1024];
     const char *base = SDL_GetBasePath();
     SDL_snprintf(exe, sizeof exe, "%sgearstick_server%s",
@@ -376,10 +388,42 @@ static bool gs_server_start(const char *port, const char *seconds) {
     return gs_server_start_for(port, seconds, "4");
 }
 
+// **Asked to stop rather than shot.** The server has a shutdown path - it
+// catches SIGINT and SIGTERM and sets a flag the loop reads - and every test
+// here used to end by killing it outright, so that path had never once run.
+// A server that did not stop when asked would hang forever on somebody's
+// machine and nothing here would have noticed.
+//
+// Asking also makes the process flush what a coverage build recorded, which is
+// why the server's own loop looked like it ran 42% of its lines when 26 tests
+// drive it hard: a process killed outright records nothing.
+//
+// Forced only if asking does not work, and how long that took is reported by
+// gs_server_stopped_in so a test can say the asking is what stopped it.
+static int gs_server_forced = 0;
+static Uint64 gs_server_stop_ms = 0;
+
 static void gs_server_stop(void) {
     if (gs_server == nullptr) return;
-    SDL_KillProcess(gs_server, true);
-    SDL_WaitProcess(gs_server, true, nullptr);
+
+    const Uint64 began = SDL_GetTicks();
+    SDL_KillProcess(gs_server, false);          // ask
+
+    // Up to two seconds, checked often, so a server that goes at once costs
+    // nothing and one that hangs is still cleaned up.
+    bool gone = false;
+    for (int i = 0; i < 200 && !gone; i++) {
+        int status = 0;
+        gone = SDL_WaitProcess(gs_server, false, &status);
+        if (!gone) SDL_Delay(10);
+    }
+    if (!gone) {
+        gs_server_forced++;
+        SDL_KillProcess(gs_server, true);       // and then insist
+        SDL_WaitProcess(gs_server, true, nullptr);
+    }
+    gs_server_stop_ms = SDL_GetTicks() - began;
+
     SDL_DestroyProcess(gs_server);
     gs_server = nullptr;
 }
@@ -482,6 +526,95 @@ TEST(four_clients_connect_and_the_server_shows_all_of_them) {
     gs_client_close(&fifth);
     for (int i = 0; i < 4; i++) gs_client_close(&c[i]);
     gs_server_stop();
+}
+
+TEST(a_server_asked_what_it_takes_says_so_and_stops) {
+    // **The one path a person takes before any other.** `gs_usage` was reached
+    // by nothing: twenty lines listing every flag the server has, and the only
+    // thing that would notice them going stale is somebody typing --help and
+    // being told about a flag that no longer exists.
+    //
+    // It also has to *exit*. A server that printed its usage and then went on
+    // to bind a port would be one that starts every time somebody asks it a
+    // question.
+    char exe[512];
+    gs_server_path(exe, sizeof exe);
+
+    const char *argv[] = { exe, "--help", nullptr };
+    SDL_PropertiesID props = SDL_CreateProperties();
+    CHECK(props != 0);
+    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv);
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
+                          SDL_PROCESS_STDIO_APP);
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER,
+                          SDL_PROCESS_STDIO_APP);
+
+    SDL_Process *p = SDL_CreateProcessWithProperties(props);
+    SDL_DestroyProperties(props);
+    CHECK(p != nullptr);
+    if (p == nullptr) return;
+
+    size_t len = 0;
+    int status = -1;
+    char *said = (char *)SDL_ReadProcess(p, &len, &status);
+    CHECK(said != nullptr);
+    CHECK(status == 0);            // asked a question, answered, left
+
+    if (said != nullptr) {
+        // Every flag it has, named. A list somebody has to remember to update
+        // is a list that goes stale, so this is the test that notices.
+        static const char *const flags[] = {
+            "--port", "--players", "--seconds", "--store", "--plain",
+        };
+        for (size_t i = 0; i < SDL_arraysize(flags); i++) {
+            if (SDL_strstr(said, flags[i]) == nullptr) {
+                printf("  SERVER --help does not mention %s\n", flags[i]);
+            }
+            CHECK(SDL_strstr(said, flags[i]) != nullptr);
+        }
+        printf("  SERVER --help names all %d of its flags and exits\n",
+               (int)SDL_arraysize(flags));
+        SDL_free(said);
+    }
+    SDL_DestroyProcess(p);
+}
+
+TEST(a_server_asked_to_stop_stops) {
+    // **The shutdown path had never run.** The server catches SIGINT and
+    // SIGTERM and sets a flag its loop reads, and every test here used to end
+    // by killing it outright - so a server that had stopped stopping would have
+    // hung forever on somebody's machine with nothing to say it had.
+    //
+    // It is also why its own loop looked like it ran 42% of its lines while 26
+    // tests drove it hard: a process killed outright records nothing for a
+    // coverage build to read.
+    //
+    // **What this proves depends on the platform, and that is said rather than
+    // hidden.** Where there are signals, asking is SIGTERM and this is the
+    // handler working. Where there are not - Windows - asking is
+    // TerminateProcess and all this shows is that the process ends. Both are
+    // worth having; only one of them is the path being tested.
+    CHECK(gs_server_start("47861", "30"));
+
+    gs_test_client c;
+    CHECK(gs_client_open(&c, 47861));
+    CHECK(gs_client_join(&c, "ada", 40));       // it is up and answering
+
+    gs_server_forced = 0;
+    gs_server_stop();
+
+    if (gs_server_forced != 0) {
+        printf("  SERVER did not stop when asked; it had to be killed\n");
+    }
+    CHECK(gs_server_forced == 0);
+
+    // And promptly. A server that takes two seconds to notice is a server
+    // somebody will kill by hand, which puts the path back where it was.
+    printf("  SERVER stopped %llu ms after being asked\n",
+           (unsigned long long)gs_server_stop_ms);
+    CHECK(gs_server_stop_ms < 1500);
+
+    gs_client_close(&c);
 }
 
 TEST(saying_hello_twice_is_still_one_player) {
@@ -2464,6 +2597,8 @@ int main(void) {
     }
 
     run_four_clients_connect_and_the_server_shows_all_of_them();
+    run_a_server_asked_what_it_takes_says_so_and_stops();
+    run_a_server_asked_to_stop_stops();
     run_saying_hello_twice_is_still_one_player();
     run_a_server_told_to_hold_two_holds_two();
     run_the_server_ignores_datagrams_that_are_not_ours();

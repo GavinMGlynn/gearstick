@@ -5859,6 +5859,57 @@ cannot predict: two panes, then three, then two. Predictability is the whole
 ethic, and it is written down in `FEATURES.md` beside the decision rather than
 left to be re-proposed.
 
+## The server was not 42% tested; it was 42% *measurable*
+
+The same trap as `main.c`, and I walked into it a second time. `test_server.c`
+ended every one of its twenty-six tests with `SDL_KillProcess(server, true)` -
+force, SIGKILL - and a process killed that way flushes nothing for a coverage
+build to read. Asked to stop instead, the server's own loop measures **83% of
+its lines and 24 of its 25 functions**.
+
+The lesson is not about the server. It is that **a coverage number over a
+subprocess is a statement about how the subprocess was stopped**, and there is
+no warning when it is wrong - the number is simply low, and low looks like work
+to do.
+
+### What the killing was hiding
+
+**The shutdown path had never run.** The server catches `SIGINT` and `SIGTERM`
+and sets a flag its loop reads, and every test shot it before it could get
+there. A server that had stopped stopping would have hung forever on somebody's
+machine and nothing here would have noticed. It stops in **11 ms** when asked,
+and the test fails if it ever has to be forced.
+
+What that test proves depends on the platform, and it says so rather than
+hiding it: where there are signals, asking is `SIGTERM` and this is the handler
+working; on Windows, asking is `TerminateProcess` and all it shows is that the
+process ends.
+
+**The dashboard had never been drawn by anything.** Fifty-nine lines - the
+server's only user interface - at zero, while twenty-six tests hammered it.
+Drawing it needs a terminal, and every test and check gives it a pipe. It has
+one now: `server_output_check.py` opens a pty and requires the dashboard to
+appear *and to repaint* - it drew thirteen times in three seconds. Where there
+is no pty the check says so rather than passing quietly.
+
+That check's original half is untouched and still means what it said. It pins
+what the server does when its output is **not** a terminal, which is the fault a
+player found: a dashboard repainting into a pipe nobody drains fills it, and a
+server blocked in `printf` answers nothing. The two halves are the two sides of
+the same gate.
+
+**`--help` had never run either** - twenty lines listing every flag the server
+takes, which nothing would notice going stale except somebody typing it and
+being told about a flag that no longer exists. The test names all five and
+requires the process to *exit*, because a server that printed its usage and then
+bound a port would start every time somebody asked it a question.
+
+### What is left, named
+
+`gs_heartbeat`: eight lines, the once-a-minute line that says a server with no
+terminal is still alive. No test runs for a minute, and making one that does to
+cover eight lines is a worse trade than saying it is not covered.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

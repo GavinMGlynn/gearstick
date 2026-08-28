@@ -109,7 +109,85 @@ def main():
 
     print("server_output_check: a server nobody is reading keeps going, "
           "correct")
+
+    if not dashboard_check(server_bin):
+        return 1
     return 0
+
+
+# --- and the other side of that gate -----------------------------------------
+#
+# **The dashboard had never been drawn by anything.** Everything above pins what
+# the server does when its output is *not* a terminal, which is the fault that
+# was found in front of a player - and it is the whole reason the dashboard is
+# switched off there. So the dashboard itself, fifty-nine lines of the server's
+# only user interface, was reached by no test at all: a coverage build put
+# `gs_draw` at zero while twenty-six tests hammered the server.
+#
+# Drawing it needs a terminal, so this gives it one. Where there is no pty -
+# Windows - there is no way to ask for the dashboard and this says so rather
+# than passing quietly.
+def dashboard_check(server_bin):
+    try:
+        import pty
+    except ImportError:
+        print("server_output_check: no pty on this platform, so the dashboard "
+              "cannot be asked for and is not checked here")
+        return True
+
+    primary, secondary = pty.openpty()
+    with tempfile.TemporaryDirectory() as tmp:
+        env = dict(os.environ)
+        env["XDG_DATA_HOME"] = tmp
+        env["HOME"] = tmp
+        env["APPDATA"] = tmp
+
+        # --plain, so what comes back is the table rather than the table with
+        # cursor control wrapped round it.
+        server = subprocess.Popen(
+            [server_bin, "--port", "0", "--players", "2", "--plain",
+             "--seconds", "3",
+             "--store", os.path.join(tmp, "dash.db")],
+            stdout=secondary, stderr=subprocess.STDOUT, env=env)
+        os.close(secondary)
+
+        seen = b""
+        deadline = time.monotonic() + 3 + GRACE_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                chunk = os.read(primary, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            seen += chunk
+        os.close(primary)
+        server.wait(timeout=GRACE_SECONDS)
+
+    text = seen.decode("utf-8", "replace")
+
+    # The header, the column titles, and the footer that says how to leave -
+    # which together are the dashboard being drawn rather than a log line that
+    # happens to mention the server.
+    for want in ("gearstick server", "driver", "ping", "port"):
+        if want not in text:
+            print("server_output_check: given a terminal, the server did not "
+                  f"draw its dashboard - no {want!r} in what it wrote.\n"
+                  + text[:2000])
+            return False
+
+    # And it repaints. Four times a second for three seconds is a dozen; one
+    # would mean it drew once and then stopped, which is a dashboard that
+    # cannot show anybody arriving.
+    drawn = text.count("gearstick server")
+    if drawn < 4:
+        print("server_output_check: the dashboard was drawn "
+              f"{drawn} time(s) in three seconds, so it is not repainting")
+        return False
+
+    print(f"server_output_check: given a terminal the dashboard drew "
+          f"{drawn} times in three seconds, correct")
+    return True
 
 
 if __name__ == "__main__":
