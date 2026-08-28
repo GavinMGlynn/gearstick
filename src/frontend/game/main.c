@@ -144,6 +144,8 @@ typedef struct gs_app {
     int      shot_screen;         // with --screen: which one to show
     bool     want_screen;
     bool     session;             // run setup -> race -> results by itself
+    bool     keep;                // and write what it did, which a session
+                                  // otherwise refuses to - see gs_store_save
     const char *track_path;       // a track named on the command line
     bool     trace;               // say what is on screen, once a second
     bool     autodrive;           // the AI drives this machine's car
@@ -514,7 +516,13 @@ static void gs_store_save(gs_app *a) {
     // into the store somebody actually plays with - which is how "ada" and
     // "bez" turn up on a machine that never asked for them. A screenshot is not
     // a session; it reads the store and leaves it alone.
-    if (a->want_screen || a->session || a->showroom || a->shot_path != nullptr) {
+    // **Unless it was asked to.** A check that races the real client from the
+    // front door to the results has to be able to look at what the race left
+    // behind, and the only place a time is left is the store. --keep is that
+    // consent, given on a command line, by something that has already pointed
+    // GEARSTICK_PREF_DIR at a throwaway.
+    if (!a->keep &&
+        (a->want_screen || a->session || a->showroom || a->shot_path != nullptr)) {
         a->menu.store_dirty = false;
         return;
     }
@@ -793,6 +801,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             // test of the *client* and not of the simulation it already has
             // tests for.
             a->autodrive = true;
+        } else if (SDL_strcmp(argv[i], "--keep") == 0) {
+            a->keep = true;
         } else if (SDL_strcmp(argv[i], "--session") == 0) {
             // A whole session with nobody at the keyboard: the grid from the
             // setup screen, a race driven by the AI, and the results table it
@@ -835,6 +845,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --screen NAME   login/title/drivers/setup/tracks/"
                     "results/records/lobby");
             SDL_Log("  --session       run a whole race by itself and stop on the results");
+            SDL_Log("  --keep          let a session write what it did, which it otherwise will not");
         SDL_Log("  --track FILE    open this track rather than the library's first");
         SDL_Log("  --autodrive     let the AI drive this machine's car");
         SDL_Log("  --trace         print what is on screen once a second");
@@ -1193,8 +1204,15 @@ static void gs_trace(gs_app *a, uint8_t views) {
     a->traced_at = a->world.tick;
 
     if (a->menu.screen != GS_SCREEN_RACE) {
-        SDL_Log("trace screen=%s tick=%llu", gs_screen_name(a->menu.screen),
-                (unsigned long long)a->world.tick);
+        // **And what is on it**, not only which one it is. A check walking the
+        // whole game from the door to the results has to be able to say that
+        // the time it just set is *there*, and a screen name alone cannot.
+        SDL_Log("trace screen=%s tick=%llu drivers=%u tracks=%u records=%u",
+                gs_screen_name(a->menu.screen),
+                (unsigned long long)a->world.tick,
+                (unsigned)a->menu.profiles.count,
+                (unsigned)a->menu.library.count,
+                (unsigned)a->menu.records.count);
         return;
     }
 

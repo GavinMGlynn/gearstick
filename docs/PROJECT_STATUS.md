@@ -6024,6 +6024,36 @@ the same world** - a race somebody can see has stopped. Two machines silently
 carrying on with two different races is the outcome none of this is allowed to
 have, and now that is asserted rather than assumed.
 
+## The door leads to a race, and the race leads to a time you can find again
+
+Everything checked a piece. The unit tests drive the menu module, the render
+tests draw its screens, `play_check.py` races the real client and watches the
+race. **Nothing walked what a person actually does**, end to end, in the real
+binary.
+
+`gearstick_play_through` does: every screen the client can be asked for is opened
+and says so, a race is driven from the setup screen to the results, it leaves a
+time behind, and then **the game is opened again as a fresh process** and the
+time is still there on the screen that keeps times.
+
+That last step is the one worth having. A race that runs and a records screen
+that draws are both perfectly fine on their own while the time between them goes
+nowhere - and both ends of that path have broken before: the store refused every
+write for weeks and blamed the disk, and the conditions a record is filed under
+were wrong so a lap could never be found again. Neither was visible from either
+end alone.
+
+### Two small things it needed
+
+A session **refuses to write anything**, deliberately: `--screen` and `--session`
+invent drivers so there is somebody in the picture, and those runs were saving
+them into the store somebody plays with. `--keep` is consent, given on a command
+line by something that has already pointed `GEARSTICK_PREF_DIR` at a throwaway.
+
+And `--trace` now says what is *on* a screen and not only which one it is -
+drivers, tracks, records. A check that has to say "the time I just set is there"
+cannot say it from a screen name.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

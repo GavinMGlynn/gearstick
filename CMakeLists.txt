@@ -692,6 +692,25 @@ if(GEARSTICK_TESTS)
                              TIMEOUT 240 SKIP_RETURN_CODE 77)
     endif()
 
+    # **The whole game, from the front door to the records.** Everything else
+    # checks a piece: the unit tests drive the menu module, the render tests
+    # draw its screens, play_check races the real client. What nothing did was
+    # walk what a person does, end to end, in the real binary - and in
+    # particular the last step, where the time set in a race has to be findable
+    # afterwards on the screen that keeps times. Both ends of that path have
+    # broken before: the store refused every write for weeks and blamed the
+    # disk, and the conditions a record is filed under were wrong so a lap
+    # could never be found again.
+    if(Python3_FOUND AND TARGET gearstick)
+        add_test(NAME gearstick_play_through
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/play_through_check.py
+                         $<TARGET_FILE:gearstick>)
+        set_tests_properties(gearstick_play_through PROPERTIES
+                             TIMEOUT 300 SKIP_RETURN_CODE 77
+                             ENVIRONMENT "${GS_TEST_SANDBOX}")
+    endif()
+
     # **A server that stops serving because of its own output.** The dashboard
     # repaints four times a second; into a pipe nobody drains, that fills the
     # buffer and the next printf blocks - and a server blocked in a write

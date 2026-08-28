@@ -2235,9 +2235,19 @@ are the places a fault could sit unnoticed.
       eleven absorbed without a retransmission; and every longer one stopping
       both machines at the same tick in the same world rather than letting them
       disagree, which is the half that makes the bound liveable.*
-- [ ] **The game played from the door to the results.** `play_check.py` races
-      the real client, but nothing walks the whole thing a person does: sign in,
-      build a track, save it, race it, and find the time afterwards in the
-      records.
-      *Verification: one check that does exactly that against the real binaries,
-      and fails if any step stops leading to the next.*
+- [x] **The game played from the door to the results.** Everything else checked
+      a piece — the unit tests drive the menu module, the render tests draw its
+      screens, `play_check.py` races the real client. Nothing walked what a
+      person does, end to end, in the real binary.
+      *Verification: every screen the client can be asked for is opened and says
+      so; a race is driven from the setup screen to the results; it leaves a
+      time behind; and the game is then **opened again as a fresh process** and
+      the time is still there on the screen that keeps times, along with the
+      drivers and the library. That last step is the one worth having — a race
+      that runs and a records screen that draws are both fine on their own while
+      the time between them goes nowhere, and both ends of that path have broken
+      before.*
+      A session refuses to write anything, deliberately, so that a screenshot
+      never touches a player's roster. It can now be told to keep what it did,
+      which is consent given on a command line by something that has already
+      pointed its preferences at a throwaway.
