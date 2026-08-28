@@ -9933,7 +9933,17 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
 
     static gs_ui_item items[GS_UI_MAX_ITEMS];
     static gs_reach   seen[GS_UI_MAX_ITEMS];
+    static gs_reach   rows_here[GS_UI_MAX_ITEMS];
     gs_ui ui;
+
+    // **Keyboard navigation off for the whole of this.** ImGui scrolls a window
+    // to keep the item the keyboard is on in view, every frame - which is
+    // exactly right for a person and exactly wrong here: it undoes the scroll
+    // this test just set, so a list came back saying four of its thirty-two
+    // rows could never be shown and a *different* four each time the frame
+    // count changed. Nothing in the game is being switched off; the question
+    // being asked is where things are, not where the keyboard is.
+    ImGui_GetIO()->ConfigFlags &= ~(ImGuiConfigFlags)ImGuiConfigFlags_NavEnableKeyboard;
 
     int screens = 0, checked = 0, in_lists = 0, stranded = 0;
     int windows = 0, lying = 0, sideways = 0, downwards = 0;
@@ -10070,8 +10080,120 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
             if (sy >= max_y) break;
         }
 
+        // **And the lists on it, each scrolled on its own.** A list inside a
+        // panel is a window in its own right: it has its own clip rectangle and
+        // its own scroll, and moving the panel does not move what is inside it.
+        // These used to be counted and skipped - 1095 controls that the sweep
+        // above said out loud it was not checking.
+        //
+        // The rule is the same one the panels are held to, one level down:
+        // every control has to be wholly inside the list holding it at some
+        // scroll position that list can be put at.
         for (int i = 0; i < n; i++) {
-            if (SDL_strcmp(items[i].window, window) != 0) in_lists++;
+            if (SDL_strcmp(items[i].window, window) == 0) continue;
+            if (SDL_strncmp(items[i].window, "Debug", 5) == 0) continue;
+
+            bool done_this = false;
+            for (int k = 0; k < i; k++) {
+                if (SDL_strcmp(items[k].window, items[i].window) == 0) {
+                    done_this = true;
+                    break;
+                }
+            }
+            if (done_this) continue;
+
+            char list[GS_UI_WINDOW];
+            SDL_strlcpy(list, items[i].window, sizeof list);
+
+            float lw = 0.0f, lh = 0.0f, lmx = 0.0f, lmy = 0.0f;
+            if (!gs_ui_probe_window_box(list, nullptr, nullptr, &lw, &lh)) {
+                continue;
+            }
+            CHECK(gs_ui_probe_scroll_span(list, nullptr, nullptr, &lmx, &lmy));
+            if (lw < 1.0f || lh < 1.0f) continue;
+
+            // **Swept, because the rows are not all there to be placed.** A
+            // long list uses a clipper: it submits the rows near the scroll
+            // position and not the rest, so enumerating once and computing
+            // where each row wants the list scrolled to only ever sees the
+            // handful that exist at that moment. Thirty-two tracks came back
+            // as five.
+            //
+            // So the list is walked, a fifth of its own height at a time. Half
+            // was not enough: what has to land inside the step is the window in
+            // which a row is *wholly* visible, and a list whose padding and
+            // header eat into it leaves less of that than the arithmetic on the
+            // box height suggests. There are 39 lists in the whole sweep, so
+            // the finer step costs nothing worth counting.
+            int held_here = 0;
+            for (float sy = 0.0f; ; sy += lh * 0.2f) {
+                if (sy > lmy) sy = lmy;
+
+                gs_ui_probe_scroll_to(list, 0.0f, sy);
+                gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
+                gs_ui_probe_frame();
+                ui.m->screen = gs_every_screen[si];
+                gs_ui_frame(&ui);
+                const int at = gs_ui_probe_count();
+                gs_ui_probe_stop();
+
+                // **Inside the box it is drawn in - which is not the same as
+                // ImGui's `whole`.** The probe says so itself: `whole` is only
+                // meaningful where nothing scrolls, because it is measured
+                // against a clip rectangle, and a scrolling list's clip stops
+                // short of its own scrollbar. A full-width row therefore
+                // overlaps the scrollbar column by a pixel and is never
+                // "whole", which reported every row of a library as
+                // unreachable when all of them are perfectly readable.
+                float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
+                CHECK(gs_ui_probe_window_box(list, &bx, &by, &bw, &bh));
+
+                for (int j = 0; j < at && j < GS_UI_MAX_ITEMS; j++) {
+                    if (SDL_strcmp(items[j].window, list) != 0) continue;
+                    if (items[j].label[0] == '\0') continue;
+                    if (gs_chrome(items[j].label, items[j].window)) continue;
+
+                    int q = 0;
+                    for (; q < held_here; q++) {
+                        if (rows_here[q].id == items[j].id) break;
+                    }
+                    if (q == held_here) {
+                        if (held_here >= GS_UI_MAX_ITEMS) continue;
+                        held_here++;
+                        rows_here[q].id = items[j].id;
+                        rows_here[q].whole = false;
+                        SDL_strlcpy(rows_here[q].label, items[j].label,
+                                    sizeof rows_here[q].label);
+                    }
+                    if (items[j].visible &&
+                        items[j].x0 >= bx - 0.5f && items[j].y0 >= by - 0.5f &&
+                        items[j].x1 <= bx + bw + 0.5f &&
+                        items[j].y1 <= by + bh + 0.5f) {
+                        rows_here[q].whole = true;
+                    }
+                }
+
+                if (sy >= lmy) break;
+            }
+
+            for (int q = 0; q < held_here; q++) {
+                in_lists++;
+                if (rows_here[q].whole) continue;
+                stranded++;
+                printf("  PAST THE EDGE  %s from '%s': '%s' is never wholly "
+                       "inside the list '%s' that holds it, at any scroll "
+                       "position it has (it can move %.0f)\n",
+                       gs_screen_name(gs_every_screen[si]), gs_seeds[sd].name,
+                       rows_here[q].label, list, (double)lmy);
+            }
+
+            (void)lw;
+            gs_ui_probe_scroll_to(list, 0.0f, 0.0f);
+            gs_ui_probe_scroll_to(window, 0.0f, 0.0f);
+
+            // The frame after a sweep has to be the one the outer loop reads,
+            // so put the panel back the way the next screen expects it.
+            gs_ui_frame(&ui);
         }
 
         for (int k = 0; k < held; k++) {
@@ -10096,7 +10218,8 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
     }
 
     printf("  SMALL %d controls over %d screens reachable at %dx%d, from %d "
-           "starting states; %d more sit inside lists that scroll themselves. "
+           "starting states, and %d more inside the lists on them, each "
+           "reachable by scrolling the list. "
            "%d windows - panels and the boxes inside them - each showing a "
            "scrollbar exactly when it has something to scroll, and %d of them "
            "can move sideways and %d down\n",
@@ -10115,6 +10238,8 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
     // above it.
     CHECK(sideways > 0);
     CHECK(downwards > 0);
+
+    ImGui_GetIO()->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
     CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,

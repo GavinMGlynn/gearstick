@@ -5910,6 +5910,48 @@ bound a port would start every time somebody asked it a question.
 terminal is still alive. No test runs for a minute, and making one that does to
 cover eight lines is a worse trade than saying it is not covered.
 
+## The controls inside the lists
+
+The small-window sweep walked every panel and then said, out loud, that it was
+counting and skipping everything inside the lists on them. That was honest and
+it was still a hole: a library of thirty-two tracks is thirty-two controls
+nothing had checked you could get to.
+
+They are walked now - **512 of them, on top of the 1935 on the panels** - and
+every one is wholly inside the box holding it at some scroll position that box
+can be put at.
+
+### Three confident wrong answers on the way
+
+Worth writing down, because each looked like a fault in the game.
+
+**A list is clipped by its panel as well as by itself.** The first run said four
+of thirty-two rows could never be shown. They could: the list was hanging off
+the bottom of a panel that was itself scrolled, so no amount of moving the list
+would help. A person scrolls the panel to the list and then scrolls the list, and
+so does the test now.
+
+**A long list only draws the rows near where it is scrolled.** The second
+attempt computed, for each row, the exact scroll that would show it - which is
+exact and useless, because a clipper means the rows are not all there to
+enumerate. Thirty-two tracks came back as five. It sweeps instead.
+
+**"Wholly inside" cannot be asked of ImGui's clip test here.** `whole` is
+measured against a clip rectangle, and a scrolling list's clip stops short of
+its own scrollbar - so a full-width row overlaps the scrollbar column by one
+pixel and is never whole. That reported *every* row of the library as
+unreachable when all of them are perfectly readable. The probe's own note says
+it: *"Only meaningful where nothing scrolls. A row at the top or bottom edge of
+a list is cut by the list, and that is what a list is."* What a person means is
+whether the row is inside the list, so that is what is measured, against the
+list's own rectangle.
+
+And one plain bug in the test itself, which is the reason the answers kept
+*changing*: the inner probes wrote into the same array the outer loop was
+reading its enumeration from. A different three rows of thirty-two were
+"unreachable" every time the number of frames changed, which is the shape of a
+test measuring itself.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

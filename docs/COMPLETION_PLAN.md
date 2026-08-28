@@ -2187,13 +2187,21 @@ are the places a fault could sit unnoticed.
       a terminal it draws its dashboard and repaints. The one function left is
       the once-a-minute heartbeat, which no test runs long enough to see, and it
       is named here rather than counted as covered.*
-- [ ] **Controls inside lists, at a small window.** The panels are walked
-      exhaustively for reach at 640×480; the 1095 controls drawn *inside* lists
-      on those panels are counted and skipped, because a list scrolls itself.
-      Nothing checks they can all be got to.
-      *Verification: every control inside every list is wholly on screen at some
-      scroll position of the list holding it, at the smallest window — the same
-      standard the panels themselves are held to.*
+- [x] **Controls inside lists, at a small window.** The panels were walked
+      exhaustively for reach at 640×480 and the controls drawn *inside* the
+      lists on them were counted and skipped. They are walked now: the panel is
+      scrolled to bring each list into view and then the list is scrolled
+      through itself, which is what a person does.
+      *Verification: 512 controls inside lists, on top of the 1935 on the panels
+      themselves, every one of them wholly inside the box that holds it at some
+      scroll position that box can be put at.*
+      Three things had to be got right before the answer meant anything, and all
+      three produced confident wrong answers first: a list is clipped by its
+      panel as well as by itself, so the panel has to be moved first; a long
+      list only draws the rows near where it is scrolled, so its contents cannot
+      be listed once and then visited; and "wholly inside" cannot be asked of
+      ImGui's own clip test, because a list's clip stops short of its own
+      scrollbar and every full-width row overlaps it by a pixel.
 - [ ] **The server's library.** `src/net/gs_store.c` runs at 80%. It is the
       thing that holds what people have published, so what is not exercised
       there is a place somebody's track could be lost or shown to the wrong
