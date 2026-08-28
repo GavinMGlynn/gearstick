@@ -5718,6 +5718,51 @@ any**, and a race without them hashes exactly the way it always did.
   the terrain's own shading, which is how the test first told itself smoke was
   four tiles wider than it is.
 
+## Weapons you can hear
+
+`src/audio/` had never heard of a hazard. Four things a player can leave behind
+and not one of them made a sound - and a mine you cannot hear behind you is a
+mine that feels like the game cheating.
+
+Hazards are not cars: there are up to thirty-two of them, they have no engines,
+and what one makes is a single event rather than something that goes on for the
+whole race. So they share a small bank of struck voices - **eight**, on purpose,
+because eight things going off at once is already more than anybody can pick
+apart and a hundred is mud. The quietest slot is taken when they are all busy,
+so a mine going off is never lost to four slicks being poured.
+
+| | what it sounds like |
+| --- | --- |
+| oil | poured: low, wet and over quickly |
+| mine, laid | a click, and the quietest of the four - a mine you can hear being laid is a mine nobody drives over |
+| mine, found | low, loud and long enough to turn round for |
+| smoke | a hiss that goes on, because the canister is still emptying |
+| fire, lit | a whoosh: something catching |
+| fire, burning | a level rather than an event, chased rather than set, so it fades when it goes out |
+
+**Noticed rather than reported.** The simulation is never asked to say "a mine
+went off" - the mixer looks at what changed since last time, exactly the way an
+impact is already found from a jump in a car's damage. Sound is downstream of
+the simulation and never upstream, and that is what it costs.
+
+A mine becoming spent is a bang; smoke and fire become spent by *burning out*,
+which is not one, and the code says which is which rather than treating `spent`
+as one thing.
+
+### A third compiler difference, and this one was right
+
+The colour switch initialised `col` in every case it had, and covered every
+enumerator with no `default` - the guarantee that a fifth kind of hazard cannot
+inherit the fourth's look. gcc and clang were happy. **MSVC was not, and MSVC
+was correct**: `h->kind` is a `uint8_t` in the world, so it can hold a number
+the switch has no case for, and `col` would then be used unset.
+
+`col` starts at nothing and is skipped if it stays there. The `-Wswitch`
+guarantee is untouched, because there is still no `default` for a new enumerator
+to hide in. Worth writing down that the local clang build cannot catch this
+class: MSVC's flow analysis is stricter than either compiler here, and the only
+place that runs is CI.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

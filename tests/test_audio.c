@@ -338,6 +338,13 @@ TEST(nothing_the_synthesiser_produces_can_blow_a_speaker) {
                 gs_world_add_car(&w, &gs_t, (uint8_t)veh,
                                  GS_INT(16), GS_INT(8) + GS_INT(i), 0);
             }
+
+            // **And all of them armed**, so the struck voices the hazards use
+            // are in the mix too. Four cars dropping and detonating on top of
+            // four engines is the loudest a race gets.
+            for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+                gs_world_arm(&w, (gs_hazard_kind)k, 9);
+            }
             for (uint8_t i = 0; i < w.car_count; i++) {
                 w.car[i].vx = GS_INT(8);
                 w.car[i].vy = GS_INT(7);
@@ -350,6 +357,10 @@ TEST(nothing_the_synthesiser_produces_can_blow_a_speaker) {
                     if (w.car[i].damage < 200) {
                         w.car[i].damage = (uint8_t)(w.car[i].damage + 8);
                     }
+                    // And everybody dropping whatever they still have, as fast
+                    // as the cooldown allows.
+                    w.car[i].drop_cooldown = 0;
+                    gs_world_drop(&w, i, gs_car_selected(&w.car[i]));
                 }
                 gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
                 gs_audio_render(gs_buf, FRAMES);
@@ -377,6 +388,164 @@ TEST(nothing_the_synthesiser_produces_can_blow_a_speaker) {
            (int)GS_VEH_COUNT);
     CHECK(mixes == (int)GS_SURF_COUNT * (int)GS_VEH_COUNT);
     gs_audio_set_volume(0.8f);
+}
+
+// Settle the mixer on a world, then drop something and render what that makes.
+// The level returned is the loudest the buffer got, because these are struck
+// sounds and an rms over a long buffer hides a short bang.
+static float gs_peak(const float *buf, int frames) {
+    float peak = 0.0f;
+    for (int i = 0; i < frames * GS_AUDIO_CHANNELS; i++) {
+        const float a = buf[i] < 0.0f ? -buf[i] : buf[i];
+        if (a > peak) peak = a;
+    }
+    return peak;
+}
+
+TEST(every_weapon_makes_a_noise_and_no_two_sound_the_same) {
+    // **The synthesiser had never heard of a hazard.** Four things a player can
+    // leave behind, and not one of them made a sound - a mine you cannot hear
+    // behind you is a mine that feels like the game cheating.
+    //
+    // Walked from GS_HAZ_COUNT, so a fifth kind has to be given a noise rather
+    // than inheriting the last one's, which is how six surfaces came to sound
+    // like pavement.
+    float level[GS_HAZ_COUNT];
+    int   bright[GS_HAZ_COUNT];
+
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        gs_world w;
+        gs_scene(&w, GS_SURF_PAVEMENT);
+        gs_world_arm(&w, (gs_hazard_kind)k, 1);
+
+        // Settled first, so the mixer has seen this world once and a drop is a
+        // change rather than the first thing it ever saw.
+        gs_settle(&w, &gs_t);
+
+        CHECK(gs_world_drop(&w, 0, (gs_hazard_kind)k));
+        gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
+        gs_audio_render(gs_buf, FRAMES);
+
+        level[k] = gs_peak(gs_buf, FRAMES);
+        bright[k] = gs_crossings(gs_buf, FRAMES);
+        CHECK(level[k] > 0.0f);
+    }
+
+    // **Every one of them is audible over the race going on around it.** The
+    // reference is the same world with nothing dropped.
+    gs_world quiet;
+    gs_scene(&quiet, GS_SURF_PAVEMENT);
+    gs_settle(&quiet, &gs_t);
+    gs_audio_update(&quiet, &gs_t, 16.0f, 8.0f);
+    gs_audio_render(gs_buf, FRAMES);
+    const float floor_level = gs_peak(gs_buf, FRAMES);
+
+    int silent = 0, alike = 0;
+    for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
+        if (level[k] <= floor_level * 1.10f) {
+            silent++;
+            printf("  WEAPON %s cannot be heard: %.4f against %.4f of race\n",
+                   gs_hazard_name((gs_hazard_kind)k), (double)level[k],
+                   (double)floor_level);
+        }
+    }
+    CHECK(silent == 0);
+
+    // **And no two are the same noise**, which is the point of there being
+    // four: a player who cannot tell a mine being laid from smoke being let go
+    // cannot tell what the car in front has done to them.
+    for (int a = GS_HAZ_NONE + 1; a < GS_HAZ_COUNT; a++) {
+        for (int b = a + 1; b < GS_HAZ_COUNT; b++) {
+            const float apart = level[a] > level[b] ? level[a] - level[b]
+                                                    : level[b] - level[a];
+            const int sharper = bright[a] > bright[b] ? bright[a] - bright[b]
+                                                      : bright[b] - bright[a];
+            if (apart > level[a] * 0.10f || sharper > 10) continue;
+            alike++;
+            printf("  WEAPON %s and %s sound alike: %.4f/%d against %.4f/%d\n",
+                   gs_hazard_name((gs_hazard_kind)a),
+                   gs_hazard_name((gs_hazard_kind)b), (double)level[a],
+                   bright[a], (double)level[b], bright[b]);
+        }
+    }
+    printf("  WEAPONS %d kinds heard, %d pairs told apart\n",
+           (int)GS_HAZ_COUNT - 1,
+           (GS_HAZ_COUNT - 1) * (GS_HAZ_COUNT - 2) / 2);
+    CHECK(alike == 0);
+}
+
+TEST(a_mine_going_off_is_louder_than_a_mine_being_laid) {
+    // The one that has to carry across a race: laying a mine is a click nobody
+    // should notice, and finding one is the loudest thing on the track.
+    gs_world w;
+    gs_scene(&w, GS_SURF_PAVEMENT);
+    gs_world_add_car(&w, &gs_t, (uint8_t)GS_VEH_STOCK_CAR,
+                     GS_INT(20), GS_INT(8), 0);
+    gs_world_arm(&w, GS_HAZ_MINE, 1);
+    gs_settle(&w, &gs_t);
+
+    // Car one lays it, well away from the listener's car.
+    w.car[1].x = GS_INT(20);
+    w.car[1].y = GS_INT(8);
+    CHECK(gs_world_drop(&w, 1, GS_HAZ_MINE));
+    gs_audio_update(&w, &gs_t, 20.0f, 8.0f);
+    gs_audio_render(gs_buf, FRAMES);
+    const float laying = gs_peak(gs_buf, FRAMES);
+
+    // And car zero drives onto it.
+    w.car[0].x = GS_INT(20);
+    w.car[0].y = GS_INT(8);
+    w.car[0].grounded = true;
+    for (int i = 0; i < 4; i++) gs_world_step(&w, &gs_t, nullptr);
+    CHECK(w.hazard[0].spent == 1);      // it went off
+
+    gs_audio_update(&w, &gs_t, 20.0f, 8.0f);
+    gs_audio_render(gs_buf, FRAMES);
+    const float going_off = gs_peak(gs_buf, FRAMES);
+
+    if (going_off <= laying * 1.5f) {
+        printf("  MINE laying %.4f, going off %.4f\n", (double)laying,
+               (double)going_off);
+    }
+    CHECK(going_off > laying * 1.5f);
+}
+
+TEST(fire_is_heard_while_it_burns_and_not_after) {
+    // Fire is the one that is not an event: it burns for seconds, so it is a
+    // level that follows how much fire is near rather than a struck sound. And
+    // it fades, because a crackle that stops dead reads as a fault in the game
+    // rather than a fire going out.
+    gs_world w;
+    gs_scene(&w, GS_SURF_PAVEMENT);
+    gs_world_arm(&w, GS_HAZ_FLAME, 1);
+    gs_settle(&w, &gs_t);
+
+    gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
+    gs_audio_render(gs_buf, FRAMES);
+    const float before = gs_rms(gs_buf, FRAMES);
+
+    CHECK(gs_world_drop(&w, 0, GS_HAZ_FLAME));
+
+    // Long enough for the level to come up - it is chased rather than set.
+    float burning = 0.0f;
+    for (int i = 0; i < 40; i++) {
+        gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
+        gs_audio_render(gs_buf, FRAMES);
+        burning = gs_rms(gs_buf, FRAMES);
+    }
+    CHECK(burning > before);
+
+    // Burnt out, and long enough after for the level to come back down.
+    for (int i = 0; i < GS_TICK_HZ * 6; i++) gs_world_step(&w, &gs_t, nullptr);
+    CHECK(w.hazard[0].spent == 1);
+
+    float after = 0.0f;
+    for (int i = 0; i < 80; i++) {
+        gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
+        gs_audio_render(gs_buf, FRAMES);
+        after = gs_rms(gs_buf, FRAMES);
+    }
+    CHECK(after < burning);
 }
 
 TEST(silence_is_a_fade_and_not_a_cut) {
@@ -612,6 +781,9 @@ int main(void) {
     run_a_car_in_the_air_makes_no_tyre_noise_at_all();
     run_a_car_further_away_is_quieter_than_the_one_being_driven();
     run_nothing_the_synthesiser_produces_can_blow_a_speaker();
+    run_every_weapon_makes_a_noise_and_no_two_sound_the_same();
+    run_a_mine_going_off_is_louder_than_a_mine_being_laid();
+    run_fire_is_heard_while_it_burns_and_not_after();
     run_silence_is_a_fade_and_not_a_cut();
     run_a_track_gets_its_own_tune_and_the_same_one_every_time();
     run_the_music_goes_somewhere_rather_than_repeating_one_bar();

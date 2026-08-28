@@ -1435,7 +1435,14 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
 
         // **Four things, four looks**, named one by one so a fifth kind has to
         // be given one rather than inheriting whatever the last case was.
-        SDL_FColor col;
+        //
+        // Started at nothing and skipped if it stays there. That is not
+        // belt-and-braces: `kind` comes from a `uint8_t` in the world, so it
+        // can hold a number this switch has no case for - and MSVC says so
+        // where gcc and clang do not. The `-Wswitch` guarantee is untouched by
+        // it, because there is still no `default` for a new enumerator to hide
+        // in.
+        SDL_FColor col = { 0.0f, 0.0f, 0.0f, 0.0f };
         switch (kind) {
         case GS_HAZ_OIL:
             // Dark and see-through: the road is still under it, which is what
@@ -1460,8 +1467,9 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
             break;
         case GS_HAZ_NONE:
         case GS_HAZ_COUNT:
-            continue;
+            break;
         }
+        if (col.a <= 0.0f) continue;      // a kind with no look; see above
         col.a *= fade;
         gs_quad(ren, p, col);
     }

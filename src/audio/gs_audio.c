@@ -60,6 +60,23 @@ typedef struct gs_voice {
     float distance_gain;
 } gs_voice;
 
+// **A noise something on the ground makes**, as against the noise a car makes.
+// Hazards are not cars: there are up to thirty-two of them, they do not have
+// engines, and the sound one makes is a single event rather than a thing that
+// goes on for the whole race. So they get a small bank of struck voices between
+// them, and the bank being small is on purpose - eight things going off at once
+// is already more than anybody can pick apart, and a hundred is mud.
+#define GS_AUDIO_EVENTS 8
+
+typedef struct gs_event {
+    float gain;      // rings down to nothing; zero means the slot is free
+    float phase;
+    float tone;      // where its body sits, in hertz
+    float noisy;     // how much of it is hiss rather than tone
+    float decay;     // per sample
+    float pan;
+} gs_event;
+
 static struct {
     SDL_AudioStream *stream;
     SDL_Mutex       *lock;
@@ -74,6 +91,24 @@ static struct {
     uint8_t last_damage[GS_MAX_CARS];
     bool    last_grounded[GS_MAX_CARS];
     bool    seeded;
+
+    gs_event event[GS_AUDIO_EVENTS];
+
+    // **Fire, which is the one that is not an event.** It burns for seconds
+    // rather than cracking once, so it is a level that follows how much fire is
+    // near the listener rather than a struck voice - and it fades in and out
+    // instead of switching, because a crackle that starts and stops dead reads
+    // as a fault in the game rather than a fire going out.
+    float burn, burn_want;
+    float burn_lp;
+
+    // Remembered from the last update, the same way a car's damage is: the
+    // simulation is not asked to report a drop or a detonation, it is noticed
+    // by looking at what changed. Sound is downstream of the simulation and
+    // never upstream, and this is what that costs.
+    uint8_t  last_hazards;
+    uint8_t  last_kind[GS_MAX_HAZARDS];
+    uint8_t  last_spent[GS_MAX_HAZARDS];
 
     uint32_t noise;        // xorshift state for the tyre noise
     float    master;       // ramped, so silence is a fade and not a click
@@ -170,6 +205,35 @@ void gs_audio_render(float *out, int frames) {
             float ang = (o->pan * 0.5f + 0.5f) * 1.5707963f;
             left  += s * SDL_cosf(ang);
             right += s * SDL_sinf(ang);
+        }
+
+        // --- What is on the ground. Struck voices, panned where they lie.
+        for (int e = 0; e < GS_AUDIO_EVENTS; e++) {
+            gs_event *ev = &gs_a.event[e];
+            if (ev->gain <= 0.0001f) { ev->gain = 0.0f; continue; }
+
+            ev->phase += ev->tone / (float)GS_AUDIO_RATE;
+            if (ev->phase >= 1.0f) ev->phase -= 1.0f;
+
+            const float body = SDL_sinf(ev->phase * 6.2831853f) * (1.0f - ev->noisy);
+            const float hiss = gs_noise_next() * ev->noisy;
+            const float s = (body + hiss) * ev->gain;
+            ev->gain *= ev->decay;
+
+            const float ang = (ev->pan * 0.5f + 0.5f) * 1.5707963f;
+            left  += s * SDL_cosf(ang);
+            right += s * SDL_sinf(ang);
+        }
+
+        // --- Fire, which is a level and not an event. Filtered noise, and the
+        // level chased rather than set so that a fire going out fades.
+        gs_a.burn += (gs_a.burn_want - gs_a.burn) * 0.00015f;
+        if (gs_a.burn > 0.0001f) {
+            const float n = gs_noise_next();
+            gs_a.burn_lp += (n - gs_a.burn_lp) * 0.10f;
+            const float s = gs_a.burn_lp * gs_a.burn * 3.0f;
+            left  += s;
+            right += s;
         }
 
         // Loud enough to be a game. The first mix peaked at a tenth of full
@@ -314,6 +378,68 @@ static void gs_surface_voice(gs_surface s, float *level, float *bright) {
     }
 }
 
+// **What each kind sounds like when it is put down**, and what a mine sounds
+// like when it is found. One list, named one by one, so a fifth kind of hazard
+// has to be given a noise rather than inheriting the last one's - which is how
+// six surfaces came to sound like pavement.
+static void gs_event_voice(gs_hazard_kind kind, bool blast, float *tone,
+                           float *noisy, float *decay, float *gain) {
+    if (blast) {
+        // A mine going off: low, loud and long enough to turn round for.
+        *tone = 70.0f; *noisy = 0.85f; *decay = 0.99988f; *gain = 1.0f;
+        return;
+    }
+    switch (kind) {
+    case GS_HAZ_OIL:
+        // Poured: low and wet, and over quickly.
+        *tone = 140.0f; *noisy = 0.80f; *decay = 0.9994f; *gain = 0.34f;
+        break;
+    case GS_HAZ_MINE:
+        // Set down: a click, and nothing else. The quietest of the four,
+        // because a mine you can hear being laid is a mine nobody drives over.
+        *tone = 900.0f; *noisy = 0.25f; *decay = 0.9985f; *gain = 0.26f;
+        break;
+    case GS_HAZ_SMOKE:
+        // A hiss, and it goes on - the canister is still emptying.
+        *tone = 300.0f; *noisy = 1.00f; *decay = 0.99975f; *gain = 0.40f;
+        break;
+    case GS_HAZ_FLAME:
+        // A whoosh: the sound of something catching.
+        *tone = 200.0f; *noisy = 0.92f; *decay = 0.99965f; *gain = 0.48f;
+        break;
+    case GS_HAZ_NONE:
+    case GS_HAZ_COUNT:
+        *tone = 0.0f; *noisy = 0.0f; *decay = 0.0f; *gain = 0.0f;
+        break;
+    }
+}
+
+// Put one in the bank. The quietest slot is taken when they are all busy, so a
+// mine going off is never lost to four slicks being poured.
+static void gs_event_add(gs_hazard_kind kind, bool blast, float x, float y,
+                         float lx, float ly) {
+    float tone = 0.0f, noisy = 0.0f, decay = 0.0f, gain = 0.0f;
+    gs_event_voice(kind, blast, &tone, &noisy, &decay, &gain);
+    if (gain <= 0.0f) return;
+
+    const float dx = x - lx, dy = y - ly;
+    const float d = SDL_sqrtf(dx * dx + dy * dy);
+    gain *= 1.0f / (1.0f + d * d * 0.02f);
+
+    int at = 0;
+    for (int i = 1; i < GS_AUDIO_EVENTS; i++) {
+        if (gs_a.event[i].gain < gs_a.event[at].gain) at = i;
+    }
+    if (gs_a.event[at].gain > gain) return;      // busier than this is worth
+
+    gs_a.event[at].gain  = gain;
+    gs_a.event[at].phase = 0.0f;
+    gs_a.event[at].tone  = tone;
+    gs_a.event[at].noisy = noisy;
+    gs_a.event[at].decay = decay;
+    gs_a.event[at].pan   = SDL_clamp((dx - dy) * 0.06f, -1.0f, 1.0f);
+}
+
 void gs_audio_update(const gs_world *w, const gs_track *t, float lx, float ly) {
     if (!gs_a.open) return;
     if (gs_a.lock != nullptr) SDL_LockMutex(gs_a.lock);
@@ -401,6 +527,47 @@ void gs_audio_update(const gs_world *w, const gs_track *t, float lx, float ly) {
         // The isometric screen axis: +x and -y are both to the right.
         o->pan = SDL_clamp((dx - dy) * 0.06f, -1.0f, 1.0f);
     }
+
+    // --- What is on the ground. **Noticed rather than reported**, the same way
+    // an impact is: the simulation is not asked to say "a mine went off", it is
+    // looked at and something has changed. Sound is downstream of the
+    // simulation and never upstream, and this is what that costs.
+    float burn = 0.0f;
+    for (uint8_t i = 0; i < w->hazard_count && i < GS_MAX_HAZARDS; i++) {
+        const gs_hazard *h = &w->hazard[i];
+        const float hx = gs_to_f(h->x), hy = gs_to_f(h->y);
+
+        if (gs_a.seeded) {
+            // **New here.** Either the slot did not exist last time, or it did
+            // and now holds something else - which is what the ring does when
+            // thirty-two are already down.
+            const bool fresh = i >= gs_a.last_hazards ||
+                               gs_a.last_kind[i] != h->kind;
+            if (fresh && !h->spent) {
+                gs_event_add((gs_hazard_kind)h->kind, false, hx, hy, lx, ly);
+            }
+
+            // **Found.** A mine that has just been spent went off; smoke and
+            // fire become spent by burning out, which is not a bang.
+            if (!fresh && h->spent && !gs_a.last_spent[i] &&
+                h->kind == (uint8_t)GS_HAZ_MINE) {
+                gs_event_add(GS_HAZ_MINE, true, hx, hy, lx, ly);
+            }
+        }
+
+        gs_a.last_kind[i]  = h->kind;
+        gs_a.last_spent[i] = h->spent;
+
+        // Fire is a level rather than an event: it burns for seconds, so what
+        // it wants is to be louder the more of it there is and the nearer it
+        // is.
+        if (h->kind == (uint8_t)GS_HAZ_FLAME && !h->spent) {
+            const float dx = hx - lx, dy = hy - ly;
+            burn += 1.0f / (1.0f + (dx * dx + dy * dy) * 0.05f);
+        }
+    }
+    gs_a.last_hazards = w->hazard_count;
+    gs_a.burn_want = SDL_clamp(burn, 0.0f, 1.0f) * 0.30f;
 
     gs_a.seeded = true;
     if (gs_a.lock != nullptr) SDL_UnlockMutex(gs_a.lock);

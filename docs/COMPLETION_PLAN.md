@@ -2103,14 +2103,16 @@ computer never uses any of it.
       the same ground with and without it, so what a player sees is what hits
       them. Every kind walked, so a fifth has to be given a look rather than
       inheriting whichever case came last.*
-- [ ] **Weapons you can hear.** `src/audio/` has never heard of a hazard: there
+- [x] **Weapons you can hear.** `src/audio/` has never heard of a hazard: there
       is no sound for dropping one, for a mine going off, or for fire burning.
       A mine you cannot hear behind you is a mine that feels like the game
       cheating.
-      *Verification: dropping each kind makes a noise and each is distinguishable
-      from the others; a mine going off is louder than laying one; four cars
-      dropping and detonating at once still fits in a speaker on every ground
-      and in every machine.*
+      *Verification: dropping each of the four is audible over the race going on
+      around it, and all six pairs of them are told apart by loudness or by
+      brightness. A mine going off is more than half again as loud as laying
+      one. Fire is heard while it burns and fades once it is out, rather than
+      stopping dead. And four cars dropping and detonating on top of four
+      engines still fits in a speaker, on every ground and in every machine.*
 - [ ] **The HUD says what you are carrying.** The control is explained once, on
       the setup screen, and never again — and there is nothing on screen saying
       which weapon a tap would drop or how many are left. A hold that silently
