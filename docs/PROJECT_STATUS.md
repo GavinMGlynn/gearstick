@@ -6054,6 +6054,35 @@ And `--trace` now says what is *on* a screen and not only which one it is -
 drivers, tracks, records. A check that has to say "the time I just set is there"
 cannot say it from a screen name.
 
+## The audio device, which no test had ever opened
+
+The sound item says it plainly: *"the synthesiser is platform-independent and
+the device path is not"*. The synthesiser is checked to the sample - every
+ground, every machine, four cars dropping and detonating - and **all of it with
+no device at all**, deliberately, because a callback thread pulling on the mixer
+alongside a test makes the answer depend on when it fired.
+
+Which left the other half untouched on every platform: opening a device, the
+thread the platform runs to pull on it, and the stream taking what it is handed.
+Three things that differ on Windows, macOS and Linux, and nothing had run any of
+them anywhere.
+
+A device is opened at the end of the audio run now, on whatever platform the run
+is on, a race is fed into it, and the callback has to have actually handed it
+frames - 1024 of them here. Then it is closed, which is the other end of the
+same path and what a player quitting does.
+
+The driver is named in the test rather than left to the environment. Without
+that it opens whatever the machine really has - a sound server, on a developer's
+desktop - which makes the check depend on the machine and, on this one, handed
+the leak checker four allocations belonging to PulseAudio. Same reasoning as the
+sandbox in every test main: a binary should not behave differently for being
+started by hand.
+
+**This does not close the item**, and the item says why: the dummy driver opens,
+runs a thread and consumes what it is given, and what it does not do is make a
+noise. What is left is what the verification asks for and no machine can give.
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

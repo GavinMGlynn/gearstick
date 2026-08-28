@@ -658,6 +658,15 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       platform-independent and the device path is not. **This one cannot be
       finished by whoever writes the code** — it needs a person with speakers on
       each platform. *Verification: a human says it sounds right on all three.*
+      **The automatable half is now done and runs on all three.** Opening a
+      device, the callback thread the platform runs to pull on it, and the
+      stream taking what it is handed are the three things that differ per
+      platform, and no test had ever run any of them anywhere: every audio test
+      renders the mixer from its own thread with no device at all, deliberately,
+      so that the answers are deterministic. A device is opened and fed at the
+      end of the run now, on whatever platform the run is on.
+      What is left is what the verification actually asks for and no machine can
+      give: somebody listening.
 
 ## Phase 14 — The network, properly
 

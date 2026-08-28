@@ -110,6 +110,11 @@ static struct {
     uint8_t  last_kind[GS_MAX_HAZARDS];
     uint8_t  last_spent[GS_MAX_HAZARDS];
 
+    // Frames the callback has handed to a device - see the note by it. Atomic
+    // because the callback runs on its own thread and this is read from the
+    // one that opened it.
+    SDL_AtomicInt fed;
+
     uint32_t noise;        // xorshift state for the tyre noise
     float    master;       // ramped, so silence is a fade and not a click
     float    master_want;
@@ -271,6 +276,14 @@ static void SDLCALL gs_audio_callback(void *userdata, SDL_AudioStream *stream,
         gs_audio_render(buf, frames);
         SDL_PutAudioStreamData(stream, buf, frames * frame_bytes);
         additional -= frames * frame_bytes;
+
+        // **How many frames have actually reached a device.** The synthesiser
+        // is checked to the sample without one; this is the only evidence that
+        // the path *to* a device works at all - opening it, the callback
+        // thread, and the stream taking what it is given. That path is the half
+        // of the audio that is not platform-independent, and it is the half no
+        // test had ever run.
+        SDL_AddAtomicInt(&gs_a.fed, frames);
     }
 }
 
@@ -323,6 +336,8 @@ void gs_audio_close(void) {
 }
 
 bool gs_audio_active(void) { return gs_a.open && gs_a.stream != nullptr; }
+
+int gs_audio_fed(void) { return SDL_GetAtomicInt(&gs_a.fed); }
 
 void gs_audio_set_volume(float v) { gs_a.volume = SDL_clamp(v, 0.0f, 1.0f); }
 float gs_audio_volume(void) { return gs_a.volume; }

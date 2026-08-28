@@ -765,6 +765,75 @@ TEST(the_music_and_the_race_together_still_fit_in_a_speaker) {
     for (int i = 0; i < 200; i++) gs_audio_render(gs_buf, FRAMES);
 }
 
+// **Last, and on its own.** Everything above renders the mixer from this
+// thread with no device behind it, on purpose: a callback thread pulling on the
+// mixer alongside them makes the answer depend on when it fired. This one wants
+// the opposite - a real device and a real callback thread - so it runs after
+// all of them and closes what it opened.
+static void gs_device_test(void) {
+    // **The half of the audio that is not platform-independent.** The
+    // synthesiser is checked to the sample and none of that touches a device;
+    // opening one, the thread SDL runs to pull on it, and the stream taking
+    // what it is handed are three things that differ on every platform and that
+    // no test had ever run, on any of them.
+    //
+    // The dummy driver is still a driver: it opens, it runs a callback thread
+    // on a timer, and it consumes what that callback puts in. What it does not
+    // do is make a noise - which is why the item this belongs to stays open
+    // until somebody listens on each platform.
+    gs_audio_close();
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+
+    // **The dummy driver, named here rather than left to the environment.**
+    // Without this the test opens whatever the machine actually has - a real
+    // sound server, on a developer's desktop - which makes a check depend on
+    // the machine it runs on and, on this one, hands the leak checker four
+    // allocations belonging to PulseAudio. The same reasoning as the sandbox
+    // in every test main: a binary should not behave differently for being
+    // started by hand.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        printf("  FAIL no audio subsystem: %s\n", SDL_GetError());
+        gs_failures++;
+        return;
+    }
+
+    if (!gs_audio_open()) {
+        printf("  FAIL no audio device even from the dummy driver: %s\n",
+               SDL_GetError());
+        gs_failures++;
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        return;
+    }
+    CHECK(gs_audio_active());
+
+    gs_world w;
+    gs_scene(&w, GS_SURF_DIRT);
+    w.car[0].vx = GS_INT(6);
+    w.car[0].vy = GS_INT(4);
+    gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
+
+    // **Something actually came out.** Up to a second, checked often, because
+    // how soon a callback fires is the platform's business and not ours.
+    int fed = 0;
+    for (int i = 0; i < 100 && fed == 0; i++) {
+        SDL_Delay(10);
+        fed = gs_audio_fed();
+    }
+
+    if (fed == 0) {
+        printf("  FAIL a device opened and its callback never fed it\n");
+    }
+    CHECK(fed > 0);
+    printf("  DEVICE opened on this platform and fed %d frames to it\n", fed);
+
+    // And closing it is not a crash, which is the other end of the same path
+    // and is what a player quitting the game does.
+    gs_audio_close();
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+}
+
 int main(void) {
     gs_sandbox();
     printf("gearstick audio tests\n");
@@ -789,6 +858,9 @@ int main(void) {
     run_the_music_goes_somewhere_rather_than_repeating_one_bar();
     run_the_music_stops_by_fading_and_can_be_started_again();
     run_the_music_and_the_race_together_still_fit_in_a_speaker();
+
+    // Last, because it opens a real device and starts a callback thread.
+    gs_device_test();
 
     gs_audio_close();
     SDL_Quit();

@@ -47,6 +47,13 @@ void gs_audio_open_silent(void);
 void gs_audio_close(void);
 bool gs_audio_active(void);
 
+// **How many frames have reached a device**, counted by the callback itself.
+// The synthesiser is checked to the sample with no device at all; this is the
+// only evidence that the path *to* one works - opening it, the callback thread
+// SDL runs, and the stream taking what it is handed. That path is the half of
+// the audio that is not platform-independent.
+int gs_audio_fed(void);
+
 // Tell the synthesiser what the world is doing. Called once a frame from the
 // main thread; the audio thread reads a snapshot of it. `lx`, `ly` are where
 // the listener is - the camera centre - so a car across the track is quieter
