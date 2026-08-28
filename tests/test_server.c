@@ -543,7 +543,11 @@ TEST(a_server_asked_what_it_takes_says_so_and_stops) {
     const char *argv[] = { exe, "--help", nullptr };
     SDL_PropertiesID props = SDL_CreateProperties();
     CHECK(props != 0);
-    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv);
+    // The cast is visible for the reason the note by the other spawn gives:
+    // SDL takes the argument vector as a plain pointer, MSVC calls the silent
+    // version of that a warning, and the warning is an error here.
+    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
+                           (void *)(uintptr_t)(const void *)argv);
     SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
                           SDL_PROCESS_STDIO_APP);
     SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER,

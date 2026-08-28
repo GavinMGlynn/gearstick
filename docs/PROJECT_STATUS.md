@@ -5898,6 +5898,13 @@ player found: a dashboard repainting into a pipe nobody drains fills it, and a
 server blocked in `printf` answers nothing. The two halves are the two sides of
 the same gate.
 
+And a fourth compiler difference, on the way in: `SDL_SetPointerProperty` takes
+a plain `void *` and the argument vector is `const char *[]`, which MSVC calls
+C4090 - *different `const` qualifiers* - where gcc and clang say nothing. The
+spawn twenty lines above already had a note about exactly that, and the cast it
+describes; the new one did not. **The cast should be visible**, which is what
+the note says and why the warning being an error is the right way round.
+
 **`--help` had never run either** - twenty lines listing every flag the server
 takes, which nothing would notice going stale except somebody typing it and
 being told about a flag that no longer exists. The test names all five and
