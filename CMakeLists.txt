@@ -669,8 +669,13 @@ if(GEARSTICK_TESTS)
                          ${CMAKE_CURRENT_SOURCE_DIR}/tools/front_door_check.py
                          $<TARGET_FILE:gearstick_server>
                          $<TARGET_FILE:gearstick>)
+        # Two halves, each with a server to start and a client to wait out,
+        # and the lobby half is allowed ninety seconds to give up in - see
+        # front_door_check.py for why it is that and not thirty. This is the
+        # outer bound on all of it, and has to stay clear of the sum or a slow
+        # machine is reported as a hung one.
         set_tests_properties(gearstick_front_door PROPERTIES
-                             TIMEOUT 180 SKIP_RETURN_CODE 77)
+                             TIMEOUT 300 SKIP_RETURN_CODE 77)
     endif()
 
     # **The shipped tracks reach somebody who has played before.** Loading the

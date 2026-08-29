@@ -39,10 +39,25 @@ import threading
 import time
 
 # How long to believe a client on the menu is staying there, and how long to
-# wait for one in the lobby to get in. The second is generous because it covers
-# a handshake, a track transfer and the race actually beginning.
+# wait for one in the lobby to get in.
+#
+# The first is a claim: eight seconds of a client sitting on the title screen
+# and not being dragged onto the grid is the check. Raising it makes the check
+# stricter and slower, and lowering it weakens it, so it is a number with a
+# meaning.
+#
+# **The second is not a claim, it is when to give up**, and it was set when a
+# track was 17 KB. A track is 148 KB now - the world went from 64 tiles square
+# to 192 - and the lobby it covers is a handshake, that track handed over in 127
+# chunks, and the race beginning. Measured on a sanitised build with the machine
+# otherwise idle, that takes about nine seconds; with `ctest -j2` running
+# something heavy alongside it, thirty had no headroom left and this check
+# failed once in a full run and passed alone and on the next one. A deadline
+# with no margin is a test that reports the machine's load as a fault in the
+# game. Ninety, and the wait still ends the moment the race begins, so a run
+# that is going to pass is not made slower by it - see the time it prints.
 MENU_SETTLE_SECONDS = 8.0
-LOBBY_TIMEOUT_SECONDS = 30.0
+LOBBY_TIMEOUT_SECONDS = 90.0
 
 RACING = "driving car"
 
@@ -229,8 +244,10 @@ def main():
                           "key\n" + watching.text())
                     return 1
 
+                began = time.monotonic()
                 racing, log = run_client(game_bin, port, key, screen, env,
                                          seconds)
+                took = time.monotonic() - began
 
                 # **What it built, when it did race.** A grid that is not the
                 # size the server said means this machine invented part of the
@@ -260,7 +277,10 @@ def main():
                     print("front_door_check: " + wrong + "\n" + log +
                           server_log(watching))
                     return 1
-                print("front_door_check: " + right)
+                # **What it had, against what it was given.** A check that
+                # only says "correct" hides the margin it passed by, and this
+                # one has failed on the margin rather than on the rule.
+                print(f"front_door_check: {right} - {took:.1f}s of {seconds:.0f}")
             finally:
                 stop_server(server)
 

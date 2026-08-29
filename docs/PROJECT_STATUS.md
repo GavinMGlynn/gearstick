@@ -965,6 +965,24 @@ floor of 630 — so a shipped set that shortens turns the tree red without anybo
 running the writer. Every track is still validated and raced by every vehicle
 from every grid slot as well.
 
+**The front door check was passing by 1.3 seconds.** It failed once in a full
+`-j2` run and passed alone and on the next one, which is the shape of a flake -
+and the cause was not load. Asked to say how long it took rather than only that
+it was correct, it prints **28.7 seconds of the 30 it was allowed**, with the
+machine otherwise idle. The budget was set when a track was 17 KB; a track is
+148 KB now and the lobby it covers is a handshake, that track handed over in 127
+chunks, and the race beginning. Anything running alongside it tipped the check
+over.
+
+The number is not a claim - it is when to give up waiting, unlike the eight
+seconds of a client sitting on the title screen and not being dragged into a
+race, which *is* the check. It is ninety now, and the wait still ends the moment
+the race begins, so a passing run is no slower. Every run prints the margin, so
+the next time it creeps there is a number to see rather than an intermittent
+failure to argue about. The same family as the analyser's ninety-second clock
+and `gearstick_plays` judging a race on the countdown: a wall-clock budget that
+did not move when the tracks got sixteen times longer.
+
 **Every kind of ground paint is walked now, not the two that were reported.**
 Two instances of one fault were found by asking the same question twice, which
 is the definition of a sample rather than a proof, so

@@ -1400,6 +1400,15 @@ worth as much as what was decided about it.
       as a machine can take this: a device is opened at the end of the audio run
       and the callback has to have actually fed it. What no driver can do is
       make a noise somebody hears.
+- [x] **A check that was passing by a second and a third.** The front door
+      check failed once in a full run and passed on its own, which looks like a
+      flake and was not: asked to say how long it took rather than only that it
+      worked, it reports 28.7 seconds of the 30 it was allowed, on an idle
+      machine. The budget was set when a track was 17 KB and a track is 148 KB
+      now, so the handshake and transfer it covers had quietly eaten it.
+      *Verification: the margin is printed on every run — "the lobby did start a
+      race, correct - 28.7s of 90" — so the next time it creeps there is a
+      number to read instead of an intermittent failure to argue about.*
 - [x] **Every kind of ground paint is checked, not the two that were
       reported.** Two instances of one fault turned up by asking the same
       question twice, which is a sample and not a proof, so the suite now walks
