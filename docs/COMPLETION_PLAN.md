@@ -1428,12 +1428,25 @@ worth as much as what was decided about it.
       bounce that makes a collision return more than it was given is the point
       of the game — so the golden hash moved only because the cars start
       somewhere new, and says so where it is written down.*
-- [ ] **An AI car that has come to rest does not reverse out of it.** What is
-      left of the above: `the big one` still loses two cars, and they are not
-      thrown anywhere — they are stopped, upright and undamaged, at a hundredth
-      of a tile a second in the middle of the track. The driver holds the
-      throttle against whatever it is against and stays there for the rest of
-      the race. Nothing in the AI backs up, and nothing has ever needed it,
+- [x] **A car a hair under the ground was frozen for the rest of the race.**
+      One was found on a ramp in `the big one` at nought tiles a second with the
+      throttle open, for a hundred thousand ticks — not against a wall, not
+      touching anything, and taking the other three cars out of the world did
+      not free it. It was six hundredths of a tile under the surface. Two rules
+      were asking about the car where they meant to ask about the ground: the
+      wall rule read that gap as an unclimbable step and refused every move,
+      and refusing skips the very code that would have lifted the car back to
+      the surface. Fixing only that turned the frozen car into a launched one,
+      because the ground-following reads the same gap as seven tiles a second
+      upward. Both ask about the ground now.
+      *Verification: two identical cars driven across a level field, one on the
+      surface and one just under it, went 5.07 tiles and 0.08. They now go 5.07
+      and 5.07 — and no golden hash moved, so nothing anybody has recorded has
+      been invalidated.*
+- [ ] **Two cars that jam together stay jammed.** All that is left of the
+      stragglers: `the big one` loses two cars that are stopped on *level*
+      ground, half a tile apart, each with the throttle open. Nothing in the
+      driver backs up and tries a different line, and nothing has ever needed it
       because a car racing alone never gets shoved into anything.
 - [x] **A race that drives itself could not finish one of the shipped
       tracks.** `--session` was bounded at a flat five minutes of race time,

@@ -980,6 +980,42 @@ get round stops rather than spinning - which is the whole point of having one.
 yes`, and `bright run` and `the oval` finish as they did. The change costs
 nothing when a race finishes, because the loop ends at the flag either way.*
 
+**A car a hair under the ground was frozen for the rest of the race - and the
+same mistake fired others into the air.**
+
+Chasing the last stragglers found one on a ramp in `the big one` doing nought
+tiles a second with the throttle wide open, for a hundred thousand ticks. It was
+not against a wall, it was not touching another car, and lifting the other three
+cars out of the world entirely did not free it. What was different about it was
+six hundredths of a tile: `z` 1.0997 where the ground under it was 1.1572.
+
+**Two rules were asking about the car where they meant to ask about the
+ground.** The wall rule measured the height ahead against the car's own `z`, so
+a car slightly under the surface read every move - even across level ground - as
+a climb of however far under it was over however little it had moved, and
+refused it. The refusal restores the position, takes the speed, and `return`s
+*before* the ground-following that would have lifted the car back to the
+surface, so the next tick asks the same question and gets the same answer, for
+ever. It could not climb out because it could not move, and it could not move
+because it had not climbed out.
+
+Correcting only that swapped a frozen car for a launched one, which is how the
+second half showed up: the follow rate is `(ground - z) / dt`, so the same six
+hundredths of a tile is **seven tiles a second upward** at 120 Hz, off level
+ground. Both now measure ground against ground - where the car has come to
+against where it came from - which is the question a gradient is.
+
+*Verification: `a_car_a_little_under_the_ground_can_still_drive_away` drives two
+identical cars across a level field, one on the surface and one six hundredths
+under it, and asks that they go the same distance. It read **5.07 tiles against
+0.08**; it reads 5.07 against 5.07.*
+
+**And no hash moved.** For a car sitting where it should be the two measurements
+are the same number, so every existing replay, ghost and shared time still lands
+exactly where it did - `gearstick_cli selftest --verify` passes untouched. A
+change to the physics that moves nothing anybody has recorded is the rarest kind
+and worth saying out loud.
+
 **The grid is an echelon, and it stops throwing opponents off the map.**
 
 Four AI cars over the shipped set lost **7 of 72**, six of them wrecked at

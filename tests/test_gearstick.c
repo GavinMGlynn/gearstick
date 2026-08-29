@@ -8435,6 +8435,68 @@ TEST(every_generated_track_can_be_got_round) {
     }
 }
 
+TEST(a_car_a_little_under_the_ground_can_still_drive_away) {
+    // **A car that is not exactly on the surface is still a car that can
+    // drive.** It is under it often enough: shoved by another car, or landing,
+    // leaves a car a few hundredths of a tile down for a moment.
+    //
+    // The rule that stops a car climbing a wall asked the wrong question. It
+    // measured the height of the ground ahead against **the car's own z**, so
+    // for a car sitting a little under the surface every move - even across
+    // level ground - looked like a climb of however far under it was, over
+    // however little it had moved, and was refused. The refusal puts the car
+    // back where it was, takes its speed away, and returns *before* the
+    // ground-following that would have lifted it back to the surface. So the
+    // next tick asks the same question and gets the same answer, for the rest
+    // of the race.
+    //
+    // One was found on a ramp in `the big one` doing nought tiles a second with
+    // the throttle wide open, six hundredths of a tile under the ground, for a
+    // hundred thousand ticks. It could not climb out because it could not move,
+    // and it could not move because it had not climbed out.
+    //
+    // Level ground, so nothing here is about slopes at all: if a car cannot
+    // drive across a flat field the rule has stopped being about walls.
+    static gs_track t;
+    gs_track_init(&t, 32, 32, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    }
+
+    // Two of the same car, one on the surface and one just under it, so the
+    // claim is "these two do the same thing" rather than a distance somebody
+    // chose.
+    gs_fix went[2] = { 0, 0 };
+    for (int under = 0; under < 2; under++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, GS_MODE_RACE);
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(16), GS_INT(16), 0);
+
+        // Six hundredths of a tile down - the depth the frozen car was found at.
+        if (under) w.car[0].z -= GS_RATIO(6, 100);
+
+        const gs_fix from_x = w.car[0].x;
+        for (int k = 0; k < GS_TICK_HZ * 2; k++) {
+            gs_input in[GS_MAX_CARS] = { (gs_input)GS_IN_ACCEL, 0, 0, 0 };
+            gs_world_step(&w, &t, in);
+        }
+        went[under] = w.car[0].x - from_x;
+    }
+
+    printf("  UNDER on the surface %.2f tiles, a little under it %.2f\n",
+           (double)went[0] / (double)GS_ONE, (double)went[1] / (double)GS_ONE);
+
+    // The one on the surface really drove, or the pair agreeing means nothing.
+    CHECK(went[0] > GS_INT(4));
+
+    // And the one under it went as far. Not "went somewhere": the ground is
+    // level and the two cars are identical, so anything less is the wall rule
+    // taking speed away from a car that is not against a wall.
+    CHECK(went[1] > gs_fix_mul(went[0], GS_RATIO(95, 100)));
+}
+
 TEST(every_car_lines_up_behind_the_line_it_has_to_cross) {
     // The analyser used to put its car *on* the start line, which left it with
     // its own position to aim at and no reason to go anywhere; whether it
@@ -8694,6 +8756,7 @@ int main(void) {
     run_a_part_that_will_not_fit_changes_nothing();
     run_a_generated_track_leaves_clear_ground_to_get_up_to_speed_on();
     run_every_generated_track_can_be_got_round();
+    run_a_car_a_little_under_the_ground_can_still_drive_away();
     run_every_car_lines_up_behind_the_line_it_has_to_cross();
 
     if (gs_failures == 0) {

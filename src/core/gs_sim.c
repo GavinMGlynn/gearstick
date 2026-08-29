@@ -478,7 +478,6 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
     }
 
     // --- Move.
-    gs_fix z_was = c->z;
     gs_fix was_x = c->x, was_y = c->y;
     c->x += gs_fix_mul(c->vx, dt);
     c->y += gs_fix_mul(c->vy, dt);
@@ -496,7 +495,25 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
     //
     // What happens instead is what happens in life: you stop.
     if (c->grounded) {
-        gs_fix climbed = ground - z_was;
+        // **How steep the ground is, not how far the car has to climb to it.**
+        //
+        // Measured against the height the car came *from* rather than against
+        // the car's own z, because those are the same number only while it is
+        // sitting exactly on the surface - and a car that has been shoved or
+        // has just landed is a little under it. Then every move, even onto
+        // level ground, reads as a climb of however far under it is, over
+        // however little it moved, and is refused; and the refusal returns
+        // before the ground-following below can lift it back to the surface,
+        // so the same thing is true on the next tick and every tick after. A
+        // car found frozen on a ramp for the rest of a race was six hundredths
+        // of a tile under the ground: nought tiles a second, throttle open,
+        // and the physics snapping it back where it stood a hundred and twenty
+        // times a second. It cannot climb out because it cannot move, and it
+        // cannot move because it has not climbed out.
+        //
+        // Ground to ground is the question the rule means to ask, is the same
+        // number whenever a car is where it should be, and cannot lock.
+        gs_fix climbed = ground - gs_track_height(t, was_x, was_y);
         gs_fix moved = gs_fix_len2(c->x - was_x, c->y - was_y);
         if (moved > 0 && climbed > gs_fix_mul(moved, GS_MAX_CLIMB)) {
             c->x = was_x;
@@ -509,8 +526,23 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
     }
 
     if (c->grounded) {
-        // The rate the ground would demand if the car stayed glued to it.
-        gs_fix follow = gs_fix_div(ground - z_was, dt);
+        // The rate the ground would demand if the car stayed glued to it -
+        // **the rate the ground itself rises under the wheels**, which is the
+        // ground it has come to against the ground it came from.
+        //
+        // Against the car's own z instead, as this was, any gap between a car
+        // and the surface becomes speed: a car six hundredths of a tile under
+        // the ground is not riding up anything, but `(ground - z) / dt` at 120
+        // Hz calls that seven tiles a second upward and fires it into the air
+        // off level ground. A car gets under the surface easily enough - shoved
+        // by another car onto ground that is higher, or landing - and it is a
+        // discrepancy to be put right, not a ramp.
+        //
+        // The same mistake as the climb rule above, and the same correction: a
+        // gradient is a question about the ground. When the car is where it
+        // should be the two are the same number, so a ramp launches exactly as
+        // it did.
+        gs_fix follow = gs_fix_div(ground - gs_track_height(t, was_x, was_y), dt);
 
         // Off the end of a ramp, the ground drops away faster than gravity can
         // pull the car down. That comparison - and not a "ramp" tile type - is
