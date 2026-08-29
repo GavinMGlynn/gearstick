@@ -1400,6 +1400,21 @@ worth as much as what was decided about it.
       as a machine can take this: a device is opened at the end of the audio run
       and the callback has to have actually fed it. What no driver can do is
       make a noise somebody hears.
+- [x] **A race that drives itself could not finish one of the shipped
+      tracks.** `--session` was bounded at a flat five minutes of race time,
+      written when a stock lap was under one. A stock lap is four to five
+      minutes now and `jupiter run` is 5m 15s — longer than the budget — so a
+      session on it stopped a lap short and reported no winner at all. The bound
+      is asked of the track now, the same way the analyser asks it.
+      *Verification: `jupiter run` went from "winner 255, over no" to "winner 1,
+      over yes"; the tracks that already finished still do, and a race that ends
+      at the flag is not slowed by a larger bound.*
+- [ ] **An AI car can fail to finish when there are other cars on the track.**
+      Uncovered by the above: with the budget no longer the limit, `first light`
+      still ends unsettled after 1,690 seconds of a race whose lap is 302 —
+      somebody wins and somebody never arrives. Every check of the AI so far
+      races **one** car alone, so this has never been looked at. One example,
+      not yet a diagnosis.
 - [x] **A check that was passing by a second and a third.** The front door
       check failed once in a full run and passed on its own, which looks like a
       flake and was not: asked to say how long it took rather than only that it

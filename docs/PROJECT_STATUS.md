@@ -965,6 +965,30 @@ floor of 630 — so a shipped set that shortens turns the tree red without anybo
 running the writer. Every track is still validated and raced by every vehicle
 from every grid slot as well.
 
+**A session on `jupiter run` could not finish it.** `--session` is the race
+that drives itself and stops on the results - the headless race the play-through
+check uses and anyone wanting a race without a person uses - and it was bounded
+at a flat five minutes of simulated time. A stock lap now takes four to five,
+and `jupiter run` takes **5m 15s**, longer than the whole budget: the session
+stopped a lap short of the flag and said `winner 255, over no` in a line nobody
+reads. It is `gs_analyse_seconds(&track) * laps` now, the same answer the
+analyser and the shipped-track test use, so it scales with the route rather than
+with a number typed in the frontend. It is still a bound - a track the AI cannot
+get round stops rather than spinning - which is the whole point of having one.
+
+*Verification: `jupiter run` went from `winner 255, over no` to `winner 1, over
+yes`, and `bright run` and `the oval` finish as they did. The change costs
+nothing when a race finishes, because the loop ends at the flag either way.*
+
+**A tail it uncovered, and did not fix.** With the budget no longer the limit,
+`first light` reports `winner 1, over no`: somebody wins, and the race is still
+not settled after **1,690 simulated seconds** on a track whose lap is 302. Four
+AI cars racing rather than one alone, which is not what
+`an_opponent_finishes_every_track_that_ships_from_every_grid_slot` covers - it
+races one car at a time. So an opponent that cannot finish while there are other
+cars on the track is a thing this project has never checked for, and now has
+one example of.
+
 **The front door check was passing by 1.3 seconds.** It failed once in a full
 `-j2` run and passed alone and on the next one, which is the shape of a flake -
 and the cause was not load. Asked to say how long it took rather than only that

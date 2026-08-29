@@ -30,6 +30,7 @@
 #include "ui/gs_menu.h"
 #include "ui/gs_style.h"
 #include "core/gs_ai.h"
+#include "core/gs_analyse.h"
 #include "core/gs_ghost.h"
 #include "core/gs_records.h"
 
@@ -1484,7 +1485,25 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         steps = 0;
         gs_clock_init(&a->clock);
 
-        const uint64_t give_up = (uint64_t)GS_TICK_HZ * 300u;
+        // **As long as the track says a lap of it takes, times the laps.**
+        //
+        // Five minutes was written when a stock lap was under one, and the
+        // stock set now takes four to five: `jupiter run` is 5m 15s, longer
+        // than the whole budget, so a session on it stopped a lap short of the
+        // flag and reported `winner 255, over no` in a line nobody reads. A
+        // race that drives itself and cannot finish the tracks in the box is
+        // not a bounded race, it is a broken one.
+        //
+        // gs_analyse_seconds is the project's own answer to "how long is this
+        // track", used by the analyser and by the shipped-track test for the
+        // same reason: it scales with the route rather than with a number typed
+        // here, so the next track that gets longer does not need anybody to
+        // remember this line. The bound is still a bound - a track the AI
+        // cannot get round stops here rather than spinning forever, which is
+        // the whole point of having one.
+        const uint32_t laps = a->world.laps_to_win > 0 ? a->world.laps_to_win : 1;
+        const uint64_t give_up = (uint64_t)gs_analyse_seconds(&a->t) *
+                                 (uint64_t)laps * (uint64_t)GS_TICK_HZ;
         while (!a->world.over && a->world.tick < give_up) {
             gs_input in[GS_MAX_CARS] = { 0 };
             for (uint8_t i = 0; i < a->world.car_count; i++) {
