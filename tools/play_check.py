@@ -19,10 +19,15 @@ makes assertions out of the lines. The rules are the ones a person checks in the
 first five seconds without noticing they are checking anything:
 
   - a race actually starts
+  - it starts held on the line, and the lights go green
   - the clock advances, and keeps advancing
   - the car this machine drives is on this machine's screen, every time
-  - it moves, and gets somewhere
+  - once it is let go it moves, and gets somewhere
   - nothing stalls
+
+Everything after the flag is judged on ticks of racing rather than on seconds
+of wall clock, so the check is the same check on a machine that runs the game
+at full speed and on one with the sanitisers on.
 
 Every one of those was false at some point today, on a build whose tests were
 all green.
@@ -37,14 +42,41 @@ import tempfile
 import threading
 import time
 
+# The rate the simulation runs at, which is what the trace counts in. This is
+# GS_TICK_HZ from src/core/gs_sim.h; the check below states the number it saw
+# rather than only asserting on it, so the two drifting apart is visible.
+TICK_HZ = 120
+
+# **How much of a race to watch, measured from the green flag and in ticks.**
+#
+# Every rule here is a property of a race in motion, and a race does not begin
+# in motion: the simulation holds every car on the line for GS_COUNTDOWN_TICKS
+# - ten seconds - so everybody gets the same moment to react to. A window
+# measured from the start of the run is therefore mostly countdown, and this
+# one was. It gave a race fourteen seconds, ten of which were the lights, and
+# then judged the controls on the second and a half of driving that was left.
+# On a sanitised build, where getting into an online race costs another nine
+# seconds of lobby and a track handed over in chunks, what was left was a car
+# that had been allowed to drive for a moment - and the check called that
+# "nowhere" and went red, on a client with nothing wrong with it.
+#
 # Long enough to be past a rollback window (256 ticks, 2.13s) several times
 # over, which is where the online race used to freeze, and past the first
 # corner, which is where a camera fault shows.
-RACE_SECONDS = 14.0
+DRIVE_TICKS = 6 * TICK_HZ
 
-# How far the car has to get from where it started, in tiles. A car that is
-# being driven goes somewhere; a car whose controls are not connected sits on
-# the line looking exactly like a car that is stationary on purpose.
+# How long to wait in wall-clock seconds for that much driving. Everything
+# before the flag runs on the machine's own time - a lobby, a 148 KB track sent
+# in chunks, and the countdown - and a build with the sanitisers on does all of
+# it slower, so this is a deadline for giving up rather than a window to fill.
+# The race is watched until it has driven enough, and then stopped.
+LOCAL_SECONDS = 45.0
+SERVER_SECONDS = 75.0
+
+# How far the car has to get from where it started, in tiles, once it is
+# allowed to drive. A car that is being driven goes somewhere; a car whose
+# controls are not connected sits on the line looking exactly like a car that
+# is stationary on purpose.
 MOVED_TILES = 3.0
 
 TRACE = re.compile(r"^trace (.*)$")
@@ -112,8 +144,29 @@ def quiet_env(store_dir):
     return env
 
 
-def run(argv, env, seconds):
-    """Run a client for `seconds` and hand back everything it said."""
+def driven_ticks(reader):
+    """How many ticks of *racing* have been seen - the countdown does not
+    count. Zero until the lights go green."""
+    rows = [r for r in reader.traces()
+            if r.get("screen") == "race" and r.get("held") == "0"]
+    if len(rows) < 2:
+        return 0
+    return int(rows[-1]["tick"]) - int(rows[0]["tick"])
+
+
+def driven_enough(reader):
+    """Enough racing has been watched to judge it. Used to stop the client as
+    soon as there is, so a fast build is not made to sit through a deadline."""
+    return driven_ticks(reader) >= DRIVE_TICKS
+
+
+def run(argv, env, seconds, until=None):
+    """Run a client until `until` says it has seen enough, and at the outside
+    for `seconds`, then hand back everything it said.
+
+    Waiting for what is being checked rather than for a stopwatch is what makes
+    this the same check on a fast machine and a slow one. The stopwatch is only
+    there so a client that never gets going is a failure rather than a hang."""
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, env=env)
     reader = Reader(proc.stdout)
@@ -121,6 +174,8 @@ def run(argv, env, seconds):
     try:
         while time.monotonic() < deadline:
             if proc.poll() is not None:
+                break
+            if until is not None and until(reader):
                 break
             time.sleep(0.1)
     finally:
@@ -169,16 +224,49 @@ def check_race(where, reader):
               f"{first['cam']}\n" + log)
         return False
 
-    # It moves, and gets somewhere. This is the one that says the input path
-    # reaches the car at all.
-    x0, y0 = float(rows[0]["x"]), float(rows[0]["y"])
-    far = max(abs(float(r["x"]) - x0) + abs(float(r["y"]) - y0) for r in rows)
-    if far < MOVED_TILES:
-        print(f"play_check: {where}: the car went {far:.1f} tiles in "
-              f"{RACE_SECONDS:.0f}s, which is nowhere\n" + log)
+    # **The race begins on the line, and then it is let go.** Both halves are
+    # checked: a countdown that never ends is a race nobody can drive, and no
+    # countdown at all is everybody moving before the person watching the lights
+    # has reacted. Splitting the run here is also what makes the rules below
+    # mean what they say - before the flag the simulation holds every car's
+    # input at nothing, so a car that has not moved yet is obeying the rules.
+    if "held" not in rows[0]:
+        print(f"play_check: {where}: the trace does not say whether the race "
+              f"is held - a client too old to check\n" + log)
         return False
 
-    if any(float(r["speed"]) > 0.5 for r in rows) is False:
+    waiting = [r for r in rows if r["held"] == "1"]
+    driving = [r for r in rows if r["held"] == "0"]
+
+    if not waiting:
+        print(f"play_check: {where}: the race was never held on the line - "
+              f"the first thing seen at tick {rows[0]['tick']} was already "
+              f"running\n" + log)
+        return False
+    if len(driving) < 2:
+        print(f"play_check: {where}: the lights never went green - still "
+              f"counting down at tick {rows[-1]['tick']}\n" + log)
+        return False
+
+    drove = int(driving[-1]["tick"]) - int(driving[0]["tick"])
+    if drove < DRIVE_TICKS:
+        print(f"play_check: {where}: only {drove} ticks of racing before the "
+              f"clock ran out, and {DRIVE_TICKS} were asked for\n" + log)
+        return False
+
+    # It moves, and gets somewhere. This is the one that says the input path
+    # reaches the car at all - and it is asked of the car once it is allowed to
+    # drive, because a car being held on a slope slides gently down it and that
+    # is not the input path working.
+    x0, y0 = float(driving[0]["x"]), float(driving[0]["y"])
+    far = max(abs(float(r["x"]) - x0) + abs(float(r["y"]) - y0)
+              for r in driving)
+    if far < MOVED_TILES:
+        print(f"play_check: {where}: the car went {far:.1f} tiles in the "
+              f"{drove} ticks after the flag, which is nowhere\n" + log)
+        return False
+
+    if any(float(r["speed"]) > 0.5 for r in driving) is False:
         print(f"play_check: {where}: the car never got up any speed\n" + log)
         return False
 
@@ -192,8 +280,9 @@ def check_race(where, reader):
               + log)
         return False
 
-    print(f"play_check: {where}: raced {ticks[-1]} ticks, "
-          f"{far:.0f} tiles, on screen every time, correct")
+    print(f"play_check: {where}: raced {ticks[-1]} ticks, held for "
+          f"{int(driving[0]['tick'])} of them, then {drove} ticks and "
+          f"{far:.0f} tiles of driving, on screen every time, correct")
     return True
 
 
@@ -222,7 +311,7 @@ def main():
         env = quiet_env(store)
 
         # --- a race on this machine ---------------------------------------
-        here = run(local, env, RACE_SECONDS)
+        here = run(local, env, LOCAL_SECONDS, driven_enough)
         if not check_race("on this machine", here):
             return 1
 
@@ -253,7 +342,7 @@ def main():
             there = run([game_bin, "--server", "127.0.0.1", str(port),
                          "--server-key", key, "--name", "tester",
                          "--screen", "lobby", "--autodrive", "--trace"],
-                        env, RACE_SECONDS + 6.0)
+                        env, SERVER_SECONDS, driven_enough)
             if not check_race("at a server", there):
                 print("--- and what the server said ---\n" + watching.text())
                 return 1

@@ -965,18 +965,33 @@ floor of 630 — so a shipped set that shortens turns the tree red without anybo
 running the writer. Every track is still validated and raced by every vehicle
 from every grid slot as well.
 
-**One test is red in `Debug` and it is not this work.** `gearstick_plays` races
-the real client for fourteen seconds of wall clock and asks that the car get
-three tiles from where it started. Under `-O0` with the address and undefined
-sanitisers on, the online run manages 2.9 — the local run on the same machine
-manages ten, and the same check passes in `RelWithDebInfo`, where the online car
-covers twenty. The bar is not the tracks: the simulation itself puts a stock car
-**42 tiles** from the line in those fourteen seconds from every grid slot on
-`wide flats`, and running the check against the short tracks of two commits ago
-with these same sanitised binaries fails it the same way, at 2.7 tiles. What it
-measures is how far behind the rollback world falls on a machine that cannot
-keep up — a real thing to know, and an older one than this. It is written down
-here rather than fixed inside a piece of work about track length.
+**`gearstick_plays` was spending its window on the countdown.** The check races
+the real client and asks that the car get three tiles from the line; it gave the
+race fourteen seconds and, under the sanitisers, saw 2.9 tiles and called the
+controls disconnected. The cause was not the rollback world lagging, which is
+what was written here first, and it was not the tracks: **a race is held on the
+line for `GS_COUNTDOWN_TICKS`, which is ten seconds.** Of the fourteen, ten were
+the lights. Locally that left four seconds of driving and the check scraped
+through; online, where a lobby and a 148 KB track handed over in chunks cost
+another nine, it left about a second and a half, and 2.9 tiles is roughly what a
+standing start covers in a second and a half. The number it was really asserting
+on was the length of the countdown.
+
+Worse, on the server's track the grid sits on a slope, so the car *slid* during
+those ten seconds — 22.00 to 23.00 in x at a fifth of a tile a second. Most of
+the 2.9 tiles the check measured was a held car rolling downhill, which is the
+one thing the rule was written to tell apart from driving.
+
+So the client's trace now says `held=1` while the lights are red, and
+`play_check.py` watches until it has seen **720 ticks of racing after the green
+flag** rather than fourteen seconds of anything, stopping as soon as it has
+them. The rule is asked of the driving rows only, and two new ones are pinned on
+the way past: a race *is* held on the line, and the lights *do* go green — a
+countdown that never ends used to be indistinguishable here from a car that
+would not move. The debug run now reports 734 ticks and 20 tiles of driving on
+this machine and 742 ticks and 16 tiles at a server, against a bar of three. It
+was checked in the other direction too: the same client with nothing driving its
+car still fails the check, sitting at x=22.00 after the flag.
 
 **The tree was red in the `Debug` preset when this landed.** `gs_faces_route`
 cast each arm of a ternary rather than its result, and a ternary's arms promote

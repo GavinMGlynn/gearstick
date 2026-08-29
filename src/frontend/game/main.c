@@ -1319,15 +1319,22 @@ static void gs_trace(gs_app *a, uint8_t views) {
 
     float speed = gs_to_f(gs_fix_len2(c->vx, c->vy));
 
+    // **And whether the lights are still red**, which is the difference
+    // between a car that will not drive and a car that is not allowed to yet.
+    // Without it a watcher cannot tell those apart, and tools/play_check.py
+    // spent its whole window on the countdown deciding the controls were
+    // broken - a race held on the line looks exactly like a race whose input
+    // path is disconnected, and the trace is the only place that can say which.
     SDL_Log("trace screen=race tick=%llu cars=%u me=%u x=%.2f y=%.2f "
             "speed=%.2f wrecked=%u onscreen=%u sx=%.0f sy=%.0f "
-            "cam=%.2f,%.2f zoom=%.2f lap=%u/%u over=%u stalls=%u",
+            "cam=%.2f,%.2f zoom=%.2f lap=%u/%u over=%u stalls=%u held=%u",
             (unsigned long long)a->world.tick, a->world.car_count, me,
             (double)gs_to_f(c->x), (double)gs_to_f(c->y), (double)speed,
             c->wrecked ? 1u : 0u, on ? 1u : 0u, (double)sx, (double)sy,
             (double)v->cam.cx, (double)v->cam.cy, (double)v->cam.zoom,
             c->laps, a->world.laps_to_win, a->world.over ? 1u : 0u,
-            a->online ? a->net.stalls : 0u);
+            a->online ? a->net.stalls : 0u,
+            gs_world_held(&a->world) ? 1u : 0u);
 }
 
 // **One step back, wherever back is from here.** Written once because two

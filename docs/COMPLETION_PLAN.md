@@ -1400,17 +1400,20 @@ worth as much as what was decided about it.
       as a machine can take this: a device is opened at the end of the audio run
       and the callback has to have actually fed it. What no driver can do is
       make a noise somebody hears.
-- [ ] **An online race falls behind on a machine that cannot keep up, and one
-      test says so by failing.** `gearstick_plays` gives the real client
-      fourteen seconds and asks the car to get three tiles from the line. With
-      the sanitisers on it manages 2.9 online, where the same client offline
-      manages ten and the same check in a release build manages twenty.
-      *Verification that it is not the tracks: the simulation puts a car 42
-      tiles from the line in those same fourteen seconds, and the check fails
-      identically against the short tracks of two commits ago, at 2.7 tiles.*
-      What the number measures is the rollback world lagging the clock on a slow
-      machine — which is worth understanding on its own, and is the last thing
-      standing between `ctest` and green in the `Debug` preset.
+- [x] **A check that was timing the countdown and calling it the controls.**
+      `gearstick_plays` races the real client and asks the car to get three
+      tiles from the line, and it gave the whole race fourteen seconds. A race
+      is held on the line for ten of them while the lights count down, so what
+      it was really judging was the second and a half of driving left over — and
+      on the server's track, which starts on a slope, most of the movement it
+      did measure was a held car sliding downhill. The client now says whether
+      the lights are still red, and the check watches for six seconds of racing
+      *after* the green flag however long that takes to arrive.
+      *Verification: the same run now reports 734 ticks and 20 tiles of driving
+      on this machine and 742 ticks and 16 tiles at a server, against a bar of
+      three; and the same client with nothing driving its car still fails, so
+      the check has not been made toothless to make it pass. Two rules come free
+      with it: a race is held on the line, and the lights do go green.*
 - [x] **The store is one file with no migration path.** *(Closed in Phase 13,
       and exercised for real in Phase 14.)* There is now a schema version and an
       upgrade path: new tables appear by `CREATE TABLE IF NOT EXISTS`, new
