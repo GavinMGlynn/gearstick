@@ -450,10 +450,26 @@ static void gs_draw_start_lights(SDL_Renderer *ren, const gs_camera *cam,
 
 // The diagonal a flat mark on the ground sorts on: the furthest into the sweep
 // that any corner of it reaches, so it is drawn after every tile it lies on.
+// **The last tile a shape actually covers, on one axis.**
+//
+// `floor` is wrong on the closed edge and only there: a shape whose far side
+// lands exactly on a tile line - a hazard of radius one tile dropped at a whole
+// number, which is where a car standing still leaves one - covers none of the
+// tile beyond that line, but `floor(25.0)` says 25 and hands the shape a
+// diagonal a whole tile nearer than it reaches. Sorted there it is painted
+// after the car standing on it, and 62 pixels of the car go with it.
+//
+// `ceil(v) - 1` is the tile holding the last point inside the shape, which is
+// the tile that ought to answer for it. For anything not exactly on a line it
+// is `floor` to the pixel; on a line it is the tile the shape is really in.
+static int gs_last_tile(float v) {
+    return (int)SDL_ceilf(v) - 1;
+}
+
 static int gs_ground_quad_diagonal(const float x[4], const float y[4]) {
-    int d = (int)SDL_floorf(x[0]) + (int)SDL_floorf(y[0]);
+    int d = gs_last_tile(x[0]) + gs_last_tile(y[0]);
     for (int i = 1; i < 4; i++) {
-        int e = (int)SDL_floorf(x[i]) + (int)SDL_floorf(y[i]);
+        int e = gs_last_tile(x[i]) + gs_last_tile(y[i]);
         if (e > d) d = e;
     }
     return d;
@@ -979,9 +995,12 @@ static int gs_car_diagonal(const gs_car *c) {
     float fx[4], fy[4];
     gs_car_footprint(c, half_len, half_wid, fx, fy);
 
-    int d = (int)SDL_floorf(fx[0]) + (int)SDL_floorf(fy[0]);
+    // The same "last tile it covers" rule the ground paint answers by; a car
+    // and the paint under it disagreeing on where a tile line falls is the
+    // whole of what this sorting has to get right.
+    int d = gs_last_tile(fx[0]) + gs_last_tile(fy[0]);
     for (int i = 1; i < 4; i++) {
-        int e = (int)SDL_floorf(fx[i]) + (int)SDL_floorf(fy[i]);
+        int e = gs_last_tile(fx[i]) + gs_last_tile(fy[i]);
         if (e > d) d = e;
     }
     return d;

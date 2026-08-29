@@ -180,123 +180,182 @@ static gs_camera gs_camera_on(float cx, float cy, float cz) {
 
 // ---------------------------------------------------------------------------
 
-TEST(a_car_standing_in_a_hazard_is_not_painted_over_by_it) {
-    // **A slick is on the road; the car is on the slick.** Same rule as the
-    // gate's arrow, asked of the other thing painted flat on the ground - and
-    // asked because the comment over the hazard loop says they are "drawn on
-    // the ground under everything that moves" while the loop itself runs after
-    // the sweep that draws the cars. A claim in a comment is not a claim
-    // anything checks, which is how the arrow came to be drawn over cars for as
-    // long as it was.
-    //
-    // Oil, because it is the widest of the four and the one a car is most
-    // likely to be sitting in: you drive into a slick and stay in it, which is
-    // the whole point of dropping one.
-    static gs_track t;
-    gs_flat_pavement(&t, 48, 48);
-
-    static gs_world slicked, clean;
-    gs_park_car(&slicked, &t, GS_INT(24), GS_INT(24));
-    gs_park_car(&clean, &t, GS_INT(24), GS_INT(24));
-
-    // Dropped where the car is standing, by moving the car there to drop it and
-    // leaving it there - a hazard goes under the car that laid it.
-    gs_world_arm(&slicked, GS_HAZ_OIL, 1);
-    slicked.car[0].drop_cooldown = 0;
-    CHECK(gs_world_drop(&slicked, 0, GS_HAZ_OIL));
-    CHECK(slicked.hazard_count == 1);
-
-    gs_camera cam = gs_camera_on(24.0f, 24.0f, 0.0f);
-    cam.zoom = 3.0f;
-
-    gs_frame with = gs_render_frame(ren, &t, &slicked, &slicked, 1.0f, &cam);
-    gs_frame without = gs_render_frame(ren, &t, &clean, &clean, 1.0f, &cam);
-    CHECK(with.px != nullptr && without.px != nullptr);
-    if (with.px == nullptr || without.px == nullptr) return;
-
-    const int seen = gs_count_car0(&with);
-    const int whole = gs_count_car0(&without);
-
-    printf("  HAZARD car in the slick %d px, the same car on clean road %d px\n",
-           seen, whole);
-
-    CHECK(whole > 2000);          // the reference car is really in the frame
-    CHECK(seen == whole);         // and the slick took none of it
-
-    gs_frame_free(&with);
-    gs_frame_free(&without);
+// **Of the car that was there, how much is still there.** Counting car-coloured
+// pixels in each frame separately is not the same question and gets the wrong
+// answer twice: a mine is drawn orange, which passes for car red, so a mark can
+// *add* to the count while covering the car underneath. This asks only about
+// the pixels the clean frame says are car.
+static int gs_car_pixels_lost(const gs_frame *with, const gs_frame *without) {
+    int lost = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        if (gs_is_car0(&without->px[i * 4]) && !gs_is_car0(&with->px[i * 4])) lost++;
+    }
+    return lost;
 }
 
-TEST(a_car_standing_on_a_gates_arrow_is_not_painted_over_by_it) {
-    // **Paint on the road goes under the car, from every angle.**
-    //
-    // The sweep paints back to front one tile diagonal at a time, and a shape's
-    // diagonal is `floor(x) + floor(y)` at its *nearest* corner - which is the
-    // only answer that keeps a mark out of the ground it lies on. A gate's line
-    // is cut into blocks so each block answers for its own tile; the arrow was
-    // never cut up, so a shaft and head spanning two and a half tiles are one
-    // shape, sorted at the tile the head reaches. Point that arrow at the
-    // camera and everything standing on its tail is a whole tile behind the
-    // diagonal it is drawn at - so the arrow is painted last, over the car.
-    //
-    // The arrow runs *behind* the gate centre, from 2.4 tiles back to just
-    // short of it, so the car goes at the tail and the gate faces down the
-    // screen: the worst case rather than the average one, built here rather
-    // than waited for. A race only meets it when the route happens to point
-    // that way at a gate a car happens to be standing on.
-    //
-    // Measured against the same car on the same ground with the gates moved
-    // away, because "how much of a car can be seen" only means something
-    // against a car nothing is covering.
-    static gs_track marked, clear;
-    gs_flat_pavement(&marked, 48, 48);
-    gs_flat_pavement(&clear, 48, 48);
+// Every kind of paint a car can end up standing on. Named here rather than
+// counted at the call site, so adding one to the renderer and not to this list
+// is a compile-time hole rather than a silent one.
+typedef enum {
+    GS_MARK_ROUTE = 0,     // the dashed line that says which way round
+    GS_MARK_START_LINE,    // the plain white line a sprint begins at
+    GS_MARK_FINISH_LINE,   // the chequer at the end of one
+    GS_MARK_ARROW,         // the way through a gate
+    GS_MARK_OIL,           // and the four things a player drops
+    GS_MARK_MINE,
+    GS_MARK_SMOKE,
+    GS_MARK_FLAME,
+    GS_MARK_COUNT
+} gs_mark_kind;
 
-    // Facing +x and +y both, which is straight towards the viewer.
+static const char *gs_mark_name(gs_mark_kind m) {
+    switch (m) {
+    case GS_MARK_ROUTE:       return "route dash";
+    case GS_MARK_START_LINE:  return "start line";
+    case GS_MARK_FINISH_LINE: return "finish line";
+    case GS_MARK_ARROW:       return "gate arrow";
+    case GS_MARK_OIL:         return "oil";
+    case GS_MARK_MINE:        return "mine";
+    case GS_MARK_SMOKE:       return "smoke";
+    case GS_MARK_FLAME:       return "flame";
+    case GS_MARK_COUNT:       break;
+    }
+    return "?";
+}
+
+static gs_hazard_kind gs_mark_hazard(gs_mark_kind m) {
+    switch (m) {
+    case GS_MARK_OIL:   return GS_HAZ_OIL;
+    case GS_MARK_MINE:  return GS_HAZ_MINE;
+    case GS_MARK_SMOKE: return GS_HAZ_SMOKE;
+    case GS_MARK_FLAME: return GS_HAZ_FLAME;
+    default:            return GS_HAZ_NONE;
+    }
+}
+
+TEST(no_paint_on_the_ground_is_drawn_over_a_car_standing_on_it) {
+    // **Paint goes under the car, and this asks it of every kind of paint.**
+    //
+    // The ground is painted back to front one tile diagonal at a time, and a
+    // shape is sorted by `floor(x) + floor(y)` at its *nearest* corner - the
+    // only answer that keeps a mark out of the ground it lies on, and the wrong
+    // one for anything standing between the shape's near end and its far end,
+    // which is then painted over. Two kinds were caught doing it, and the only
+    // reason the rest were not suspected is that nobody had asked:
+    //
+    //   - a gate's **arrow** ate 339 of a car's 6,491 pixels, and did it a tile
+    //     at a time as the car drove, which is what a player reported as a
+    //     flicker crossing an arrow or the start line;
+    //   - a **hazard** ate all 6,491. Hazards were drawn in a pass after the
+    //     sweep, so every one of them was on top of every car - under a comment
+    //     saying they went "under everything that moves".
+    //
+    // So the rule is asked of all eight, in the orientation that is worst for
+    // each: the gate faces the camera, which is what puts the far end of a mark
+    // a whole tile behind the diagonal it is sorted at.
+    //
+    // **Measured against the same car on the same ground with the mark taken
+    // away**, because "how much of a car can be seen" only means anything
+    // against a car nothing is covering. And each case checks the mark is
+    // really in the frame, or a scene that quietly failed to place one would
+    // pass this without testing anything.
+    //
+    // Deliberately not here: the **kerb**, which is drawn one tile at a time
+    // and so is already its own smallest piece; the **posts** at a waypoint's
+    // edges and the **flags** and **lights** at a start line, which stand up
+    // out of the world rather than lying on it and are meant to occlude a car
+    // behind them; and the **landing arc**, which is drawn over everything on
+    // purpose because it is a readout rather than scenery.
     const gs_angle towards_camera = (gs_angle)(65536 / 8);
     const gs_fix wide = GS_INT(3);
 
-    gs_track_add_gate(&marked, GS_INT(24), GS_INT(24), towards_camera, wide);
-    gs_track_add_gate(&marked, GS_INT(30), GS_INT(30), towards_camera, wide);
+    int covered = 0;
+    for (int m = 0; m < GS_MARK_COUNT; m++) {
+        const gs_mark_kind mark = (gs_mark_kind)m;
+        const gs_hazard_kind haz = gs_mark_hazard(mark);
 
-    // The same route, out of shot, so the reference frame has the car and the
-    // ground and nothing else.
-    gs_track_add_gate(&clear, GS_INT(44), GS_INT(44), towards_camera, wide);
-    gs_track_add_gate(&clear, GS_INT(46), GS_INT(46), towards_camera, wide);
+        static gs_track marked, clear;
+        gs_flat_pavement(&marked, 48, 48);
+        gs_flat_pavement(&clear, 48, 48);
 
-    // The tail of the arrow: 2.4 tiles back along the way through the gate.
-    const gs_fix car_x = GS_INT(24) - GS_RATIO(17, 10);
-    const gs_fix car_y = GS_INT(24) - GS_RATIO(17, 10);
+        // Where the car stands, and where the route has to be for the mark it
+        // is standing on to be under it.
+        gs_fix car_x = GS_INT(24), car_y = GS_INT(24);
 
-    static gs_world on_paint, off_paint;
-    gs_park_car(&on_paint, &marked, car_x, car_y);
-    gs_park_car(&off_paint, &clear, car_x, car_y);
+        if (haz == GS_HAZ_NONE) {
+            // A sprint: gate zero carries the plain line, the last gate the
+            // chequer, and both carry an arrow behind them.
+            const gs_fix a = GS_INT(24), b = GS_INT(32);
+            gs_track_add_gate(&marked, a, a, towards_camera, wide);
+            gs_track_add_gate(&marked, b, b, towards_camera, wide);
 
-    gs_camera cam = gs_camera_on(gs_to_f(car_x), gs_to_f(car_y), 0.0f);
-    cam.zoom = 3.0f;
+            // The same route, out of shot, so the reference frame is the car
+            // and the ground and nothing else.
+            gs_track_add_gate(&clear, GS_INT(44), GS_INT(44), towards_camera, wide);
+            gs_track_add_gate(&clear, GS_INT(46), GS_INT(46), towards_camera, wide);
 
-    gs_frame with = gs_render_frame(ren, &marked, &on_paint, &on_paint, 1.0f, &cam);
-    gs_frame without = gs_render_frame(ren, &clear, &off_paint, &off_paint, 1.0f, &cam);
-    CHECK(with.px != nullptr && without.px != nullptr);
-    if (with.px == nullptr || without.px == nullptr) return;
+            switch (mark) {
+            case GS_MARK_START_LINE:                       // on gate zero
+                car_x = a; car_y = a;
+                break;
+            case GS_MARK_FINISH_LINE:                      // on the last gate
+                car_x = b; car_y = b;
+                break;
+            case GS_MARK_ARROW:                            // 2.4 tiles behind it
+                car_x = b - GS_RATIO(17, 10);
+                car_y = b - GS_RATIO(17, 10);
+                break;
+            case GS_MARK_ROUTE:                            // half way between
+            default:
+                car_x = (a + b) / 2;
+                car_y = (a + b) / 2;
+                break;
+            }
+        }
 
-    const int seen = gs_count_car0(&with);
-    const int whole = gs_count_car0(&without);
+        static gs_world on_mark, off_mark;
+        gs_park_car(&on_mark, &marked, car_x, car_y);
+        gs_park_car(&off_mark, &clear, car_x, car_y);
 
-    printf("  ARROW car on the arrow %d px, the same car off it %d px\n",
-           seen, whole);
+        if (haz != GS_HAZ_NONE) {
+            gs_world_arm(&on_mark, haz, 1);
+            on_mark.car[0].drop_cooldown = 0;
+            CHECK(gs_world_drop(&on_mark, 0, haz));
+            CHECK(on_mark.hazard_count == 1);
+        }
 
-    // The reference car is really there, or the two counts agreeing would mean
-    // nothing at all.
-    CHECK(whole > 2000);
+        gs_camera cam = gs_camera_on(gs_to_f(car_x), gs_to_f(car_y), 0.0f);
+        cam.zoom = 3.0f;
 
-    // And the arrow took none of it. Exact rather than nearly: the car has not
-    // moved between the two frames and neither has the camera, so every pixel
-    // of the difference is paint that landed on a car.
-    CHECK(seen == whole);
+        gs_frame with = gs_render_frame(ren, &marked, &on_mark, &on_mark, 1.0f, &cam);
+        gs_frame without = gs_render_frame(ren, &clear, &off_mark, &off_mark, 1.0f, &cam);
+        CHECK(with.px != nullptr && without.px != nullptr);
+        if (with.px == nullptr || without.px == nullptr) {
+            gs_frame_free(&with);
+            gs_frame_free(&without);
+            continue;
+        }
 
-    gs_frame_free(&with);
-    gs_frame_free(&without);
+        const int whole = gs_count_car0(&without);
+        const int lost = gs_car_pixels_lost(&with, &without);
+        const double drawn = gs_frame_diff(&with, &without);
+
+        printf("  PAINT %-12s %d px of car, %d of it painted over\n",
+               gs_mark_name(mark), whole, lost);
+
+        CHECK(whole > 2000);      // the reference car is really in the frame
+        CHECK(drawn > 0.0);       // and the mark really is in the other one
+        CHECK(lost == 0);         // and none of it landed on the car
+
+        covered++;
+        gs_frame_free(&with);
+        gs_frame_free(&without);
+    }
+
+    // **Asserted, not believed.** A kind added to gs_mark_kind and not walked
+    // here turns this red by itself.
+    printf("  PAINT %d of %d kinds of ground paint walked\n", covered, GS_MARK_COUNT);
+    CHECK(covered == GS_MARK_COUNT);
 }
 
 TEST(a_car_behind_a_rise_is_hidden_by_it) {
@@ -10936,8 +10995,7 @@ int main(void) {
 
     gs_win = win;
 
-    run_a_car_standing_in_a_hazard_is_not_painted_over_by_it(ren);
-    run_a_car_standing_on_a_gates_arrow_is_not_painted_over_by_it(ren);
+    run_no_paint_on_the_ground_is_drawn_over_a_car_standing_on_it(ren);
     run_a_car_behind_a_rise_is_hidden_by_it(ren);
     run_the_view_does_not_jump_as_a_car_crosses_a_tile_boundary(ren);
     run_interpolation_places_a_car_between_the_two_ticks_it_sits_between(ren);

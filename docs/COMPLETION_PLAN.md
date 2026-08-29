@@ -1400,6 +1400,20 @@ worth as much as what was decided about it.
       as a machine can take this: a device is opened at the end of the audio run
       and the callback has to have actually fed it. What no driver can do is
       make a noise somebody hears.
+- [x] **Every kind of ground paint is checked, not the two that were
+      reported.** Two instances of one fault turned up by asking the same
+      question twice, which is a sample and not a proof, so the suite now walks
+      all eight kinds of paint a car can stand on — the route line, the start
+      line, the chequered finish, a gate's arrow and the four hazards — and says
+      it walked 8 of 8, so a ninth that nobody checks turns the tree red. The
+      walk found a third fault nobody had reported: a flame is exactly one tile
+      across, so one dropped by a stationary car has its edge exactly on a tile
+      line, and the sorting counted a tile the flame did not cover — painting it
+      over 62 pixels of the car standing in it. The rule is now "the last tile
+      the shape is actually in".
+      *Verification: eight kinds of paint, every one of them 0 pixels of car
+      painted over, where the flame was 62 and the arrow 339 and a hazard the
+      whole car.*
 - [x] **A car sitting in a hazard was painted out of the frame.** The same
       question asked of the other thing painted flat on the road, and the same
       fault at its worst: hazards were drawn in a pass of their own after

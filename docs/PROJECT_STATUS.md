@@ -965,6 +965,31 @@ floor of 630 — so a shipped set that shortens turns the tree red without anybo
 running the writer. Every track is still validated and raced by every vehicle
 from every grid slot as well.
 
+**Every kind of ground paint is walked now, not the two that were reported.**
+Two instances of one fault were found by asking the same question twice, which
+is the definition of a sample rather than a proof, so
+`no_paint_on_the_ground_is_drawn_over_a_car_standing_on_it` asks it of all eight
+kinds a car can stand on - route dash, start line, chequered finish, gate arrow
+and the four hazards - each in the orientation that is worst for it, and states
+that it walked 8 of 8. A ninth added to `gs_mark_kind` and not walked turns the
+tree red by itself. Left out deliberately, and named in the test: the kerb,
+which is drawn a tile at a time and is already its own smallest piece; the
+posts, flags and lights, which stand up out of the world and are *meant* to
+occlude a car behind them; and the landing arc, which is drawn over everything
+on purpose.
+
+**It caught a third fault the reports had not.** Flame was painting over 62
+pixels of a car sitting in it while the other seven were clean, and the reason
+was not the flame: `GS_FLAME_RADIUS` is exactly one tile, so a flame dropped by
+a stationary car has its far edge exactly on a tile line - and `floor(25.0)` is
+25, a tile the shape covers none of. The mark was handed a diagonal a whole tile
+nearer than it reached, and sorted there it was painted after the car standing
+on it. `gs_last_tile` is `ceil(v) - 1` instead: the tile holding the last point
+*inside* the shape, which is `floor` to the pixel everywhere except on a line,
+where it is right. The car's own footprint answers by the same rule, because a
+car and the paint under it disagreeing about where a tile line falls is the
+whole of what this sorting has to get right.
+
 **And a car sitting in a hazard was painted out of the frame entirely.** Found
 by asking the arrow's question of the other thing painted flat on the ground,
 and it is the same fault at its worst: the hazards were drawn in a pass of their
