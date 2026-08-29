@@ -4623,6 +4623,7 @@ TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
     CHECK(count >= 16);
 
     int raced = 0, stuck = 0;
+    gs_fix shortest = INT32_MAX, longest = 0;
     for (int i = 0; i < count; i++) {
         char path[1024];
         SDL_snprintf(path, sizeof path, "%s/tracks/%s", GS_SOURCE_ASSETS, found[i]);
@@ -4638,6 +4639,19 @@ TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
         CHECK(read);
         if (!read) continue;
         CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
+
+        // **And it is a race, not a demonstration.** The tool that writes these
+        // refuses anything under the floor, but the build never runs the tool -
+        // it only compiles it - so until this line the eighteen files in the
+        // box were held to nothing. That is exactly how a set of twenty-seven
+        // second tracks shipped once already: the rule existed, in a place that
+        // was not consulted by anything that ran.
+        const gs_fix route = gs_track_route_length(&t);
+        printf("  STOCK %-26s %4d tiles of route\n", found[i],
+               (int)(route / GS_ONE));
+        CHECK(route >= GS_INT(GS_STOCK_MIN_ROUTE));
+        if (route < shortest) shortest = route;
+        if (route > longest) longest = route;
 
         for (uint8_t slot = 0; slot < GS_MAX_CARS; slot++) {
             gs_world w;
@@ -4677,8 +4691,12 @@ TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
 
     printf("  STOCK %d races over %d tracks, %d of them stuck\n",
            raced, count, stuck);
+    printf("  STOCK route %d to %d tiles, and the floor is %d\n",
+           (int)(shortest / GS_ONE), (int)(longest / GS_ONE),
+           GS_STOCK_MIN_ROUTE);
     CHECK(raced == count * GS_MAX_CARS);
     CHECK(stuck == 0);
+    CHECK(shortest >= GS_INT(GS_STOCK_MIN_ROUTE));
 }
 
 TEST(no_test_writes_where_a_player_keeps_their_things) {

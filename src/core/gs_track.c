@@ -143,10 +143,13 @@ static bool gs_faces_route(const gs_track *t, uint8_t i) {
     bool loop = t->route == (uint8_t)GS_ROUTE_CIRCUIT && n >= 3;
     gs_angle facing = t->gate[i].heading;
 
-    uint8_t before = loop ? (uint8_t)((i + n - 1) % n)
-                          : (uint8_t)(i == 0 ? 0 : i - 1);
-    uint8_t after = loop ? (uint8_t)((i + 1) % n)
-                         : (uint8_t)(i + 1 < n ? i + 1 : i);
+    // One cast around the whole conditional, not one per arm: a ternary's arms
+    // promote to int before the result is converted back, so casting the arms
+    // leaves an int-to-uint8_t narrowing that -Wconversion only forgives when
+    // the optimiser happens to have proved the range - green at -O2 and red at
+    // -O0, which is how this reached a commit.
+    uint8_t before = (uint8_t)(loop ? (i + n - 1) % n : (i == 0 ? 0 : i - 1));
+    uint8_t after = (uint8_t)(loop ? (i + 1) % n : (i + 1 < n ? i + 1 : i));
 
     const gs_gate *a = &t->gate[before];
     const gs_gate *b = &t->gate[i];
@@ -169,6 +172,24 @@ uint8_t gs_track_route_legs(const gs_track *t) {
     if (t == nullptr || t->gate_count < 2) return 0;
     bool loop = t->route == (uint8_t)GS_ROUTE_CIRCUIT && t->gate_count >= 3;
     return loop ? t->gate_count : (uint8_t)(t->gate_count - 1);
+}
+
+gs_fix gs_track_route_length(const gs_track *t) {
+    if (t == nullptr || t->gate_count < 2) return 0;
+
+    // Chords rather than the Catmull-Rom the road is carved along: a chord is
+    // shorter than the curve through the same gates, so this under-reports and
+    // a track that clears the floor by this measure clears it by any other.
+    gs_fix len = 0;
+    for (uint8_t i = 0; i + 1 < t->gate_count; i++) {
+        len += gs_fix_len2(t->gate[i + 1].x - t->gate[i].x,
+                           t->gate[i + 1].y - t->gate[i].y);
+    }
+    if (t->route == (uint8_t)GS_ROUTE_CIRCUIT) {
+        const gs_gate *last = &t->gate[t->gate_count - 1];
+        len += gs_fix_len2(t->gate[0].x - last->x, t->gate[0].y - last->y);
+    }
+    return len;
 }
 
 void gs_track_route_point(const gs_track *t, uint8_t leg, gs_fix s,

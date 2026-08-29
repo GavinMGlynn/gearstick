@@ -327,6 +327,23 @@ void gs_track_route_point(const gs_track *t, uint8_t leg, gs_fix s,
 // gate for a loop, which comes back to where it started.
 uint8_t gs_track_route_legs(const gs_track *t);
 
+// **How long the route is, in tiles**, as the chords between its gates - a loop
+// closing back to its first gate and a path stopping at its last.
+//
+// One definition, because the number decides whether a track is long enough to
+// ship and that verdict cannot depend on who measured it. `tools/make_tracks.c`
+// refuses to write a track under GS_STOCK_MIN_ROUTE and the suite holds the
+// tracks already in `assets/tracks/` to the same floor.
+gs_fix gs_track_route_length(const gs_track *t);
+
+// **How long a track that ships has to be, in tiles of route.** Ten times the
+// set of August 2026, which ran 28 to 173 tiles and averaged 63 - twenty-seven
+// seconds of driving. A default track being a race rather than a demonstration
+// has been asked for repeatedly and lost repeatedly between one piece of work
+// and the next, so it is a number the tree is red without rather than a thing
+// anybody is asked to remember.
+#define GS_STOCK_MIN_ROUTE 630
+
 // **Where a car waits for the flag.** Behind the start line, abreast across it,
 // facing the way the route runs through it - so the first thing a car does is
 // cross the line it has to cross, at whatever speed it managed on the way.

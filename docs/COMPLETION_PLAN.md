@@ -1394,12 +1394,23 @@ worth as much as what was decided about it.
       item as "Sound listened to on Windows and macOS" above — one thing, listed
       twice.)* The synthesiser is platform-independent and the device path is
       not. Windows and macOS need a human with speakers, and nothing in this
-      repository can substitute for that. It is the only tail left, and it is
-      left for the same reason the phase item is.
+      repository can substitute for that. It is left for the same reason the
+      phase item is.
       **The device path itself is now exercised on all three**, which is as far
       as a machine can take this: a device is opened at the end of the audio run
       and the callback has to have actually fed it. What no driver can do is
       make a noise somebody hears.
+- [ ] **An online race falls behind on a machine that cannot keep up, and one
+      test says so by failing.** `gearstick_plays` gives the real client
+      fourteen seconds and asks the car to get three tiles from the line. With
+      the sanitisers on it manages 2.9 online, where the same client offline
+      manages ten and the same check in a release build manages twenty.
+      *Verification that it is not the tracks: the simulation puts a car 42
+      tiles from the line in those same fourteen seconds, and the check fails
+      identically against the short tracks of two commits ago, at 2.7 tiles.*
+      What the number measures is the rollback world lagging the clock on a slow
+      machine — which is worth understanding on its own, and is the last thing
+      standing between `ctest` and green in the `Debug` preset.
 - [x] **The store is one file with no migration path.** *(Closed in Phase 13,
       and exercised for real in Phase 14.)* There is now a schema version and an
       upgrade path: new tables appear by `CREATE TABLE IF NOT EXISTS`, new
@@ -2353,17 +2364,18 @@ are the places a fault could sit unnoticed.
       The world was the reason: a field could be at most 64 by 64 tiles, and no
       route folded into that is longer than about five hundred tiles. The world
       is 192 now and the route is a serpentine of passes joined by half circles,
-      so the eighteen tracks that ship are **998 to 1125 tiles — sixteen to
-      eighteen times** what they replaced, or five to ten minutes of driving.
+      so the eighteen tracks that ship are **997 to 1097 tiles — sixteen to
+      seventeen times** what they replaced, or five to ten minutes of driving.
       The ten written by hand are on the same field, with their signature
       feature repeated across it so a track about a ramp has a ramp on every
       pass.
       *Verification: driven rather than measured — the AI gets round `bright
       run` in 4m 22s and `jupiter run` in 5m 15s, against twenty-seven seconds
-      for what they replaced. The tool that writes the shipped set refuses a
-      track under a route-length floor, so the rule is enforced by the build
-      rather than remembered, and every track is raced by every vehicle from
-      every grid slot before it is written.*
+      for what they replaced, and every track is raced by every vehicle from
+      every grid slot. The suite measures the route of every track in the box
+      and fails under the floor — it prints 997 to 1097 tiles against a floor of
+      630 — so a set that shortens goes red on its own, rather than only the
+      tool that writes them refusing to write a short one.*
       Three things moved with it, each found by something going red: the
       analyser gave every track ninety seconds and assumed a pace no car holds
       through a hairpin; a route of a thousand tiles needs a checkpoint every

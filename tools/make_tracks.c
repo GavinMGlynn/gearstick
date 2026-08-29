@@ -23,10 +23,10 @@
 
 static gs_track gs_t;
 
-// **How long a default track has to be, in tiles of route.** Ten times the set
-// this replaced, which averaged sixty-three. See gs_write for why it is a rule
-// the build enforces rather than a thing anybody is asked to remember.
-#define GS_STOCK_MIN_ROUTE 630
+// GS_STOCK_MIN_ROUTE - how long a default track has to be - lives in
+// core/gs_track.h, next to the route length it is compared against, so the tool
+// that writes the tracks and the suite that checks the written ones hold them to
+// the same number rather than to two numbers that agree today.
 
 static void gs_flat(uint8_t w, uint8_t h, gs_surface s) {
     gs_track_init(&gs_t, w, h, s);
@@ -99,15 +99,7 @@ static bool gs_write(const char *path) {
     // and the requirement kept being lost between one piece of work and the
     // next. It is not a thing to remember any more: a track under the floor is
     // not written, and the build fails.
-    gs_fix route = 0;
-    for (uint8_t i = 0; i + 1 < gs_t.gate_count; i++) {
-        route += gs_fix_len2(gs_t.gate[i + 1].x - gs_t.gate[i].x,
-                             gs_t.gate[i + 1].y - gs_t.gate[i].y);
-    }
-    if (gs_t.route == (uint8_t)GS_ROUTE_CIRCUIT && gs_t.gate_count > 1) {
-        route += gs_fix_len2(gs_t.gate[0].x - gs_t.gate[gs_t.gate_count - 1].x,
-                             gs_t.gate[0].y - gs_t.gate[gs_t.gate_count - 1].y);
-    }
+    gs_fix route = gs_track_route_length(&gs_t);
     if (route < GS_INT(GS_STOCK_MIN_ROUTE)) {
         printf("  %s: %d tiles of route, and the floor is %d\n", path,
                (int)(route / GS_ONE), GS_STOCK_MIN_ROUTE);

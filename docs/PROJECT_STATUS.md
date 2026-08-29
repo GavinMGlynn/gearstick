@@ -944,16 +944,49 @@ sixth of the segment, which at a hundred tiles a pass is sixteen tiles of
 overshoot, and the first attempt carved the whole field into one car park with
 islands in it.
 
-The eighteen tracks that ship are **998 to 1125 tiles of route — sixteen to
-eighteen times** what they replaced. Driven rather than measured: the AI gets
+The eighteen tracks that ship are **997 to 1097 tiles of route — sixteen to
+seventeen times** what they replaced. Driven rather than measured: the AI gets
 round `bright run` in **4m 22s**, `the oval` in 5m 07s, `first light` in 5m 02s
 and `jupiter run` in 5m 15s, against the twenty-seven seconds
 `gearstick_cli pace` reports for the route this replaced — ten to twelve times
 the driving, which is the range that was asked for.
-Every one of them is validated, and every one is raced by every vehicle before
-it is written; `tools/make_tracks.c` refuses to write a track under
-`GS_STOCK_MIN_ROUTE`, so the requirement is enforced by the build rather than
-remembered by whoever is here next.
+
+**And the floor is checked on the tracks in the box, not only on the way in.**
+`tools/make_tracks.c` refuses to write a track under `GS_STOCK_MIN_ROUTE`, and
+that was described here as the build enforcing the rule. It was not: the build
+*compiles* the tool and never runs it, so the eighteen files in `assets/tracks/`
+were held to nothing once written, which is the precise shape of the failure
+that let a set of twenty-seven second tracks ship in the first place — a rule
+kept somewhere nothing consulted. `gs_track_route_length` is now one definition
+in the core, `GS_STOCK_MIN_ROUTE` sits beside it in `gs_track.h`, and
+`an_opponent_finishes_every_track_that_ships_from_every_grid_slot` measures
+every `.gstrack` it loads and prints the range it found — 997 to 1097 against a
+floor of 630 — so a shipped set that shortens turns the tree red without anybody
+running the writer. Every track is still validated and raced by every vehicle
+from every grid slot as well.
+
+**One test is red in `Debug` and it is not this work.** `gearstick_plays` races
+the real client for fourteen seconds of wall clock and asks that the car get
+three tiles from where it started. Under `-O0` with the address and undefined
+sanitisers on, the online run manages 2.9 — the local run on the same machine
+manages ten, and the same check passes in `RelWithDebInfo`, where the online car
+covers twenty. The bar is not the tracks: the simulation itself puts a stock car
+**42 tiles** from the line in those fourteen seconds from every grid slot on
+`wide flats`, and running the check against the short tracks of two commits ago
+with these same sanitised binaries fails it the same way, at 2.7 tiles. What it
+measures is how far behind the rollback world falls on a machine that cannot
+keep up — a real thing to know, and an older one than this. It is written down
+here rather than fixed inside a piece of work about track length.
+
+**The tree was red in the `Debug` preset when this landed.** `gs_faces_route`
+cast each arm of a ternary rather than its result, and a ternary's arms promote
+to `int` before the result is converted back — so the initialiser is an
+`int`-to-`uint8_t` narrowing that `-Wconversion` forgives only when the
+optimiser has already proved the range. GCC proves it at `-O2` and does not at
+`-O0`: green in `linux-release`, red in `linux-debug`, and only the release
+preset had been built. One cast around the whole conditional fixes it. **A
+preset that is not built is not green**, and both are built now before anything
+is called done.
 
 **The ten written by hand are on the same field.** Each of them demonstrates one
 idea and used to do it on forty by twenty-four with two gates. Their signature
