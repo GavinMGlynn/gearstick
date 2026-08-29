@@ -1443,16 +1443,22 @@ worth as much as what was decided about it.
       surface and one just under it, went 5.07 tiles and 0.08. They now go 5.07
       and 5.07 — and no golden hash moved, so nothing anybody has recorded has
       been invalidated.*
-- [ ] **The driver can be fooled by a slope it is standing across.** Its check
-      for "am I against something I cannot climb" looks one distance ahead along
-      its own nose. A car stalled at an angle across a ramp sees very little
-      rise that way while the fall line is what is holding it, so it leans on
-      the throttle instead of backing off. A wider probe was written and then
-      taken back out: it could not be shown to fix anything measurable, and no
-      test could be built that told it from the old one — five slope profiles
-      were tried and the old check backed away from all of them. Reproducing it
-      needs a car put deliberately at an angle on a ramp, which is how the next
-      attempt should start.
+- [x] **The driver leaned on hills it could not climb.** Its check for "am I
+      against something I cannot get up" looked one distance ahead, a tile and a
+      half, so a hill that begins gently and steepens read as climbable at
+      exactly the point the question was put — and the car then stalled on the
+      steep part, from where the same tile and a half ahead is gentle again. Two
+      cars on `the big one` sat like that at nine hundredths of a tile a second
+      with the throttle open, for the rest of the race. It asks the whole way up
+      now.
+      *Verification: the driver is asked directly rather than through a race —
+      it is a pure function of the world — and on a hill rising 0.42 of a tile
+      at a tile and a half and 1.35 at three it used to answer "accelerate" and
+      now answers "brake". The two cars leaning on slopes become none, and no
+      golden hash moves.*
+      This was written, taken out again for failing to prove itself, and put
+      back when the proof arrived; the story is in `PROJECT_STATUS.md` because
+      the first judgement was made on a count instead of a mechanism.
 - [ ] **Two cars that jam together stay jammed.** All that is left of the
       stragglers: `the big one` loses two cars that are stopped on *level*
       ground, half a tile apart, each with the throttle open. Nothing in the

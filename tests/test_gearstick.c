@@ -8435,6 +8435,82 @@ TEST(every_generated_track_can_be_got_round) {
     }
 }
 
+TEST(a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from) {
+    // **The question is asked of the whole slope, not one point on it.**
+    //
+    // A driver decides it is against something it cannot climb by looking a
+    // tile and a half up its own nose. A hill that begins gently and steepens
+    // after that answers "climbable" at exactly the distance the question is
+    // put, and the mistake holds rather than passing: the car creeps up the
+    // gentle part, comes to rest on the steep part, and from there the same
+    // tile and a half ahead is gentle again. Two cars were found doing this on
+    // `the big one`, at nine hundredths of a tile a second with the throttle
+    // wide open, for the rest of the race.
+    //
+    // **Asked of the driver rather than of a race.** An opponent is a pure
+    // function of the world, so the honest question is what it asks for in this
+    // exact position - not where a car ends up after ten seconds, which is
+    // dominated by how it arrived and was why four earlier attempts at this
+    // test could not tell the two versions apart.
+    static gs_track t;
+    gs_track_init(&t, 40, 24, GS_SURF_PAVEMENT);
+
+    // Level to x = 16, then a fifth of a tile per tile for a tile and a half,
+    // then seven tenths. At rest a car is allowed half a tile of rise at the
+    // tile and a half it used to look at, and this is 0.42 - inside it. Three
+    // tiles out it is 1.35, which is not climbable by any reading.
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_fix h = 0;
+            if (x > 16) {
+                const gs_fix up = GS_INT(x - 16);
+                h = up <= GS_RATIO(150, 100)
+                        ? gs_fix_mul(GS_RATIO(20, 100), up)
+                        : GS_RATIO(30, 100) +
+                          gs_fix_mul(GS_RATIO(70, 100), up - GS_RATIO(150, 100));
+            }
+            gs_track_set_corner(&t, x, y, h);
+        }
+    }
+
+    // A route through the hill, so the driver wants to go that way and the only
+    // thing telling it not to is the ground.
+    gs_track_add_gate(&t, GS_INT(8), GS_INT(12), 0, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(36), GS_INT(12), 0, GS_INT(5));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                     GS_INT(16), GS_INT(12), 0);
+
+    // The shape of the ground is stated, so a change to it that makes this
+    // scene something else is visible rather than silent.
+    const gs_fix here = gs_track_height(&t, w.car[0].x, w.car[0].y);
+    const gs_fix at_one_and_a_half =
+        gs_track_height(&t, w.car[0].x + GS_RATIO(150, 100), w.car[0].y) - here;
+    const gs_fix at_three =
+        gs_track_height(&t, w.car[0].x + GS_INT(3), w.car[0].y) - here;
+
+    printf("  HILL rises %.2f at a tile and a half and %.2f at three\n",
+           (double)at_one_and_a_half / (double)GS_ONE,
+           (double)at_three / (double)GS_ONE);
+
+    // Gentle where the old question was asked, and hopeless a little past it -
+    // which is the whole point of this scene.
+    CHECK(at_one_and_a_half < GS_HALF);
+    CHECK(at_three > GS_INT(1));
+
+    // **So it backs off rather than leaning on it.** The brake is reverse from
+    // a standstill, which is what getting off a hill looks like.
+    const gs_input in = gs_ai_drive(&w, &t, 0);
+    printf("  HILL the driver asks for %s%s\n",
+           (in & GS_IN_ACCEL) ? "accel " : "", (in & GS_IN_BRAKE) ? "brake" : "");
+    CHECK((in & GS_IN_BRAKE) != 0);
+    CHECK((in & GS_IN_ACCEL) == 0);
+}
+
 TEST(a_car_a_little_under_the_ground_can_still_drive_away) {
     // **A car that is not exactly on the surface is still a car that can
     // drive.** It is under it often enough: shoved by another car, or landing,
@@ -8756,6 +8832,7 @@ int main(void) {
     run_a_part_that_will_not_fit_changes_nothing();
     run_a_generated_track_leaves_clear_ground_to_get_up_to_speed_on();
     run_every_generated_track_can_be_got_round();
+    run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
     run_every_car_lines_up_behind_the_line_it_has_to_cross();
 

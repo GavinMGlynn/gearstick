@@ -1016,21 +1016,36 @@ exactly where it did - `gearstick_cli selftest --verify` passes untouched. A
 change to the physics that moves nothing anybody has recorded is the rarest kind
 and worth saying out loud.
 
-**A change to the driver went in with it and has been taken back out.** The AI's
-"am I against something I cannot climb" probe asked at one distance, and a slope
-that begins gently and steepens defeats that in principle - so it was changed to
-ask the whole way. In principle. Measured afterwards, the physics fix above
-accounts for the whole of the improvement: with the probe put back exactly as it
-was, four cars over the shipped set lose the same two, on the same track, at the
-same places. And no test could be built that told the two versions apart - five
-slope profiles were tried and the old probe backed away from every one of them,
-because the real trap needed a car stalled at an angle *across* a ramp, where
-the rise along its nose is small while the fall line holds it.
+**A change to the driver went out and has come back, with the test that was
+missing.** The AI's "am I against something I cannot climb" probe asked at one
+distance, a tile and a half up its own nose, and a hill that begins gently and
+steepens defeats that. It was written, then taken out again the same day for
+failing to prove itself, and then put back when the proof turned up. Both
+decisions are worth keeping visible, because the second one is a lesson about
+how the first was judged.
 
-A driver change that cannot be shown to fix anything and cannot be pinned by a
-test is exactly what `GS_OPPONENTS_WORLD_HASH` exists to catch, so it is out. The
-fault it was aimed at is real and is written down in COMPLETION_PLAN.md with the
-geometry that causes it, for somebody who can reproduce it deliberately.
+**It was taken out on the wrong measurement.** Four cars over the shipped set
+lose the same two either way, so the change looked inert. The count was the
+wrong thing to look at: with the probe, neither remaining straggler is on a
+slope at all - the one left is stopped on flat ground, half a tile from another
+car, which is a different fault. Without it, **both** are leaning on hills at
+nine hundredths of a tile a second with the throttle open. Same number, entirely
+different reason, and only the mechanism says so.
+
+**And it could not be tested because the tests were asking the wrong thing.**
+Five slope profiles were built and raced, and the old probe backed away from
+every one: what a car does over ten seconds is dominated by how it arrived, not
+by the rule under examination. An opponent is a **pure function of the world**,
+so the question can be put to it directly - here is a world, what do you ask
+for? On a hill rising 0.42 of a tile at a tile and a half and 1.35 at three, the
+old probe answers `accel` and the new one answers `brake`, and
+`a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from` says so in
+one call with no race around it.
+
+*Verification: the test fails against the old probe and passes against the new
+one; on `the big one` the two cars leaning on slopes become none; and no hash
+moves - the opponents race never puts a car slow enough in front of a hill for
+the two to disagree.*
 
 **The grid is an echelon, and it stops throwing opponents off the map.**
 
