@@ -1458,6 +1458,13 @@ worth as much as what was decided about it.
       ground, half a tile apart, each with the throttle open. Nothing in the
       driver backs up and tries a different line, and nothing has ever needed it
       because a car racing alone never gets shoved into anything.
+      **It does not reproduce from a standing start**, and that is worth knowing
+      before somebody tries again: two cars placed in contact on flat ground,
+      nose to tail and offset, at five separations from eight tenths of a tile
+      to one and a fifth, all drive away perfectly. So the jam is not "two cars
+      touching" — something about how they arrive matters, and the reproduction
+      has to come from the race rather than from a scene. The one in hand is
+      `the big one`, four cars, two laps, at tick 12821.
 - [x] **A race that drives itself could not finish one of the shipped
       tracks.** `--session` was bounded at a flat five minutes of race time,
       written when a stock lap was under one. A stock lap is four to five
