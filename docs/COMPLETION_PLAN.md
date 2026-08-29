@@ -1410,149 +1410,42 @@ worth as much as what was decided about it.
       over yes"; the tracks that already finished still do, and a race that ends
       at the flag is not slowed by a larger bound.*
 - [x] **On a full grid, an opponent was launched off the map before the first
-      corner — on six of the eighteen shipped tracks.** Four AI cars over the
-      shipped set lost 7 of 72, six of them wrecked off the north edge having
-      driven no laps. It took all four slots filled, which is the only grid a
-      player races, and no check had ever raced more than one car at a time.
-      Traced to the tick: the four cars started abreast and level with each
-      other, and two seconds in — all steering for the same racing line — a car
-      in the middle was struck from both sides inside one tick. The two sideways
-      shoves partly cancel; the lift each one adds cannot, so it went nearly
-      five tiles up and ten backwards. The grid is staggered now, each slot a
-      tile and a half further back than the one beside it, so no car is level
-      with either neighbour and a shove has an empty diagonal to go into. The
-      depth was measured rather than picked: two tiles a slot buys nothing more
-      and costs three of twelve generated seeds their shippability.
-      *Verification: 7 stragglers of 72 became 2, and every one of the six
-      launched off the map now finishes. The physics was not touched — the
-      bounce that makes a collision return more than it was given is the point
-      of the game — so the golden hash moved only because the cars start
-      somewhere new, and says so where it is written down.*
+      corner.** Four cars over the shipped set lost 7 of 72, six of them wrecked
+      off the north edge with no laps driven, on six of the eighteen tracks. It
+      needed all four slots filled — the only grid a player races, and one no
+      check had ever used. The four started abreast and level, so a car in the
+      middle could be struck from both sides at once; the grid is staggered now,
+      each slot a tile and a half behind the one beside it.
+      *Verification: 7 stragglers became 2, and every car that was being thrown
+      off the map finishes. The physics is untouched; the golden hash moved only
+      because the cars start somewhere new.*
 - [x] **A car a hair under the ground was frozen for the rest of the race.**
-      One was found on a ramp in `the big one` at nought tiles a second with the
-      throttle open, for a hundred thousand ticks — not against a wall, not
-      touching anything, and taking the other three cars out of the world did
-      not free it. It was six hundredths of a tile under the surface. Two rules
-      were asking about the car where they meant to ask about the ground: the
-      wall rule read that gap as an unclimbable step and refused every move,
-      and refusing skips the very code that would have lifted the car back to
-      the surface. Fixing only that turned the frozen car into a launched one,
-      because the ground-following reads the same gap as seven tiles a second
-      upward. Both ask about the ground now.
-      *Verification: two identical cars driven across a level field, one on the
-      surface and one just under it, went 5.07 tiles and 0.08. They now go 5.07
-      and 5.07 — and no golden hash moved, so nothing anybody has recorded has
-      been invalidated.*
-- [x] **The driver leaned on hills it could not climb.** Its check for "am I
-      against something I cannot get up" looked one distance ahead, a tile and a
-      half, so a hill that begins gently and steepens read as climbable at
-      exactly the point the question was put — and the car then stalled on the
-      steep part, from where the same tile and a half ahead is gentle again. Two
-      cars on `the big one` sat like that at nine hundredths of a tile a second
-      with the throttle open, for the rest of the race. It asks the whole way up
-      now.
-      *Verification: the driver is asked directly rather than through a race —
-      it is a pure function of the world — and on a hill rising 0.42 of a tile
-      at a tile and a half and 1.35 at three it used to answer "accelerate" and
-      now answers "brake". The two cars leaning on slopes become none, and no
-      golden hash moves.*
-      This was written, taken out again for failing to prove itself, and put
-      back when the proof arrived; the story is in `PROJECT_STATUS.md` because
-      the first judgement was made on a count instead of a mechanism.
-- [ ] **A car balanced on the lip of a drop creeps for minutes instead of
-      giving up.** The last straggler, and it is not what the last two notes
-      here said it was — it is not jammed against another car and it is not
-      stuck. On `the big one` a car comes to rest just over the crest of the big
-      drop, pointing back up at the plateau, with the engine pushing one way and
-      gravity the other. It creeps **backwards at 0.0134 tiles a second**, held
-      almost exactly in balance, for thousands of ticks — and then the slope
-      under it steepens, it slides free, and drives on perfectly well. It only
-      counts as a straggler because the two-lap budget runs out during the
-      crawl.
-      So the fault is not that the car cannot recover, it is that the driver
-      never notices it is going backwards. It asks for full throttle up a slope
-      it has not the power for, for as long as it takes the hill to let go of
-      it. A driver could see this without any memory at all — its speed is near
-      nothing *and its velocity opposes its heading* — and turn downhill instead
-      of leaning on it. What it should then do is a question about how an
-      opponent ought to drive, which is why this is written down rather than
-      guessed at.
-- [x] **A car a hair under the ground was frozen for the rest of the race.**
-      One was found on a ramp in `the big one` at nought tiles a second with the
-      throttle open, for a hundred thousand ticks — not against a wall, not
-      touching anything, and taking the other three cars out of the world did
-      not free it. It was six hundredths of a tile under the surface. Two rules
-      were asking about the car where they meant to ask about the ground: the
-      wall rule read that gap as an unclimbable step and refused every move,
-      and refusing skips the very code that would have lifted the car back to
-      the surface. Fixing only that turned the frozen car into a launched one,
-      because the ground-following reads the same gap as seven tiles a second
-      upward. Both ask about the ground now.
-      *Verification: two identical cars driven across a level field, one on the
-      surface and one just under it, went 5.07 tiles and 0.08. They now go 5.07
-      and 5.07 — and no golden hash moved, so nothing anybody has recorded has
-      been invalidated.*
-- [x] **The driver leaned on hills it could not climb.** Its check for "am I
-      against something I cannot get up" looked one distance ahead, a tile and a
-      half, so a hill that begins gently and steepens read as climbable at
-      exactly the point the question was put — and the car then stalled on the
-      steep part, from where the same tile and a half ahead is gentle again. Two
-      cars on `the big one` sat like that at nine hundredths of a tile a second
-      with the throttle open, for the rest of the race. It asks the whole way up
-      now.
-      *Verification: the driver is asked directly rather than through a race —
-      it is a pure function of the world — and on a hill rising 0.42 of a tile
-      at a tile and a half and 1.35 at three it used to answer "accelerate" and
-      now answers "brake". The two cars leaning on slopes become none, and no
-      golden hash moves.*
-      This was written, taken out again for failing to prove itself, and put
-      back when the proof arrived; the story is in `PROJECT_STATUS.md` because
-      the first judgement was made on a count instead of a mechanism.
-- [ ] **Two cars that jam together stay jammed.** All that is left of the
-      stragglers: `the big one` loses two cars that are stopped on *level*
-      ground, half a tile apart, each with the throttle open. Nothing in the
-      driver backs up and tries a different line, and nothing has ever needed it
-      because a car racing alone never gets shoved into anything.
-      **It does not reproduce from a standing start**, and that is worth knowing
-      before somebody tries again: two cars placed in contact on flat ground,
-      nose to tail and offset, at five separations from eight tenths of a tile
-      to one and a fifth, all drive away perfectly. So the jam is not "two cars
-      touching" — something about how they arrive matters, and the reproduction
-      has to come from the race rather than from a scene. The one in hand is
-      `the big one`, four cars, two laps, at tick 12821.
-- [x] **A race that drives itself could not finish one of the shipped
-      tracks.** `--session` was bounded at a flat five minutes of race time,
-      written when a stock lap was under one. A stock lap is four to five
-      minutes now and `jupiter run` is 5m 15s — longer than the budget — so a
-      session on it stopped a lap short and reported no winner at all. The bound
-      is asked of the track now, the same way the analyser asks it.
-      *Verification: `jupiter run` went from "winner 255, over no" to "winner 1,
-      over yes"; the tracks that already finished still do, and a race that ends
-      at the flag is not slowed by a larger bound.*
-- [ ] **On a full grid, an opponent is launched off the map before the first
-      corner — on six of the eighteen shipped tracks.** Diagnosed rather than
-      guessed at. Racing four AI cars on every shipped track loses **7 of 72**:
-      six of the seven end wrecked at y = -13, off the north edge, having
-      completed no laps at all. It needs a *full* grid: with one, two or three
-      cars every one of them finishes.
-      What happens is that a car is hit by **two other cars in the same tick**
-      about two seconds after the flag, while the field is still bunched. Each
-      hit adds `impulse x GS_BOUNCE_LIFT` to the car's upward speed, and the two
-      lifts **add** — the horizontal impulses partly cancel as vectors, the
-      lifts cannot — so a shunt at walking pace throws the car 4.7 tiles into
-      the air and ten tiles backwards, and it lands off the field and wrecks.
-      The give-away is the ratio: one hit gives 0.35 of lift per unit of
-      impulse and the observed launch is 0.72, exactly twice.
-      The physics is doing what it says: `GS_BOUNCE` is 1.5, which is
-      deliberately more than it was hit with, because the chaos is the reward.
-      What is not deliberate is the comment over that code — *"a shove is not a
-      launch"* — being true of one hit and false of two.
-      **The fix is a dial and the choice is not the machine's**: cap the lift a
-      car can take in one tick, soften the bounce, or widen the grid so the
-      sandwich does not happen. Any of them moves the golden replay hash, which
-      is a deliberate act with a note, so it waits for a person to choose.
-      *Nothing checks this today: every AI check races one car alone, including
-      the shipped-track walk over eighteen tracks and four grid slots.*
+      One sat on a ramp at nought tiles a second with the throttle open for a
+      hundred thousand ticks, six hundredths of a tile below the surface. Two
+      rules were asking about the car where they meant to ask about the ground —
+      one froze it, and correcting only that fired it into the air instead. Both
+      ask about the ground now.
+      *Verification: two identical cars across a level field, one on the surface
+      and one just under it, went 5.07 tiles and 0.08; they now go 5.07 and
+      5.07. No golden hash moved, so nothing recorded was invalidated.*
+- [x] **The driver leaned on hills it could not climb.** It judged "can I get
+      up this" by looking a tile and a half ahead, so a hill that starts gently
+      and steepens read as climbable — and a car that stalled on the steep part
+      saw the same gentle tile and a half from there. Two cars sat like that for
+      the rest of a race. It asks the whole way up now.
+      *Verification: the driver is asked directly rather than raced, being a
+      pure function of the world: on a hill rising 0.42 of a tile at a tile and
+      a half and 1.35 at three, it used to answer "accelerate" and now answers
+      "brake". No golden hash moves. It was landed, withdrawn and landed again —
+      that story is in `PROJECT_STATUS.md`.*
+- [ ] **A car balanced on the lip of a drop creeps instead of giving up.** The
+      last straggler, and not what two earlier notes here claimed: it is neither
+      jammed nor stuck. It comes to rest just over the crest of the big drop
+      facing back up it, engine against gravity, and creeps backwards at 0.0134
+      tiles a second for thousands of ticks before the slope lets it go — by
+      which time the race budget has run out. The driver never notices it is
+      going backwards, which it could see without any memory at all. What it
+      should do instead is a question about how an opponent ought to drive.
 - [x] **A check that was passing by a second and a third.** The front door
       check failed once in a full run and passed on its own, which looks like a
       flake and was not: asked to say how long it took rather than only that it
@@ -1563,64 +1456,47 @@ worth as much as what was decided about it.
       race, correct - 28.7s of 90" — so the next time it creeps there is a
       number to read instead of an intermittent failure to argue about.*
 - [x] **Every kind of ground paint is checked, not the two that were
-      reported.** Two instances of one fault turned up by asking the same
-      question twice, which is a sample and not a proof, so the suite now walks
-      all eight kinds of paint a car can stand on — the route line, the start
-      line, the chequered finish, a gate's arrow and the four hazards — and says
-      it walked 8 of 8, so a ninth that nobody checks turns the tree red. The
-      walk found a third fault nobody had reported: a flame is exactly one tile
-      across, so one dropped by a stationary car has its edge exactly on a tile
-      line, and the sorting counted a tile the flame did not cover — painting it
-      over 62 pixels of the car standing in it. The rule is now "the last tile
-      the shape is actually in".
-      *Verification: eight kinds of paint, every one of them 0 pixels of car
-      painted over, where the flame was 62 and the arrow 339 and a hazard the
-      whole car.*
+      reported.** Two instances of one fault had been found by asking the same
+      question twice, which is a sample rather than a proof. The suite now walks
+      all eight kinds of paint a car can stand on and says it walked 8 of 8, so
+      a ninth nobody checks turns the tree red. It found a third fault: a flame
+      is exactly one tile across, so one dropped by a stationary car has its
+      edge exactly on a tile line, and the sorting counted a tile the flame did
+      not cover.
+      *Verification: eight kinds of paint, every one 0 pixels of car painted
+      over, where the arrow was 339, the flame 62 and a hazard the whole car.*
 - [x] **A car sitting in a hazard was painted out of the frame.** The same
       question asked of the other thing painted flat on the road, and the same
-      fault at its worst: hazards were drawn in a pass of their own after
-      everything else, so every one went on top of every car. A car parked in
-      the slick it had just laid measured zero pixels — gone, not dimmed — while
-      the comment over that loop said hazards go "under everything that moves".
-      They are painted in the sweep now, with the route and the gates.
+      fault at its worst: hazards were drawn in a pass after everything else, so
+      every one went on top of every car. A car in the slick it had just laid
+      measured zero pixels — while the comment above that loop said hazards go
+      "under everything that moves". They are painted in the sweep now.
       *Verification: the same car in the slick and on clean road, 6,491 pixels
-      against 6,491; and the two tests that already checked hazards are drawn as
-      themselves, and at the size the simulation catches you at, both still
-      pass — so how they look did not move, only when.*
+      against 6,491, and the tests that already checked how hazards look still
+      pass — only when they are drawn moved.*
 - [x] **A car crossing an arrow was painted over by it.** Seen as a flicker as
-      cars cross an arrow or the start line. The ground is painted back to front
-      a tile at a time and a shape is sorted by the tile its nearest corner
-      reaches, so an arrow two and a half tiles long, pointing at the camera,
-      was painted at the tile its head reached — over anything standing on its
-      tail. A car's own tile steps up as it drives, so the two swapped places
-      tile by tile, which is the flicker. The gate's line had been cut into
-      blocks for this reason years back; the arrow never was. Every mark is now
-      cut into pieces of at most half a tile, each sorted on the ground it lies
-      on.
-      *Verification: a car parked on the tail of an arrow that faces the camera
-      showed 6,152 pixels of itself against 6,491 for the same car on the same
-      ground with the gates moved away — 339 pixels eaten by its own arrow. It
-      is now 6,491 against 6,491, and an ordinary race frame is unchanged to the
-      pixel, so nothing else moved.*
-      Two innocents were cleared on the way and are named in
-      `PROJECT_STATUS.md` so they are not re-suspected: the start line never
-      covered a car, and the shadow is correctly on top of the paint. One limit
-      remains — paint on ground *higher* than the car in front of it can still
-      land on the car, which a tile-sorted painter cannot express.
+      cars cross an arrow or the start line. Ground paint is sorted by the tile
+      its nearest corner reaches, so an arrow two and a half tiles long could be
+      painted at the tile its head reached — over anything standing on its tail
+      — and a car's own tile steps up as it drives, so the two swapped places
+      tile by tile. The line had been cut into per-tile pieces years back; the
+      arrow never was. Every mark is now cut into pieces of half a tile.
+      *Verification: a car parked on an arrow's tail showed 6,152 pixels of
+      itself against 6,491 for the same car with the gates moved away — 339
+      eaten by its own arrow. It is now 6,491 against 6,491, and an ordinary
+      race frame is unchanged to the pixel.*
 - [x] **A check that was timing the countdown and calling it the controls.**
-      `gearstick_plays` races the real client and asks the car to get three
-      tiles from the line, and it gave the whole race fourteen seconds. A race
-      is held on the line for ten of them while the lights count down, so what
-      it was really judging was the second and a half of driving left over — and
-      on the server's track, which starts on a slope, most of the movement it
-      did measure was a held car sliding downhill. The client now says whether
-      the lights are still red, and the check watches for six seconds of racing
-      *after* the green flag however long that takes to arrive.
-      *Verification: the same run now reports 734 ticks and 20 tiles of driving
-      on this machine and 742 ticks and 16 tiles at a server, against a bar of
-      three; and the same client with nothing driving its car still fails, so
-      the check has not been made toothless to make it pass. Two rules come free
-      with it: a race is held on the line, and the lights do go green.*
+      `gearstick_plays` asks that the car get three tiles from the line and gave
+      the whole race fourteen seconds — but a race is held on the line for ten of
+      them while the lights count down, so it was really judging a second and a
+      half of driving. On the server's track, which starts on a slope, most of
+      the movement it did measure was a held car sliding downhill. The client
+      now says whether the lights are still red, and the check watches for six
+      seconds of racing *after* the flag however long that takes.
+      *Verification: the same run reports 734 ticks and 20 tiles of driving on
+      this machine and 742 and 16 at a server, against a bar of three; and the
+      same client with nothing driving its car still fails, so the check has not
+      been made toothless to make it pass.*
 - [x] **The store is one file with no migration path.** *(Closed in Phase 13,
       and exercised for real in Phase 14.)* There is now a schema version and an
       upgrade path: new tables appear by `CREATE TABLE IF NOT EXISTS`, new
