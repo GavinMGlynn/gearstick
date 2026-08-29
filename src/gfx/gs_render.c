@@ -459,6 +459,78 @@ static int gs_ground_quad_diagonal(const float x[4], const float y[4]) {
     return d;
 }
 
+// **The biggest a piece of ground paint may be, in tiles.**
+//
+// The sweep decides depth one tile diagonal at a time, and a shape's diagonal
+// is `floor(x) + floor(y)` at its *nearest* corner. That is the right answer
+// against the terrain - a mark must not sink into the ground it lies on - and
+// the wrong one against anything standing between the shape's near end and its
+// far end, because the whole shape is then painted at the near end's turn, on
+// top of it.
+//
+// Half a tile is small enough that a piece and a car cannot both want the same
+// diagonal and disagree about which is in front.
+#define GS_MARK_PIECE 0.5f
+
+// **A mark on the ground, drawn a piece at a time, each piece where it lies.**
+//
+// The chequered line was cut into blocks for exactly this reason. The arrow was
+// not: a shaft and a head spanning two and a half tiles stayed one shape, so an
+// arrow pointing at the camera was painted at the tile its head reached and
+// took with it everything standing on its tail. A car sitting on the shaft lost
+// 339 pixels of itself to it - and, driving, lost and regained them tile by
+// tile, which is the flicker.
+//
+// Every mark goes through here now, so the next one somebody adds is cut up
+// without having to remember to do it. The split is by the shape's own size, so
+// a mark already smaller than a piece - a route dash, a block of the chequer -
+// is still one piece and costs what it always did.
+static void gs_ground_mark(SDL_Renderer *ren, const gs_camera *cam,
+                           const gs_track *t, const float x[4], const float y[4],
+                           float lift, SDL_FColor c, int world_d) {
+    // How far the quad reaches along its own two axes rather than the world's,
+    // so a mark lying diagonally is no bigger than it looks.
+    float u = SDL_max(SDL_fabsf(x[1] - x[0]) + SDL_fabsf(y[1] - y[0]),
+                      SDL_fabsf(x[2] - x[3]) + SDL_fabsf(y[2] - y[3]));
+    float v = SDL_max(SDL_fabsf(x[3] - x[0]) + SDL_fabsf(y[3] - y[0]),
+                      SDL_fabsf(x[2] - x[1]) + SDL_fabsf(y[2] - y[1]));
+
+    int nu = SDL_clamp((int)SDL_ceilf(u / GS_MARK_PIECE), 1, 16);
+    int nv = SDL_clamp((int)SDL_ceilf(v / GS_MARK_PIECE), 1, 16);
+
+    if (nu == 1 && nv == 1) {
+        if (gs_ground_quad_diagonal(x, y) == world_d) {
+            gs_ground_quad(ren, cam, t, x, y, lift, c);
+        }
+        return;
+    }
+
+    // Bilinear across the quad, so a triangle - a quad with two corners in the
+    // same place - divides into pieces that close up at the tip rather than
+    // into something with a hole in it.
+    static const int cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
+    for (int iv = 0; iv < nv; iv++) {
+        for (int iu = 0; iu < nu; iu++) {
+            const float us[2] = { (float)iu / (float)nu, (float)(iu + 1) / (float)nu };
+            const float vs[2] = { (float)iv / (float)nv, (float)(iv + 1) / (float)nv };
+
+            float px[4], py[4];
+            for (int k = 0; k < 4; k++) {
+                const float a = us[cu[k]], b = vs[cv[k]];
+                const float tx = x[0] + (x[1] - x[0]) * a;
+                const float ty = y[0] + (y[1] - y[0]) * a;
+                const float bx = x[3] + (x[2] - x[3]) * a;
+                const float by = y[3] + (y[2] - y[3]) * a;
+                px[k] = tx + (bx - tx) * b;
+                py[k] = ty + (by - ty) * b;
+            }
+
+            if (gs_ground_quad_diagonal(px, py) != world_d) continue;
+            gs_ground_quad(ren, cam, t, px, py, lift, c);
+        }
+    }
+}
+
 // Where the chequered line's two flags stand: at its ends and a little outside
 // them, so a car crossing on the extreme edge still passes between the flags
 // rather than through one.
@@ -565,8 +637,7 @@ static void gs_draw_route(SDL_Renderer *ren, const gs_camera *cam,
 
             // Sorted onto the ground it is painted on, like every other mark
             // the route puts down, or a dash beyond a rise floats over it.
-            if (gs_ground_quad_diagonal(qx, qy) != world_d) continue;
-            gs_ground_quad(ren, cam, t, qx, qy, 0.03f, ink);
+            gs_ground_mark(ren, cam, t, qx, qy, 0.03f, ink, world_d);
         }
     }
 }
@@ -613,13 +684,11 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
                 float y[4] = { gy + sy * a + fy * d0, gy + sy * b + fy * d0,
                                gy + sy * b + fy * d1, gy + sy * a + fy * d1 };
 
-                if (gs_ground_quad_diagonal(x, y) != world_d) continue;
-
                 SDL_FColor c = chequered
                     ? (((i + r) & 1) ? (SDL_FColor){ 0.08f, 0.08f, 0.09f, 1.0f }
                                      : (SDL_FColor){ 0.95f, 0.95f, 0.95f, 1.0f })
                     : (SDL_FColor){ 0.95f, 0.95f, 0.95f, 1.0f };
-                gs_ground_quad(ren, cam, t, x, y, 0.04f, c);
+                gs_ground_mark(ren, cam, t, x, y, 0.04f, c, world_d);
             }
         }
     }
@@ -634,9 +703,7 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
                     gx + fx * (base + len) - sx * half, gx + fx * base - sx * half };
     float ay[4] = { gy + fy * base + sy * half, gy + fy * (base + len) + sy * half,
                     gy + fy * (base + len) - sy * half, gy + fy * base - sy * half };
-    if (gs_ground_quad_diagonal(ax, ay) == world_d) {
-        gs_ground_quad(ren, cam, t, ax, ay, 0.05f, tip);
-    }
+    gs_ground_mark(ren, cam, t, ax, ay, 0.05f, tip, world_d);
 
     // The head, as one triangle: a quad with two corners in the same place is
     // a triangle, and gs_quad draws the degenerate half for nothing.
@@ -653,9 +720,7 @@ static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
         gy + fy * (base + len) - sy * wide,
         gy + fy * (base + len + head),
     };
-    if (gs_ground_quad_diagonal(hx, hy) == world_d) {
-        gs_ground_quad(ren, cam, t, hx, hy, 0.05f, tip);
-    }
+    gs_ground_mark(ren, cam, t, hx, hy, 0.05f, tip, world_d);
 
     // A gate with no line across it is marked at its edges and left open in the
     // middle, the way a rally stage is.

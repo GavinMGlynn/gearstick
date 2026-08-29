@@ -180,6 +180,78 @@ static gs_camera gs_camera_on(float cx, float cy, float cz) {
 
 // ---------------------------------------------------------------------------
 
+TEST(a_car_standing_on_a_gates_arrow_is_not_painted_over_by_it) {
+    // **Paint on the road goes under the car, from every angle.**
+    //
+    // The sweep paints back to front one tile diagonal at a time, and a shape's
+    // diagonal is `floor(x) + floor(y)` at its *nearest* corner - which is the
+    // only answer that keeps a mark out of the ground it lies on. A gate's line
+    // is cut into blocks so each block answers for its own tile; the arrow was
+    // never cut up, so a shaft and head spanning two and a half tiles are one
+    // shape, sorted at the tile the head reaches. Point that arrow at the
+    // camera and everything standing on its tail is a whole tile behind the
+    // diagonal it is drawn at - so the arrow is painted last, over the car.
+    //
+    // The arrow runs *behind* the gate centre, from 2.4 tiles back to just
+    // short of it, so the car goes at the tail and the gate faces down the
+    // screen: the worst case rather than the average one, built here rather
+    // than waited for. A race only meets it when the route happens to point
+    // that way at a gate a car happens to be standing on.
+    //
+    // Measured against the same car on the same ground with the gates moved
+    // away, because "how much of a car can be seen" only means something
+    // against a car nothing is covering.
+    static gs_track marked, clear;
+    gs_flat_pavement(&marked, 48, 48);
+    gs_flat_pavement(&clear, 48, 48);
+
+    // Facing +x and +y both, which is straight towards the viewer.
+    const gs_angle towards_camera = (gs_angle)(65536 / 8);
+    const gs_fix wide = GS_INT(3);
+
+    gs_track_add_gate(&marked, GS_INT(24), GS_INT(24), towards_camera, wide);
+    gs_track_add_gate(&marked, GS_INT(30), GS_INT(30), towards_camera, wide);
+
+    // The same route, out of shot, so the reference frame has the car and the
+    // ground and nothing else.
+    gs_track_add_gate(&clear, GS_INT(44), GS_INT(44), towards_camera, wide);
+    gs_track_add_gate(&clear, GS_INT(46), GS_INT(46), towards_camera, wide);
+
+    // The tail of the arrow: 2.4 tiles back along the way through the gate.
+    const gs_fix car_x = GS_INT(24) - GS_RATIO(17, 10);
+    const gs_fix car_y = GS_INT(24) - GS_RATIO(17, 10);
+
+    static gs_world on_paint, off_paint;
+    gs_park_car(&on_paint, &marked, car_x, car_y);
+    gs_park_car(&off_paint, &clear, car_x, car_y);
+
+    gs_camera cam = gs_camera_on(gs_to_f(car_x), gs_to_f(car_y), 0.0f);
+    cam.zoom = 3.0f;
+
+    gs_frame with = gs_render_frame(ren, &marked, &on_paint, &on_paint, 1.0f, &cam);
+    gs_frame without = gs_render_frame(ren, &clear, &off_paint, &off_paint, 1.0f, &cam);
+    CHECK(with.px != nullptr && without.px != nullptr);
+    if (with.px == nullptr || without.px == nullptr) return;
+
+    const int seen = gs_count_car0(&with);
+    const int whole = gs_count_car0(&without);
+
+    printf("  ARROW car on the arrow %d px, the same car off it %d px\n",
+           seen, whole);
+
+    // The reference car is really there, or the two counts agreeing would mean
+    // nothing at all.
+    CHECK(whole > 2000);
+
+    // And the arrow took none of it. Exact rather than nearly: the car has not
+    // moved between the two frames and neither has the camera, so every pixel
+    // of the difference is paint that landed on a car.
+    CHECK(seen == whole);
+
+    gs_frame_free(&with);
+    gs_frame_free(&without);
+}
+
 TEST(a_car_behind_a_rise_is_hidden_by_it) {
     // Isometric depth runs along x + y, with larger values nearer the viewer.
     // The car sits at depth 40; the wall in front of it at depth 44 and five
@@ -10817,6 +10889,7 @@ int main(void) {
 
     gs_win = win;
 
+    run_a_car_standing_on_a_gates_arrow_is_not_painted_over_by_it(ren);
     run_a_car_behind_a_rise_is_hidden_by_it(ren);
     run_the_view_does_not_jump_as_a_car_crosses_a_tile_boundary(ren);
     run_interpolation_places_a_car_between_the_two_ticks_it_sits_between(ren);

@@ -1400,6 +1400,26 @@ worth as much as what was decided about it.
       as a machine can take this: a device is opened at the end of the audio run
       and the callback has to have actually fed it. What no driver can do is
       make a noise somebody hears.
+- [x] **A car crossing an arrow was painted over by it.** Seen as a flicker as
+      cars cross an arrow or the start line. The ground is painted back to front
+      a tile at a time and a shape is sorted by the tile its nearest corner
+      reaches, so an arrow two and a half tiles long, pointing at the camera,
+      was painted at the tile its head reached — over anything standing on its
+      tail. A car's own tile steps up as it drives, so the two swapped places
+      tile by tile, which is the flicker. The gate's line had been cut into
+      blocks for this reason years back; the arrow never was. Every mark is now
+      cut into pieces of at most half a tile, each sorted on the ground it lies
+      on.
+      *Verification: a car parked on the tail of an arrow that faces the camera
+      showed 6,152 pixels of itself against 6,491 for the same car on the same
+      ground with the gates moved away — 339 pixels eaten by its own arrow. It
+      is now 6,491 against 6,491, and an ordinary race frame is unchanged to the
+      pixel, so nothing else moved.*
+      Two innocents were cleared on the way and are named in
+      `PROJECT_STATUS.md` so they are not re-suspected: the start line never
+      covered a car, and the shadow is correctly on top of the paint. One limit
+      remains — paint on ground *higher* than the car in front of it can still
+      land on the car, which a tile-sorted painter cannot express.
 - [x] **A check that was timing the countdown and calling it the controls.**
       `gearstick_plays` races the real client and asks the car to get three
       tiles from the line, and it gave the whole race fourteen seconds. A race

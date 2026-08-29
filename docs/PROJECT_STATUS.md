@@ -965,6 +965,45 @@ floor of 630 — so a shipped set that shortens turns the tree red without anybo
 running the writer. Every track is still validated and raced by every vehicle
 from every grid slot as well.
 
+**A car crossing an arrow was painted over by it.** Reported as a flicker as
+cars cross an arrow or the start line, and it is one: the sweep paints back to
+front a tile diagonal at a time, and a shape's diagonal is `floor(x) + floor(y)`
+at its **nearest** corner. That is the only answer that keeps a mark out of the
+ground it lies on, and it is the wrong one for anything standing between a
+shape's near end and its far end - the whole shape is painted at the near end's
+turn, on top of it. A car's own diagonal steps up a tile at a time as it drives,
+so the two swap places tile by tile: painted over, then not, then over again.
+
+**The line had been cut into blocks for this exact reason and the arrow never
+was.** A shaft and a head spanning two and a half tiles stayed one shape each,
+sorted at the tile the head reached, so an arrow pointing at the camera took
+with it everything standing on its tail. `gs_ground_mark` now cuts every mark -
+arrow, line and route dash alike - into pieces of at most half a tile, each
+sorted on the ground it actually lies on, and a mark already smaller than a
+piece still takes the path it always did.
+
+*Verified by building the case rather than waiting for it:*
+`a_car_standing_on_a_gates_arrow_is_not_painted_over_by_it` parks a car on the
+tail of an arrow that faces the camera and counts how much of it can be seen
+against the same car on the same ground with the gates moved out of shot. It was
+**6,152 pixels against 6,491** - 339 pixels of car eaten by its own arrow - and
+is now 6,491 against 6,491, exactly. A normal race frame is unchanged to the
+pixel, so the fix is invisible except where the fault was.
+
+**What this is not.** Two things were measured and cleared on the way, and are
+written down so they are not re-suspected: the start line never painted over a
+car body (0 pixels, every frame checked), and the shadow is correctly drawn on
+top of the paint it falls on. A bounding-box detector over a whole race reported
+thousands of near misses that turned out not to touch a car's pixels - boxes
+overlapping, not paint - so the number to trust is the constructed one above.
+
+**A limit that remains, and is not this.** Where the ground in front of a car is
+higher than the ground under it - a ramp face, a ridge - paint on that higher
+ground can still project onto a car behind it, because a painter's sweep sorted
+by tile cannot express "in front of, but lower than". A scalar offset cannot fix
+it; it needs a depth the renderer does not keep. Worth knowing before somebody
+reads the next report of this as a regression.
+
 **`gearstick_plays` was spending its window on the countdown.** The check races
 the real client and asks that the car get three tiles from the line; it gave the
 race fourteen seconds and, under the sanitisers, saw 2.9 tiles and called the
