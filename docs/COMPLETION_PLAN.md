@@ -1443,6 +1443,16 @@ worth as much as what was decided about it.
       surface and one just under it, went 5.07 tiles and 0.08. They now go 5.07
       and 5.07 — and no golden hash moved, so nothing anybody has recorded has
       been invalidated.*
+- [ ] **The driver can be fooled by a slope it is standing across.** Its check
+      for "am I against something I cannot climb" looks one distance ahead along
+      its own nose. A car stalled at an angle across a ramp sees very little
+      rise that way while the fall line is what is holding it, so it leans on
+      the throttle instead of backing off. A wider probe was written and then
+      taken back out: it could not be shown to fix anything measurable, and no
+      test could be built that told it from the old one — five slope profiles
+      were tried and the old check backed away from all of them. Reproducing it
+      needs a car put deliberately at an angle on a ramp, which is how the next
+      attempt should start.
 - [ ] **Two cars that jam together stay jammed.** All that is left of the
       stragglers: `the big one` loses two cars that are stopped on *level*
       ground, half a tile apart, each with the throttle open. Nothing in the

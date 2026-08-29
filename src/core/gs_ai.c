@@ -267,32 +267,11 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
                 //
                 // So this one asks about the heading, and the answer is to back
                 // off until there is room to turn.
-                // **And it asks the whole way, not one point of it.** Asking
-                // at a tile and a half only sees the start of what is ahead,
-                // and a slope that begins gently and steepens after it reads as
-                // climbable at the one distance the question was put. That is
-                // not a near miss, it is a trap that holds: a car creeps up the
-                // gentle part, comes to rest on the steep part, and from there
-                // the same tile and a half ahead is gentle again. One was found
-                // sitting at nine hundredths of a tile a second with the
-                // throttle wide open, on ground rising a quarter of a tile over
-                // the first tile and two thirds over each one after it - and it
-                // sat there for the rest of the race.
-                //
-                // So the allowance grows with the distance it is asked about,
-                // which is what "how steep is this" means, and any distance
-                // that says no is a no.
                 if (speed_now < GS_RATIO(30, 100)) {
-                    for (int step = 1; step <= 4; step++) {
-                        const gs_fix at = gs_fix_mul(look, GS_INT(step) / 2);
-                        const gs_fix nx = c->x + gs_fix_mul(gs_cos(c->heading), at);
-                        const gs_fix ny = c->y + gs_fix_mul(gs_sin(c->heading), at);
-                        const gs_fix allowed =
-                            gs_fix_mul(climbable, gs_fix_div(at, look));
-                        if (gs_track_height(t, nx, ny) - here_h > allowed) {
-                            blocked = true;
-                            break;
-                        }
+                    const gs_fix nx = c->x + gs_fix_mul(gs_cos(c->heading), look);
+                    const gs_fix ny = c->y + gs_fix_mul(gs_sin(c->heading), look);
+                    if (gs_track_height(t, nx, ny) - here_h > climbable) {
+                        blocked = true;
                     }
                 }
             }

@@ -1016,6 +1016,22 @@ exactly where it did - `gearstick_cli selftest --verify` passes untouched. A
 change to the physics that moves nothing anybody has recorded is the rarest kind
 and worth saying out loud.
 
+**A change to the driver went in with it and has been taken back out.** The AI's
+"am I against something I cannot climb" probe asked at one distance, and a slope
+that begins gently and steepens defeats that in principle - so it was changed to
+ask the whole way. In principle. Measured afterwards, the physics fix above
+accounts for the whole of the improvement: with the probe put back exactly as it
+was, four cars over the shipped set lose the same two, on the same track, at the
+same places. And no test could be built that told the two versions apart - five
+slope profiles were tried and the old probe backed away from every one of them,
+because the real trap needed a car stalled at an angle *across* a ramp, where
+the rise along its nose is small while the fall line holds it.
+
+A driver change that cannot be shown to fix anything and cannot be pinned by a
+test is exactly what `GS_OPPONENTS_WORLD_HASH` exists to catch, so it is out. The
+fault it was aimed at is real and is written down in COMPLETION_PLAN.md with the
+geometry that causes it, for somebody who can reproduce it deliberately.
+
 **The grid is an echelon, and it stops throwing opponents off the map.**
 
 Four AI cars over the shipped set lost **7 of 72**, six of them wrecked at
