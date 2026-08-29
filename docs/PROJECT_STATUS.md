@@ -980,14 +980,27 @@ get round stops rather than spinning - which is the whole point of having one.
 yes`, and `bright run` and `the oval` finish as they did. The change costs
 nothing when a race finishes, because the loop ends at the flag either way.*
 
-**A tail it uncovered, and did not fix.** With the budget no longer the limit,
-`first light` reports `winner 1, over no`: somebody wins, and the race is still
-not settled after **1,690 simulated seconds** on a track whose lap is 302. Four
-AI cars racing rather than one alone, which is not what
-`an_opponent_finishes_every_track_that_ships_from_every_grid_slot` covers - it
-races one car at a time. So an opponent that cannot finish while there are other
-cars on the track is a thing this project has never checked for, and now has
-one example of.
+**A tail it uncovered, diagnosed and deliberately not fixed.** Four AI cars on
+every shipped track lose **7 of 72**, and six of those seven end wrecked at
+y = -13 - off the north edge of the field, with no laps completed. It takes a
+full grid: at one, two or three cars every one of them finishes.
+
+Traced tick by tick, a car doing two tiles a second is hit about two seconds
+after the flag and comes out of it with `vz = +4.60` and `vy = -5.24`. The arc
+after that is honest - vz decays linearly under gravity and peaks at 4.7 tiles -
+so the launch is the collision, not the flight. One hit gives
+`impulse x GS_BOUNCE_LIFT`, which is 0.35 of lift per unit of impulse; the
+observed launch is 0.72 of it, **exactly twice**, because the car is hit by two
+others in the same tick while the field is still bunched. Two horizontal
+impulses partly cancel as vectors. Two lifts cannot: they add.
+
+`GS_BOUNCE` is 1.5 and that is deliberate - a collision returns more than it was
+given because the chaos is the reward. What is not deliberate is that the
+comment over that code, *"a shove is not a launch"*, is true of one hit and
+false of two. The fix is a dial - cap the lift per tick, soften the bounce, or
+widen the grid - and every one of them moves the golden replay hash, which is a
+deliberate act with a note rather than something to decide while passing
+through. It is written up in COMPLETION_PLAN.md for a person to choose.
 
 **The front door check was passing by 1.3 seconds.** It failed once in a full
 `-j2` run and passed alone and on the next one, which is the shape of a flake -

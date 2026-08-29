@@ -1409,12 +1409,30 @@ worth as much as what was decided about it.
       *Verification: `jupiter run` went from "winner 255, over no" to "winner 1,
       over yes"; the tracks that already finished still do, and a race that ends
       at the flag is not slowed by a larger bound.*
-- [ ] **An AI car can fail to finish when there are other cars on the track.**
-      Uncovered by the above: with the budget no longer the limit, `first light`
-      still ends unsettled after 1,690 seconds of a race whose lap is 302 —
-      somebody wins and somebody never arrives. Every check of the AI so far
-      races **one** car alone, so this has never been looked at. One example,
-      not yet a diagnosis.
+- [ ] **On a full grid, an opponent is launched off the map before the first
+      corner — on six of the eighteen shipped tracks.** Diagnosed rather than
+      guessed at. Racing four AI cars on every shipped track loses **7 of 72**:
+      six of the seven end wrecked at y = -13, off the north edge, having
+      completed no laps at all. It needs a *full* grid: with one, two or three
+      cars every one of them finishes.
+      What happens is that a car is hit by **two other cars in the same tick**
+      about two seconds after the flag, while the field is still bunched. Each
+      hit adds `impulse x GS_BOUNCE_LIFT` to the car's upward speed, and the two
+      lifts **add** — the horizontal impulses partly cancel as vectors, the
+      lifts cannot — so a shunt at walking pace throws the car 4.7 tiles into
+      the air and ten tiles backwards, and it lands off the field and wrecks.
+      The give-away is the ratio: one hit gives 0.35 of lift per unit of
+      impulse and the observed launch is 0.72, exactly twice.
+      The physics is doing what it says: `GS_BOUNCE` is 1.5, which is
+      deliberately more than it was hit with, because the chaos is the reward.
+      What is not deliberate is the comment over that code — *"a shove is not a
+      launch"* — being true of one hit and false of two.
+      **The fix is a dial and the choice is not the machine's**: cap the lift a
+      car can take in one tick, soften the bounce, or widen the grid so the
+      sandwich does not happen. Any of them moves the golden replay hash, which
+      is a deliberate act with a note, so it waits for a person to choose.
+      *Nothing checks this today: every AI check races one car alone, including
+      the shipped-track walk over eighteen tracks and four grid slots.*
 - [x] **A check that was passing by a second and a third.** The front door
       check failed once in a full run and passed on its own, which looks like a
       flake and was not: asked to say how long it took rather than only that it
