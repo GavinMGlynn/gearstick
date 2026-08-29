@@ -1101,12 +1101,21 @@ what moved is where the cars are put. The generator fold is untouched - "200
 generated tracks, all the ones they always were" - and so is the scripted
 replay, which does not start from a grid.
 
-**What is left, and it is a different fault.** `the big one` still loses two
-cars, and they are not launched: they are **stopped**, upright and undamaged, at
-0.01 tiles a second in the middle of the track with no laps driven. An AI car
-that has come to rest against something does not reverse out of it - it holds
-the throttle and stays there. That is not the grid and the grid cannot fix it;
-it is written up in COMPLETION_PLAN.md on its own.
+**What is left, and it is not what it looked like.** `the big one` loses one
+car, and chasing it down changed the description twice. It is not jammed against
+another car - the nearest is thirty tiles away. It is not stuck - it is
+**creeping backwards at 0.0134 tiles a second**, balanced just over the crest of
+the big drop with the engine pushing up the plateau and gravity pulling down it,
+and after thousands of ticks the ground steepens, it slides free and drives on
+at a tile and a third a second. It counts as a straggler only because the
+two-lap budget expires during the crawl.
+
+The fault, then, is that the driver never notices it is going *backwards*: it
+asks for full throttle up a slope it has not the power for, for as long as the
+hill takes to let go. That is visible without any memory - speed near nothing
+while the velocity opposes the heading - but what an opponent should do about it
+is a question about driving rather than a defect with one right answer, so it is
+in COMPLETION_PLAN.md for a person.
 
 **The front door check was passing by 1.3 seconds.** It failed once in a full
 `-j2` run and passed alone and on the next one, which is the shape of a flake -

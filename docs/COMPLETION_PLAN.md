@@ -1459,6 +1459,55 @@ worth as much as what was decided about it.
       This was written, taken out again for failing to prove itself, and put
       back when the proof arrived; the story is in `PROJECT_STATUS.md` because
       the first judgement was made on a count instead of a mechanism.
+- [ ] **A car balanced on the lip of a drop creeps for minutes instead of
+      giving up.** The last straggler, and it is not what the last two notes
+      here said it was — it is not jammed against another car and it is not
+      stuck. On `the big one` a car comes to rest just over the crest of the big
+      drop, pointing back up at the plateau, with the engine pushing one way and
+      gravity the other. It creeps **backwards at 0.0134 tiles a second**, held
+      almost exactly in balance, for thousands of ticks — and then the slope
+      under it steepens, it slides free, and drives on perfectly well. It only
+      counts as a straggler because the two-lap budget runs out during the
+      crawl.
+      So the fault is not that the car cannot recover, it is that the driver
+      never notices it is going backwards. It asks for full throttle up a slope
+      it has not the power for, for as long as it takes the hill to let go of
+      it. A driver could see this without any memory at all — its speed is near
+      nothing *and its velocity opposes its heading* — and turn downhill instead
+      of leaning on it. What it should then do is a question about how an
+      opponent ought to drive, which is why this is written down rather than
+      guessed at.
+- [x] **A car a hair under the ground was frozen for the rest of the race.**
+      One was found on a ramp in `the big one` at nought tiles a second with the
+      throttle open, for a hundred thousand ticks — not against a wall, not
+      touching anything, and taking the other three cars out of the world did
+      not free it. It was six hundredths of a tile under the surface. Two rules
+      were asking about the car where they meant to ask about the ground: the
+      wall rule read that gap as an unclimbable step and refused every move,
+      and refusing skips the very code that would have lifted the car back to
+      the surface. Fixing only that turned the frozen car into a launched one,
+      because the ground-following reads the same gap as seven tiles a second
+      upward. Both ask about the ground now.
+      *Verification: two identical cars driven across a level field, one on the
+      surface and one just under it, went 5.07 tiles and 0.08. They now go 5.07
+      and 5.07 — and no golden hash moved, so nothing anybody has recorded has
+      been invalidated.*
+- [x] **The driver leaned on hills it could not climb.** Its check for "am I
+      against something I cannot get up" looked one distance ahead, a tile and a
+      half, so a hill that begins gently and steepens read as climbable at
+      exactly the point the question was put — and the car then stalled on the
+      steep part, from where the same tile and a half ahead is gentle again. Two
+      cars on `the big one` sat like that at nine hundredths of a tile a second
+      with the throttle open, for the rest of the race. It asks the whole way up
+      now.
+      *Verification: the driver is asked directly rather than through a race —
+      it is a pure function of the world — and on a hill rising 0.42 of a tile
+      at a tile and a half and 1.35 at three it used to answer "accelerate" and
+      now answers "brake". The two cars leaning on slopes become none, and no
+      golden hash moves.*
+      This was written, taken out again for failing to prove itself, and put
+      back when the proof arrived; the story is in `PROJECT_STATUS.md` because
+      the first judgement was made on a count instead of a mechanism.
 - [ ] **Two cars that jam together stay jammed.** All that is left of the
       stragglers: `the big one` loses two cars that are stopped on *level*
       ground, half a tile apart, each with the throttle open. Nothing in the
