@@ -1438,14 +1438,19 @@ worth as much as what was decided about it.
       a half and 1.35 at three, it used to answer "accelerate" and now answers
       "brake". No golden hash moves. It was landed, withdrawn and landed again —
       that story is in `PROJECT_STATUS.md`.*
-- [ ] **A car balanced on the lip of a drop creeps instead of giving up.** The
-      last straggler, and not what two earlier notes here claimed: it is neither
-      jammed nor stuck. It comes to rest just over the crest of the big drop
-      facing back up it, engine against gravity, and creeps backwards at 0.0134
-      tiles a second for thousands of ticks before the slope lets it go — by
-      which time the race budget has run out. The driver never notices it is
-      going backwards, which it could see without any memory at all. What it
-      should do instead is a question about how an opponent ought to drive.
+- [ ] **Two opponents oscillate at the foot of a ramp for the rest of the
+      race.** The last stragglers: on `the big one` two cars end with no laps
+      driven, alternating between "back off, I cannot climb this" and "the way
+      is clear, accelerate" every second or two, jittering by hundredths of a
+      tile and never getting away. The driver re-decides at the boundary every
+      tick; what would settle it is refusing to change its mind until it is
+      clear by a margin. What it should do once clear is a question about how an
+      opponent ought to drive, which is why this is written down rather than
+      guessed at.
+      *This note previously said these cars were jammed against each other, and
+      then that one crept over a lip and drove on. Both were wrong, written from
+      partial looks; the third account is from watching both cars to the end and
+      printing what the driver asked for.*
 - [x] **A check that was passing by a second and a third.** The front door
       check failed once in a full run and passed on its own, which looks like a
       flake and was not: asked to say how long it took rather than only that it
