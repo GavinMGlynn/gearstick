@@ -312,8 +312,13 @@ void gs_track_grid(const gs_track *t, uint8_t slot,
                                (gs_fix)(((int64_t)(2 * slot + 1) - GS_TRACK_GRID) *
                                         GS_ONE / GS_TRACK_GRID));
 
-    *x = g->x - gs_fix_mul(fx, GS_GRID_BACK) - gs_fix_mul(fy, across);
-    *y = g->y - gs_fix_mul(fy, GS_GRID_BACK) + gs_fix_mul(fx, across);
+    // Alternate slots a stagger further back, so no car is level with the car
+    // beside it - see GS_GRID_STAGGER for the start that kept eliminating one,
+    // and for why the grid does not simply step back all the way.
+    gs_fix back = GS_GRID_BACK + gs_fix_mul(GS_GRID_STAGGER, GS_INT(slot));
+
+    *x = g->x - gs_fix_mul(fx, back) - gs_fix_mul(fy, across);
+    *y = g->y - gs_fix_mul(fy, back) + gs_fix_mul(fx, across);
     *heading = g->heading;
 
     // A gate near an edge would put the grid outside the track. Half a tile in

@@ -980,27 +980,66 @@ get round stops rather than spinning - which is the whole point of having one.
 yes`, and `bright run` and `the oval` finish as they did. The change costs
 nothing when a race finishes, because the loop ends at the flag either way.*
 
-**A tail it uncovered, diagnosed and deliberately not fixed.** Four AI cars on
-every shipped track lose **7 of 72**, and six of those seven end wrecked at
-y = -13 - off the north edge of the field, with no laps completed. It takes a
-full grid: at one, two or three cars every one of them finishes.
+**The grid is an echelon, and it stops throwing opponents off the map.**
 
-Traced tick by tick, a car doing two tiles a second is hit about two seconds
-after the flag and comes out of it with `vz = +4.60` and `vy = -5.24`. The arc
-after that is honest - vz decays linearly under gravity and peaks at 4.7 tiles -
-so the launch is the collision, not the flight. One hit gives
-`impulse x GS_BOUNCE_LIFT`, which is 0.35 of lift per unit of impulse; the
-observed launch is 0.72 of it, **exactly twice**, because the car is hit by two
-others in the same tick while the field is still bunched. Two horizontal
-impulses partly cancel as vectors. Two lifts cannot: they add.
+Four AI cars over the shipped set lost **7 of 72**, six of them wrecked at
+y = -13 off the north edge with no laps driven, on six of the eighteen tracks.
+It took a full grid: at one, two or three cars every one of them finished, which
+is why nothing had ever seen it - every AI check races one car alone, the
+eighteen-track walk over four grid slots included.
 
-`GS_BOUNCE` is 1.5 and that is deliberate - a collision returns more than it was
-given because the chaos is the reward. What is not deliberate is that the
-comment over that code, *"a shove is not a launch"*, is true of one hit and
-false of two. The fix is a dial - cap the lift per tick, soften the bounce, or
-widen the grid - and every one of them moves the golden replay hash, which is a
-deliberate act with a note rather than something to decide while passing
-through. It is written up in COMPLETION_PLAN.md for a person to choose.
+Traced to the tick. A car doing two tiles a second is hit two seconds after the
+flag and leaves with `vz = +4.60`, `vy = -5.24`; the flight after that is honest,
+vz decaying linearly under gravity to a peak of 4.7 tiles. One hit gives 0.35 of
+lift per unit of impulse and this launch is 0.72 - **exactly twice** - because
+the car is hit from both sides inside one tick while the field is still bunched.
+Two horizontal impulses partly cancel as vectors; two lifts can only add.
+
+`GS_BOUNCE` is 1.5 and that is deliberate: a collision returns more than it was
+given because the chaos is the reward. So the fix is not the physics. Four cars
+were starting abreast and *level with each other*, three and a half tiles apart
+across a fourteen tile gate, all steering for the same racing line - so the grid
+is an echelon now, each slot a tile and a half further back than the one beside
+it, the way a starting grid has been since before any of us. No car is level
+with either neighbour, so a shove has an empty diagonal to go into instead of
+another car.
+
+**A tile and a half, and the number was measured rather than chosen.** Depth is
+not free: a route that folds back every thirty tiles has the previous pass of
+itself close behind the line, so a grid that reaches too far back puts a car on
+ground belonging to a different part of the route.
+
+| stagger a slot | back of the grid | cars lost of 72 | every seed finishable |
+|---|---|---|---|
+| none (abreast) | 3 tiles | 7 | yes |
+| 1 tile | 6 tiles | 4 | yes |
+| **1.5 tiles** | **7.5 tiles** | **2** | **yes** |
+| 2 tiles | 9 tiles | 2 | **no** - 3 of 12 seeds |
+
+Two tiles buys nothing over one and a half and costs three of twelve generated
+seeds their shippability, which `a_generated_race_can_actually_be_finished`
+caught - its own comment had warned that a staggered grid on a folding route was
+not guaranteed. Two rows of two and an alternating grid were both tried and are
+worse than either, at 5.
+
+*Verification: 7 stragglers of 72 became **2**, and every launch off the map is
+gone - all six cars that were ending wrecked at the field's edge finish now. The
+two that remain are stopped, not thrown.*
+
+**The golden hash moved, deliberately.** The opponents race is four cars put on
+a grid, and the grid moved, so `GS_OPPONENTS_WORLD_HASH` goes from
+`0x3953f0a568bc1d2f` to `0x907e0b272edba84d`, with the reason written beside it
+in `golden.h`. Not one constant of the physics moved and neither did the driver;
+what moved is where the cars are put. The generator fold is untouched - "200
+generated tracks, all the ones they always were" - and so is the scripted
+replay, which does not start from a grid.
+
+**What is left, and it is a different fault.** `the big one` still loses two
+cars, and they are not launched: they are **stopped**, upright and undamaged, at
+0.01 tiles a second in the middle of the track with no laps driven. An AI car
+that has come to rest against something does not reverse out of it - it holds
+the throttle and stays there. That is not the grid and the grid cannot fix it;
+it is written up in COMPLETION_PLAN.md on its own.
 
 **The front door check was passing by 1.3 seconds.** It failed once in a full
 `-j2` run and passed alone and on the next one, which is the shape of a flake -

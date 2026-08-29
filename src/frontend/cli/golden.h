@@ -168,6 +168,23 @@
 // Moved with the one above, and for the same reason: a bigger world means a
 // different wear cell for a car that has left the track, and the opponents race
 // puts one there too. The driver and the physics are both untouched.
-#define GS_OPPONENTS_WORLD_HASH 0x3953f0a568bc1d2fULL
+//
+// **And moved once more when the grid became an echelon.**
+//
+// Four cars used to start abreast and level with each other. Two seconds after
+// the flag they are all steering for the same racing line, still level, and a
+// car in the middle can be struck from both sides inside one tick: the two
+// horizontal impulses partly cancel, the lift each one adds cannot, and the car
+// is thrown nearly five tiles up and ten tiles backwards - off the top of the
+// field, wrecked, having driven no laps. Four AI cars over the shipped set lost
+// **7 of 72** that way, on six of the eighteen tracks, and it took all four
+// slots filled, which is the only grid anybody races.
+//
+// So each slot now starts a tile and a half further back than the one beside
+// it, and no two cars are level to be squeezed between. The physics is
+// untouched - not one constant of it moved - and so is the driver. **What moved
+// is where the cars are put**, and the opponents race is four cars put on a
+// grid, so its hash moves with them. See docs/PROJECT_STATUS.md.
+#define GS_OPPONENTS_WORLD_HASH 0x907e0b272edba84dULL
 
 #endif // GS_GOLDEN_H

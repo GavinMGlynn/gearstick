@@ -8467,9 +8467,20 @@ TEST(every_car_lines_up_behind_the_line_it_has_to_cross) {
 
             // **And driving straight ahead crosses the line**, which is the
             // whole point of being behind it.
+            //
+            // As far as the grid is deep, plus a margin, rather than the six
+            // tiles that used to be written here: six was twice the setback
+            // when every car sat three tiles back, and the moment the grid
+            // gained a stagger the back of it was further away than the check
+            // could see - so this failed on a grid that was perfectly correct.
+            // Asked of the grid's own depth, it cannot come loose again.
+            const gs_fix reach = GS_GRID_BACK +
+                                 gs_fix_mul(GS_GRID_STAGGER,
+                                            GS_INT(GS_TRACK_GRID - 1)) +
+                                 GS_INT(3);
             CHECK(gs_gate_crossed(&t.gate[0], x, y,
-                                  x + gs_fix_mul(fx, GS_INT(6)),
-                                  y + gs_fix_mul(fy, GS_INT(6))));
+                                  x + gs_fix_mul(fx, reach),
+                                  y + gs_fix_mul(fy, reach)));
         }
 
         // Abreast rather than in a queue: no two cars share a place.

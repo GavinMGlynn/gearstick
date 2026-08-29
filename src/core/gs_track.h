@@ -276,6 +276,35 @@ void gs_track_set_gravity(gs_track *t, uint8_t x, uint8_t y, gs_fix multiplier);
 // race begin" is a start line painted somewhere nobody starts.
 #define GS_GRID_BACK GS_INT(3)
 
+// **And how much further back each slot after the first sits.**
+//
+// The grid used to be four cars abreast, all level with each other. Across a
+// fourteen tile gate that is three and a half tiles apart, which sounds like
+// room until every one of them steers for the same racing line: two seconds
+// after the flag the field is converging, still level, and a car in the middle
+// can be hit from both sides in the same tick. Two horizontal impulses partly
+// cancel; the lift each one adds cannot, so the car in the middle is thrown
+// nearly five tiles into the air and ten tiles backwards, off the top of the
+// field, wrecked, on **six of the eighteen tracks that ship**. It only happens
+// with all four slots filled, which is the only grid a player ever races.
+//
+// So the grid is an echelon, the way a starting grid has been since before any
+// of us: each slot sits a stagger further back than the one beside it, so **no
+// car is level with either of its neighbours**. A car with an empty diagonal to
+// be shoved into is a car that gets shoved rather than squeezed, and one shove
+// is a shove.
+//
+// **And the stagger is as small as it is** because depth is not free. A
+// route that folds back every thirty tiles has the previous pass of itself
+// close behind the line, so a grid that reaches nine tiles back puts a car on
+// ground that belongs to a different part of the route - and it showed:
+// stepping every slot back in turn put three of twelve generated seeds beyond
+// being finished from every slot at all, which
+// `a_generated_race_can_actually_be_finished` caught and its own comment had
+// warned about. Alternating reaches five tiles rather than nine and separates
+// exactly the cars that need it.
+#define GS_GRID_STAGGER GS_RATIO(150, 100)
+
 // Append a gate to the route. Returns its index, or -1 if the route is full.
 int gs_track_add_gate(gs_track *t, gs_fix x, gs_fix y, gs_angle heading, gs_fix half_width);
 

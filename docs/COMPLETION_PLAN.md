@@ -1409,6 +1409,41 @@ worth as much as what was decided about it.
       *Verification: `jupiter run` went from "winner 255, over no" to "winner 1,
       over yes"; the tracks that already finished still do, and a race that ends
       at the flag is not slowed by a larger bound.*
+- [x] **On a full grid, an opponent was launched off the map before the first
+      corner — on six of the eighteen shipped tracks.** Four AI cars over the
+      shipped set lost 7 of 72, six of them wrecked off the north edge having
+      driven no laps. It took all four slots filled, which is the only grid a
+      player races, and no check had ever raced more than one car at a time.
+      Traced to the tick: the four cars started abreast and level with each
+      other, and two seconds in — all steering for the same racing line — a car
+      in the middle was struck from both sides inside one tick. The two sideways
+      shoves partly cancel; the lift each one adds cannot, so it went nearly
+      five tiles up and ten backwards. The grid is staggered now, each slot a
+      tile and a half further back than the one beside it, so no car is level
+      with either neighbour and a shove has an empty diagonal to go into. The
+      depth was measured rather than picked: two tiles a slot buys nothing more
+      and costs three of twelve generated seeds their shippability.
+      *Verification: 7 stragglers of 72 became 2, and every one of the six
+      launched off the map now finishes. The physics was not touched — the
+      bounce that makes a collision return more than it was given is the point
+      of the game — so the golden hash moved only because the cars start
+      somewhere new, and says so where it is written down.*
+- [ ] **An AI car that has come to rest does not reverse out of it.** What is
+      left of the above: `the big one` still loses two cars, and they are not
+      thrown anywhere — they are stopped, upright and undamaged, at a hundredth
+      of a tile a second in the middle of the track. The driver holds the
+      throttle against whatever it is against and stays there for the rest of
+      the race. Nothing in the AI backs up, and nothing has ever needed it,
+      because a car racing alone never gets shoved into anything.
+- [x] **A race that drives itself could not finish one of the shipped
+      tracks.** `--session` was bounded at a flat five minutes of race time,
+      written when a stock lap was under one. A stock lap is four to five
+      minutes now and `jupiter run` is 5m 15s — longer than the budget — so a
+      session on it stopped a lap short and reported no winner at all. The bound
+      is asked of the track now, the same way the analyser asks it.
+      *Verification: `jupiter run` went from "winner 255, over no" to "winner 1,
+      over yes"; the tracks that already finished still do, and a race that ends
+      at the flag is not slowed by a larger bound.*
 - [ ] **On a full grid, an opponent is launched off the map before the first
       corner — on six of the eighteen shipped tracks.** Diagnosed rather than
       guessed at. Racing four AI cars on every shipped track loses **7 of 72**:
