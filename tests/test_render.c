@@ -180,6 +180,53 @@ static gs_camera gs_camera_on(float cx, float cy, float cz) {
 
 // ---------------------------------------------------------------------------
 
+TEST(a_car_standing_in_a_hazard_is_not_painted_over_by_it) {
+    // **A slick is on the road; the car is on the slick.** Same rule as the
+    // gate's arrow, asked of the other thing painted flat on the ground - and
+    // asked because the comment over the hazard loop says they are "drawn on
+    // the ground under everything that moves" while the loop itself runs after
+    // the sweep that draws the cars. A claim in a comment is not a claim
+    // anything checks, which is how the arrow came to be drawn over cars for as
+    // long as it was.
+    //
+    // Oil, because it is the widest of the four and the one a car is most
+    // likely to be sitting in: you drive into a slick and stay in it, which is
+    // the whole point of dropping one.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+
+    static gs_world slicked, clean;
+    gs_park_car(&slicked, &t, GS_INT(24), GS_INT(24));
+    gs_park_car(&clean, &t, GS_INT(24), GS_INT(24));
+
+    // Dropped where the car is standing, by moving the car there to drop it and
+    // leaving it there - a hazard goes under the car that laid it.
+    gs_world_arm(&slicked, GS_HAZ_OIL, 1);
+    slicked.car[0].drop_cooldown = 0;
+    CHECK(gs_world_drop(&slicked, 0, GS_HAZ_OIL));
+    CHECK(slicked.hazard_count == 1);
+
+    gs_camera cam = gs_camera_on(24.0f, 24.0f, 0.0f);
+    cam.zoom = 3.0f;
+
+    gs_frame with = gs_render_frame(ren, &t, &slicked, &slicked, 1.0f, &cam);
+    gs_frame without = gs_render_frame(ren, &t, &clean, &clean, 1.0f, &cam);
+    CHECK(with.px != nullptr && without.px != nullptr);
+    if (with.px == nullptr || without.px == nullptr) return;
+
+    const int seen = gs_count_car0(&with);
+    const int whole = gs_count_car0(&without);
+
+    printf("  HAZARD car in the slick %d px, the same car on clean road %d px\n",
+           seen, whole);
+
+    CHECK(whole > 2000);          // the reference car is really in the frame
+    CHECK(seen == whole);         // and the slick took none of it
+
+    gs_frame_free(&with);
+    gs_frame_free(&without);
+}
+
 TEST(a_car_standing_on_a_gates_arrow_is_not_painted_over_by_it) {
     // **Paint on the road goes under the car, from every angle.**
     //
@@ -10889,6 +10936,7 @@ int main(void) {
 
     gs_win = win;
 
+    run_a_car_standing_in_a_hazard_is_not_painted_over_by_it(ren);
     run_a_car_standing_on_a_gates_arrow_is_not_painted_over_by_it(ren);
     run_a_car_behind_a_rise_is_hidden_by_it(ren);
     run_the_view_does_not_jump_as_a_car_crosses_a_tile_boundary(ren);

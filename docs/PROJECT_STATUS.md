@@ -965,6 +965,29 @@ floor of 630 — so a shipped set that shortens turns the tree red without anybo
 running the writer. Every track is still validated and raced by every vehicle
 from every grid slot as well.
 
+**And a car sitting in a hazard was painted out of the frame entirely.** Found
+by asking the arrow's question of the other thing painted flat on the ground,
+and it is the same fault at its worst: the hazards were drawn in a pass of their
+own *after* the sweep, so every one of them went on top of every car. A car
+parked in the slick it had just laid measured **0 pixels against 6,491** — gone,
+not dimmed. The comment over that loop said hazards were "drawn on the ground
+under everything that moves", which is what they are for; the loop had never
+done it.
+
+They are paint, so they go down with the paint: `gs_draw_hazards` now runs
+inside the sweep at each hazard's own diagonal, before the cars of that
+diagonal, and through `gs_ground_mark` like everything else — smoke is over two
+tiles across, which is three diagonals of ground for one shape to answer for.
+The per-kind look moved into `gs_hazard_paint` so the paint and the sorting are
+separate questions. `a_car_standing_in_a_hazard_is_not_painted_over_by_it` now
+reads 6,491 against 6,491, and the two tests that already checked hazards are
+drawn as themselves and at the size the simulation catches you at both still
+pass, so nothing about how they look moved.
+
+Blending is now turned on once at the top of the view. It used to be switched on
+by the first car drawn, which happened to be before any mark that needed it —
+until hazards moved earlier in the sweep than any car.
+
 **A car crossing an arrow was painted over by it.** Reported as a flicker as
 cars cross an arrow or the start line, and it is one: the sweep paints back to
 front a tile diagonal at a time, and a shape's diagonal is `floor(x) + floor(y)`

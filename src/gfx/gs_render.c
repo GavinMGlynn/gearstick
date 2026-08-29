@@ -1463,6 +1463,99 @@ void gs_render_track_camera(gs_view *view, const gs_track *t,
     view->cam.cz = gs_cam_height(t, &c);
 }
 
+// **What a hazard looks like, and whether it has a look at all.**
+//
+// Pulled out of the draw so the paint and the sorting are separate questions.
+static bool gs_hazard_paint(const gs_hazard *h, SDL_FColor *out) {
+    const gs_hazard_kind kind = (gs_hazard_kind)h->kind;
+
+    // **Four things, four looks**, named one by one so a fifth kind has to be
+    // given one rather than inheriting whatever the last case was.
+    //
+    // Started at nothing and refused if it stays there. That is not
+    // belt-and-braces: `kind` comes from a `uint8_t` in the world, so it can
+    // hold a number this switch has no case for - and MSVC says so where gcc
+    // and clang do not. The `-Wswitch` guarantee is untouched by it, because
+    // there is still no `default` for a new enumerator to hide in.
+    SDL_FColor col = { 0.0f, 0.0f, 0.0f, 0.0f };
+    switch (kind) {
+    case GS_HAZ_OIL:
+        // Dark and see-through: the road is still under it, which is what makes
+        // it something to be driven through rather than avoided.
+        col = (SDL_FColor){ 0.05f, 0.04f, 0.10f, 0.72f };
+        break;
+    case GS_HAZ_MINE:
+        // Small and bright. The one thing a player must be able to do is see it
+        // in time.
+        col = (SDL_FColor){ 1.0f, 0.45f, 0.1f, 0.95f };
+        break;
+    case GS_HAZ_SMOKE:
+        // **Pale and nearly solid, because hiding the ground is the whole of
+        // what it does.** Anything you can see the road through is a grey patch
+        // rather than a screen.
+        col = (SDL_FColor){ 0.78f, 0.79f, 0.82f, 0.93f };
+        break;
+    case GS_HAZ_FLAME:
+        // Hot: yellow where a mine is orange, and wider, so the two are told
+        // apart at a glance by colour and by size at once.
+        col = (SDL_FColor){ 1.0f, 0.82f, 0.20f, 0.88f };
+        break;
+    case GS_HAZ_NONE:
+    case GS_HAZ_COUNT:
+        break;
+    }
+    if (col.a <= 0.0f) return false;
+
+    // **Going out is something you can see.** Smoke and fire have a clock, and
+    // one about to expire fades over its last third - so a driver can tell the
+    // fire they can wait out from the fire they cannot.
+    const uint16_t full = gs_hazard_life(kind);
+    if (full > 0) {
+        const float left = (float)h->life / (float)full;
+        if (left < 0.34f) col.a *= left / 0.34f;
+    }
+
+    *out = col;
+    return true;
+}
+
+// **The hazards on this diagonal.** Flat, because they are things on the road
+// rather than things standing on it - and each one **at the size the simulation
+// will actually catch you at**, asked of gs_hazard_radius rather than guessed
+// at here. A slick drawn narrower than it is is a lie, and it is the kind a
+// player learns to distrust the physics over.
+//
+// **Drawn in the sweep, which is what "on the ground" has to mean.** They used
+// to be drawn in a pass of their own after it, which put every one of them on
+// top of every car - so a car sitting in the slick it had just laid was painted
+// out completely, all 6,491 pixels of it, and the comment here said they went
+// under everything that moves. They are paint, so they go down with the paint.
+static void gs_draw_hazards(SDL_Renderer *ren, const gs_camera *cam,
+                            const gs_track *t, const gs_world *w, int world_d) {
+    for (uint8_t i = 0; i < w->hazard_count; i++) {
+        const gs_hazard *h = &w->hazard[i];
+        if (h->kind == GS_HAZ_NONE || h->spent) continue;
+
+        SDL_FColor col;
+        if (!gs_hazard_paint(h, &col)) continue;
+
+        const float hx = gs_to_f(h->x), hy = gs_to_f(h->y);
+        const float r = gs_to_f(gs_hazard_radius((gs_hazard_kind)h->kind));
+
+        static const float ox[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
+        static const float oy[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+        float x[4], y[4];
+        for (int k = 0; k < 4; k++) {
+            x[k] = hx + ox[k] * r;
+            y[k] = hy + oy[k] * r;
+        }
+
+        // Cut up like every other mark: smoke is over two tiles across, which
+        // is three diagonals of ground for one shape to answer for.
+        gs_ground_mark(ren, cam, t, x, y, 0.02f, col, world_d);
+    }
+}
+
 void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                     const gs_world *now, float alpha, const gs_view *view) {
     SDL_SetRenderViewport(ren, &view->rect);
@@ -1485,6 +1578,10 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
     //
     // Far enough out to show the drop starting. Beyond that the ground is a long
     // way below and there is nothing to learn from more of it.
+    // Every mark on the ground has an alpha, and the first of them is drawn
+    // before the first car is - which used to be what turned blending on.
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
     const int fringe = GS_RUNOFF_TILES + 6;
 
     int diagonals = (int)t->w + (int)t->h - 1 + fringe * 2;
@@ -1536,6 +1633,10 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                 }
             }
         }
+        // The hazards on the ground of this diagonal, painted before the cars
+        // that drive through them, like the route and the gates above.
+        gs_draw_hazards(ren, &cam, t, now, d - fringe * 2);
+
         // The sweep counts from the fringe, so the world diagonal this pass is
         // drawing is `d` shifted back by the two tiles of margin it starts
         // outside on each axis. Comparing a car's own diagonal against the raw
@@ -1549,82 +1650,6 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                 gs_draw_car(ren, &cam, t, &c, i, 1.0f);
             }
         }
-    }
-
-    // Hazards, drawn on the ground under everything that moves. Flat, because
-    // they are things on the road rather than things standing on it - and each
-    // one **at the size the simulation will actually catch you at**, asked of
-    // gs_hazard_radius rather than guessed at here. A slick drawn narrower than
-    // it is is a lie, and it is the kind a player learns to distrust the
-    // physics over.
-    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-    for (uint8_t i = 0; i < now->hazard_count; i++) {
-        const gs_hazard *h = &now->hazard[i];
-        if (h->kind == GS_HAZ_NONE || h->spent) continue;
-
-        const gs_hazard_kind kind = (gs_hazard_kind)h->kind;
-        float hx = gs_to_f(h->x), hy = gs_to_f(h->y);
-        float r = gs_to_f(gs_hazard_radius(kind));
-
-        // **Going out is something you can see.** Smoke and fire have a clock,
-        // and one about to expire fades over its last third - so a driver can
-        // tell the fire they can wait out from the fire they cannot.
-        float fade = 1.0f;
-        const uint16_t full = gs_hazard_life(kind);
-        if (full > 0) {
-            const float left = (float)h->life / (float)full;
-            if (left < 0.34f) fade = left / 0.34f;
-        }
-
-        static const float ox[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
-        static const float oy[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
-        SDL_FPoint p[4];
-        for (int k = 0; k < 4; k++) {
-            float px = hx + ox[k] * r, py = hy + oy[k] * r;
-            gs_fix pz = gs_track_height(t, (gs_fix)(px * (float)GS_ONE),
-                                        (gs_fix)(py * (float)GS_ONE));
-            gs_iso_project(&cam, px, py, gs_to_f(pz) + 0.02f, &p[k].x, &p[k].y);
-        }
-
-        // **Four things, four looks**, named one by one so a fifth kind has to
-        // be given one rather than inheriting whatever the last case was.
-        //
-        // Started at nothing and skipped if it stays there. That is not
-        // belt-and-braces: `kind` comes from a `uint8_t` in the world, so it
-        // can hold a number this switch has no case for - and MSVC says so
-        // where gcc and clang do not. The `-Wswitch` guarantee is untouched by
-        // it, because there is still no `default` for a new enumerator to hide
-        // in.
-        SDL_FColor col = { 0.0f, 0.0f, 0.0f, 0.0f };
-        switch (kind) {
-        case GS_HAZ_OIL:
-            // Dark and see-through: the road is still under it, which is what
-            // makes it something to be driven through rather than avoided.
-            col = (SDL_FColor){ 0.05f, 0.04f, 0.10f, 0.72f };
-            break;
-        case GS_HAZ_MINE:
-            // Small and bright. The one thing a player must be able to do is
-            // see it in time.
-            col = (SDL_FColor){ 1.0f, 0.45f, 0.1f, 0.95f };
-            break;
-        case GS_HAZ_SMOKE:
-            // **Pale and nearly solid, because hiding the ground is the whole
-            // of what it does.** Anything you can see the road through is a
-            // grey patch rather than a screen.
-            col = (SDL_FColor){ 0.78f, 0.79f, 0.82f, 0.93f };
-            break;
-        case GS_HAZ_FLAME:
-            // Hot: yellow where a mine is orange, and wider, so the two are
-            // told apart at a glance by colour and by size at once.
-            col = (SDL_FColor){ 1.0f, 0.82f, 0.20f, 0.88f };
-            break;
-        case GS_HAZ_NONE:
-        case GS_HAZ_COUNT:
-            break;
-        }
-        if (col.a <= 0.0f) continue;      // a kind with no look; see above
-        col.a *= fade;
-        gs_quad(ren, p, col);
     }
 
     // Cars that have driven off the authored track are past the last diagonal,

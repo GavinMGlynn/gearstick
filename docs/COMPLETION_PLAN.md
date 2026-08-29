@@ -1400,6 +1400,17 @@ worth as much as what was decided about it.
       as a machine can take this: a device is opened at the end of the audio run
       and the callback has to have actually fed it. What no driver can do is
       make a noise somebody hears.
+- [x] **A car sitting in a hazard was painted out of the frame.** The same
+      question asked of the other thing painted flat on the road, and the same
+      fault at its worst: hazards were drawn in a pass of their own after
+      everything else, so every one went on top of every car. A car parked in
+      the slick it had just laid measured zero pixels — gone, not dimmed — while
+      the comment over that loop said hazards go "under everything that moves".
+      They are painted in the sweep now, with the route and the gates.
+      *Verification: the same car in the slick and on clean road, 6,491 pixels
+      against 6,491; and the two tests that already checked hazards are drawn as
+      themselves, and at the size the simulation catches you at, both still
+      pass — so how they look did not move, only when.*
 - [x] **A car crossing an arrow was painted over by it.** Seen as a flicker as
       cars cross an arrow or the start line. The ground is painted back to front
       a tile at a time and a shape is sorted by the tile its nearest corner
