@@ -8435,6 +8435,69 @@ TEST(every_generated_track_can_be_got_round) {
     }
 }
 
+TEST(a_driver_already_backing_off_a_hill_does_not_change_its_mind_at_the_edge) {
+    // **A decision taken at a threshold has to stay taken.**
+    //
+    // "Can I climb this" is a comparison against a limit, and a car that has
+    // come to rest against a hill sits exactly at that limit: it backs off, and
+    // a hair further back the same comparison says the way is clear, so it
+    // accelerates, and the hill stops it again. Two opponents on `the big one`
+    // spent the rest of a race doing that - `accel right`, `brake left`, `accel
+    // right`, a second or two apart, jittering by hundredths of a tile and
+    // never getting away.
+    //
+    // So a car that is **already going backwards** asks a harder question
+    // before it decides the way is clear. That is hysteresis and it needs no
+    // memory: which way a car is travelling relative to where it is pointing is
+    // in the world already.
+    //
+    // Both halves are asked of the driver directly, because it is a pure
+    // function of the world and this is a claim about two worlds rather than
+    // about a race.
+    static gs_track t;
+    gs_track_init(&t, 40, 24, GS_SURF_PAVEMENT);
+
+    // A hill just inside what a stationary car will take on: at a tile and a
+    // half it rises a little under half a tile, which is the limit at rest.
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            gs_track_set_corner(&t, x, y,
+                x > 16 ? gs_fix_mul(GS_RATIO(28, 100), GS_INT(x - 16)) : 0);
+        }
+    }
+    gs_track_add_gate(&t, GS_INT(8), GS_INT(12), 0, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(36), GS_INT(12), 0, GS_INT(5));
+
+    // The same car in the same place twice, differing only in which way it is
+    // already travelling.
+    gs_input asked[2];
+    for (int backing = 0; backing < 2; backing++) {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_set_mode(&w, GS_MODE_RACE);
+        gs_world_set_laps(&w, 1);
+        gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                         GS_INT(16), GS_INT(12), 0);
+        // Pointing up the hill either way; rolling back down it in the second.
+        if (backing) w.car[0].vx = -GS_RATIO(12, 100);
+        asked[backing] = gs_ai_drive(&w, &t, 0);
+    }
+
+    printf("  EDGE rolling forward: %s%s   already backing away: %s%s\n",
+           (asked[0] & GS_IN_ACCEL) ? "accel" : "",
+           (asked[0] & GS_IN_BRAKE) ? "brake" : "",
+           (asked[1] & GS_IN_ACCEL) ? "accel" : "",
+           (asked[1] & GS_IN_BRAKE) ? "brake" : "");
+
+    // Stopped at the hill, it is willing to have a go - this scene is inside
+    // what it will attempt, or the pair below would agree for the wrong reason.
+    CHECK((asked[0] & GS_IN_ACCEL) != 0);
+
+    // **And having decided to back off, it does not turn round at the edge.**
+    CHECK((asked[1] & GS_IN_BRAKE) != 0);
+    CHECK((asked[1] & GS_IN_ACCEL) == 0);
+}
+
 TEST(a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from) {
     // **The question is asked of the whole slope, not one point on it.**
     //
@@ -8832,6 +8895,7 @@ int main(void) {
     run_a_part_that_will_not_fit_changes_nothing();
     run_a_generated_track_leaves_clear_ground_to_get_up_to_speed_on();
     run_every_generated_track_can_be_got_round();
+    run_a_driver_already_backing_off_a_hill_does_not_change_its_mind_at_the_edge();
     run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
     run_every_car_lines_up_behind_the_line_it_has_to_cross();

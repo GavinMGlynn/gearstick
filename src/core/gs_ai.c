@@ -281,13 +281,38 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
                 // So the allowance grows with the distance being asked about -
                 // which is what "how steep is this" means - and any distance
                 // that says no is a no.
-                if (speed_now < GS_RATIO(30, 100)) {
+                // **Which way it is already travelling, relative to where it
+                // is pointing.** A decision taken at a threshold has to stay
+                // taken: a car that has come to rest against a hill sits
+                // exactly at the limit, backs off, and a hair further back the
+                // same comparison says the way is clear - so it drives at the
+                // hill again. Two opponents spent the rest of a race doing that
+                // on `the big one`, `accel right` and `brake left` a second
+                // apart, jittering by hundredths of a tile.
+                //
+                // Two things flipped it. Backing away *gains speed*, and the
+                // allowance grows with speed, so retreating made the hill look
+                // more climbable the further it retreated. And past three
+                // tenths of a tile a second the question stopped being asked at
+                // all, which is the speed a car reaches while reversing away.
+                //
+                // So while it is going backwards the question is still asked,
+                // and asked harder: it has to be clear by a margin before it
+                // changes its mind. That is hysteresis, and it needs no memory
+                // - which way a car is moving against its own heading is in the
+                // world already, so the driver stays a pure function of it.
+                const gs_fix along = gs_fix_mul(c->vx, gs_cos(c->heading)) +
+                                     gs_fix_mul(c->vy, gs_sin(c->heading));
+                const bool backing_off = along < 0;
+
+                if (speed_now < GS_RATIO(30, 100) || backing_off) {
                     for (int step = 1; step <= 4; step++) {
                         const gs_fix at = gs_fix_mul(look, GS_INT(step) / 2);
                         const gs_fix nx = c->x + gs_fix_mul(gs_cos(c->heading), at);
                         const gs_fix ny = c->y + gs_fix_mul(gs_sin(c->heading), at);
-                        const gs_fix allowed =
+                        gs_fix allowed =
                             gs_fix_mul(climbable, gs_fix_div(at, look));
+                        if (backing_off) allowed = gs_fix_mul(allowed, GS_HALF);
                         if (gs_track_height(t, nx, ny) - here_h > allowed) {
                             blocked = true;
                             break;

@@ -1101,6 +1101,93 @@ what moved is where the cars are put. The generator fold is untouched - "200
 generated tracks, all the ones they always were" - and so is the scripted
 replay, which does not start from a grid.
 
+**And the last two are fixed: every car finishes every shipped track now.**
+
+They oscillated at the foot of a ramp for the rest of the race - `accel right`,
+`brake left`, `accel right`, a second or two apart, heading flicking between two
+values, position jittering by hundredths of a tile. Two things flipped them.
+Backing away **gains speed**, and the allowance for what counts as climbable
+grows with speed, so retreating made the hill look more climbable the further
+they retreated. And past three tenths of a tile a second the question stopped
+being asked at all - which is exactly the speed a car reaches while reversing.
+
+So while a car is going backwards the question is still asked, and asked harder:
+it has to be clear by a **margin** before it changes its mind. That is
+hysteresis, and it needs no memory - which way a car is moving against its own
+heading is in the world already, so the driver stays a pure function of it,
+which is what the golden hash pins.
+
+*Verification: `a_driver_already_backing_off_a_hill_does_not_change_its_mind_at_
+the_edge` puts the same car in the same place twice, differing only in which way
+it is already rolling, and asks the driver directly: stopped it says accelerate,
+already backing away it says brake. Written before the change and failing then.
+Across the shipped set, **7 cars of 72 failed to finish when this began, then 2,
+and now 0** - every opponent gets round every track from every slot. No golden
+hash moves.*
+
+**Three wrong descriptions before that one, and the lesson is theirs.** These two
+cars were written up as jammed against each other (they were thirty tiles
+apart), then as one creeping over a lip and driving on (it does creep, and does
+not drive on). Each came from a partial look - a diagnostic that reported one
+car while two were failing, a snapshot at one moment, a trace that stopped
+before the car came back. The account that turned out to be right came from
+watching both cars to the end of the race and printing what the driver asked for
+at every sample.
+
+**The grid is an echelon, and it stops throwing opponents off the map.**
+
+Four AI cars over the shipped set lost **7 of 72**, six of them wrecked at
+y = -13 off the north edge with no laps driven, on six of the eighteen tracks.
+It took a full grid: at one, two or three cars every one of them finished, which
+is why nothing had ever seen it - every AI check races one car alone, the
+eighteen-track walk over four grid slots included.
+
+Traced to the tick. A car doing two tiles a second is hit two seconds after the
+flag and leaves with `vz = +4.60`, `vy = -5.24`; the flight after that is honest,
+vz decaying linearly under gravity to a peak of 4.7 tiles. One hit gives 0.35 of
+lift per unit of impulse and this launch is 0.72 - **exactly twice** - because
+the car is hit from both sides inside one tick while the field is still bunched.
+Two horizontal impulses partly cancel as vectors; two lifts can only add.
+
+`GS_BOUNCE` is 1.5 and that is deliberate: a collision returns more than it was
+given because the chaos is the reward. So the fix is not the physics. Four cars
+were starting abreast and *level with each other*, three and a half tiles apart
+across a fourteen tile gate, all steering for the same racing line - so the grid
+is an echelon now, each slot a tile and a half further back than the one beside
+it, the way a starting grid has been since before any of us. No car is level
+with either neighbour, so a shove has an empty diagonal to go into instead of
+another car.
+
+**A tile and a half, and the number was measured rather than chosen.** Depth is
+not free: a route that folds back every thirty tiles has the previous pass of
+itself close behind the line, so a grid that reaches too far back puts a car on
+ground belonging to a different part of the route.
+
+| stagger a slot | back of the grid | cars lost of 72 | every seed finishable |
+|---|---|---|---|
+| none (abreast) | 3 tiles | 7 | yes |
+| 1 tile | 6 tiles | 4 | yes |
+| **1.5 tiles** | **7.5 tiles** | **2** | **yes** |
+| 2 tiles | 9 tiles | 2 | **no** - 3 of 12 seeds |
+
+Two tiles buys nothing over one and a half and costs three of twelve generated
+seeds their shippability, which `a_generated_race_can_actually_be_finished`
+caught - its own comment had warned that a staggered grid on a folding route was
+not guaranteed. Two rows of two and an alternating grid were both tried and are
+worse than either, at 5.
+
+*Verification: 7 stragglers of 72 became **2**, and every launch off the map is
+gone - all six cars that were ending wrecked at the field's edge finish now. The
+two that remain are stopped, not thrown.*
+
+**The golden hash moved, deliberately.** The opponents race is four cars put on
+a grid, and the grid moved, so `GS_OPPONENTS_WORLD_HASH` goes from
+`0x3953f0a568bc1d2f` to `0x907e0b272edba84d`, with the reason written beside it
+in `golden.h`. Not one constant of the physics moved and neither did the driver;
+what moved is where the cars are put. The generator fold is untouched - "200
+generated tracks, all the ones they always were" - and so is the scripted
+replay, which does not start from a grid.
+
 **What is left, described correctly at the third attempt.** `the big one` ends
 with **two** cars that have driven no laps, and this note has now said three
 different things about them, the first two of them wrong: "jammed against each

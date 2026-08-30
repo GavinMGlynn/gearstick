@@ -1438,19 +1438,19 @@ worth as much as what was decided about it.
       a half and 1.35 at three, it used to answer "accelerate" and now answers
       "brake". No golden hash moves. It was landed, withdrawn and landed again —
       that story is in `PROJECT_STATUS.md`.*
-- [ ] **Two opponents oscillate at the foot of a ramp for the rest of the
-      race.** The last stragglers: on `the big one` two cars end with no laps
-      driven, alternating between "back off, I cannot climb this" and "the way
-      is clear, accelerate" every second or two, jittering by hundredths of a
-      tile and never getting away. The driver re-decides at the boundary every
-      tick; what would settle it is refusing to change its mind until it is
-      clear by a margin. What it should do once clear is a question about how an
-      opponent ought to drive, which is why this is written down rather than
-      guessed at.
-      *This note previously said these cars were jammed against each other, and
-      then that one crept over a lip and drove on. Both were wrong, written from
-      partial looks; the third account is from watching both cars to the end and
-      printing what the driver asked for.*
+- [x] **Two opponents oscillated at the foot of a ramp for the rest of the
+      race.** They alternated "back off, I cannot climb this" and "the way is
+      clear, accelerate" every second or two, jittering by hundredths of a tile
+      and never getting away. Backing away gains speed, the allowance for what
+      counts as climbable grows with speed, and past three tenths of a tile a
+      second the question stopped being asked at all — so retreating made the
+      hill look easier the further they retreated. A car going backwards is now
+      asked the question anyway, and has to be clear by a margin before it
+      changes its mind.
+      *Verification: the same car in the same place twice, differing only in
+      which way it is already rolling — stopped it says accelerate, already
+      backing away it says brake. Across the shipped set 7 cars of 72 failed to
+      finish when this began, then 2, and now none. No golden hash moves.*
 - [x] **A check that was passing by a second and a third.** The front door
       check failed once in a full run and passed on its own, which looks like a
       flake and was not: asked to say how long it took rather than only that it
