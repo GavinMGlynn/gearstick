@@ -286,6 +286,27 @@ bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix n
     return gs_fix_abs(lateral) <= g->half_width;
 }
 
+bool gs_gate_missed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny) {
+    gs_fix fx = gs_cos(g->heading);
+    gs_fix fy = gs_sin(g->heading);
+
+    // Same rule as crossing for whether the plane was reached at all, and in
+    // the direction a car driving the route reaches it.
+    gs_fix before = gs_fix_mul(px - g->x, fx) + gs_fix_mul(py - g->y, fy);
+    gs_fix after = gs_fix_mul(nx - g->x, fx) + gs_fix_mul(ny - g->y, fy);
+    if (before >= 0 || after < 0) return false;
+
+    gs_fix span = after - before;
+    gs_fix at = span == 0 ? 0 : gs_fix_div(-before, span);
+
+    gs_fix cx = px + gs_fix_mul(nx - px, at);
+    gs_fix cy = py + gs_fix_mul(ny - py, at);
+
+    // ...and then the opposite answer: outside the width rather than inside it.
+    gs_fix lateral = gs_fix_mul(cx - g->x, -fy) + gs_fix_mul(cy - g->y, fx);
+    return gs_fix_abs(lateral) > g->half_width;
+}
+
 // How far back the grid sits from the line. Three tiles: enough that a car has
 // crossed properly rather than been placed astride the plane, and little enough
 // that the run-up to the first corner is the track's business and not this

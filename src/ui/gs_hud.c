@@ -124,6 +124,11 @@ typedef struct gs_hud_rows {
     // that exists for every race and means something in one of them is a hole
     // in all the others.
     bool  carrying;
+
+    // **A checkpoint driven past.** Its own row, because a driver who has
+    // missed one is about to finish a lap that will not count and the game has
+    // to say so before they cross the line rather than after.
+    bool  missed;
 } gs_hud_rows;
 
 // **What a line of text will actually measure.** ImGui bakes a font at whole
@@ -167,6 +172,8 @@ static float gs_hud_height(const gs_hud_rows *r, float base, float zoom,
     // this row was caught costing a gap too much in exactly the three where
     // somebody is waiting.
     if (r->carrying) h += row_small;
+    // The missed checkpoint, and the gap above it.
+    if (r->missed) h += row_small + gap;
     // A finished car's time, and the gap above it.
     if (r->finished) h += row_small + gap;
     // The one or two keys a wrecked driver is offered. Counted here rather than
@@ -343,6 +350,7 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                         : 2.0f,                       // this lap, best
         .finished = c->finish_tick != 0,
         .carrying = gs_car_selected(c) != GS_HAZ_NONE,
+        .missed = v->missed && c->finish_tick == 0,
         .wrecked = c->wrecked,
         .waiting = waited > 0.5f,
         .online = online,
@@ -526,6 +534,16 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                          gs_hazard_name(sel), gs_car_ammo(c, sel));
             gs_hud_stat("carrying", text, GS_HUD_SMALL);
             SDL_snprintf(gs_hud_carried, sizeof gs_hud_carried, "%s", text);
+        }
+
+        // **A checkpoint driven past, said before the flag rather than after.**
+        // The race only ever tests the gate this car is owed, so from here the
+        // finish will do nothing - and a player who ran wide at a corner and
+        // was told nothing drove the whole rest of the lap and crossed the
+        // chequer for it. The arrow on the ground points back at the one owed.
+        if (v->missed && c->finish_tick == 0) {
+            ImGui_Spacing();
+            gs_hud_stat("checkpoint missed", "go back", GS_HUD_SMALL);
         }
 
         if (c->wrecked) gs_hud_way_out(online);

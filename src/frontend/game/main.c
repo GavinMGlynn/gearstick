@@ -417,6 +417,9 @@ static void gs_start_race(gs_app *a) {
     // or by one machine and sent, would be a different world on each screen.
     gs_world_set_countdown(&a->world, GS_COUNTDOWN_TICKS);
 
+    // Nobody has missed anything yet.
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) a->view[i].missed = false;
+
     a->race_settled = false;
     a->prev = a->world;
 
@@ -1761,7 +1764,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                 break;    // the other machine has gone quiet; wait for it
             }
             a->stalled_since = 0;
+            gs_world seen = a->world;
             a->world = *gs_net_world(&a->net);
+            gs_view_note_missed(a->view, GS_MAX_CARS, &a->t, &seen, &a->world);
         }
         steps = 0;
     }
@@ -1784,6 +1789,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         a->prev = a->world;
         gs_replay_record(&a->recording, in);
         gs_world_step(&a->world, &a->t, in);
+        gs_view_note_missed(a->view, GS_MAX_CARS, &a->t, &a->prev, &a->world);
 
         // Lockstep, one tick for one tick. The ghost is a race, not a
         // playback, so it has to be stepped by the same clock as everything

@@ -8636,6 +8636,49 @@ TEST(a_car_a_little_under_the_ground_can_still_drive_away) {
     CHECK(went[1] > gs_fix_mul(went[0], GS_RATIO(95, 100)));
 }
 
+TEST(a_step_past_a_gate_is_told_from_a_step_through_it) {
+    // **Three answers, not two.** A step can go through a gate, past it, or
+    // neither - and "neither" is what a car still driving towards one is doing,
+    // so a missed gate cannot be the negation of a crossed one.
+    //
+    // This is worth having because the simulation only ever tests the gate a
+    // car is *expecting*. Miss one and every later crossing stops counting, the
+    // finish included, and nothing in the game said so: a player ran wide at a
+    // corner, drove the rest of the lap, crossed the chequer and was told
+    // nothing.
+    static gs_track t;
+    gs_track_init(&t, 40, 40, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(20), GS_INT(20), 0, GS_INT(4));
+    const gs_gate *g = &t.gate[0];
+
+    const gs_fix behind = GS_INT(18), beyond = GS_INT(22);
+
+    // Straight through the middle.
+    CHECK(gs_gate_crossed(g, behind, GS_INT(20), beyond, GS_INT(20)));
+    CHECK(!gs_gate_missed(g, behind, GS_INT(20), beyond, GS_INT(20)));
+
+    // Through, at the very edge of the gate's width - still through.
+    CHECK(gs_gate_crossed(g, behind, GS_INT(24), beyond, GS_INT(24)));
+    CHECK(!gs_gate_missed(g, behind, GS_INT(24), beyond, GS_INT(24)));
+
+    // Past it, wide of the width: not crossed, and this is the case the game
+    // had no word for.
+    CHECK(!gs_gate_crossed(g, behind, GS_INT(26), beyond, GS_INT(26)));
+    CHECK(gs_gate_missed(g, behind, GS_INT(26), beyond, GS_INT(26)));
+
+    // **Still on the way is neither.** A step that never reaches the plane says
+    // nothing, or a car would be told it had missed a gate it was driving at.
+    CHECK(!gs_gate_crossed(g, GS_INT(10), GS_INT(26), GS_INT(15), GS_INT(26)));
+    CHECK(!gs_gate_missed(g, GS_INT(10), GS_INT(26), GS_INT(15), GS_INT(26)));
+
+    // And backwards over the line is neither: reversing across a gate has never
+    // counted as taking it, and it must not count as missing it either.
+    CHECK(!gs_gate_crossed(g, beyond, GS_INT(26), behind, GS_INT(26)));
+    CHECK(!gs_gate_missed(g, beyond, GS_INT(26), behind, GS_INT(26)));
+
+    printf("  GATE through, past and still-on-the-way told apart\n");
+}
+
 TEST(every_car_lines_up_behind_the_line_it_has_to_cross) {
     // The analyser used to put its car *on* the start line, which left it with
     // its own position to aim at and no reason to go anywhere; whether it
@@ -8898,6 +8941,7 @@ int main(void) {
     run_a_driver_already_backing_off_a_hill_does_not_change_its_mind_at_the_edge();
     run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
+    run_a_step_past_a_gate_is_told_from_a_step_through_it();
     run_every_car_lines_up_behind_the_line_it_has_to_cross();
 
     if (gs_failures == 0) {

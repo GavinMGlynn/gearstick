@@ -30,12 +30,47 @@ typedef struct gs_view {
     // anybody clear this" is the whole job.
     bool      show_arc;
 
+    // **The checkpoint this driver has driven past, or -1.**
+    //
+    // The simulation only tests the gate a car is *expecting*, so one missed
+    // gate silently stops every later crossing counting, the finish included -
+    // a player who ran wide at a corner drove the rest of the lap, crossed the
+    // chequer and was told nothing at all. This is what the HUD says so, and
+    // what the arrow on the ground points back at.
+    //
+    // Latched by the frontend rather than kept in the world: which gate a car
+    // is owed is already in the world, and *having been told about it* is a
+    // property of a screen. Keeping it out of gs_world is also what stops this
+    // moving the golden hash and invalidating every replay in existence.
+    //
+    // A flag and an index rather than an index and a sentinel, because a
+    // `gs_view` is zero-initialised in a dozen places and a zero that means
+    // "gate zero was missed" would put the warning on screen in every one of
+    // them.
+    bool     missed;
+    uint8_t  missed_at;
+
     // The analyser's heatmap, or null for none. Borrowed, not owned: the view
     // paints whatever the editor last worked out and never runs the sweep
     // itself, because a sweep is thirty seconds of simulation and a frame is
     // eight milliseconds.
     const gs_analysis *heat;
 } gs_view;
+
+// **Notice when this view's driver has driven past the checkpoint it owes.**
+//
+// Given the world before a step and after it, latch `missed` on any view whose
+// car crossed the plane of the gate it was expecting without going through it,
+// and clear it on any whose car has just taken that gate. The race only ever
+// tests the gate a car is expecting, so one missed gate silently stops every
+// later crossing counting, the finish included - a player who ran wide at a
+// corner drove the rest of the lap, crossed the chequer and was told nothing.
+//
+// Here rather than in the frontend so that it can be tested, and rather than in
+// `gs_world` so that it does not move the golden hash: which gate a car owes is
+// already in the world, and *having been told* is a property of a screen.
+void gs_view_note_missed(gs_view *views, uint8_t count, const gs_track *t,
+                         const gs_world *was, const gs_world *now);
 
 // Draw one view of the world. `alpha` in [0,1] interpolates between the
 // previous simulation state and the current one, so motion is smooth at frame

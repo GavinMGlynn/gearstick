@@ -1575,6 +1575,34 @@ static void gs_draw_hazards(SDL_Renderer *ren, const gs_camera *cam,
     }
 }
 
+void gs_view_note_missed(gs_view *views, uint8_t count, const gs_track *t,
+                         const gs_world *was, const gs_world *now) {
+    if (views == nullptr || t == nullptr || was == nullptr || now == nullptr) return;
+    if (t->gate_count == 0) return;
+
+    for (uint8_t i = 0; i < now->car_count && i < GS_MAX_CARS; i++) {
+        const gs_car *before = &was->car[i];
+        const gs_car *after = &now->car[i];
+        if (!after->active) continue;
+
+        // Took the gate it owed: whatever it had missed is put right.
+        const bool took_one = after->next_gate != before->next_gate;
+
+        const gs_gate *g = &t->gate[before->next_gate % t->gate_count];
+        const bool drove_past =
+            !took_one &&
+            gs_gate_missed(g, before->x, before->y, after->x, after->y);
+
+        if (!took_one && !drove_past) continue;
+
+        for (uint8_t v = 0; v < count; v++) {
+            if (views[v].car != i) continue;
+            views[v].missed = drove_past;
+            if (drove_past) views[v].missed_at = before->next_gate;
+        }
+    }
+}
+
 void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                     const gs_world *now, float alpha, const gs_view *view) {
     SDL_SetRenderViewport(ren, &view->rect);
@@ -1689,6 +1717,52 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
     // ticks is not a state the simulation was ever in.
     if (view->show_arc && view->car < now->car_count) {
         gs_draw_arc(ren, &cam, t, now, view->car);
+    }
+
+    // **And the way back to a checkpoint that was driven past**, over
+    // everything and only for this driver, for the same reason the arc is: it
+    // is a readout rather than scenery, and a player who cannot see it is a
+    // player still driving a lap that will not count.
+    //
+    // From the car towards the gate it owes, because "which way now" is the
+    // question, and pointing at a line thirty tiles behind a hairpin is not an
+    // answer anybody can act on from a route drawn on the ground.
+    if (view->missed && view->car < now->car_count &&
+        view->missed_at < t->gate_count) {
+        const gs_car *me = &now->car[view->car];
+        const gs_gate *owed = &t->gate[view->missed_at];
+
+        float dx = gs_to_f(owed->x - me->x), dy = gs_to_f(owed->y - me->y);
+        float len = SDL_sqrtf(dx * dx + dy * dy);
+        if (len > 0.001f) {
+            dx /= len; dy /= len;
+            const float sx = -dy, sy = dx;
+
+            // Short and near the car rather than a line all the way to the
+            // gate: what is wanted is a direction, and a two tile arrow says it
+            // without painting over the road somebody is trying to read.
+            const float ox = gs_to_f(me->x), oy = gs_to_f(me->y);
+            const float from = 1.2f, to = 2.6f, wide = 0.30f, barb = 0.75f;
+            const SDL_FColor warn = { 1.0f, 0.35f, 0.20f, 0.85f };
+
+            float shaft_x[4] = { ox + dx * from + sx * wide, ox + dx * to + sx * wide,
+                                 ox + dx * to - sx * wide,   ox + dx * from - sx * wide };
+            float shaft_y[4] = { oy + dy * from + sy * wide, oy + dy * to + sy * wide,
+                                 oy + dy * to - sy * wide,   oy + dy * from - sy * wide };
+            gs_ground_mark(ren, &cam, t, shaft_x, shaft_y, 0.06f, warn,
+                           gs_ground_quad_diagonal(shaft_x, shaft_y));
+
+            float head_x[4] = { ox + dx * (to + barb),
+                                ox + dx * to + sx * barb,
+                                ox + dx * to - sx * barb,
+                                ox + dx * (to + barb) };
+            float head_y[4] = { oy + dy * (to + barb),
+                                oy + dy * to + sy * barb,
+                                oy + dy * to - sy * barb,
+                                oy + dy * (to + barb) };
+            gs_ground_mark(ren, &cam, t, head_x, head_y, 0.06f, warn,
+                           gs_ground_quad_diagonal(head_x, head_y));
+        }
     }
 
     SDL_SetRenderClipRect(ren, nullptr);

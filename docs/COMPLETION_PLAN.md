@@ -824,6 +824,19 @@ review, and it fails it for good reasons.
       server race without `--relay` had never sent anything at all; only the
       welcome populated peers, so the first player could not see the second; and
       readiness meant introduced rather than able to race.*
+- [x] **A missed checkpoint was silent, and silence cost the race.** Reported
+      from play: a corner overshot, then the finish line crossed with nothing
+      recognised and no way to tell why. The race tests only the gate a car is
+      expecting — which is what stops a lap being won by cutting the infield —
+      so one gate driven past stops every later crossing counting, the finish
+      included, and nothing said so. The HUD now says "checkpoint missed / go
+      back" and an arrow on the ground points from the car to the gate it owes;
+      both clear the moment that gate is taken.
+      *Verification: a car driven eight tiles wide of a gate three wide latches
+      the warning on the right gate, draws the arrow (1,044 pixels against 0
+      with it cleared), says so in the HUD (9,308 pixels of difference), and
+      clears it on going back. No golden hash moves — the flag is on the view,
+      not in the world, because having been told is a property of a screen.*
 - [ ] **A track is chosen by racing one car, and a race has four.** The
       eighteen tracks in the box are now clean — every opponent finishes every
       one of them from every slot. Generated tracks are not: over eighty seeds,

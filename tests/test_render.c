@@ -233,6 +233,149 @@ static gs_hazard_kind gs_mark_hazard(gs_mark_kind m) {
     }
 }
 
+// One frame drawn from a view as given, rather than from a camera with a fresh
+// view built round it - which is what gs_render_frame does, and would drop
+// anything the test had set on the view itself.
+static gs_frame gs_frame_of_view(SDL_Renderer *ren, const gs_track *t,
+                                 const gs_world *w, const gs_view *v) {
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    gs_render_view(ren, t, w, w, 1.0f, v);
+
+    gs_frame f = { 0 };
+    SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
+    if (raw == nullptr) return f;
+    f.own = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(raw);
+    if (f.own != nullptr) f.px = (uint8_t *)f.own->pixels;
+    return f;
+}
+
+// Defined with the HUD tests further down; used here because a missed
+// checkpoint is a thing the HUD has to say as well as a thing drawn on the
+// ground.
+static void gs_hud_frame(SDL_Renderer *ren, const gs_track *t, const gs_world *w,
+                         const gs_view *v, gs_frame *out);
+static int gs_hud_pixels_differing(const gs_frame *a, const gs_frame *b);
+static void gs_imgui_start(SDL_Window *win, SDL_Renderer *ren);
+
+// The warning arrow's colour, which nothing else in these scenes uses.
+static int gs_count_warning(const gs_frame *f) {
+    int n = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        const uint8_t *p = &f->px[i * 4];
+        if (p[0] > 200 && p[1] > 60 && p[1] < 130 && p[2] < 90) n++;
+    }
+    return n;
+}
+
+TEST(a_driver_who_drove_past_a_checkpoint_is_told_and_pointed_back) {
+    // **A missed checkpoint used to be silent, and silence cost the race.**
+    //
+    // The simulation only ever tests the gate a car is *expecting*, so driving
+    // past one stops every later crossing counting - the finish included. A
+    // player ran wide at a corner, drove the rest of the lap, crossed the
+    // chequered line and was told nothing at all; the first they knew was
+    // running out of track.
+    //
+    // So: driving past the gate it owes latches the warning, an arrow is drawn
+    // on the ground pointing back at it, and going back for the gate clears it.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(24), 0, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(24), 0, GS_INT(3));
+
+    gs_view view = { 0 };
+    view.car = 0;
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    view.cam = gs_camera_on(24.0f, 24.0f, 0.0f);
+    view.cam.zoom = 2.0f;
+
+    // Nothing has happened yet, and nothing is claimed.
+    CHECK(!view.missed);
+
+    // **Wide of the gate, past its line.** Eight tiles off centre of a gate
+    // three wide, which is what running out of road at a corner looks like.
+    static gs_world was, now;
+    gs_park_car(&was, &t, GS_INT(22), GS_INT(32));
+    now = was;
+    now.car[0].x = GS_INT(26);
+
+    gs_view_note_missed(&view, 1, &t, &was, &now);
+    printf("  MISSED after driving past: %s, gate %u\n",
+           view.missed ? "warned" : "silent", (unsigned)view.missed_at);
+    CHECK(view.missed);
+    CHECK(view.missed_at == 0);
+
+    // **The arrow is on the ground and points back.** Counted against the same
+    // frame with the warning cleared, because "some orange pixels" is a claim
+    // about this scene and not about the arrow.
+    gs_view quiet = view;
+    quiet.missed = false;
+
+    gs_frame warned = gs_frame_of_view(ren, &t, &now, &view);
+    gs_frame silent = gs_frame_of_view(ren, &t, &now, &quiet);
+    CHECK(warned.px != nullptr && silent.px != nullptr);
+    if (warned.px != nullptr && silent.px != nullptr) {
+        const int lit = gs_count_warning(&warned);
+        const int unlit = gs_count_warning(&silent);
+        printf("  MISSED arrow on the ground: %d px warned, %d px not\n",
+               lit, unlit);
+
+        // The same world and the same camera, so the arrow is the whole of the
+        // difference - and the scene has none of that colour without it.
+        CHECK(unlit == 0);
+        CHECK(lit > 200);
+    }
+    gs_frame_free(&warned);
+    gs_frame_free(&silent);
+
+    // **And the HUD says it in words**, because an arrow on the ground says
+    // which way and not why. Counted as a difference against the same HUD with
+    // the warning cleared, so it is this row and not the panel in general.
+    {
+        // The HUD is drawn through ImGui, which the tests that own it start on
+        // demand. This one runs before any of them, so it says so rather than
+        // depending on the order they happen to be listed in - which is a
+        // segmentation fault, and was.
+        gs_imgui_start(gs_win, ren);
+
+        gs_frame said, unsaid;
+        gs_hud_frame(ren, &t, &now, &view, &said);
+        gs_hud_frame(ren, &t, &now, &quiet, &unsaid);
+        if (said.px != nullptr && unsaid.px != nullptr) {
+            // The whole frame rather than the corner box the other HUD tests
+            // use: the panel grows downward by a row, and where that row lands
+            // depends on how many rows this race has. Nothing else differs
+            // between the two frames, so every changed pixel is the row.
+            int changed = 0;
+            for (int i = 0; i < GS_W * GS_H; i++) {
+                const uint8_t *a = &said.px[i * 4], *b = &unsaid.px[i * 4];
+                if (a[0] != b[0] || a[1] != b[1] || a[2] != b[2]) changed++;
+            }
+            printf("  MISSED the HUD says so: %d pixels of it\n", changed);
+            CHECK(changed > 100);
+        }
+        gs_frame_free(&said);
+        gs_frame_free(&unsaid);
+    }
+
+    // **And going back for it clears the warning**, which is what makes this a
+    // thing a player can put right rather than a verdict.
+    static gs_world back, through;
+    back = now;
+    back.car[0].x = GS_INT(22);
+    back.car[0].y = GS_INT(24);
+    through = back;
+    through.car[0].x = GS_INT(26);
+    through.car[0].next_gate = 1;      // the gate was taken this step
+
+    gs_view_note_missed(&view, 1, &t, &back, &through);
+    printf("  MISSED after going back for it: %s\n",
+           view.missed ? "still warned" : "cleared");
+    CHECK(!view.missed);
+}
+
 TEST(no_paint_on_the_ground_is_drawn_over_a_car_standing_on_it) {
     // **Paint goes under the car, and this asks it of every kind of paint.**
     //
@@ -10995,6 +11138,7 @@ int main(void) {
 
     gs_win = win;
 
+    run_a_driver_who_drove_past_a_checkpoint_is_told_and_pointed_back(ren);
     run_no_paint_on_the_ground_is_drawn_over_a_car_standing_on_it(ren);
     run_a_car_behind_a_rise_is_hidden_by_it(ren);
     run_the_view_does_not_jump_as_a_car_crosses_a_tile_boundary(ren);

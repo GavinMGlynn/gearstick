@@ -319,6 +319,21 @@ bool gs_track_remove_gate(gs_track *t, uint8_t index);
 // makes a gate a gate rather than an infinite tripwire across the world.
 bool gs_gate_crossed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny);
 
+// **And whether that step went past the gate instead of through it.**
+//
+// The same step, the same plane, the other answer: it reached the far side the
+// way a car driving the route does, and did it outside the gate's width. That
+// is a checkpoint missed, and it is worth being able to say so because the
+// simulation only ever tests the gate a car is *expecting* - so one missed
+// gate silently stops every later crossing counting, the finish included. A
+// player who ran wide at a corner drove the rest of the lap, crossed the
+// chequer, and was told nothing at all.
+//
+// Not the negation of gs_gate_crossed: a step that never reaches the plane is
+// neither crossed nor missed, which is what a car still on its way to the gate
+// is doing.
+bool gs_gate_missed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny);
+
 // **Face every gate the way the route goes through it.**
 //
 // A gate is a plane whose normal is its heading - `gs_gate_crossed` is written

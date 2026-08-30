@@ -1101,6 +1101,50 @@ what moved is where the cars are put. The generator fold is untouched - "200
 generated tracks, all the ones they always were" - and so is the scripted
 replay, which does not start from a grid.
 
+**A missed checkpoint was silent, and silence cost the race.** Reported from
+play: *"I drove across the finish line and it was not recognised and then just
+drove off the end"*, and then *"I did overshoot one of the corners, but there was
+no visual indication that I missed a checkpoint."*
+
+The mechanism is one line of the simulation. Route progress tests **only the
+gate a car is expecting**:
+
+    const gs_gate *g = &t->gate[c->next_gate % t->gate_count];
+    if (!gs_gate_crossed(g, was[i].x, was[i].y, c->x, c->y)) continue;
+
+which is right - it is what stops a lap being won by cutting the infield - but
+it means one gate driven past silently stops every later crossing counting, the
+finish included. On a thousand-tile serpentine with ninety of them, running wide
+at one corner costs the whole lap and nothing anywhere says so. The HUD has
+rows for position, lap, this lap, best, condition and what you are carrying, and
+had no word for this at all.
+
+**Three answers, where there were two.** `gs_gate_missed` is the other half of
+`gs_gate_crossed`: same step, same plane, and it reports the case where the far
+side was reached *outside* the gate's width. It is deliberately not the negation
+- a step that never reaches the plane is neither, which is what a car still
+driving towards a gate is doing.
+
+**Latched by the view, not by the world.** Which gate a car owes is already in
+`gs_world`; having been *told* about it is a property of a screen, so the flag
+lives in `gs_view` and `gs_view_note_missed` sets it from the world before a
+step and the world after. That is also what keeps the golden hash still: a field
+in `gs_car` would have invalidated every replay, ghost and shared time in
+existence to say something no simulation needs to know.
+
+What a player gets: the HUD row **"checkpoint missed / go back"**, and an arrow
+on the ground pointing from the car to the gate it owes - short, near the car,
+because the question is which way and not where exactly. Both clear the moment
+the gate is taken, so it is something to put right rather than a verdict.
+
+*Verification: `a_driver_who_drove_past_a_checkpoint_is_told_and_pointed_back`
+drives a car eight tiles wide of a gate three wide and checks all four things -
+the warning latches on the right gate, the arrow is drawn (1,044 pixels of a
+colour the scene has none of otherwise, against 0 with the warning cleared), the
+HUD says so (9,308 pixels of difference), and going back for the gate clears it.
+`a_step_past_a_gate_is_told_from_a_step_through_it` pins the three answers in
+the core. No golden hash moves.*
+
 **The shipped set is clean; the generator's output is not, and nothing checks
 it.** Having got every opponent round all eighteen shipped tracks from every
 slot, the same question was put to the generator: eighty seeds, 68 of which the
