@@ -833,9 +833,14 @@ review, and it fails it for good reasons.
       is visible to the chooser, because a candidate is accepted by racing a
       **single** car round from pole, and one car alone never gets shoved into
       anything.
+      Traced, the two mechanisms are ordinary racing rather than new faults: a
+      single hard shove near the field's edge puts a car outside it, where the
+      run-off rule wrecks it; and a car worn down in traffic dies on a landing a
+      fresh one survives. Neither happens to a car racing alone.
       Fixing it means the acceptance test races a full grid, which would change
-      which seeds are shippable and therefore which tracks ship — so it is a
-      decision about the set rather than a defect to quietly correct.
+      which seeds are shippable and therefore which tracks ship — so the
+      question is what a track should have to survive before it ships, one car
+      round or four cars racing, and that is a decision about the set.
 - [ ] **The transport has a written specification.** Message formats, the state
       machine, the key schedule, the message limit before a rekey, and the
       properties claimed **and explicitly not claimed**. A design nobody wrote

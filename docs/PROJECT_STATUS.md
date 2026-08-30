@@ -1115,6 +1115,24 @@ corner - so the acceptance test is measuring a race that nobody will have. The
 shipped eighteen are clean because they were fixed one at a time by hand here,
 not because the process that chose them can tell.
 
+**Two mechanisms, and neither is a new fault.** Traced on the failing seeds:
+
+- *Thrown off the world.* On seed 34 a car takes a single hit - the lift is
+  0.35 of the sideways impulse, exactly `GS_BOUNCE_LIFT`, so one collision and
+  not the sandwich the grid was staggered for - with ten and a half tiles a
+  second of sideways impulse at x = 10, close to the field's edge. It lands
+  outside, slides down the run-off, and the "past the shoulder, a car is gone"
+  rule wrecks it. The shipped serpentines keep their route well inside the
+  field; a generated route that runs near the edge has no room for a shove.
+- *Worn down, then a landing finishes it.* On seed 49 all four wreck, and the
+  launches that kill them are pure jumps - no sideways component at all. Car
+  zero is already at **damage 250** before the last three, so what kills it is a
+  landing a fresh car walks away from. Damage accumulates in traffic and the
+  same jump becomes fatal, which is the damage model working as written.
+
+So the question is not "what is broken" but "what should a track have to
+survive before it ships" - one car round, or four cars racing.
+
 Racing a full grid in the chooser would change which seeds pass and therefore
 which tracks ship, which is a decision about the set rather than a defect to
 correct in passing. It is in COMPLETION_PLAN.md with the seeds that fail.
