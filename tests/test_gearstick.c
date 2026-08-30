@@ -8731,6 +8731,113 @@ TEST(a_car_a_little_under_the_ground_can_still_drive_away) {
     CHECK(went[1] > gs_fix_mul(went[0], GS_RATIO(95, 100)));
 }
 
+// Hold the brake from a standstill and see how fast it ends up going backwards.
+static gs_fix gs_reverse_terminal(uint8_t vehicle, gs_surface surface,
+                                  gs_fix gravity) {
+    static gs_track t;
+    gs_track_init(&t, 180, 40, surface);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+
+    gs_world w;
+    gs_world_init(&w, gravity);
+    gs_world_add_car(&w, &t, vehicle, GS_INT(150), GS_INT(20), 0);
+
+    gs_fix fastest = 0;
+    for (int i = 0; i < GS_TICK_HZ * 40; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_BRAKE, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        const gs_fix s = gs_car_speed(&w.car[0]);
+        if (s > fastest) fastest = s;
+    }
+    return fastest;
+}
+
+TEST(no_machine_reverses_faster_than_it_drives_forwards) {
+    // **Reverse was the fastest gear in the game.**
+    //
+    // Forward thrust falls away as the car approaches its top speed - that is
+    // what `top` is - so the engine has nothing left to give at the end of the
+    // straight. The reverse branch had no such rolloff: half power, pulling
+    // just as hard at thirty tiles a second as off the line, and nothing to
+    // stop it but drag. Drag is small, so every machine wound up past its own
+    // forward top going backwards. The stock car did **23.5 against a top of
+    // 9.0**; the motorcycle **30.1 against 9.9**.
+    //
+    // Nobody chose that and no player could predict it, which is the test this
+    // game applies to a mechanic. Reverse tops out at half the forward top now,
+    // because reverse thrust is already half the power - the same halving in
+    // both places rather than a second dial to tune per machine.
+    //
+    // Walked over every machine on every ground at four gravities, because the
+    // thing that used to stop reverse was drag and the things that shape it now
+    // are the surface and the weight: a rule checked only on pavement at Earth
+    // is a rule checked where it is easiest.
+    static const gs_fix gravities[] = {
+        GS_ONE, GS_RATIO(38, 100), GS_RATIO(17, 100), GS_RATIO(253, 100),
+    };
+
+    int walked = 0, worst_at = -1;
+    double worst = 0.0;
+
+    for (uint8_t vi = 0; vi < GS_VEH_COUNT; vi++) {
+        const gs_fix top = gs_vehicle(vi)->top;
+
+        for (int si = 0; si < GS_SURF_COUNT; si++) {
+            for (size_t gi = 0; gi < (sizeof gravities / sizeof gravities[0]); gi++) {
+                const gs_fix back =
+                    gs_reverse_terminal(vi, (gs_surface)si, gravities[gi]);
+
+                // **The cap, everywhere.** Half the top and a little over for
+                // the tick the speed is sampled on - not the forward top, which
+                // is the weaker claim this was failing by a factor of three.
+                const gs_fix cap = gs_fix_mul(top, GS_RATIO(52, 100));
+                if (back > cap) {
+                    printf("  REVERSE %s on %s at %.2fg reached %.2f, "
+                           "cap %.2f (top %.2f)\n",
+                           gs_vehicle(vi)->name, gs_surfaces[si].name,
+                           (double)gravities[gi] / 65536.0,
+                           (double)back / 65536.0, (double)cap / 65536.0,
+                           (double)top / 65536.0);
+                }
+                CHECK(back <= cap);
+                CHECK(back < top);
+
+                const double ratio = (double)back / (double)top;
+                if (ratio > worst) { worst = ratio; worst_at = (int)vi; }
+                walked++;
+            }
+        }
+    }
+
+    printf("  REVERSE %d combinations walked; fastest is %s at %.0f%% of its "
+           "own forward top\n", walked,
+           worst_at >= 0 ? gs_vehicle((uint8_t)worst_at)->name : "-",
+           worst * 100.0);
+
+    // Every machine, every ground, every gravity - stated so that a machine or
+    // a surface added later is walked without anybody remembering this test.
+    CHECK(walked == GS_VEH_COUNT * GS_SURF_COUNT *
+                    (int)(sizeof gravities / sizeof gravities[0]));
+
+    // **And it still reverses.** A cap that stopped the car moving would pass
+    // every check above, so on the ground where nothing else gets in the way
+    // every machine has to actually reach it.
+    int reached = 0;
+    for (uint8_t vi = 0; vi < GS_VEH_COUNT; vi++) {
+        const gs_fix top = gs_vehicle(vi)->top;
+        const gs_fix back = gs_reverse_terminal(vi, GS_SURF_PAVEMENT, GS_ONE);
+        if (back < gs_fix_mul(top, GS_RATIO(45, 100))) {
+            printf("  REVERSE %s only reached %.2f of a %.2f top\n",
+                   gs_vehicle(vi)->name, (double)back / 65536.0,
+                   (double)top / 65536.0);
+        }
+        CHECK(back > gs_fix_mul(top, GS_RATIO(45, 100)));
+        reached++;
+    }
+    CHECK(reached == GS_VEH_COUNT);
+}
+
 TEST(no_generated_route_turns_tighter_than_its_own_hairpin) {
     // **The smoothness condition: nothing sharper than the tightest turn the
     // generator means to lay.**
@@ -9098,6 +9205,7 @@ int main(void) {
     run_a_driver_already_backing_off_a_hill_does_not_change_its_mind_at_the_edge();
     run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
+    run_no_machine_reverses_faster_than_it_drives_forwards();
     run_no_generated_route_turns_tighter_than_its_own_hairpin();
     run_a_step_past_a_gate_is_told_from_a_step_through_it();
     run_every_car_lines_up_behind_the_line_it_has_to_cross();

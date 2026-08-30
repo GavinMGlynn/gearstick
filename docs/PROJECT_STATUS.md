@@ -7208,9 +7208,32 @@ the vehicle's top speed. The reverse branch — `accel -= power/2 * drive` — h
 such rolloff, so reverse accelerates until drag alone balances it, and drag is
 small. Nothing caps it.
 
-This is written down rather than fixed: it moves the world hash and belongs in
-its own change with its own note. The bar is built on one honest scale, so
-reverse pegs the left end while this is true and reads normally once it is not.
+**Fixed in the commit after the bar.** Reverse tops out at half the forward top
+now, because reverse thrust is already half the power - the same halving in both
+places rather than a second dial to tune per machine, so a machine that is quick
+forwards is quick backwards in the same proportion and the roster keeps its
+shape. Measured after: 0.47 to 0.49 of forward top on every machine, with drag
+and rolling resistance taking the last couple of percent.
+
+The branch is still the brake when the car is rolling forwards, so the headroom
+is clamped at one there: it must not become a way of asking for more than the
+engine has.
+
+`no_machine_reverses_faster_than_it_drives_forwards` walks **every machine on
+every ground at four gravities - 216 combinations** - because the thing that used
+to stop reverse was drag, and the things that shape it now are the surface and
+the weight; a rule checked only on pavement at Earth is a rule checked where it
+is easiest. It also requires every machine to still *reach* that half on
+pavement, since a cap that stopped the car moving would satisfy every other
+check. Putting the old branch back turns it red on the first combination it
+walks.
+
+**And no golden hash moved**, which is worth saying out loud rather than
+enjoying. A change to the physics that no recorded race notices is a change no
+recorded race was testing: neither the selftest log nor the four-opponent race
+ever reverses far enough to leave the first tenth of a tile a second, so the
+runaway sat there through every one of them. The replays and ghosts are all
+still valid, and the reason they are is a gap.
 
 ### Two things in the panel's arithmetic, one of them nine pixels old
 

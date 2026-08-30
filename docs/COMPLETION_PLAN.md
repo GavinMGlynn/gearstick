@@ -944,16 +944,21 @@ review, and it fails it for good reasons.
       text now rather than the number twelve — twelve *was* this font's line
       height, and a missing row, which is what the check exists for, is thirty
       pixels and more.
-- [ ] **Reverse is the fastest gear in the game.** Found while deciding what the
-      speed bar's scale should be. Forward thrust falls to nothing at the
-      vehicle's top speed; the reverse branch has no such rolloff and simply
-      accelerates until drag balances it, so every machine reverses two to three
-      times faster than it can drive forwards — the stock car does 23.5 against
-      a top of 9.0, the motorcycle 30.1 against 9.9. Fixing it moves the world
-      hash, so it is its own change with its own note rather than a rider on the
-      HUD.
-      *Verification: hold the brake from a standstill on flat pavement and no
-      machine exceeds its own top speed going backwards.*
+- [x] **Reverse was the fastest gear in the game.** Found while deciding what
+      the speed bar's scale should be. Forward thrust falls to nothing at the
+      vehicle's top speed; the reverse branch had no such rolloff and simply
+      accelerated until drag balanced it, so every machine reversed two to three
+      times faster than it could drive forwards — the stock car 23.5 against a
+      top of 9.0, the motorcycle 30.1 against 9.9. Reverse now tops out at half
+      the forward top, because reverse thrust is already half the power: the
+      same halving in both places rather than a second dial to tune per machine.
+      *Verification: every machine on every ground at four gravities — 216
+      combinations — none exceeding half its own forward top, and every machine
+      still reaching that half on pavement, so a cap that stopped the car
+      moving would not pass. Putting the old branch back turns it red, naming
+      the machine and the ground. No golden hash moves, which is itself worth
+      knowing: neither pinned race ever reverses, so nothing recorded was
+      testing this at all.*
 - [x] **Two keys at once, all thirty-two ways.** Reported from play: "I don't
       seem to be able to accelerate and turn at the same time." Everything
       around this was already checked — each key doing its own job, a moved

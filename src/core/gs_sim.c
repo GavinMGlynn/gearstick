@@ -383,8 +383,37 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
         }
         if ((in & GS_IN_BRAKE) != 0) {
             // Brake going forwards, reverse from a standstill.
-            if (vlong > GS_RATIO(5, 100)) accel -= gs_fix_mul(v->brake, sd->drive);
-            else accel -= gs_fix_mul(gs_fix_mul(v->power, GS_HALF), sd->drive);
+            if (vlong > GS_RATIO(5, 100)) {
+                accel -= gs_fix_mul(v->brake, sd->drive);
+            } else {
+                // **Reverse has a top speed of its own**, for exactly the
+                // reason forward does: an engine force that never falls off is
+                // an engine that pulls just as hard at speed as off the line,
+                // and the only thing left to stop it is drag.
+                //
+                // Without this it was not stopped by much. Reverse thrust is
+                // half power and drag is small, so every machine wound up to a
+                // terminal speed *above its own forward top* - the stock car
+                // reversed at 23.5 tiles a second against a top of 9.0, the
+                // motorcycle at 30.1 against 9.9. **Reverse was the fastest
+                // gear in the game**, on every machine, which is not a dial
+                // anybody chose and not something a player could predict.
+                //
+                // Half the forward top, because reverse is already half the
+                // power: one number, the same halving in both places, and a
+                // machine that is quick forwards is quick backwards in the same
+                // proportion. That keeps the roster's shape - it is a scale on
+                // an existing dial rather than a new one to tune per vehicle.
+                const gs_fix rtop = gs_fix_mul(v->top, GS_HALF);
+                gs_fix headroom = GS_ONE - gs_fix_div(-vlong, rtop);
+                // Rolling forwards slowly, this branch is still a brake, and
+                // the headroom is over one there - it must not become a way of
+                // asking for more than the engine has.
+                if (headroom > GS_ONE) headroom = GS_ONE;
+                if (headroom < 0) headroom = 0;
+                accel -= gs_fix_mul(gs_fix_mul(gs_fix_mul(v->power, GS_HALF),
+                                               headroom), sd->drive);
+            }
         }
 
         // --- The grip circle, in the one form simple enough to predict: you
