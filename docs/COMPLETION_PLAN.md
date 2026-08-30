@@ -988,6 +988,13 @@ review, and it fails it for good reasons.
       answered from the log. It is a wall clock now.
       *Verification: sitting on the front door prints a line a second; a stall
       reads as the log stopping at a named screen.*
+      It carries the frame rate too, because a loop that has stopped and a loop
+      running at half a frame a second are different faults that look the same
+      from a chair. That immediately retired the standing suspicion for the
+      report of dead controls: the front end draws the live race world behind
+      its menus and does it at the 30 fps cap, on the same track and grid the
+      report came from. **The report itself is still open and unexplained** —
+      what exists now is the instrument that will say which fault it is.
 - [x] **Two keys at once, all thirty-two ways.** Reported from play: "I don't
       seem to be able to accelerate and turn at the same time." Everything
       around this was already checked — each key doing its own job, a moved

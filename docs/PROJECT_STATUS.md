@@ -7386,6 +7386,35 @@ It is a wall clock now, so the front end says where it is once a second wherever
 it is, and a stall reads as the log stopping at a named screen. That is the only
 reason the paused-setup screen could be identified at all.
 
+### And it says how fast, because "nothing responds" has two causes
+
+A loop that has stopped and a loop running at half a frame a second look
+identical from a chair, and they are different faults. The line carries `fps=`
+now: lines still arriving with a healthy rate on them means the loop is fine and
+input is not reaching the screen; lines stopping means the loop is not.
+
+It was worth having immediately. The front end draws the live race world behind
+its menus, which had been the standing suspicion for a report of controls that
+would not work - and it is **not** the cause:
+
+| what | fps |
+|---|---|
+| the setup screen with `jupiter run` behind it | 30.0 |
+| the same, two players | 30.4 |
+| the construction set on that track | 30.3 |
+
+Everything sits on a 30 fps cap. That also retires a second suspicion recorded
+during the hunt - a client burning 1.2 cores on the login screen, which is what a
+capped loop drawing a world costs and not a symptom of anything. **The report
+that controls stop working for a while after Escaping a race is still open and
+still unexplained**; what has been built is the instrument that will say which of
+the two things it is, rather than a fix for a cause that had been guessed at.
+
+A note on how that suspicion survived as long as it did: the first stack samples
+taken of the "hung" client showed the sweep crawling, and that measurement was an
+artefact of `gdb` stopping the process to take it. Attaching a debugger to ask
+"why is this slow" is a way of making it slow.
+
 
 ## Known risks
 

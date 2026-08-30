@@ -165,6 +165,13 @@ typedef struct gs_app {
     // stopped and a front end that is fine look identical, because neither says
     // anything. The wall clock advances wherever the game is.
     uint64_t traced_at;           // SDL_GetTicks() of the last trace line
+
+    // **Frames drawn since the last trace line.** Reported as a rate, because
+    // "nothing responds" and "responds once every two seconds" look identical
+    // from a chair and are different faults - and the front end draws the live
+    // world behind its menus, so the front end has a frame rate worth asking
+    // about at all.
+    uint32_t framed;
     bool     demo_library;        // a few tracks, for looking at the screen
     // **When this machine started waiting for somebody, and for how long it
     // will.** A stall is the rollback saying the other machine has gone quiet,
@@ -1306,18 +1313,27 @@ static void gs_trace(gs_app *a, uint8_t views) {
     bool moved = a->menu.screen != was;
     if (!moved && now_ms < a->traced_at + 1000u) return;
     was = a->menu.screen;
+    const uint64_t since = now_ms - a->traced_at;
+    // A screen change fires the line early, so the window can be a few
+    // milliseconds - short windows say nothing and are reported as nothing
+    // rather than as a wild number.
+    const float fps = (since >= 250u && a->framed > 0)
+                          ? (float)a->framed * 1000.0f / (float)since
+                          : 0.0f;
     a->traced_at = now_ms;
+    a->framed = 0;
 
     if (a->menu.screen != GS_SCREEN_RACE) {
         // **And what is on it**, not only which one it is. A check walking the
         // whole game from the door to the results has to be able to say that
         // the time it just set is *there*, and a screen name alone cannot.
-        SDL_Log("trace screen=%s tick=%llu drivers=%u tracks=%u records=%u",
+        SDL_Log("trace screen=%s tick=%llu drivers=%u tracks=%u records=%u "
+                "fps=%.1f",
                 gs_screen_name(a->menu.screen),
                 (unsigned long long)a->world.tick,
                 (unsigned)a->menu.profiles.count,
                 (unsigned)a->menu.library.count,
-                (unsigned)a->menu.records.count);
+                (unsigned)a->menu.records.count, (double)fps);
         return;
     }
 
@@ -1366,14 +1382,14 @@ static void gs_trace(gs_app *a, uint8_t views) {
     SDL_Log("trace screen=race tick=%llu cars=%u me=%u x=%.2f y=%.2f "
             "speed=%.2f wrecked=%u onscreen=%u sx=%.0f sy=%.0f "
             "cam=%.2f,%.2f zoom=%.2f lap=%u/%u over=%u stalls=%u held=%u "
-            "input=%s",
+            "input=%s fps=%.1f",
             (unsigned long long)a->world.tick, a->world.car_count, me,
             (double)gs_to_f(c->x), (double)gs_to_f(c->y), (double)speed,
             c->wrecked ? 1u : 0u, on ? 1u : 0u, (double)sx, (double)sy,
             (double)v->cam.cx, (double)v->cam.cy, (double)v->cam.zoom,
             c->laps, a->world.laps_to_win, a->world.over ? 1u : 0u,
             a->online ? a->net.stalls : 0u,
-            gs_world_held(&a->world) ? 1u : 0u, held);
+            gs_world_held(&a->world) ? 1u : 0u, held, (double)fps);
 }
 
 // **One step back, wherever back is from here.** Written once because two
@@ -1970,6 +1986,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         }
     }
 
+    a->framed++;
     gs_trace(a, views);
 
     for (uint8_t i = 0; i < views; i++) {
