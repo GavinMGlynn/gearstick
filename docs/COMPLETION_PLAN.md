@@ -959,6 +959,35 @@ review, and it fails it for good reasons.
       the machine and the ground. No golden hash moves, which is itself worth
       knowing: neither pinned race ever reverses, so nothing recorded was
       testing this at all.*
+- [x] **Back went to the main menu from a race you were standing in.**
+      Reported from play. Escape out of a race lands on the race setup, and Back
+      from there abandoned the race — which was still sitting in memory, paused,
+      with no way to return to it. The tracks list did the same to a grid you
+      were halfway through filling in. A screen reachable from two places has to
+      know which one it came from; the records table already worked that way and
+      these two never got it. Paused, the row now reads **NEW RACE · Resume ·
+      Main menu**, and Escape resumes rather than dropping you on the title.
+      *Verification: the way out of the setup screen is walked from all nine
+      origins, on a server and off one, and the tracks list from all nine — the
+      treatment the records table already had. The panel walk gained a starting
+      state with a race behind it, went red by itself when it could not reach
+      the new buttons, and now reaches 52 of the 52 controls the menu names.*
+      **The test that should have caught this had written the fault down as the
+      expected answer**: it asserted Back from setup goes to the title without
+      ever asking where setup was reached from. And the panel walk could not
+      have caught it at all — it checks that controls are reachable and inside
+      their boxes, and a button that is reachable, correctly sized and wrong
+      passes every assertion in it. Exhaustive over geometry is not exhaustive.
+      Left uncovered and said so: that the frontend *resumes* rather than
+      restarts lives in the iterate loop rather than in anything callable, and
+      is checked by hand.
+- [x] **The trace said one thing on arriving at a screen and then went quiet.**
+      It rate-limited on the world's tick, which does not advance on a menu — so
+      a front end that had stopped and one that was fine produced the same
+      silence, and a report of "it locked up on this screen" could not be
+      answered from the log. It is a wall clock now.
+      *Verification: sitting on the front door prints a line a second; a stall
+      reads as the log stopping at a named screen.*
 - [x] **Two keys at once, all thirty-two ways.** Reported from play: "I don't
       seem to be able to accelerate and turn at the same time." Everything
       around this was already checked — each key doing its own job, a moved

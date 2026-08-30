@@ -4983,7 +4983,12 @@ TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
     }
     for (int i = 0; i < GS_SCREEN_COUNT; i++) CHECK(listed[i]);
 
+    // The two screens that are reachable from more than one place are walked
+    // over every origin below; here they are set to the plain one so the table
+    // above is asking about the ordinary path.
     m.records_from = GS_SCREEN_TITLE;
+    m.setup_from = GS_SCREEN_TITLE;
+    m.tracks_from = GS_SCREEN_TITLE;
     int walked = 0;
     for (size_t i = 0; i < SDL_arraysize(way_out); i++) {
         for (int served = 0; served < 2; served++) {
@@ -5042,6 +5047,67 @@ TEST(there_is_always_a_way_back_out_of_wherever_you_are) {
     printf("  BACK records walked from all %d screens\n", froms);
     CHECK(froms == GS_SCREEN_COUNT);
     m.records_from = GS_SCREEN_TITLE;
+
+    // **And the setup screen, which is the one this cost a race over.**
+    //
+    // Escape out of a race lands on the race setup. Back from there went to the
+    // main menu - so a race stepped out of for a moment could not be stepped
+    // back into, though it was still sitting in memory paused. The table above
+    // walked every screen and asked the wrong question of this one: it pinned
+    // "setup goes to the title" without ever asking where setup had been
+    // reached *from*, so the fault was written down as the expected answer.
+    //
+    // Online is walked with it, because there the race belongs to the server
+    // and Escape goes to the lobby - there is nothing here to step back into,
+    // and claiming there is would be worse than the fault it replaced.
+    m.screen = GS_SCREEN_SETUP;
+    int setups = 0;
+    for (int from = 0; from < GS_SCREEN_COUNT; from++) {
+        for (int served = 0; served < 2; served++) {
+            m.setup_from = (gs_screen)from;
+            m.online = served != 0;
+
+            const bool paused = !m.online && from == GS_SCREEN_RACE;
+            const gs_screen want = paused ? GS_SCREEN_RACE : GS_SCREEN_TITLE;
+            const gs_screen got = gs_menu_back(&m, false);
+            if (got != want) {
+                printf("  BACK setup opened from %s %s went to %d, wanted %d\n",
+                       gs_screen_name((gs_screen)from),
+                       served ? "on a server" : "on this machine",
+                       (int)got, (int)want);
+            }
+            CHECK(got == want);
+            CHECK(gs_menu_setup_is_paused(&m) == paused);
+            setups++;
+        }
+    }
+    printf("  BACK setup walked from all %d screens, on a server and off one\n",
+           GS_SCREEN_COUNT);
+    CHECK(setups == GS_SCREEN_COUNT * 2);
+    m.setup_from = GS_SCREEN_TITLE;
+    m.online = false;
+
+    // **And the tracks list, which is the same fault costing a grid.** It is
+    // opened from the main menu and from the setup screen, and Back went to the
+    // main menu from both - so choosing a track for a race you were halfway
+    // through setting up threw the setup away.
+    m.screen = GS_SCREEN_TRACKS;
+    int tracks = 0;
+    for (int from = 0; from < GS_SCREEN_COUNT; from++) {
+        m.tracks_from = (gs_screen)from;
+        const gs_screen want = from == GS_SCREEN_SETUP ? GS_SCREEN_SETUP
+                                                       : GS_SCREEN_TITLE;
+        const gs_screen got = gs_menu_back(&m, false);
+        if (got != want) {
+            printf("  BACK tracks opened from %s went to %d, wanted %d\n",
+                   gs_screen_name((gs_screen)from), (int)got, (int)want);
+        }
+        CHECK(got == want);
+        tracks++;
+    }
+    printf("  BACK tracks walked from all %d screens\n", tracks);
+    CHECK(tracks == GS_SCREEN_COUNT);
+    m.tracks_from = GS_SCREEN_TITLE;
 }
 
 TEST(the_weapons_switch_on_the_setup_screen_arms_the_race) {
@@ -7477,6 +7543,18 @@ static void gs_seed_nobody_has_driven_here(gs_menu *m) {
     m->login_password[0] = '\0';
 }
 
+// **A race waiting behind the setup screen.**
+//
+// Escape out of a race lands on the race setup, and there the buttons mean
+// different things: GO starts a *new* race, Back returns to the one already
+// running, and the main menu is its own button. No other starting state draws
+// those, and the walk had never seen them - which is how "Back" came to abandon
+// a paused race with nothing to say so and nothing to catch it.
+static void gs_seed_a_race_to_go_back_to(gs_menu *m) {
+    m->online = false;
+    m->setup_from = GS_SCREEN_RACE;
+}
+
 static void gs_seed_a_track_that_shipped(gs_menu *m) {
     if (m->library.count == 0) return;
     m->library.entry[0].builtin = true;
@@ -7538,6 +7616,7 @@ static const struct {
     { "no password yet",     gs_seed_a_driver_with_no_password },
     { "asked for a code",    gs_seed_a_server_asking_for_a_code },
     { "a track that shipped", gs_seed_a_track_that_shipped },
+    { "a race to go back to", gs_seed_a_race_to_go_back_to },
     { "nobody has driven here", gs_seed_nobody_has_driven_here },
     { "the longest names that fit", gs_seed_the_longest_names_that_fit },
 };

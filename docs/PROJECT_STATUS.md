@@ -7290,6 +7290,103 @@ trace now reports what the driver actually asked for — `input=ALR` — so the 
 report of this shape is answerable rather than a guess.
 
 
+## Back went to the main menu from a race you were standing in
+
+Reported from play: *"after starting a race, racing for a short while and then
+hitting escape, the Race setup screen shows... The Back button goes to the main
+menu - that doesn't make sense in context."*
+
+Escape out of a race lands on the race setup. From there **Back went to the main
+menu**, and GO started a new race - so a race stepped out of for a moment could
+not be stepped back into, though it was still sitting in memory, paused, with
+nothing stepping it. There was no way to say "I meant to come back".
+
+The same fault, in three places:
+
+- **the setup screen**, which cost the race;
+- **the tracks list**, which is opened from the setup screen and sent Back to
+  the main menu from there too - so choosing a track for a grid you had just
+  filled in threw the grid away;
+- **the test that was supposed to catch both.**
+
+### The walk was exhaustive and wrote the fault down as correct
+
+This is the part worth keeping. There *was* a test walking every screen's way
+out, and its table said:
+
+```c
+{ GS_SCREEN_SETUP,    GS_SCREEN_TITLE,   GS_SCREEN_TITLE },
+```
+
+It asserted that Back from the setup screen goes to the title, and never asked
+where the setup screen had been reached *from*. The records table - three
+functions away in the same file - already had the right shape: it remembers
+which screen opened it and returns there, and is walked over all nine origins.
+Setup and tracks simply never got it, and the walk pinned the gap shut.
+
+**And the panel walk could not have caught it either.** It checks that every
+control is reachable and wholly inside its box - 2060 controls over 152 screens,
+545 more inside lists. Not one of those assertions asks what a button *means*. A
+button that is reachable, correctly sized and does the wrong thing passes every
+one of them. Exhaustive over geometry is not exhaustive.
+
+### What the screens do now
+
+A screen reachable from more than one place has to know which one, so `setup_from`
+and `tracks_from` join `records_from`. They are set by the frontend **as the move
+is made**, in `gs_note_origin`, rather than at each button - because there are two
+paths that move the screen, the menu returning the next one and Escape, and a rule
+written at one of them is a rule the other does not follow. That is precisely how
+this happened.
+
+With a race paused behind it the setup screen's row reads **NEW RACE · Resume ·
+Main menu**: GO becomes what it actually does there, Back becomes the thing
+somebody pressing Escape meant, and the main menu stops being a surprise. Escape
+from that screen resumes as well, so the key that paused the race un-pauses it.
+
+`Tracks` is not offered while paused. Four buttons abreast is 135 pixels wider
+than the panel at 640x480, and a second row costs a row of height it has not got
+- so the paused row is the same three widths as the ordinary one, and the button
+left out is the one whose job is done before a race rather than in the middle of
+one.
+
+**Resuming is not starting.** Every arrival at the race screen called
+`gs_start_race`, which builds a new world - right for GO, and the reason a paused
+race could not be returned to even if something had offered. `m->resume` says
+which of the two is being asked for and the frontend clears it as it acts. The
+world is untouched while a menu is up, because the step count is zeroed off the
+race screen, so there is nothing to restore.
+
+*Verification: `gs_menu_back` is walked from all nine origins for the setup
+screen, on a server and off one, and from all nine for the tracks list - the
+same treatment the records table already had. The panel walk carries a new
+starting state, `a race to go back to`; it went red on its own when the buttons
+were added and it could not reach them, which is the coverage assertion doing
+its job, and it now reaches 52 of the 52 controls `gs_menu.c` names.*
+
+**Not covered by a test: that the frontend resumes rather than restarts.** That
+rule lives in `SDL_AppIterate` rather than in a function anything can call, and
+it is checked by hand. The menu half of it is walked; this half is not.
+
+## A trace that said one thing and then went quiet
+
+The trace rate-limited on the **world's tick**:
+
+```c
+if (!moved && a->world.tick < a->traced_at + GS_TICK_HZ) return;
+```
+
+A menu does not step the world, so the tick never moves: the front end printed
+one line on arriving at a screen and then said nothing for as long as it stayed
+there. A report of *"it got to this screen and locked up"* is unanswerable from
+that log - a front end that has stopped and a front end that is fine produce the
+same silence.
+
+It is a wall clock now, so the front end says where it is once a second wherever
+it is, and a stall reads as the log stopping at a named screen. That is the only
+reason the paused-setup screen could be identified at all.
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

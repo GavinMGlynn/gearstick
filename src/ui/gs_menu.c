@@ -56,6 +56,9 @@ void gs_menu_init(gs_menu *m) {
     // is the front end throwing somebody out for glancing at a lap time. The
     // screen-graph test found this within an hour of the field being added.
     m->records_from = GS_SCREEN_TITLE;
+    m->setup_from = GS_SCREEN_TITLE;
+    m->tracks_from = GS_SCREEN_TITLE;
+    m->resume = false;
 
     m->setup.players = 2;
     m->setup.mode = (uint8_t)GS_MODE_RACE;
@@ -881,6 +884,22 @@ static gs_screen gs_profiles_screen(gs_menu *m) {
     return next;
 }
 
+// **Is there a race waiting behind this screen?**
+//
+// Only offline: online, Escape out of a race goes to the lobby and the race
+// belongs to the server, so there is nothing here to step back into.
+bool gs_menu_setup_is_paused(const gs_menu *m) {
+    return !m->online && m->setup_from == GS_SCREEN_RACE;
+}
+
+// Where Back goes from the tracks list - the setup it was opened from, or the
+// main menu. Checked rather than trusted, the same way the records table does
+// it: a stored screen that is neither is a bug, and the main menu is the answer
+// that is never wrong.
+static gs_screen gs_tracks_back(const gs_menu *m) {
+    return m->tracks_from == GS_SCREEN_SETUP ? GS_SCREEN_SETUP : GS_SCREEN_TITLE;
+}
+
 static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
     gs_screen next = GS_SCREEN_SETUP;
     // **One row per driver, so the panel is that much taller.** The grid draws
@@ -1227,16 +1246,51 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         ImGui_Separator();
         ImGui_Spacing();
 
+        // **What these mean depends on whether a race is waiting behind them.**
+        //
+        // Escape out of a race lands here, and it used to land on a screen whose
+        // only ways off were "start a new race" and "main menu" - so a race you
+        // stepped out of for a moment could not be stepped back into, though it
+        // was still sitting there paused. "Back" meaning "abandon the race you
+        // are in" is the wrong word for the wrong thing.
+        //
+        // Paused, the row reads: GO starts a *new* race on these settings, Back
+        // returns to the one already running, and the main menu is its own
+        // button rather than something Back does by surprise.
+        const bool paused = gs_menu_setup_is_paused(m);
+
         ImGui_BeginDisabled(!ok);
-        if (gs_go_button("GO", 160.0f, 42.0f)) next = GS_SCREEN_RACE;
+        if (gs_go_button(paused ? "NEW RACE" : "GO", 160.0f, 42.0f)) {
+            next = GS_SCREEN_RACE;
+            m->resume = false;
+        }
         ImGui_EndDisabled();
 
         ImGui_SameLine();
-        if (ImGui_ButtonEx("Tracks", (ImVec2){ 110.0f, 42.0f })) {
-            next = GS_SCREEN_TRACKS;
+        if (paused) {
+            // **The same three widths as the row below**, because the panel has
+            // to hold it at 640x480 and a fourth button abreast does not fit -
+            // nor does a second row, which costs a row of height the screen has
+            // not got. Choosing a different track is what the race you are
+            // going back to is *on*, so it is the one of the four to leave for
+            // when you are not standing in a paused race.
+            if (ImGui_ButtonEx("Resume", (ImVec2){ 110.0f, 42.0f })) {
+                next = GS_SCREEN_RACE;
+                m->resume = true;
+            }
+            ImGui_SameLine();
+            if (ImGui_ButtonEx("Main menu", (ImVec2){ 100.0f, 42.0f })) {
+                next = GS_SCREEN_TITLE;
+            }
+        } else {
+            if (ImGui_ButtonEx("Tracks", (ImVec2){ 110.0f, 42.0f })) {
+                next = GS_SCREEN_TRACKS;
+            }
+            ImGui_SameLine();
+            if (ImGui_ButtonEx("Back", (ImVec2){ 100.0f, 42.0f })) {
+                next = GS_SCREEN_TITLE;
+            }
         }
-        ImGui_SameLine();
-        if (ImGui_ButtonEx("Back", (ImVec2){ 100.0f, 42.0f })) next = GS_SCREEN_TITLE;
 
         if (!ok) {
             ImGui_SameLine();
@@ -1245,6 +1299,7 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
                                   "  construction set (Tab)");
             ImGui_PopStyleColor();
         }
+
         gs_panel_measure(m);
     }
     ImGui_End();
@@ -2011,7 +2066,11 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
             }
         }
         ImGui_SameLine();
-        if (ImGui_ButtonEx("Back", (ImVec2){ 100.0f, 38.0f })) next = GS_SCREEN_TITLE;
+        // Back to whoever opened it: the main menu, or the race setup somebody
+        // was halfway through filling in - which this used to throw away.
+        if (ImGui_ButtonEx("Back", (ImVec2){ 100.0f, 38.0f })) {
+            next = gs_tracks_back(m);
+        }
 
         if (m->status[0] != '\0') ImGui_TextUnformatted(m->status);
         gs_panel_measure(m);
@@ -2073,10 +2132,18 @@ gs_screen gs_menu_back(const gs_menu *m, bool editing) {
     case GS_SCREEN_LOGIN:
         return GS_SCREEN_COUNT;      // and nothing behind the door but leaving
 
-    case GS_SCREEN_PROFILES:
     case GS_SCREEN_SETUP:
-    case GS_SCREEN_LOBBY:
+        // **Escape out of a paused race goes back into it**, which is what the
+        // key meant when it was pressed: stepping out of a race for a moment
+        // and stepping back in. Otherwise it is the main menu, as before.
+        return gs_menu_setup_is_paused(m) ? GS_SCREEN_RACE : GS_SCREEN_TITLE;
+
     case GS_SCREEN_TRACKS:
+        // Whichever screen opened it - see gs_tracks_back.
+        return gs_tracks_back(m);
+
+    case GS_SCREEN_PROFILES:
+    case GS_SCREEN_LOBBY:
         return GS_SCREEN_TITLE;
 
     case GS_SCREEN_COUNT:

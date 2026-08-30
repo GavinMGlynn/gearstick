@@ -200,6 +200,28 @@ typedef struct gs_menu {
     // from, which means it has to know where "back" is.
     gs_screen records_from;
 
+    // **Where Back goes from the race setup, and from the tracks list.**
+    //
+    // The same fault the records table had, in two more places, and the worse
+    // one of them costs a race. Escape out of a race lands on the setup screen,
+    // where Back went to the main menu - so the only way off a paused race was
+    // to abandon it, and the race was still sitting in memory, unreachable.
+    // Opening the tracks list from setup and pressing Back did the same to the
+    // grid somebody had just filled in.
+    //
+    // A screen reachable from two places has to know which one it came from.
+    // These are set by the frontend as it makes the move, so every path in is
+    // covered by construction rather than by remembering to set it at each one.
+    gs_screen setup_from;
+    gs_screen tracks_from;
+
+    // **The race is paused rather than over, and Back returns to it.**
+    //
+    // Every arrival at the race screen starts a *new* race, which is right for
+    // GO and wrong for coming back to one already running. This says which of
+    // the two is being asked for; the frontend clears it as it acts on it.
+    bool resume;
+
     // **What the tracks screen is asking the frontend to do.** The menu owns
     // none of this: it cannot open the construction set, it cannot talk to a
     // server, and it should not learn how - so it raises a request and the
@@ -307,6 +329,10 @@ gs_screen gs_menu_frame(gs_menu *m, const gs_track *t);
 #define GS_KNOCK_PATIENCE 6.0f
 
 gs_screen gs_menu_back(const gs_menu *m, bool editing);
+
+// **Whether the setup screen has a paused race behind it**, which decides what
+// its buttons mean and where Escape goes. See gs_menu_setup_is_paused.
+bool gs_menu_setup_is_paused(const gs_menu *m);
 
 // **Can the lobby start a race right now?** A predicate rather than a condition
 // buried in the drawing, because the first version of it was buried there and

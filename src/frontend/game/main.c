@@ -156,7 +156,15 @@ typedef struct gs_app {
     // it: a keyboard that cannot send two keys at once and a car that will not
     // turn at the speed it is doing feel the same from the driver's seat.
     gs_input last_input;
-    uint64_t traced_at;           // the tick the last trace line went out on
+    // **When the last trace line went out, by the wall clock.**
+    //
+    // This was the world's tick, which does not advance on a menu - so the
+    // front end printed one line when it arrived on a screen and then went
+    // silent for as long as it stayed there. A report of "it got to this screen
+    // and locked up" is then unanswerable from the log: a front end that has
+    // stopped and a front end that is fine look identical, because neither says
+    // anything. The wall clock advances wherever the game is.
+    uint64_t traced_at;           // SDL_GetTicks() of the last trace line
     bool     demo_library;        // a few tracks, for looking at the screen
     // **When this machine started waiting for somebody, and for how long it
     // will.** A stall is the rollback saying the other machine has gone quiet,
@@ -1287,13 +1295,18 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 static void gs_trace(gs_app *a, uint8_t views) {
     if (!a->trace) return;
 
-    // Once a second while racing, and on every screen change, which is the
-    // rate a person notices things at.
+    // Once a second wherever it is, and on every screen change, which is the
+    // rate a person notices things at. **By the wall clock rather than the
+    // world's tick**: a menu does not step the world, so a tick-based limit
+    // said one thing on arrival and nothing ever again - and a screen that has
+    // stopped responding is exactly the case where the log going quiet is the
+    // thing you needed it to tell you.
     static gs_screen was = GS_SCREEN_COUNT;
+    const uint64_t now_ms = SDL_GetTicks();
     bool moved = a->menu.screen != was;
-    if (!moved && a->world.tick < a->traced_at + GS_TICK_HZ) return;
+    if (!moved && now_ms < a->traced_at + 1000u) return;
     was = a->menu.screen;
-    a->traced_at = a->world.tick;
+    a->traced_at = now_ms;
 
     if (a->menu.screen != GS_SCREEN_RACE) {
         // **And what is on it**, not only which one it is. A check walking the
@@ -1375,6 +1388,20 @@ static void gs_trace(gs_app *a, uint8_t views) {
 // presses to go back one step, reflexively, and having it close the game from
 // the title is not a thing anybody asked for. Where there is nothing behind the
 // screen, a pad's cancel does nothing at all.
+// **Where a screen is being reached from, remembered as the move is made.**
+//
+// Two screens are reachable from more than one place and have to send Back
+// where it came from: the race setup, which Escape out of a race lands on, and
+// the tracks list, which the setup opens. Recorded here rather than at each
+// button, because there are two paths that move the screen - a menu that
+// returns the next one, and Escape - and a rule written at one of them is a
+// rule the other does not follow. That is exactly how a paused race came to
+// have no way back into it.
+static void gs_note_origin(gs_app *a, gs_screen next) {
+    if (next == GS_SCREEN_SETUP)  a->menu.setup_from = a->menu.screen;
+    if (next == GS_SCREEN_TRACKS) a->menu.tracks_from = a->menu.screen;
+}
+
 static bool gs_back_out(gs_app *a, bool may_quit) {
     // Back out one step rather than always quitting: quitting from a race
     // because you wanted the menu is the oldest bad habit in games, and the
@@ -1405,6 +1432,12 @@ static bool gs_back_out(gs_app *a, bool may_quit) {
         // cleared. The finished world outlives the screen, so clearing it here
         // re-runs the end of the race.
     }
+    // **Escape back into a paused race resumes it rather than restarting.**
+    // Nothing here builds a world - only the menu's own transition does - so
+    // arriving this way is already the resume, and the flag is cleared so a
+    // stale one cannot make the next GO do nothing.
+    gs_note_origin(a, back);
+    a->menu.resume = false;
     a->menu.screen = back;
     return false;
 }
@@ -2106,9 +2139,24 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         }
 
         if (next != a->menu.screen) {
+            // **Where a screen was reached from, recorded as the move is made.**
+            // One place rather than one per button, so a path added later is
+            // covered without anybody remembering to set it - which is how the
+            // setup screen came to send a paused race to the main menu.
+            gs_note_origin(a, next);
+
             if (next == GS_SCREEN_RACE) {
-                gs_start_race(a);
-                gs_layout(a);
+                // **Coming back to a paused race is not starting one.** Every
+                // arrival here used to build a new world, which is right for GO
+                // and threw away the race somebody had merely stepped out of.
+                // The world is untouched while a menu is up - the step count is
+                // zeroed off the race screen - so there is nothing to restore.
+                if (a->menu.resume) {
+                    a->menu.resume = false;
+                } else {
+                    gs_start_race(a);
+                    gs_layout(a);
+                }
             }
 
             // **Asking for another online race means there can be another
