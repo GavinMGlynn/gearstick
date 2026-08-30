@@ -92,7 +92,15 @@
 //
 // The track hash above did not move: a track's identity is its own contents and
 // has never depended on how big a track is allowed to be.
-#define GS_SELFTEST_WORLD_HASH 0x44526ece9b8519bcULL
+// **And the world hash moved, deliberately, when the cars got quicker.**
+//
+// The game felt sluggish against the one it is after, so power, top speed and
+// grip are half as much again on every machine, and toughness with them so that
+// half as much speed again does not simply break everything on the first
+// landing. That is the physics of every car in every race, so every replay,
+// ghost and shared time recorded before it is a race nobody can drive now -
+// which is what this number failing is for. See docs/PROJECT_STATUS.md.
+#define GS_SELFTEST_WORLD_HASH 0x0550a8a6ccd255d5ULL
 
 // The track generator, folded over its first two hundred seeds.
 //
@@ -148,7 +156,25 @@
 // eighty rather than a fifty-tile arc on a field of sixty. That was the point of
 // the change - a default track that takes twenty-seven seconds to drive is not
 // a race - and it is what a share code for a generated track will now open as.
-#define GS_SELFTEST_GENERATOR_HASH 0x6a90c44a51a3469cULL
+// **And it moved once more when the circuits learned to close.**
+//
+// Every loop the generator had ever built ended with a 157 degree reversal at
+// about a tile radius, immediately before the start line - a corner no car can
+// take, sitting exactly where the lap is counted. The closing arc was centred
+// on the route's *start point* rather than on the midpoint between the route's
+// two ends, so it always finished a radius away from where it had to arrive and
+// the lap wrapped across the gap left over.
+//
+// The closure is a single half-circle now, and the sharpest bend on any
+// generated circuit is 46.8 degrees at 13.8 tiles.
+// `no_generated_route_turns_tighter_than_its_own_hairpin` walks 2,073 corners
+// over every shape the generator makes and fails on anything over 90.
+//
+// So every seed builds different ground again, and a seed anybody shared names
+// a different track. The physics is untouched - the world hash above moved for
+// the roster, not for this - and what these seeds named before was a circuit
+// with an unnavigable corner on it.
+#define GS_SELFTEST_GENERATOR_HASH 0x461ff0a1e3fb9f69ULL
 
 // **A race with nobody at the keyboard**, four opponents spread across the
 // skill dial, on a circuit none of them has seen.
@@ -185,6 +211,9 @@
 // untouched - not one constant of it moved - and so is the driver. **What moved
 // is where the cars are put**, and the opponents race is four cars put on a
 // grid, so its hash moves with them. See docs/PROJECT_STATUS.md.
-#define GS_OPPONENTS_WORLD_HASH 0x907e0b272edba84dULL
+// And with it when the roster got quicker, for the plainest reason of all: the
+// cars in this race are half as fast again as the ones the old number was taken
+// from.
+#define GS_OPPONENTS_WORLD_HASH 0x9d61c6f26883878eULL
 
 #endif // GS_GOLDEN_H

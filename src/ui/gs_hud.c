@@ -88,6 +88,110 @@ static void gs_hud_damage(const gs_car *c, float width, float bar) {
     }
 }
 
+// **Where zero sits along the speed bar.** Left of it is reverse.
+//
+// A bar that fills from the left cannot say which way you are going, and going
+// backwards is a thing this game asks of a driver often - reversing off a wall,
+// out of a hole, back to a checkpoint that was driven past. So zero is a quarter
+// of the way in and the bar grows both ways from it.
+#define GS_HUD_SPEED_ZERO 0.25f
+
+// **How tall the speed bar is against the condition bar.**
+//
+// Slimmer, because the two say different kinds of thing. Condition is the one
+// that ends your race, and it is the one that should catch an eye that was not
+// looking for it; speed is ambient, read continuously and never an alarm. A
+// readout that shouts as loudly as the alarm beside it makes the alarm quieter.
+//
+// It also gives the panel back a couple of pixels in the states with the most
+// rows in them, which is where a HUD fitted to a quarter of a small window has
+// the least room to spare.
+#define GS_HUD_SPEED_BAR 0.75f
+
+// **How fast, and which way, as a bar rather than a number.** Asked for from
+// play, and it is the same argument the damage bar already makes: a figure that
+// changes every frame is read by nobody at speed, while a bar says "nearly flat
+// out" or "going the wrong way" without being read at all.
+//
+// **One scale in both directions**, tiles per second per pixel, with zero
+// offset rather than two scales meeting at a line. A bar whose halves mean
+// different things is a bar you have to interpret, and the quarter given to
+// reverse is exactly a third of the three quarters given to forward - so full
+// forward is this machine's top speed and full reverse is a third of it, on the
+// same ruler.
+//
+// Full forward is *this machine's* top speed, so the bar answers "how much of
+// what I have am I using" rather than "how fast in the abstract" - the number a
+// driver can act on, and one that means the same in a rover as in a sprint car.
+// Both ends clamp: a car can beat its own top downhill, which is a real thing
+// this game is about, and the last pixel meaning "more than the engine alone"
+// is better than a bar that runs off its own end.
+//
+// The accent colour rather than the damage bar's green-to-red: colour there
+// means how worried to be, and borrowing it here would say a fast car is a car
+// in trouble. Reverse is drawn in the warning orange instead, because going
+// backwards at speed is nearly always a thing to stop doing.
+static void gs_hud_speed(const gs_car *c, float width, float bar) {
+    const gs_vehicle_def *def = gs_vehicle(c->vehicle);
+    const float top = def != nullptr ? gs_to_f(def->top) : 0.0f;
+
+    // Along the way it is pointing, not how fast it is moving: a car sliding
+    // backwards down a slope is going backwards, whatever its speed says.
+    const gs_fix vlong = gs_fix_mul(c->vx, gs_cos(c->heading)) +
+                         gs_fix_mul(c->vy, gs_sin(c->heading));
+    const float now = gs_to_f(vlong);
+
+    // Tiles a second per pixel, from the forward end - and the same ruler
+    // backwards, which is what makes the reverse quarter mean anything.
+    const float ahead = width * (1.0f - GS_HUD_SPEED_ZERO);
+    float px = top > 0.0f ? (now / top) * ahead : 0.0f;
+    const float back = width * GS_HUD_SPEED_ZERO;
+    if (px > ahead) px = ahead;
+    if (px < -back) px = -back;
+
+    float r, g, b;
+    gs_style_accent(&r, &g, &b);
+
+    const ImVec2 at = ImGui_GetCursorScreenPos();
+    ImDrawList *dl = ImGui_GetWindowDrawList();
+
+    const float zero = at.x + back;
+    const float y0 = at.y, y1 = at.y + bar;
+
+    // The track it runs in, so an empty bar is still a bar.
+    ImDrawList_AddRectFilled(dl, (ImVec2){ at.x, y0 },
+                             (ImVec2){ at.x + width, y1 },
+                             ImGui_GetColorU32ImVec4((ImVec4){ r * 0.25f,
+                                                               g * 0.25f,
+                                                               b * 0.25f, 0.55f }));
+
+    if (px >= 0.0f) {
+        ImDrawList_AddRectFilled(dl, (ImVec2){ zero, y0 },
+                                 (ImVec2){ zero + px, y1 },
+                                 ImGui_GetColorU32ImVec4((ImVec4){ r, g, b, 1.0f }));
+    } else {
+        ImDrawList_AddRectFilled(dl, (ImVec2){ zero + px, y0 },
+                                 (ImVec2){ zero, y1 },
+                                 ImGui_GetColorU32ImVec4((ImVec4){ 1.0f, 0.45f,
+                                                                   0.20f, 1.0f }));
+    }
+
+    // The zero mark, drawn over the fill so it is still findable at a glance
+    // when the bar is hard against it either way.
+    ImDrawList_AddRectFilled(dl, (ImVec2){ zero - 1.0f, y0 },
+                             (ImVec2){ zero + 1.0f, y1 },
+                             ImGui_GetColorU32ImVec4((ImVec4){ 0.92f, 0.92f,
+                                                               0.92f, 0.9f }));
+
+    // The row the bar occupies, claimed the same way a progress bar claims one
+    // so the panel's height arithmetic is unchanged by drawing it by hand.
+    ImGui_Dummy((ImVec2){ width, bar });
+
+    ImGui_PushStyleColorImVec4(ImGuiCol_Text, (ImVec4){ r, g, b, 0.85f });
+    ImGui_TextUnformatted(now < -0.05f ? "speed  REVERSE" : "speed");
+    ImGui_PopStyleColor();
+}
+
 // **A wreck is not the end of the session, and the screen has to say so.** A
 // car that cannot move is in a race that will never finish, so nothing takes
 // the player anywhere and the HUD is the only thing still talking to them.
@@ -159,7 +263,11 @@ static float gs_hud_height(const gs_hud_rows *r, float base, float zoom,
     float h = pad * 2.0f
             + row_big * r->bigs
             + row_small * r->smalls
-            + bar + gap * 2.0f + body     // the bar, labelled
+            // Two bars, each labelled: how fast, and what is left of the car.
+            // The speed bar is the slimmer of the two on purpose - see
+            // GS_HUD_SPEED_BAR.
+            + bar * GS_HUD_SPEED_BAR + gap * 2.0f + body
+            + bar + gap * 2.0f + body
             + gap * r->gaps;
     // **What it is carrying.** Its own height and no gap after it - unlike the
     // finished row below, which costs a gap more because it is the last thing
@@ -171,7 +279,22 @@ static float gs_hud_height(const gs_hud_rows *r, float base, float zoom,
     // against what actually got drawn in all twenty-four states - which is how
     // this row was caught costing a gap too much in exactly the three where
     // somebody is waiting.
-    if (r->carrying) h += row_small;
+    // **A row that ends the panel costs one gap more than a row in the middle**
+    // - measured, not reasoned: the panel is nine pixels short whenever its
+    // last row is one of these and exactly right when something follows it.
+    // Both of the rows below were charged for one case and drawn in both.
+    //
+    // Carrying was charged as though something always followed it, and in the
+    // commonest race of all - weapons on, nobody wrecked, nobody waiting - it
+    // is the last thing on the panel. It fitted anyway because there was slack
+    // above to eat the difference; adding the speed bar spent that slack and
+    // the shortfall came out.
+    // **And the gap under it.** Charged without one, on the reasoning that
+    // ImGui's content ends at the last item rather than after the spacing that
+    // would follow it - which left the panel nine pixels short in every race
+    // with weapons in it. It fitted only because there was slack above to eat
+    // the difference, and adding the speed bar spent that slack.
+    if (r->carrying) h += row_small + gap;
     // The missed checkpoint, and the gap above it.
     if (r->missed) h += row_small + gap;
     // A finished car's time, and the gap above it.
@@ -292,6 +415,41 @@ static void gs_hud_minimap(const gs_world *w, const gs_track *t, const gs_view *
                       oy + (gs_to_f(fin->y) - fx * hw) * scale },
             gs_map_rgba(0.95f, 0.95f, 0.95f, 0.95f), 2.0f);
 
+        // **The checkpoints, and the one this driver owes.**
+        //
+        // The route says which way round; it does not say what you have to go
+        // *through*. A player who ran wide at a corner drove the rest of the
+        // lap, crossed the chequer, and only found out at the end that none of
+        // it counted - and asked for the checkpoints on the map, which is the
+        // question answered before the mistake rather than after it.
+        //
+        // Every gate as a dot, small enough that ninety of them read as beads
+        // on the route rather than as a second line; the one owed as a ring
+        // around it, in white while it is ahead and in the warning's orange
+        // once it has been driven past. Nothing is drawn for a track whose
+        // route has no gates, which the guard at the top of this function has
+        // already returned for.
+        const gs_car *me = v->car < w->car_count ? &w->car[v->car] : nullptr;
+        const uint8_t owed = me != nullptr ? me->next_gate : 0;
+
+        for (uint8_t i = 0; i < t->gate_count; i++) {
+            const gs_gate *g = &t->gate[i];
+            const ImVec2 dot = { ox + gs_to_f(g->x) * scale,
+                                 oy + gs_to_f(g->y) * scale };
+
+            ImDrawList_AddCircleFilled(dl, dot, 1.5f,
+                                       gs_map_rgba(0.75f, 0.85f, 0.95f, 0.7f), 0);
+
+            if (me == nullptr || i != owed || me->finish_tick != 0) continue;
+
+            // The one to head for. Orange once it is behind you, because then
+            // the lap depends on going back for it.
+            const ImU32 mark = v->missed
+                                   ? gs_map_rgba(1.0f, 0.35f, 0.20f, 1.0f)
+                                   : gs_map_rgba(1.0f, 1.0f, 1.0f, 1.0f);
+            ImDrawList_AddCircleEx(dl, dot, 4.0f, mark, 0, 2.0f);
+        }
+
         // Everybody on it, in the colour they are driving, and this machine's
         // car ringed so it is findable at a glance rather than counted out.
         for (uint8_t i = 0; i < w->car_count; i++) {
@@ -392,9 +550,16 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // A hundredth at a time, because the rounding above means the fraction
         // that fits is near the one the division gives and not always at it.
         // Bounded, and it stops the moment it fits.
-        for (int i = 0; i < 100 && gs_hud_zoom > 0.05f &&
+        //
+        // **The step is the size of the hole it can leave.** It stops at the
+        // first fraction that fits, so whatever it overshot by is empty panel
+        // at the bottom - and a step of zoom is worth more pixels the taller
+        // the panel, so the worst of it lands on the state with the most rows.
+        // Five times finer costs a few more evaluations of a dozen multiplies,
+        // once a frame.
+        for (int i = 0; i < 500 && gs_hud_zoom > 0.05f &&
                         gs_hud_at(&rows, base, st, gs_hud_zoom) > room; i++) {
-            gs_hud_zoom -= 0.01f;
+            gs_hud_zoom -= 0.002f;
         }
     }
 
@@ -512,7 +677,11 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
             gs_hud_stat("best", text, GS_HUD_SMALL);
         }
 
-        // --- What is left of the car.
+        // --- How fast it is going, and then what is left of it.
+        ImGui_Spacing();
+        gs_hud_speed(c, ImGui_GetContentRegionAvail().x,
+                     GS_HUD_BAR * GS_HUD_SPEED_BAR * gs_hud_zoom);
+
         ImGui_Spacing();
         // **As wide as the room there is**, not as wide as the window less a
         // padding somebody wrote down once. The HUD is drawn in the menu's
@@ -543,7 +712,10 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // chequer for it. The arrow on the ground points back at the one owed.
         if (v->missed && c->finish_tick == 0) {
             ImGui_Spacing();
-            gs_hud_stat("checkpoint missed", "go back", GS_HUD_SMALL);
+            // "checkpoint missed" does not fit the panel, whose width is set by
+            // the shortest labels in the game; it was drawn as "checkpoint
+            // misse". The word that matters is the instruction.
+            gs_hud_stat("checkpoint", "GO BACK", GS_HUD_SMALL);
         }
 
         if (c->wrecked) gs_hud_way_out(online);

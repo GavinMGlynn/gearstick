@@ -281,9 +281,27 @@ static void gs_plan_route(const gs_track *t, bool loop, gs_route_plan *p) {
     gs_seg_line(p, x1, y_last - r, x1, y0 + r);
     gs_seg_arc(p, x1 - r, y0 + r, r, 0, -16384);
     gs_seg_line(p, x1 - r, y0, px0, y0);
-    gs_seg_arc(p, px0, y0 + r, r, GS_DEG(270), -16384);
-    gs_seg_line(p, px0 - r, y0 + r, px0 - r, ys);
-    gs_seg_arc(p, px0, ys, r, GS_DEG(180), 16384);
+
+    // **And back onto the first pass with one half circle**, the same turn the
+    // serpentine uses everywhere else.
+    //
+    // This used to be a quarter circle, a run down the left-hand side and
+    // another quarter circle - and the last of those was centred on the very
+    // point the route starts from, so it could never arrive there: an arc of
+    // radius r about a point ends r away from it. The route therefore stopped
+    // fifteen tiles north of its own beginning and the lap wrapped across the
+    // gap, which put a **157 degree reversal of about a tile's radius** into
+    // every loop the generator has ever made, immediately before the start
+    // line. A player found it by driving into it: "the strange thing before the
+    // start line is silly... it is unnavigatable and even the track layout is
+    // disjointed".
+    //
+    // A half circle about (px0, y0 + r) leaves the top row heading west at
+    // (px0, y0) and arrives at (px0, ys) heading east, which is where the first
+    // pass begins and the way it begins. Its radius is the pitch's half - the
+    // tightest turn this generator lays anywhere - so the sharpest corner on a
+    // loop is now the same hairpin as the sharpest corner on a straight.
+    gs_seg_arc(p, px0, y0 + r, r, GS_DEG(270), -32768);
 }
 
 // A point on the plan, `along` running from zero to GS_ONE over the whole

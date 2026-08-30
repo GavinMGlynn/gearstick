@@ -150,6 +150,12 @@ typedef struct gs_app {
     const char *track_path;       // a track named on the command line
     bool     trace;               // say what is on screen, once a second
     bool     autodrive;           // the AI drives this machine's car
+
+    // **What this machine's driver last asked for**, kept only so the trace can
+    // say it. A report that the controls did not work is unanswerable without
+    // it: a keyboard that cannot send two keys at once and a car that will not
+    // turn at the speed it is doing feel the same from the driver's seat.
+    gs_input last_input;
     uint64_t traced_at;           // the tick the last trace line went out on
     bool     demo_library;        // a few tracks, for looking at the screen
     // **When this machine started waiting for somebody, and for how long it
@@ -1329,16 +1335,32 @@ static void gs_trace(gs_app *a, uint8_t views) {
     // spent its whole window on the countdown deciding the controls were
     // broken - a race held on the line looks exactly like a race whose input
     // path is disconnected, and the trace is the only place that can say which.
+    // **And what the game was told to do**, which is the only way a report of
+    // "the controls did not work" can be answered without guessing. A keyboard
+    // that cannot report two keys at once and a car that will not turn at speed
+    // feel identical from the driver's seat and are nothing alike; this says
+    // which arrived.
+    char held[8];
+    int at = 0;
+    if (a->last_input & GS_IN_ACCEL) held[at++] = 'A';
+    if (a->last_input & GS_IN_BRAKE) held[at++] = 'B';
+    if (a->last_input & GS_IN_LEFT)  held[at++] = 'L';
+    if (a->last_input & GS_IN_RIGHT) held[at++] = 'R';
+    if (a->last_input & GS_IN_FIRE)  held[at++] = 'F';
+    if (at == 0) held[at++] = '-';
+    held[at] = '\0';
+
     SDL_Log("trace screen=race tick=%llu cars=%u me=%u x=%.2f y=%.2f "
             "speed=%.2f wrecked=%u onscreen=%u sx=%.0f sy=%.0f "
-            "cam=%.2f,%.2f zoom=%.2f lap=%u/%u over=%u stalls=%u held=%u",
+            "cam=%.2f,%.2f zoom=%.2f lap=%u/%u over=%u stalls=%u held=%u "
+            "input=%s",
             (unsigned long long)a->world.tick, a->world.car_count, me,
             (double)gs_to_f(c->x), (double)gs_to_f(c->y), (double)speed,
             c->wrecked ? 1u : 0u, on ? 1u : 0u, (double)sx, (double)sy,
             (double)v->cam.cx, (double)v->cam.cy, (double)v->cam.zoom,
             c->laps, a->world.laps_to_win, a->world.over ? 1u : 0u,
             a->online ? a->net.stalls : 0u,
-            gs_world_held(&a->world) ? 1u : 0u);
+            gs_world_held(&a->world) ? 1u : 0u, held);
 }
 
 // **One step back, wherever back is from here.** Written once because two
@@ -1721,6 +1743,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             if (a->autodrive) {
                 in[0] = gs_ai_drive(&a->world, &a->t, a->net.local);
             }
+            a->last_input = in[0];
             gs_net_local_input(&a->net, in[0]);
 
             n = gs_net_packet(&a->net, buf, sizeof buf);
@@ -1785,6 +1808,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                 in[c] = gs_ai_drive(&a->world, &a->t, c);
             }
         }
+
+        a->last_input = in[a->view[0].car < GS_MAX_CARS ? a->view[0].car : 0];
 
         a->prev = a->world;
         gs_replay_record(&a->recording, in);
@@ -1897,15 +1922,18 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         gs_split_update(&a->split, &a->t, &a->prev, &a->world, alpha, ww, wh,
                         (float)delta / 1e9f);
 
-        gs_view merged[GS_MAX_CARS];
+        // **The views the frontend already has**, so that everything on them
+        // which the splitter does not own survives being re-placed: the
+        // overlay, the arc, and whether this driver has driven past a
+        // checkpoint. That last one was set every tick and thrown away every
+        // frame, because this used to hand the splitter a blank array and copy
+        // three fields back by name.
         views = gs_split_views(&a->split, &a->t, &a->prev, &a->world, alpha,
-                               ww, wh, merged);
+                               ww, wh, a->view);
         for (uint8_t i = 0; i < views; i++) {
-            merged[i].show_gravity = a->view[i].show_gravity;
-            merged[i].show_arc = a->arc;
-            merged[i].heat = nullptr;
-            if (a->zoom > 0.0f) merged[i].cam.zoom = a->zoom;
-            a->view[i] = merged[i];
+            a->view[i].show_arc = a->arc;
+            a->view[i].heat = nullptr;
+            if (a->zoom > 0.0f) a->view[i].cam.zoom = a->zoom;
         }
     }
 

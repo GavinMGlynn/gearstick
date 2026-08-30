@@ -837,6 +837,134 @@ review, and it fails it for good reasons.
       with it cleared), says so in the HUD (9,308 pixels of difference), and
       clears it on going back. No golden hash moves — the flag is on the view,
       not in the world, because having been told is a property of a screen.*
+      **Ticked here before it had ever reached a screen, and that is the part
+      worth keeping.** The flag was set every tick and destroyed every frame:
+      the client rebuilt its views from a blank array each frame and copied the
+      switches back one field at a time by name, so a field added without a line
+      added with it was wiped. Every test above passed, because they drove the
+      HUD and the arrow directly and none of them crossed that seam. The
+      splitter now sets only the car and the rectangle it owns and the client
+      hands it the views it already has, so adding a field to a view is safe by
+      default rather than safe if somebody remembers. The checkpoints are on the
+      minimap with it — every gate a dot, the one owed ringed in white, orange
+      once it is behind you — and the HUD row now reads "checkpoint / GO BACK",
+      because "checkpoint missed" did not fit the panel and was drawn as
+      "checkpoint misse".
+      *Verification: a view filled with values nothing else produces is put
+      through the splitter at every number of players on both sides of the merge
+      — 13 views over 8 arrangements, 6 merged and 2 split, with both paths
+      required — and demanded back **whole** rather than field by field, so the
+      next field somebody adds is covered without editing the test. Putting the
+      bug back turns it red.*
+- [x] **The cars are half as quick again.** Asked for after driving the shipped
+      set: the game felt sluggish against the one it is after. Power, top speed
+      and grip are each half as much again on all six machines, and toughness
+      with them — because half as much speed again into a jump is more than
+      twice the damage out of it. Braking, steering and drag are untouched, so
+      a corner asks for more precision than it used to rather than less.
+      *Verification: a lap of the pace circuit goes from 27.27s to 20.43s, a
+      quarter quicker, which was what was asked for. All three dials were needed
+      — grip alone buys 5% and power with top speed but no grip buys 13%.
+      Four AI cars raced a lap of each of the eighteen shipped tracks: without
+      the toughness 15 of the 72 are wrecked, with it 7 — and that 7 is what the
+      same grid was already losing before any of this — the open item below on
+      choosing a track by racing one car, not something this introduced. Every machine is
+      still best at something, in the same spread of wins it had before. The
+      golden world hash moves, deliberately, and says why.*
+      Nine tests moved with it, and none of them because the product broke:
+      their fixtures had old speeds written into them — a 40×16 field, a 64-tile
+      strip, "five tiles a second", a twenty-second derby — and faster cars ran
+      off the end of the measuring stick. Where the rule could be stated instead
+      of the number it now is: the cornering test finds the speed each driver
+      gives up at rather than asserting what they do at five tiles a second, and
+      the editor's build-and-race loop is driven by the game's own AI rather than
+      by a hard-right circle that used to happen to pass through both gates.
+- [x] **Every generated circuit had a corner nobody could take, right before the
+      start line.** Reported from play as "the strange thing before the start
+      line ... it is unnavigatable". The closing arc was centred on the point the
+      route starts from, and an arc of radius r about a point ends r away from
+      it — so the route stopped short of its own beginning and the lap wrapped
+      across the gap, putting a 157° reversal at about a tile's radius into every
+      loop the generator has ever made. It closes with a single half circle now,
+      the same turn the serpentine uses everywhere else.
+      *Verification: the sharpest turn between any three consecutive gates on a
+      generated route is now 46.8°, against the 157° reversal it replaced. The
+      suite walks 2,073 corners over every shape the generator makes — 6 loops
+      and 18 paths — and fails on anything over 90°, so it is the rule that is
+      pinned and not the six shapes that exist today. The generator hash moves,
+      deliberately, and says why.*
+- [x] **The shipped set is rebuilt on the fixed generator.** The eighteen are 6
+      circuits and 12 sprints, and the six files that changed are exactly the
+      six circuits — the closure is a loop-only construct, so a sprint's ground
+      is untouched. "Circuit" cuts across "written by hand": the authored tracks
+      lay their routes with the same planner, so `the oval`, `the crossing` and
+      `the long way round` moved with the generated ones. Ten of the twelve
+      sprints are byte for byte what they were; the other two changed because a
+      track ships only if all six machines can finish it and the machines got
+      quicker in the same breath, so `first ridge` and `low bend` are in and
+      `grey ridge` and `wide flats` are out. Those two had to be *deleted* — the
+      baker writes the set but has never removed from it, so both were still on
+      disk and still tracked.
+      *Verification: the eighteen files in the box are byte for byte what the
+      baker writes today, checked by baking into an empty directory and
+      comparing all eighteen; every one is validated and raced, and the
+      route-length floor still holds.*
+- [x] **The way back to a checkpoint was drawn in pieces.** Reported from play:
+      "parts of it are visible and then not visible, it is like the image is
+      oscillating." Ground paint is cut into half-tile pieces and drawn one
+      depth at a time by the terrain sweep, which is what stops a mark painting
+      over a car standing on it. This arrow is drawn *after* the sweep, as a
+      readout, and passed its own shape's depth — so only the few pieces sharing
+      it were drawn, and a different few qualified each time the car moved a
+      tile. Five call sites in the same file already did it correctly and the
+      helper's own comment described this exact flicker being fixed once
+      before; this was the wrong argument with the right one demonstrated
+      alongside it. There are two entry points now, one for the sweep and one
+      for a readout, so there is no depth to get wrong.
+      *Verification: sixteen alignments of the car across two tiles, counting
+      the arrow's pixels at each — 1099 to 4617 with the bug, 5437 to 5583
+      without, and the test requires them within a fifth of each other. The
+      test that was already there asked only for "some orange" and passed
+      throughout. Putting the bug back also fails to compile, because the
+      readout entry point goes unused.*
+- [x] **The HUD says how fast, and which way.** A bar rather than a number,
+      because a figure that changes every frame is read by nobody at speed.
+      Zero sits a quarter of the way along and it grows both ways on one scale,
+      so reverse is the same ruler backwards: full forward is the machine's own
+      top speed, full reverse a third of it. Forward in the accent colour,
+      reverse in the warning orange, and it reads the speed along the way the
+      car is pointing, so a car sliding backwards down a slope says so.
+      *Verification: drawn in all twenty-four states the panel has, none of
+      which hides anything.*
+      Two faults in the panel's arithmetic came out of adding the row, one of
+      them nine pixels old: the carrying row had been charged a gap short since
+      weapons landed, fitting only because there was slack above to absorb it,
+      and the zoom search left up to a whole step of empty panel because it
+      stopped at the first size that fits. The test's allowance is a line of
+      text now rather than the number twelve — twelve *was* this font's line
+      height, and a missing row, which is what the check exists for, is thirty
+      pixels and more.
+- [ ] **Reverse is the fastest gear in the game.** Found while deciding what the
+      speed bar's scale should be. Forward thrust falls to nothing at the
+      vehicle's top speed; the reverse branch has no such rolloff and simply
+      accelerates until drag balances it, so every machine reverses two to three
+      times faster than it can drive forwards — the stock car does 23.5 against
+      a top of 9.0, the motorcycle 30.1 against 9.9. Fixing it moves the world
+      hash, so it is its own change with its own note rather than a rider on the
+      HUD.
+      *Verification: hold the brake from a standstill on flat pavement and no
+      machine exceeds its own top speed going backwards.*
+- [x] **Two keys at once, all thirty-two ways.** Reported from play: "I don't
+      seem to be able to accelerate and turn at the same time." Everything
+      around this was already checked — each key doing its own job, a moved
+      binding moving, one key not driving two cars — and nothing anywhere
+      pressed **two keys together**, which is what driving is. No fault was
+      found; the path is sound, and the hole in the tests was real either way.
+      *Verification: every subset of the five controls, all 32 of them, held at
+      once and resolved, and then through `gs_input_combine`, where a pad and a
+      keyboard are merged and either could mask the other. The race trace now
+      also reports what the driver actually asked for, so the next report of
+      this shape can be answered rather than guessed at.*
 - [ ] **A track is chosen by racing one car, and a race has four.** The
       eighteen tracks in the box are now clean — every opponent finishes every
       one of them from every slot. Generated tracks are not: over eighty seeds,

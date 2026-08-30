@@ -111,6 +111,19 @@ void gs_split_update(gs_split *s, const gs_track *t, const gs_world *prev,
 // Fill in the views to draw. Returns how many - one while merged, one per car
 // otherwise. Cameras are blended by the merge factor, which is what makes the
 // switch continuous rather than sudden.
+//
+// **`out` is in as well as out.** This sets the camera, the rectangle and whose
+// view it is, and leaves everything else on each `gs_view` exactly as it found
+// it - the overlays, the landing arc, the analyser's heatmap, whether this
+// driver has been told they drove past a checkpoint. So pass the views you
+// already have, and initialise them if you have none: an uninitialised array
+// comes back uninitialised in every field this does not own.
+//
+// It used to zero each view instead, which made callers safe by accident and
+// the frontend wrong on purpose - it had to copy its own settings back one
+// field at a time, and the day a field was added without a line added with it,
+// the missed-checkpoint warning was set every tick and wiped every frame. See
+// `placing_the_views_leaves_everything_it_does_not_own_alone`.
 uint8_t gs_split_views(const gs_split *s, const gs_track *t,
                        const gs_world *prev, const gs_world *w, float alpha,
                        int win_w, int win_h, gs_view *out);

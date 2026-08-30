@@ -376,6 +376,83 @@ TEST(a_driver_who_drove_past_a_checkpoint_is_told_and_pointed_back) {
     CHECK(!view.missed);
 }
 
+TEST(the_way_back_arrow_is_drawn_whole_wherever_the_car_is_standing) {
+    // **It was drawn in pieces, and which pieces changed as the car moved.**
+    //
+    // Reported from play: "the go back arrow is rendering strangely ... parts
+    // of it are visible and then not visible, it is like the image is
+    // oscillating."
+    //
+    // `gs_ground_mark` cuts a mark into half-tile pieces and draws the ones
+    // belonging to the diagonal it is handed, because that is how the terrain
+    // sweep sorts ground paint against the things standing on it. It is called
+    // once per diagonal, and across the whole sweep the mark comes out whole.
+    //
+    // This arrow is not drawn in the sweep. It is a readout, drawn after
+    // everything, and it was passing its *own* quad's diagonal - so of the
+    // pieces it was cut into, only the handful sharing the diagonal of the
+    // furthest corner were ever drawn, and a different handful qualified each
+    // time the car moved a tile. Hence a flickering arrow.
+    //
+    // The rule, which is what this pins: the arrow is the same shape wherever
+    // the car is standing, so it is the same number of pixels. Not "some
+    // orange" - the test above already asks that, and passed throughout.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(24), 0, GS_INT(3));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(24), 0, GS_INT(3));
+
+    // Walked across two whole tiles in eighth-of-a-tile steps, which is what
+    // driving does: every phase of the car against the tile grid, so no
+    // alignment can be the lucky one that happens to look right.
+    const int steps = 16;
+    int least = 1 << 30, most = 0, walked = 0;
+
+    for (int i = 0; i < steps; i++) {
+        const float off = (float)i * 0.125f;
+
+        static gs_world was, now;
+        gs_park_car(&was, &t, GS_INT(22) + (gs_fix)(off * 65536.0f), GS_INT(32));
+        now = was;
+        now.car[0].x = was.car[0].x + GS_INT(4);
+
+        gs_view view = { 0 };
+        view.car = 0;
+        view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+        // The camera follows the car, so the arrow lands in the same place on
+        // screen every time and only its alignment to the tile grid changes.
+        view.cam = gs_camera_on(gs_to_f(now.car[0].x), gs_to_f(now.car[0].y), 0.0f);
+        view.cam.zoom = 2.0f;
+
+        gs_view_note_missed(&view, 1, &t, &was, &now);
+        CHECK(view.missed);
+
+        gs_frame f = gs_frame_of_view(ren, &t, &now, &view);
+        CHECK(f.px != nullptr);
+        if (f.px == nullptr) continue;
+
+        const int lit = gs_count_warning(&f);
+        gs_frame_free(&f);
+
+        if (lit < least) least = lit;
+        if (lit > most) most = lit;
+        walked++;
+    }
+
+    CHECK(walked == steps);
+    printf("  ARROW %d alignments walked; %d to %d pixels of it\n",
+           walked, least, most);
+
+    // **All of it, every time.** A whole arrow at this zoom is well over a
+    // thousand pixels; the bug drew as few as a couple of hundred at some
+    // alignments and most of it at others. Sub-pixel coverage moves the count a
+    // little as the shape slides across the grid, so the bound is a fifth
+    // rather than nothing - which is far tighter than a piece of the arrow
+    // going missing and far looser than rasterisation noise.
+    CHECK(least > 0);
+    CHECK(most * 4 < least * 5);
+}
+
 TEST(no_paint_on_the_ground_is_drawn_over_a_car_standing_on_it) {
     // **Paint goes under the car, and this asks it of every kind of paint.**
     //
@@ -1707,7 +1784,7 @@ TEST(the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not) {
 
     // Side by side: one view.
     for (int i = 0; i < 120; i++) gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
-    gs_view v[GS_MAX_CARS];
+    gs_view v[GS_MAX_CARS] = { 0 };
     CHECK(sp.merge == 1.0f);
     CHECK(gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v) == 1);
 
@@ -1729,6 +1806,119 @@ TEST(the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not) {
     gs_split_init(&sp);
     gs_split_update(&sp, &t, &solo, &solo, 1.0f, GS_W, GS_H, dt);
     CHECK(gs_split_views(&sp, &t, &solo, &solo, 1.0f, GS_W, GS_H, v) == 1);
+}
+
+// Everything `gs_split_views` is allowed to have written, blanked in both
+// copies so that all the rest - named or not, added today or next year - has to
+// come back byte for byte.
+static void gs_forget_placement(gs_view *v) {
+    v->cam  = (gs_camera){ 0 };
+    v->rect = (SDL_Rect){ 0 };
+    v->car  = 0;
+}
+
+TEST(placing_the_views_leaves_everything_it_does_not_own_alone) {
+    (void)ren;
+
+    // **The missed-checkpoint warning was built, tested, ticked - and never
+    // once reached a screen.**
+    //
+    // A `gs_view` carries two kinds of thing: where the view looks, which the
+    // splitter decides, and what is switched on over it, which whoever set it
+    // decides. The client used to hand `gs_split_views` a blank array and copy
+    // the second kind back one field at a time *by name* - so the day a field
+    // was added and no line was added with it, the flag was set every tick by
+    // the simulation and destroyed every frame before anything could draw it.
+    //
+    // Every test around it passed. They drove the HUD and the ground arrow
+    // directly, and the frame that wiped the flag was not on the path any of
+    // them took. What was missing was not a check on the warning; it was a
+    // check on **the seam the warning had to cross**.
+    //
+    // So the rule is pinned here rather than left to whoever adds the next
+    // field: the splitter sets the car and the rectangle it owns, and leaves
+    // the rest of the view exactly as it found it. Deliberately not a list of
+    // today's fields - the view is filled with values nothing else would
+    // produce and demanded back wholesale, so a field added next month is
+    // covered without anybody remembering this file exists.
+    static gs_track t;
+    gs_flat_pavement(&t, 60, 60);
+
+    static const gs_analysis borrowed = { 0 };
+
+    gs_view seed;
+    memset(&seed, 0, sizeof seed);       // padding too, so memcmp means something
+    seed.show_gravity = true;
+    seed.show_arc     = true;
+    seed.missed       = true;
+    seed.missed_at    = 7;
+    seed.heat         = &borrowed;
+
+    gs_split sp;
+    const float dt = 1.0f / 60.0f;
+    int checked = 0, cases = 0, merged = 0, split = 0;
+
+    // **Both paths this function has, at every number of players.** Merged is
+    // the early return; split is the loop - and the client's bug lived in
+    // whichever one the frame happened to take, so neither is a sample of the
+    // other.
+    for (uint8_t cars = 1; cars <= GS_MAX_CARS; cars++) {
+        for (int apart = 0; apart < 2; apart++) {
+            gs_world w;
+            gs_world_init(&w, GS_ONE);
+            for (int i = 0; i < (int)cars; i++) {
+                const gs_fix step = apart ? GS_INT(15) : GS_INT(2);
+                gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR,
+                                 GS_INT(5) + step * i, GS_INT(30), 0);
+            }
+
+            gs_split_init(&sp);
+            for (int i = 0; i < 120; i++)
+                gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
+
+            gs_view v[GS_MAX_CARS];
+            for (int i = 0; i < GS_MAX_CARS; i++) v[i] = seed;
+
+            const uint8_t n = gs_split_views(&sp, &t, &w, &w, 1.0f,
+                                             GS_W, GS_H, v);
+            CHECK(n >= 1);
+            cases++;
+            if (n == 1) merged++; else split++;
+
+            for (uint8_t i = 0; i < n; i++) {
+                // It did do its own half of the job, or the rest of this
+                // proves only that a function which does nothing breaks
+                // nothing.
+                CHECK(v[i].rect.w > 0);
+                CHECK(v[i].rect.h > 0);
+
+                gs_view got = v[i], want = seed;
+                gs_forget_placement(&got);
+                gs_forget_placement(&want);
+
+                if (memcmp(&got, &want, sizeof got) != 0)
+                    printf("  PLACE %u cars, %s: a view came back changed "
+                           "(missed %u, arc %u, gravity %u, heat %u)\n",
+                           cars, apart ? "split" : "merged",
+                           v[i].missed ? 1u : 0u, v[i].show_arc ? 1u : 0u,
+                           v[i].show_gravity ? 1u : 0u,
+                           v[i].heat != nullptr ? 1u : 0u);
+                CHECK(memcmp(&got, &want, sizeof got) == 0);
+                checked++;
+            }
+        }
+    }
+
+    printf("  PLACE %d views over %d arrangements (%d merged, %d split) kept "
+           "everything the splitter does not own\n",
+           checked, cases, merged, split);
+    CHECK(cases == GS_MAX_CARS * 2);
+
+    // **Both paths were actually taken.** The early return and the loop are
+    // two separate places that write a view, and a run that only ever reached
+    // one of them would pass this test while leaving the other unwatched.
+    CHECK(merged > 0);
+    CHECK(split > 0);
 }
 
 TEST(every_number_of_players_gets_the_whole_screen_and_a_fair_share_of_it) {
@@ -1851,7 +2041,7 @@ TEST(cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half) {
         w.car[1].x = GS_INT(30) + (gs_fix)(wobble * (float)GS_ONE);
         gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
 
-        gs_view v[GS_MAX_CARS];
+        gs_view v[GS_MAX_CARS] = { 0 };
         uint8_t n = gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v);
         if (n != was) { changes++; was = n; }
     }
@@ -1891,7 +2081,7 @@ TEST(the_view_does_not_jump_when_the_screen_merges_or_splits) {
         w.car[1].x = GS_INT(20) + (gs_fix)(away * (float)GS_ONE);
 
         gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, dt);
-        gs_view v[GS_MAX_CARS];
+        gs_view v[GS_MAX_CARS] = { 0 };
         gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v);
 
         // Pane zero is what a player watches throughout: the whole screen while
@@ -3022,6 +3212,78 @@ TEST(the_analyser_refuses_a_track_with_no_route_rather_than_guessing) {
     gs_editor_quit(&ed);
 }
 
+TEST(every_combination_of_keys_reaches_the_car_at_once) {
+    (void)ren;
+
+    // **Accelerating and turning are one thing a driver does, not two.**
+    //
+    // Reported from play: "when using the arrow keys on the keyboard, I don't
+    // seem to be able to accelerate and turn at the same time". Everything
+    // around this was already checked - that each key does its own job, that a
+    // moved binding moves, that one key cannot drive two cars - and none of it
+    // pressed **two keys together**, which is what driving is.
+    //
+    // So: every subset of the five controls, all thirty-two of them, held at
+    // once and asked for. Sampling three interesting pairs would have left the
+    // same hole in a different place.
+    gs_bindings b;
+    gs_bind_defaults(&b);
+
+    // What each control is worth in a gs_input, named here because the table
+    // that does it is private to gs_bind.c - which is right: the mapping is
+    // that file's business and this is checking the answer, not the workings.
+    static const gs_input worth[GS_ACT_COUNT] = {
+        [GS_ACT_ACCEL] = GS_IN_ACCEL,
+        [GS_ACT_BRAKE] = GS_IN_BRAKE,
+        [GS_ACT_LEFT]  = GS_IN_LEFT,
+        [GS_ACT_RIGHT] = GS_IN_RIGHT,
+        [GS_ACT_FIRE]  = GS_IN_FIRE,
+    };
+
+    static const SDL_Scancode arrows[GS_ACT_COUNT] = {
+        [GS_ACT_ACCEL] = SDL_SCANCODE_UP,
+        [GS_ACT_BRAKE] = SDL_SCANCODE_DOWN,
+        [GS_ACT_LEFT]  = SDL_SCANCODE_LEFT,
+        [GS_ACT_RIGHT] = SDL_SCANCODE_RIGHT,
+        [GS_ACT_FIRE]  = SDL_SCANCODE_RSHIFT,
+    };
+
+    int walked = 0;
+    for (unsigned held = 0; held < (1u << GS_ACT_COUNT); held++) {
+        bool keys[SDL_SCANCODE_COUNT] = { false };
+        gs_input want = 0;
+        for (int a = 0; a < GS_ACT_COUNT; a++) {
+            if ((held & (1u << (unsigned)a)) == 0) continue;
+            keys[arrows[a]] = true;
+            want |= worth[a];
+        }
+
+        const gs_input got = gs_bind_resolve(&b, 0, keys, SDL_SCANCODE_COUNT, 0);
+        if (got != want) {
+            printf("  KEYS holding %u gave %u, wanted %u\n", held,
+                   (unsigned)got, (unsigned)want);
+        }
+        CHECK(got == want);
+        walked++;
+    }
+
+    // **And through the whole path a race uses**, not only the resolver: two
+    // keys held reach two cars' worth of input through gs_input_combine, which
+    // is where a pad and a keyboard are merged and where one could mask the
+    // other.
+    gs_input from_keys[GS_MAX_CARS] = { 0 };
+    gs_input from_pads[GS_MAX_CARS] = { 0 };
+    gs_input out[GS_MAX_CARS] = { 0 };
+    from_keys[0] = (gs_input)(GS_IN_ACCEL | GS_IN_LEFT);
+    from_pads[0] = GS_IN_RIGHT;
+    gs_input_combine(from_pads, 1, from_keys, GS_MAX_CARS, out, 1);
+    CHECK(out[0] == (gs_input)(GS_IN_ACCEL | GS_IN_LEFT | GS_IN_RIGHT));
+
+    printf("  KEYS %d of %d combinations of the five controls walked\n",
+           walked, 1 << GS_ACT_COUNT);
+    CHECK(walked == (1 << GS_ACT_COUNT));
+}
+
 TEST(a_rebind_waits_for_the_key_that_started_it_to_be_let_go) {
     (void)ren;
 
@@ -3716,7 +3978,7 @@ TEST(every_driver_can_see_their_own_car_on_ground_that_is_not_at_height_zero) {
             gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
         }
 
-        gs_view v[GS_MAX_CARS];
+        gs_view v[GS_MAX_CARS] = { 0 };
         uint8_t n = gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v);
         CHECK(n >= 1);
 
@@ -3753,7 +4015,7 @@ TEST(a_car_down_a_drop_does_not_take_the_camera_off_the_other_one) {
         gs_split_update(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
     }
 
-    gs_view v[GS_MAX_CARS];
+    gs_view v[GS_MAX_CARS] = { 0 };
     uint8_t n = gs_split_views(&sp, &t, &w, &w, 1.0f, GS_W, GS_H, v);
 
     // Whether that is answered by splitting the screen or by pulling back far
@@ -3791,7 +4053,7 @@ TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
         for (int i = 0; i < 240; i++) {
             gs_split_update(&sp, &t, w, w, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
         }
-        gs_view v[GS_MAX_CARS];
+        gs_view v[GS_MAX_CARS] = { 0 };
         CHECK(gs_split_views(&sp, &t, w, w, 1.0f, GS_W, GS_H, v) == 1);
         gs_car_on_screen(&v[0], w, 0, &sx, which == 0 ? &on_ground : &in_air);
 
@@ -3816,7 +4078,7 @@ TEST(a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it) {
     for (int i = 0; i < 240; i++) {
         gs_split_update(&sp, &t, &stuck, &stuck, 1.0f, GS_W, GS_H, 1.0f / 60.0f);
     }
-    gs_view v[GS_MAX_CARS];
+    gs_view v[GS_MAX_CARS] = { 0 };
     CHECK(gs_split_views(&sp, &t, &stuck, &stuck, 1.0f, GS_W, GS_H, v) == 1);
 
     float hung = 0.0f;
@@ -3864,7 +4126,7 @@ TEST(the_camera_holds_the_car_still_between_ticks) {
         // interpolation and not a transition still in progress.
         gs_split_update(&sp, &t, &prev, &now, alpha, GS_W, GS_H, 0.0f);
 
-        gs_view v[GS_MAX_CARS];
+        gs_view v[GS_MAX_CARS] = { 0 };
         CHECK(gs_split_views(&sp, &t, &prev, &now, alpha, GS_W, GS_H, v) == 1);
 
         // Where the renderer draws it: between the two states, by alpha.
@@ -4464,16 +4726,35 @@ TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
         // drawing is a box with an empty half, which is what a derby HUD looked
         // like the day it stopped drawing four of its five rows. Measured as
         // the room left under the last thing drawn.
+        // **A row, not a magic twelve.**
+        //
+        // The bound was a constant, and a constant cannot say what it is a
+        // bound on. What this test is for is a panel sized for rows it is not
+        // drawing - the derby HUD that stopped drawing four of its five rows -
+        // and the smallest thing that failure can be is **one row's worth of
+        // hole**. Below that is the sizing model's own resolution: it adds up
+        // whole rounded lines and spacings, and no arrangement of them lands
+        // exactly on what ImGui then advances the cursor by.
+        //
+        // So the bound is a line of text, asked of the font rather than
+        // written down. That is what the old twelve was - this font's line
+        // height on this machine - and saying so is the difference between a
+        // bound that travels to a different font and one that happens to be
+        // right here. It caught the fault it was written for at twelve and
+        // still catches it: a missing row is thirty pixels and more.
+        const float line = ImGui_GetTextLineHeight();
         const float spare = gs_hud_spare();
-        if (spare > 12.0f) {
-            printf("  HUD state %zu (%s%s%s%s%s) has %.0f pixels of nothing at "
-                   "the bottom\n", i, carrying ? "carrying " : "",
+        if (spare > line) {
+            printf("  HUD state %zu (%s%s%s%s%s) has %.1f pixels of nothing at "
+                   "the bottom, against a line of %.1f\n", i,
+                   carrying ? "carrying " : "",
                    states[i].derby ? "derby " : "race ",
                    states[i].wrecked ? "wrecked " : "",
                    states[i].finished ? "finished " : "",
-                   states[i].counting ? "counting" : "", (double)spare);
+                   states[i].counting ? "counting" : "",
+                   (double)spare, (double)line);
         }
-        CHECK(spare <= 12.0f);
+        CHECK(spare <= line);
     }
 
     gs_world_set_mode(&w, GS_MODE_RACE);
@@ -4560,7 +4841,7 @@ TEST(a_hud_stays_inside_the_view_it_belongs_to) {
         gs_split_update(&sp, &t, &w, &w, 1.0f, sizes[z].w,
                         sizes[z].h, 1.0f / 60.0f);
     }
-    gs_view v[GS_MAX_CARS];
+    gs_view v[GS_MAX_CARS] = { 0 };
     uint8_t views = gs_split_views(&sp, &t, &w, &w, 1.0f, sizes[z].w,
                                    sizes[z].h, v);
     CHECK(views == cars);
@@ -8142,14 +8423,23 @@ TEST(a_track_is_built_from_nothing_and_raced_without_leaving_the_editor) {
     gs_world_add_car(&w, &back, (uint8_t)GS_VEH_SPRINT_CAR,
                      GS_INT(32), GS_INT(32), 0);
 
+    // **Driven by the simulation's own driver, not by a trick.**
+    //
+    // This used to hold the throttle below four tiles a second and the wheel
+    // hard right, so the car drove a circle - and the two gates were laid where
+    // that circle happened to pass. That is a coincidence between the gates'
+    // positions and one car's turning radius, not a fact about the editor, and
+    // it broke the moment the roster gained grip: the circle came out 17.04
+    // tiles across against the 17.2 the gates are apart, and the car went round
+    // and round for fifteen minutes a tile short of the checkpoint it owed.
+    //
+    // `gs_ai_drive` aims at the gate it owes, which is what the claim here
+    // actually needs - that a track built with the tools a player has is one
+    // that can be *raced*. It is also a pure function of the world, so this asks
+    // the simulation rather than steering around it.
     for (uint32_t i = 0; i < GS_TICK_HZ * 60u * 15u && !w.over; i++) {
-        const gs_fix vx = w.car[0].vx;
-        const gs_fix vy = w.car[0].vy;
-        const gs_fix speed_sq = gs_fix_mul(vx, vx) + gs_fix_mul(vy, vy);
-
         gs_input in[GS_MAX_CARS] = { 0 };
-        in[0] = (gs_input)((speed_sq < GS_INT(16) ? (unsigned)GS_IN_ACCEL : 0u) |
-                           (unsigned)GS_IN_RIGHT);
+        in[0] = gs_ai_drive(&w, &back, 0);
         gs_world_step(&w, &back, in);
     }
 
@@ -11139,6 +11429,7 @@ int main(void) {
     gs_win = win;
 
     run_a_driver_who_drove_past_a_checkpoint_is_told_and_pointed_back(ren);
+    run_the_way_back_arrow_is_drawn_whole_wherever_the_car_is_standing(ren);
     run_no_paint_on_the_ground_is_drawn_over_a_car_standing_on_it(ren);
     run_a_car_behind_a_rise_is_hidden_by_it(ren);
     run_the_view_does_not_jump_as_a_car_crosses_a_tile_boundary(ren);
@@ -11162,10 +11453,12 @@ int main(void) {
     run_four_players_get_four_views_that_tile_the_window_without_overlapping(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);
     run_the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not(ren);
+    run_placing_the_views_leaves_everything_it_does_not_own_alone(ren);
     run_every_number_of_players_gets_the_whole_screen_and_a_fair_share_of_it(ren);
     run_cars_hovering_at_the_threshold_do_not_flicker_the_screen_in_half(ren);
     run_the_view_does_not_jump_when_the_screen_merges_or_splits(ren);
     run_every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone(ren);
+    run_every_combination_of_keys_reaches_the_car_at_once(ren);
     run_a_rebind_waits_for_the_key_that_started_it_to_be_let_go(ren);
     run_changed_controls_survive_being_written_and_read_back(ren);
     run_every_vehicle_has_a_mesh_and_no_two_are_the_same_shape(ren);

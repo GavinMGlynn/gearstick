@@ -1253,6 +1253,7 @@ static gs_corner gs_take_corner(gs_surface surface) {
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
+
     w.car[0].vx = GS_INT(5);
 
     gs_angle before = gs_atan2(w.car[0].vy, w.car[0].vx);
@@ -1518,7 +1519,15 @@ static double gs_turn_at_friction(gs_fix friction) {
     gs_world_init(&w, GS_ONE);
     w.friction_scale = friction;
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(30), GS_INT(30), 0);
-    w.car[0].vx = GS_INT(5);
+
+    // **Fast enough that the tyres are still what limits the corner.** The
+    // plateau this test pins is grip ceasing to matter because *steering* is
+    // the limit, and where that happens depends on the speed asked about. At
+    // five tiles a second and the grip this roster has now it happens at nine
+    // tenths of the dial rather than at the top of it, so "every step turns it
+    // further" fails on the last step - by a hundredth of a degree, which is
+    // the plateau arriving early and not the dial being broken.
+    w.car[0].vx = GS_RATIO(75, 10);
 
     gs_angle before = gs_atan2(w.car[0].vy, w.car[0].vx);
     gs_input in[GS_MAX_CARS] = { (gs_input)(GS_IN_ACCEL | GS_IN_LEFT), 0, 0, 0 };
@@ -1742,10 +1751,18 @@ TEST(wear_belongs_to_the_race_and_not_to_the_track) {
     gs_world_init(&w, GS_ONE);
     gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(20), 0);
 
+    const gs_fix from_x = w.car[0].x, from_y = w.car[0].y;
+
     gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
     for (int i = 0; i < GS_TICK_HZ * 8; i++) gs_world_step(&w, &t, in);
 
-    CHECK(gs_world_wear(&w, w.car[0].x, w.car[0].y) > 0);
+    // **Where it has been, not where it is.** This used to ask the tile under
+    // the car after eight seconds, which was ground it had been working the
+    // whole time when the roster's best did six tiles a second. Faster cars
+    // reach fresh dirt by then and the tile under them is barely marked, so the
+    // question moved to the ground it launched off - which is the ground this
+    // is about either way.
+    CHECK(gs_world_wear(&w, from_x, from_y) > 0);
 
     // The track is untouched: reload it and the ground is fresh again, which is
     // exactly right - ruts are what happened during a race, not what somebody
@@ -1868,6 +1885,12 @@ TEST(a_car_can_be_destroyed_by_driving_and_by_being_hit) {
     gs_world_init(&alone, GS_ONE);
     gs_world_add_car(&alone, &cliff, GS_VEH_MOTORCYCLE, GS_INT(2), GS_INT(6), 0);
     alone.car[0].vx = GS_INT(6);
+
+    // **Six tiles a second, not the roster's new best.** Faster off this cliff
+    // and the motorcycle clears the forty tile field entirely and is wrecked by
+    // leaving the world, which is a different rule passing this check for the
+    // wrong reason - measured: at nine tiles a second it lands at x = 53 on a
+    // track forty wide.
     for (int i = 0; i < GS_TICK_HZ * 8; i++) gs_world_step(&alone, &cliff, nullptr);
 
     // Driving alone, off a cliff: nobody else involved.
@@ -1887,8 +1910,14 @@ TEST(a_car_can_be_destroyed_by_driving_and_by_being_hit) {
     gs_world_add_car(&hit, &flat, GS_VEH_STOCK_CAR, GS_INT(38), GS_INT(10),
                      (gs_angle)(GS_QUARTER * 2));
 
+    // **Ten seconds, not twenty.** Long enough that the fragile one is
+    // destroyed, short enough that the sturdy one is not: at the speeds this
+    // roster has now, twenty seconds of head-on running takes both of them to
+    // 255 and "the fragile one takes far more of it" becomes 255 against 255,
+    // which is a saturated measurement rather than a false claim. At ten it is
+    // 255 against 63.
     bool ever_flew = false;
-    for (int i = 0; i < GS_TICK_HZ * 20; i++) {
+    for (int i = 0; i < GS_TICK_HZ * 10; i++) {
         // Both hold the throttle, facing each other, so every bounce is
         // followed by another run at it - a derby rather than one crash.
         gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, GS_IN_ACCEL, 0, 0 };
@@ -2645,14 +2674,18 @@ TEST(how_many_are_still_driving_is_one_number_with_one_definition) {
 
 TEST(a_destruction_race_fought_out_between_two_cars_finishes_by_itself) {
     // Not staged: two cars driven into each other until one of them stops.
+    // **Room for the cars this roster has.** Eighty by twenty was an arena when
+    // the best of them did six tiles a second; at half as much again a single
+    // hit throws a car most of the way across it and into the run-off, and a
+    // derby decided by who fell off the world is not the derby this is about.
     static gs_track t;
-    gs_track_init(&t, 80, 20, GS_SURF_PAVEMENT);
+    gs_track_init(&t, 120, 30, GS_SURF_PAVEMENT);
 
     gs_world w;
     gs_world_init(&w, GS_ONE);
     gs_world_set_mode(&w, GS_MODE_DESTRUCTION);
-    gs_world_add_car(&w, &t, GS_VEH_MOTORCYCLE, GS_INT(20), GS_INT(10), 0);
-    gs_world_add_car(&w, &t, GS_VEH_BAJA_BUG, GS_INT(60), GS_INT(10),
+    gs_world_add_car(&w, &t, GS_VEH_MOTORCYCLE, GS_INT(30), GS_INT(15), 0);
+    gs_world_add_car(&w, &t, GS_VEH_BAJA_BUG, GS_INT(90), GS_INT(15),
                      (gs_angle)(GS_QUARTER * 2));
 
     for (int i = 0; i < GS_TICK_HZ * 30 && !w.over; i++) {
@@ -2918,11 +2951,12 @@ TEST(the_skill_dial_changes_how_they_drive_and_not_only_how_fast) {
     static gs_ai_entry entry[GS_AI_SKILL_STEPS + 1];
     static gs_ai_flight flight[GS_AI_SKILL_STEPS + 1];
     static uint32_t lap[GS_AI_SKILL_STEPS + 1];
+    const uint32_t laps = 3;            // what every lap[] below is timed over
 
     for (int sk = 0; sk <= GS_AI_SKILL_STEPS; sk++) {
         entry[sk] = gs_ai_corner_entry(&pav, GS_ONE, (uint8_t)GS_VEH_STOCK_CAR, sk);
         flight[sk] = gs_ai_over_the_jump(&jump, sk);
-        lap[sk] = gs_ai_lap_ticks(&pav, GS_ONE, (uint8_t)GS_VEH_STOCK_CAR, sk, 3);
+        lap[sk] = gs_ai_lap_ticks(&pav, GS_ONE, (uint8_t)GS_VEH_STOCK_CAR, sk, laps);
 
         CHECK(entry[sk].tick > 0);          // it got to the corner
         CHECK(flight[sk].take_off > 0);     // and it left the ground
@@ -2950,14 +2984,22 @@ TEST(the_skill_dial_changes_how_they_drive_and_not_only_how_fast) {
         if (lap[sk - 1] - lap[sk] < lap[closest - 1] - lap[closest]) closest = sk;
     }
     const uint32_t gap = lap[closest - 1] - lap[closest];
-    printf("  STYLE closest pair is %d and %d, %u ticks apart over three laps; "
+    printf("  STYLE closest pair is %d and %d, %.3f s a lap apart; "
            "they leave the ramp at %.3f and %.3f and land %.3f apart\n",
-           closest - 1, closest, gap,
+           closest - 1, closest,
+           (double)gap / (double)laps / (double)GS_TICK_HZ,
            (double)flight[closest - 1].take_off / 65536.0,
            (double)flight[closest].take_off / 65536.0,
            (double)gs_fix_abs(flight[closest].landed - flight[closest - 1].landed) /
                65536.0);
-    CHECK(gap * 200u < lap[closest]);       // within half a percent of each other
+
+    // **The stopwatch is what barely separates them, so say so in seconds.**
+    // This was a fraction of the lap time once, which quietly meant something
+    // stricter every time the cars got quicker - the same lap gap measured
+    // against a shorter lap. What the claim above actually rests on is a person
+    // with a stopwatch being unable to call the two apart, and that is a
+    // duration: under a fifth of a second a lap, whatever the lap is worth.
+    CHECK(gap * 5u < GS_TICK_HZ * laps);
     CHECK(flight[closest].take_off != flight[closest - 1].take_off);
     CHECK(flight[closest].landed != flight[closest - 1].landed);
 
@@ -3145,20 +3187,57 @@ TEST(a_quicker_driver_carries_more_speed_through_the_same_corner) {
     gs_track_add_gate(&t, GS_INT(40), GS_INT(30), GS_QUARTER, GS_INT(5));
     gs_track_add_gate(&t, GS_INT(40), GS_INT(50), GS_QUARTER, GS_INT(5));
 
-    gs_world w;
-    gs_world_init(&w, GS_ONE);
-    // Four tiles short of the corner at five tiles a second, which is exactly
-    // where a cautious driver has already decided and a quick one has not.
-    gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(36), GS_INT(30), 0);
-    w.car[0].vx = GS_INT(5);
+    // **The speed each of them gives up at, rather than a speed chosen here.**
+    //
+    // This used to approach at a flat five tiles a second, "exactly where a
+    // cautious driver has already decided and a quick one has not" - true of
+    // the roster it was written against, and false the moment the cars gained
+    // grip, when five tiles a second became a speed neither of them worries
+    // about. The claim was never about five; it is that the quick one leaves it
+    // later. So the test finds both thresholds and compares them, and stays
+    // true whatever the envelope becomes.
+    gs_fix careful_at = 0, quick_at = 0;
+    for (int tenths = 10; tenths <= 200; tenths++) {
+        const gs_fix v = GS_RATIO(tenths, 10);
 
-    gs_input careful = gs_ai_drive_style(&w, &t, 0, gs_ai_skill_style(0));
-    gs_input quick = gs_ai_drive_style(&w, &t, 0,
-                                       gs_ai_skill_style(GS_AI_SKILL_STEPS));
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(36), GS_INT(30), 0);
+        w.car[0].vx = v;
 
-    CHECK((careful & GS_IN_BRAKE) != 0);
-    CHECK((quick & GS_IN_BRAKE) == 0);
-    CHECK((quick & GS_IN_ACCEL) != 0);
+        const gs_input careful =
+            gs_ai_drive_style(&w, &t, 0, gs_ai_skill_style(0));
+        const gs_input quick =
+            gs_ai_drive_style(&w, &t, 0, gs_ai_skill_style(GS_AI_SKILL_STEPS));
+
+        if (careful_at == 0 && (careful & GS_IN_BRAKE) != 0) careful_at = v;
+        if (quick_at == 0 && (quick & GS_IN_BRAKE) != 0) quick_at = v;
+    }
+
+    printf("  CORNER cautious gives up at %.1f tiles a second, quick at %.1f\n",
+           (double)careful_at / (double)GS_ONE, (double)quick_at / (double)GS_ONE);
+
+    // Both of them do eventually decide, or the comparison below is between two
+    // numbers that were never found.
+    CHECK(careful_at > 0);
+    CHECK(quick_at > 0);
+
+    // **And the quick one carries more speed into the same corner.**
+    CHECK(quick_at > careful_at);
+
+    // At the speed the cautious one has given up at, the quick one is still on
+    // the throttle - which is the same claim said the other way round, and the
+    // one this test used to make directly.
+    {
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        gs_world_add_car(&w, &t, GS_VEH_STOCK_CAR, GS_INT(36), GS_INT(30), 0);
+        w.car[0].vx = careful_at;
+        const gs_input quick =
+            gs_ai_drive_style(&w, &t, 0, gs_ai_skill_style(GS_AI_SKILL_STEPS));
+        CHECK((quick & GS_IN_ACCEL) != 0);
+        CHECK((quick & GS_IN_BRAKE) == 0);
+    }
 
     // And the default sits between them rather than at one end, which is what
     // makes it worth racing rather than a formality in either direction.
@@ -4989,8 +5068,14 @@ TEST(a_race_that_is_over_stays_over_until_a_new_one_replaces_it) {
 }
 
 TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
+    // **A field the cars of the day can get round.** This was forty by sixteen
+    // with the gates twenty-four apart, which was room enough when the roster's
+    // best did six tiles a second. At half as much again it is a hairpin every
+    // two seconds in a field narrower than the braking distance, and the race
+    // that used to finish inside two minutes stopped finishing at all. The
+    // scene is scaled with the cars; what it asks is unchanged.
     static gs_track t;
-    gs_track_init(&t, 40, 16, GS_SURF_PAVEMENT);
+    gs_track_init(&t, 60, 24, GS_SURF_PAVEMENT);
     for (uint8_t y = 0; y <= t.h; y++)
         for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
 
@@ -4998,8 +5083,8 @@ TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
     // circuit, which is what says gate zero is where a lap begins and ends.
     // Left as a path this would be finished by arriving at the far gate once,
     // because that is what a path is.
-    gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
-    gs_track_add_gate(&t, GS_INT(30), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(9), GS_INT(12), 0, GS_INT(9));
+    gs_track_add_gate(&t, GS_INT(45), GS_INT(12), 0, GS_INT(9));
     t.route = (uint8_t)GS_ROUTE_CIRCUIT;
 
     gs_world w;
@@ -5009,8 +5094,8 @@ TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
 
     // A quick car and a slow one, so the order is decided by the racing rather
     // than by which index went first.
-    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(4), GS_INT(7), 0);
-    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_LUNAR_ROVER, GS_INT(4), GS_INT(9), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR, GS_INT(6), GS_INT(11), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_LUNAR_ROVER, GS_INT(6), GS_INT(13), 0);
 
     CHECK(!w.over);
     CHECK(w.winner == GS_NO_WINNER);
@@ -7676,7 +7761,15 @@ typedef struct gs_feel {
 static gs_track gs_ground;
 
 static void gs_measure_ground(gs_surface s, gs_feel *out) {
-    gs_track_init(&gs_ground, 64, 64, s);
+    // **A field the cars of the day can use.** Sixty-four tiles square measured
+    // nine grounds apart from each other when the roster's best did six tiles a
+    // second. At half as much again the straight ends before the speed settles,
+    // and the circle that the cornering measure drives no longer fits inside
+    // the field - the car spirals off the edge and is wrecked, which reads as a
+    // cornering speed of zero on *every* loose surface and made dirt and gravel
+    // indistinguishable. Scaled with the cars: the same three questions, asked
+    // where they can still be answered.
+    gs_track_init(&gs_ground, 96, 96, s);
 
     // Flat out until the speed settles or the far side arrives, whichever comes
     // first. **Stopping at the edge matters**: the ground outside a track is a
@@ -7699,13 +7792,15 @@ static void gs_measure_ground(gs_surface s, gs_feel *out) {
     for (int i = 0; i < GS_TICK_HZ * 30; i++) {
         gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
         gs_world_step(&a, &gs_ground, in);
-        if (gs_car_speed(&a.car[0]) >= GS_INT(3)) { out->to_speed = i; break; }
+        // Four and a half tiles a second rather than three: the speed that
+        // told nine grounds apart, scaled with the roster that has to reach it.
+        if (gs_car_speed(&a.car[0]) >= GS_RATIO(45, 10)) { out->to_speed = i; break; }
     }
 
     // A circle, held long enough to grind the tiles under it flat.
     gs_world c;
     gs_world_init(&c, GS_ONE);
-    gs_world_add_car(&c, &gs_ground, GS_VEH_STOCK_CAR, GS_INT(32), GS_INT(32), 0);
+    gs_world_add_car(&c, &gs_ground, GS_VEH_STOCK_CAR, GS_INT(48), GS_INT(48), 0);
     gs_fix early = 0;
     for (int i = 0; i < GS_TICK_HZ * 150; i++) {
         gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL | GS_IN_LEFT, 0, 0, 0 };
@@ -8636,6 +8731,68 @@ TEST(a_car_a_little_under_the_ground_can_still_drive_away) {
     CHECK(went[1] > gs_fix_mul(went[0], GS_RATIO(95, 100)));
 }
 
+TEST(no_generated_route_turns_tighter_than_its_own_hairpin) {
+    // **The smoothness condition: nothing sharper than the tightest turn the
+    // generator means to lay.**
+    //
+    // A serpentine's passes are spaced at twice a turning radius precisely so
+    // that the half circle joining one to the next is the sharpest thing on the
+    // track. Every corner should be that hairpin or gentler. One was not: the
+    // arc that closed a loop back onto its first pass was centred on the very
+    // point the route starts from, and an arc of radius r about a point ends r
+    // *away* from it - so every loop the generator made stopped fifteen tiles
+    // short of its own beginning and wrapped across the gap. That put a **157
+    // degree reversal of about one tile's radius** immediately before the start
+    // line of every circuit, which a player drove into and reported as
+    // unnavigable and disjointed.
+    //
+    // So the shape of the route is checked rather than trusted: three gates in
+    // a row give a turn, and no turn may be tighter than the pitch allows.
+    int loops = 0, paths = 0, checked = 0;
+    double sharpest = 0.0;
+    int sharpest_seed = -1;
+
+    for (uint32_t seed = 1; seed <= 24; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+        if (gs_track_is_circuit(&gs_gen_a)) loops++; else paths++;
+
+        for (uint8_t i = 0; i < gs_gen_a.gate_count; i++) {
+            // A path does not wrap: its last gate has no corner after it.
+            if (!gs_track_is_circuit(&gs_gen_a) &&
+                i + 2 >= gs_gen_a.gate_count) break;
+
+            const gs_gate *a = &gs_gen_a.gate[i];
+            const gs_gate *b = &gs_gen_a.gate[(i + 1u) % gs_gen_a.gate_count];
+            const gs_gate *c = &gs_gen_a.gate[(i + 2u) % gs_gen_a.gate_count];
+
+            const gs_angle in_leg = gs_atan2(b->y - a->y, b->x - a->x);
+            const gs_angle out_leg = gs_atan2(c->y - b->y, c->x - b->x);
+            int32_t bend = gs_angle_delta(in_leg, out_leg);
+            if (bend < 0) bend = -bend;
+
+            const double degrees = (double)bend * 360.0 / 65536.0;
+            if (degrees > sharpest) { sharpest = degrees; sharpest_seed = (int)seed; }
+            checked++;
+
+            // **Ninety degrees between two gates, and no more.** The hairpin
+            // that joins two passes is spread over several gates - one every
+            // dozen tiles round a fifteen tile radius - so no single step of it
+            // turns further than a right angle. The reversal this is here to
+            // catch was a hundred and fifty-seven.
+            CHECK(degrees <= 90.0);
+        }
+    }
+
+    printf("  BEND %d corners over %d loops and %d paths; sharpest %.1f deg "
+           "(seed %d)\n", checked, loops, paths, sharpest, sharpest_seed);
+
+    // Both kinds of route were actually generated, or this walked half a space
+    // and said nothing about the other half.
+    CHECK(loops > 0);
+    CHECK(paths > 0);
+    CHECK(checked > 500);
+}
+
 TEST(a_step_past_a_gate_is_told_from_a_step_through_it) {
     // **Three answers, not two.** A step can go through a gate, past it, or
     // neither - and "neither" is what a car still driving towards one is doing,
@@ -8941,6 +9098,7 @@ int main(void) {
     run_a_driver_already_backing_off_a_hill_does_not_change_its_mind_at_the_edge();
     run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
+    run_no_generated_route_turns_tighter_than_its_own_hairpin();
     run_a_step_past_a_gate_is_told_from_a_step_through_it();
     run_every_car_lines_up_behind_the_line_it_has_to_cross();
 

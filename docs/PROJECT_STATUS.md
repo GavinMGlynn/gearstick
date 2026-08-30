@@ -6921,6 +6921,352 @@ platform-independent"* had been a claim in a header; it is a measurement now.
 runs a thread and consumes what it is given, and what it does not do is make a
 noise. What is left is what the verification asks for and no machine can give.
 
+## Half as much again, and the tests that were measuring the old cars
+
+The game felt sluggish against the one it is after, so **power, top speed and
+grip are each multiplied by 1.5 on all six machines**. Braking, steering and drag
+are untouched.
+
+All three, because no one of them is the pace. Measured on `gearstick_cli pace`
+against a lap of 27.27s: grip alone buys 5%, because a car that corners harder
+still runs out of engine down the straight; power and top speed with the old
+grip buy 13%, because the corner is where the time is. Together they give
+**20.43s, a quarter quicker**, which is what was asked for.
+
+The same factor on all three deliberately, because it keeps the shape of the
+driving rather than flattening it. Cornering speed goes as the square root of
+grip — up about 22% — while straight-line speed goes up the full 50%, so a car
+now arrives at a corner *relatively* faster than it used to and slides harder for
+it. Braking distance goes as v² over deceleration and is half as long again.
+More speed everywhere, and more precision asked for at every corner.
+
+**Toughness had to move with them, and that is not a pace change.** A landing's
+damage is divided by toughness and arrives as the square of the speed you land
+at, so half as much speed again into a jump is more than twice the punishment out
+of it, on ground that was already the limit. Measured by racing four AI cars a lap
+of each of the eighteen shipped tracks: with toughness left alone **15 of the 72
+are wrecked**, and with it scaled **7** — and that 7 is what the same grid was
+already losing before any of this, the open item about choosing a track by racing
+one car rather than four, not something the speed introduced. Moving
+all six machines by one factor leaves the ordering alone: the rover still shrugs
+off what folds the sprint car, and `gearstick_cli roster` still finds every
+machine best at something, with the same 1, 3, 1, 1, 3, 1 spread of wins.
+
+### Nine tests moved, and not one of them because the product broke
+
+Every one had an old speed or an old handling model written into its fixture, and
+faster cars ran off the end of the measuring stick:
+
+- **the derby** ran head-on for twenty seconds; both cars now reach 255 damage,
+  so *"the fragile one takes far more of it"* became 255 against 255. At ten
+  seconds it is 255 against 63. **The measurement had saturated, not the claim.**
+- **the destruction race** was fought in an 80×20 arena; a single hit now throws
+  a car most of the way across it and into the run-off, so the derby was being
+  decided by who fell off the world. The field is 120×30.
+- **the ground comparison** drove a circle on a 64×64 field to tell nine
+  surfaces apart. The circle no longer fits: the car spirals off the edge and is
+  wrecked, which reads as *a cornering speed of zero on every loose surface* and
+  made dirt and gravel indistinguishable. 96×96, and the settling speed it looks
+  for scaled with the roster that has to reach it.
+- **the race that ends when everybody finishes** was a 40×16 field with gates 24
+  apart — a hairpin every two seconds in a field narrower than the braking
+  distance, and it stopped finishing at all.
+- **surface wear** asked the tile under the car after eight seconds. Faster cars
+  reach fresh dirt by then; the question moved to the ground it launched off,
+  which is the ground the test was always about.
+- **the cliff** launched a motorcycle at nine tiles a second off a 40-tile field,
+  where it landed at x = 53 and was wrecked *by leaving the world* — a different
+  rule passing the check for the wrong reason. Held at six.
+- **the friction plateau** asked at five tiles a second, where grip has stopped
+  being the limit and steering has become it, so the last step of the dial
+  turned a hundredth of a degree less than the one below. Asked at 7.5.
+- **the skill dial** required its closest pair of settings to lap within half a
+  percent of each other. That is a *fraction of the lap time*, so shortening
+  every lap by a quarter quietly made it stricter. What the claim actually rests
+  on is a person with a stopwatch being unable to separate two settings, and
+  that is a duration: **under a fifth of a second a lap**, whatever a lap is
+  worth. The closest pair is 0.111 s a lap apart and still leaves the ramp at a
+  different speed and lands somewhere else.
+
+- **the editor's build-and-race loop** drove its lap by holding the throttle
+  below four tiles a second and the wheel hard right, so the car went round in a
+  circle — and the two gates were laid where that circle happened to pass. With
+  the grip the roster has now the circle comes out **17.04 tiles across against
+  the 17.2 the gates are apart**, and the car orbited for fifteen simulated
+  minutes a tile short of the checkpoint it owed. It is driven by `gs_ai_drive`
+  now, which aims at the gate it owes: what the test claims is that a track built
+  with the editor's own tools can be *raced*, and that never had anything to do
+  with one car's turning radius.
+
+And one thing that is not a test moved with them: the roster's own scenario
+raced down a 64-tile strip and scored how far each machine got. Four of the six
+now reach the end of it inside ten seconds and tie on the same number, and a
+comparison where four cars score identically cannot say which is best at what.
+The strip is as long as a track may be — the sprint car will do 117 tiles in ten
+seconds.
+
+Three of these were rewritten to state the rule rather than the number — the
+skill dial's bound is a duration now, the editor's lap is driven by the game's
+own driver, and the cornering test is the third. It used to assert that at five
+tiles a second the cautious driver brakes and the quick one does not — true of the roster it was written against,
+and meaningless once five tiles a second was a speed neither worries about. It
+now **finds the speed each of them gives up at** and compares the two, which is
+the claim it was always making and stays true whatever the envelope becomes.
+
+The lesson worth keeping: **saturation looks exactly like failure.** Three of
+these "failures" were measurements that had hit their ceiling. Before concluding
+the product is wrong, check whether the measuring stick still reaches.
+
+## Every generated circuit had a corner nobody could take
+
+Reported from play: *"the strange thing before the start line is silly... it is
+unnavigatable and even the track layout is disjointed"*.
+
+Every loop the generator has ever built ended with a **157° reversal at about a
+tile's radius, immediately before the start line** — a corner no car can take,
+sitting exactly where the lap is counted.
+
+The cause is one argument. The route came home along a corridor and dropped onto
+the first pass with a quarter circle, a run down the left-hand side, and another
+quarter circle — and that last arc was centred on **the point the route starts
+from**. An arc of radius r about a point ends r away from it, so the route
+finished fifteen tiles north of its own beginning and the lap wrapped across the
+gap that was left.
+
+It closes with a single half circle now, about `(px0, y0 + r)`, the same turn the
+serpentine uses everywhere else. It leaves the top row heading west at
+`(px0, y0)` and arrives at `(px0, ys)` heading east — which is where the first
+pass begins and the way it begins, because `ys = y0 + pitch` and `r = pitch/2`,
+so `y0 + 2r` *is* `ys`. The radius is the pitch's half, the tightest turn this
+generator lays anywhere, so the sharpest corner on a loop is now the same hairpin
+as the sharpest corner on a straight.
+
+**The sharpest turn between any three consecutive gates on a generated route is
+now 46.8°**, against the 157° reversal it replaced.
+
+`no_generated_route_turns_tighter_than_its_own_hairpin` walks **2,073 corners over
+6 loops and 18 paths** and fails on anything over 90°. It pins the rule rather
+than the six shapes that exist today, which is what stops the next shape being
+added with a corner like this in it.
+
+The generator hash moves and says why. Every seed builds different ground, so a
+seed anybody shared names a different track — and what those seeds named before
+was a circuit with an unnavigable corner on it.
+
+### The shipped set, rebuilt
+
+The eighteen tracks are **6 circuits and 12 sprints**, and the six files that
+changed are exactly the six circuits — which is the check that the change touched
+only what it claimed to. The closure is a loop-only construct: `gs_plan_route`
+returns before it for a path, so a sprint's ground is untouched by any of this.
+
+Note that "circuit" cuts across "generated" and "written by hand". The ten
+authored tracks lay their routes with `gs_generate_route` too, so `the crossing`,
+`the oval` and `the long way round` are loops and moved with the rest.
+
+Ten of the twelve sprints are byte for byte what they were. The other two are
+different tracks: `first ridge` and `low bend` are in the set and `grey ridge`
+and `wide flats` are out. That is not the closure — a candidate ships only if all
+six machines can finish it, and the machines changed in this same commit, so
+which seeds clear that bar moved with them. Both of the dropped ones still race
+6 of 6 at Earth gravity, so they were displaced rather than rejected.
+
+The two that left had to be **deleted**, not merely dropped. The baker writes the
+set and has never removed from it, so both were still sitting in
+`assets/tracks/`, still tracked, still loadable — inside a directory everything
+else treats as the shipped set. Verified by baking into an empty directory: it
+produces exactly eighteen files, and every one of them is byte for byte the one
+in the box.
+
+## The warning that was built, tested, ticked — and never drawn
+
+The missed-checkpoint warning landed in the previous commit with four passing
+checks behind it. **It had never once appeared in the game.**
+
+A `gs_view` carries two kinds of thing: where the view looks, which the splitter
+decides, and what is switched on over it, which whoever set it decides. The
+client rebuilt its views every frame from a blank array and copied the second
+kind back **one field at a time by name**:
+
+```c
+merged[i].show_gravity = a->view[i].show_gravity;
+merged[i].show_arc     = a->arc;
+merged[i].heat         = nullptr;
+```
+
+A fourth field was added and no line was added with it. The simulation set
+`missed` every tick and the renderer destroyed it every frame, before anything
+could draw it.
+
+Every test around it passed, and none of them was wrong. They drove the HUD and
+the ground arrow directly, and **the frame that wiped the flag was not on the
+path any of them took**. What was missing was not a check on the warning; it was
+a check on the seam the warning had to cross.
+
+The fix is structural rather than one more line. `gs_split_views` now names what
+it owns — `gs_view_place` sets the car and the rectangle — and the client passes
+in the views it already has, so everything else survives by default. Adding a
+field to `gs_view` is safe because of how the function is written, not because
+somebody remembered.
+
+`placing_the_views_leaves_everything_it_does_not_own_alone` pins it, and pins it
+in a way that covers fields nobody has written yet: a view is filled with values
+nothing else would produce, put through the splitter at **every number of players
+on both sides of the merge**, and then compared back **whole** — `cam`, `rect`
+and `car` blanked in both copies and the remainder `memcmp`'d. A field added next
+month is covered without anybody editing the test. Both paths are counted and
+both are required, because the early return and the loop are two separate places
+that write a view.
+
+**And the checkpoints are on the minimap.** The route says which way round; it
+never said what you have to go *through*. Every gate is a dot, small enough that
+ninety of them read as beads on the route rather than a second line; the one you
+owe is ringed in white, and orange once you have driven past it — the same colour
+the warning uses, because at that point the lap depends on going back for it.
+
+The HUD row changed too: "checkpoint missed" does not fit a panel whose width is
+set by the shortest labels in the game, and was being drawn as **"checkpoint
+misse"**. It reads "checkpoint / GO BACK" now. The word that matters is the
+instruction.
+
+## The way back was drawn in pieces, and which pieces changed as the car moved
+
+Reported from play: *"the go back arrow is rendering strangely ... parts of it
+are visible and then not visible, it is like the image is oscillating."*
+
+`gs_ground_mark` cuts a mark on the ground into half-tile pieces and draws the
+ones belonging to the diagonal it is handed. That is how ground paint sorts
+against the things standing on it, and it works because the terrain sweep calls
+it **once per diagonal** — across the whole sweep the mark comes out whole.
+
+The missed-checkpoint arrow is not drawn in the sweep. It is a readout, drawn
+after everything, and it passed its **own quad's** diagonal — so of the eight
+pieces the shaft is cut into, only those sharing the furthest corner's diagonal
+were ever drawn, and a different few qualified each time the car moved a tile.
+
+**This is the second flicker of this exact family**, and the first one's note is
+written directly above the function: a mark spanning two and a half tiles
+*"lost and regained [pixels] tile by tile, which is the flicker"*. The helper was
+built to fix that. What it protected was the cutting up; what it never protected
+was which pieces get drawn, because the depth filter took a bare `int` and any
+integer compiled.
+
+Five call sites in the same file already did it correctly. The gate arrow a few
+hundred lines above is the same shape of thing drawn the right way. **This was
+not a subtle contract violation — it was the wrong argument with the right one
+demonstrated five times adjacent.**
+
+So there are two entry points now rather than one integer to get wrong:
+`gs_ground_mark` for the sweep, which takes its diagonal, and
+`gs_ground_mark_over_everything` for a readout, which has none to pass. When the
+bug was put back to watch the test fail, `-Werror=unused-function` refused to
+build, because the readout wrapper went unused — the structure objects on its
+own now.
+
+`the_way_back_arrow_is_drawn_whole_wherever_the_car_is_standing` walks sixteen
+alignments across two tiles in eighth-of-a-tile steps and requires the pixel
+count to hold within a fifth. **With the bug: 1099 to 4617 pixels. Fixed: 5437
+to 5583.** The test above it, which asked only for "some orange", passed
+throughout.
+
+## How fast, and which way
+
+Asked for from play: a bar for the current speed, and then — *"the bar should
+have some way of indicating you are going in reverse"*.
+
+Zero sits a quarter of the way along and the bar grows both ways from it, on
+**one scale**: tiles per second per pixel, the same ruler backwards as forwards.
+Full forward is the machine's own top speed, so the bar says how much of what
+you have you are using, and means the same in a rover as in a sprint car. The
+quarter given to reverse is exactly a third of the three quarters given to
+forward, so nothing has to be interpreted. Forward is the accent colour;
+reverse is the warning orange, because going backwards at speed is nearly
+always a thing to stop doing. It reads the velocity along the way the car is
+*pointing*, not its speed, so a car sliding backwards down a slope says so.
+
+It is slimmer than the condition bar on purpose. Condition is the one that ends
+your race and should catch an eye that was not looking for it; speed is ambient.
+A readout that shouts as loudly as the alarm beside it makes the alarm quieter.
+
+### And reverse is the fastest gear in the game
+
+Measured while deciding what the bar's full scale should be, and it is a fault
+rather than a detail:
+
+| machine | top | reverse |
+|---|---|---|
+| stock car | 9.00 | 23.49 |
+| sprint car | 11.70 | 21.88 |
+| dune buggy | 7.95 | 20.67 |
+| baja bug | 7.50 | 18.67 |
+| motorcycle | 9.90 | 30.09 |
+| lunar rover | 5.40 | 13.19 |
+
+**Every machine reverses two to three times faster than it can drive forwards.**
+Forward thrust is cut by `headroom = 1 - vlong/top`, so it falls to nothing at
+the vehicle's top speed. The reverse branch — `accel -= power/2 * drive` — has no
+such rolloff, so reverse accelerates until drag alone balances it, and drag is
+small. Nothing caps it.
+
+This is written down rather than fixed: it moves the world hash and belongs in
+its own change with its own note. The bar is built on one honest scale, so
+reverse pegs the left end while this is true and reads normally once it is not.
+
+### Two things in the panel's arithmetic, one of them nine pixels old
+
+Adding a row to the HUD is what exposed them.
+
+**The carrying row was charged one gap short** — every race with weapons on has
+been nine pixels short since weapons landed. It fitted anyway because there was
+slack above it to eat the difference, and the speed bar spent that slack. The
+reasoning in the comment was that ImGui's content ends at the last item rather
+than after the spacing that would follow it, which is true of a row that *is*
+last; this one is not.
+
+**The zoom search stepped a hundredth at a time and stopped at the first
+fraction that fits**, so whatever it overshot by was empty panel at the bottom —
+and a step of zoom is worth more pixels the taller the panel, so the worst of it
+landed on the state with the most rows. Five times finer now, which costs a few
+more evaluations of a dozen multiplies once a frame.
+
+**And the bound the test holds this to is a line of text now, not the number
+twelve.** Twelve *was* this font's line height on this machine; saying so is the
+difference between a bound that travels to another font and one that happens to
+be right here. Below a line is the sizing model's own resolution — it adds up
+whole rounded lines and spacings, and no arrangement of them lands exactly on
+what ImGui advances the cursor by. The fault it was written for is a panel
+sized for rows it is not drawing, and the smallest that can be is one row, which
+is thirty pixels and more. It caught that at twelve and still catches it.
+
+Two states sit within a pixel of the bound and I could not find the term
+responsible: five different corrections each fixed some states and broke others,
+because the zoom search and the per-line rounding couple them together. What is
+true of all twenty-four is what matters to a player and is separately asserted:
+**nothing is hidden in any of them.**
+
+
+## Two keys at once, all thirty-two ways
+
+Reported from play: *"when using the arrow keys on the keyboard, I don't seem to
+be able to accelerate and turn at the same time"*.
+
+Everything around this was already checked — that each key does its own job, that
+a rebound key moves, that one key cannot drive two cars — and **nothing anywhere
+pressed two keys together**, which is what driving is.
+
+No fault was found. Every subset of the five controls, all 32 of them, is held at
+once and resolved, and then pushed through `gs_input_combine`, where a pad and a
+keyboard are merged and either could mask the other. The path is sound; the hole
+in the tests was real regardless, and sampling three interesting pairs would have
+left the same hole somewhere else.
+
+What the report did expose is that **the trace could not answer it**. A keyboard
+that cannot report two keys at once and a car that will not turn at the speed it
+is doing feel identical from the driver's seat and are nothing alike. The race
+trace now reports what the driver actually asked for — `input=ALR` — so the next
+report of this shape is answerable rather than a guess.
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

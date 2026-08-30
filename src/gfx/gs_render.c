@@ -501,9 +501,22 @@ static int gs_ground_quad_diagonal(const float x[4], const float y[4]) {
 // without having to remember to do it. The split is by the shape's own size, so
 // a mark already smaller than a piece - a route dash, a block of the chequer -
 // is still one piece and costs what it always did.
-static void gs_ground_mark(SDL_Renderer *ren, const gs_camera *cam,
-                           const gs_track *t, const float x[4], const float y[4],
-                           float lift, SDL_FColor c, int world_d) {
+//
+// **A mark is only whole across the whole sweep.** Each call draws the pieces
+// belonging to the one diagonal it is handed and skips the rest, so the sweep
+// calling it once per diagonal is what assembles the shape.
+//
+// That makes "which diagonal" a thing the caller cannot invent, and the reason
+// there are two entry points below rather than one integer argument. A caller
+// outside the sweep has no diagonal to give; passing the mark's own - the
+// obvious thing to reach for, and what the missed-checkpoint arrow did - draws
+// only the pieces sharing the furthest corner's diagonal and silently loses the
+// others, a different few each time the car moves. That is a flicker, and it is
+// the *second* one of this family: the note above is the first.
+static void gs_ground_mark_pieces(SDL_Renderer *ren, const gs_camera *cam,
+                                  const gs_track *t, const float x[4],
+                                  const float y[4], float lift, SDL_FColor c,
+                                  int world_d, bool every) {
     // How far the quad reaches along its own two axes rather than the world's,
     // so a mark lying diagonally is no bigger than it looks.
     float u = SDL_max(SDL_fabsf(x[1] - x[0]) + SDL_fabsf(y[1] - y[0]),
@@ -515,7 +528,7 @@ static void gs_ground_mark(SDL_Renderer *ren, const gs_camera *cam,
     int nv = SDL_clamp((int)SDL_ceilf(v / GS_MARK_PIECE), 1, 16);
 
     if (nu == 1 && nv == 1) {
-        if (gs_ground_quad_diagonal(x, y) == world_d) {
+        if (every || gs_ground_quad_diagonal(x, y) == world_d) {
             gs_ground_quad(ren, cam, t, x, y, lift, c);
         }
         return;
@@ -541,10 +554,31 @@ static void gs_ground_mark(SDL_Renderer *ren, const gs_camera *cam,
                 py[k] = ty + (by - ty) * b;
             }
 
-            if (gs_ground_quad_diagonal(px, py) != world_d) continue;
+            if (!every && gs_ground_quad_diagonal(px, py) != world_d) continue;
             gs_ground_quad(ren, cam, t, px, py, lift, c);
         }
     }
+}
+
+// **In the sweep**, at the diagonal the sweep is currently drawing. The mark
+// comes out whole once every diagonal has had its turn, and sorts correctly
+// against whatever is standing on it.
+static void gs_ground_mark(SDL_Renderer *ren, const gs_camera *cam,
+                           const gs_track *t, const float x[4], const float y[4],
+                           float lift, SDL_FColor c, int world_d) {
+    gs_ground_mark_pieces(ren, cam, t, x, y, lift, c, world_d, false);
+}
+
+// **After the sweep, over everything** - for a mark that is a readout rather
+// than scenery, like the way back to a checkpoint that was driven past. There
+// is nothing left to sort against, so every piece is drawn and there is no
+// diagonal to pass or to get wrong.
+static void gs_ground_mark_over_everything(SDL_Renderer *ren,
+                                           const gs_camera *cam,
+                                           const gs_track *t, const float x[4],
+                                           const float y[4], float lift,
+                                           SDL_FColor c) {
+    gs_ground_mark_pieces(ren, cam, t, x, y, lift, c, 0, true);
 }
 
 // Where the chequered line's two flags stand: at its ends and a little outside
@@ -1335,14 +1369,30 @@ void gs_split_update(gs_split *s, const gs_track *t, const gs_world *prev,
     s->shared.vh = (float)win_h;
 }
 
+// **What the splitter owns, and what it must leave alone.**
+//
+// It decides where each view looks and how big it is. Everything else on a
+// `gs_view` belongs to whoever set it - which overlay is on, whether the arc is
+// showing, the analyser's heatmap, and whether this driver has been told they
+// drove past a checkpoint. Those are wiped by `out[i] = (gs_view){ 0 }` and
+// then put back one field at a time by the frontend, which worked until
+// somebody added a field and did not add a line: the missed-checkpoint warning
+// was set every tick and destroyed every frame, so it never reached a screen.
+//
+// So the fields this function owns are named, and the rest is carried across
+// from whatever the caller had in `out`. Adding a field to gs_view is now safe
+// by default rather than safe if you remember.
+static void gs_view_place(gs_view *v, uint8_t car, SDL_Rect rect) {
+    v->car = car;
+    v->rect = rect;
+}
+
 uint8_t gs_split_views(const gs_split *s, const gs_track *t,
                        const gs_world *prev, const gs_world *w, float alpha,
                        int win_w, int win_h, gs_view *out) {
     if (s->merge >= 1.0f || w->car_count <= 1) {
-        out[0] = (gs_view){ 0 };
-        out[0].car = 0;
+        gs_view_place(&out[0], 0, (SDL_Rect){ 0, 0, win_w, win_h });
         out[0].cam = s->shared;
-        out[0].rect = (SDL_Rect){ 0, 0, win_w, win_h };
         return 1;
     }
 
@@ -1358,9 +1408,7 @@ uint8_t gs_split_views(const gs_split *s, const gs_track *t,
     float eased = m * m * (3.0f - 2.0f * m);
 
     for (uint8_t i = 0; i < n; i++) {
-        out[i] = (gs_view){ 0 };
-        out[i].car = i;
-        out[i].rect = rects[i];
+        gs_view_place(&out[i], i, rects[i]);
 
         // Its own car when fully split, the shared view as the merge closes -
         // so at the instant the divider appears or goes, every pane is already
@@ -1749,8 +1797,8 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                                  ox + dx * to - sx * wide,   ox + dx * from - sx * wide };
             float shaft_y[4] = { oy + dy * from + sy * wide, oy + dy * to + sy * wide,
                                  oy + dy * to - sy * wide,   oy + dy * from - sy * wide };
-            gs_ground_mark(ren, &cam, t, shaft_x, shaft_y, 0.06f, warn,
-                           gs_ground_quad_diagonal(shaft_x, shaft_y));
+            gs_ground_mark_over_everything(ren, &cam, t, shaft_x, shaft_y,
+                                           0.06f, warn);
 
             float head_x[4] = { ox + dx * (to + barb),
                                 ox + dx * to + sx * barb,
@@ -1760,8 +1808,8 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                                 oy + dy * to + sy * barb,
                                 oy + dy * to - sy * barb,
                                 oy + dy * (to + barb) };
-            gs_ground_mark(ren, &cam, t, head_x, head_y, 0.06f, warn,
-                           gs_ground_quad_diagonal(head_x, head_y));
+            gs_ground_mark_over_everything(ren, &cam, t, head_x, head_y,
+                                           0.06f, warn);
         }
     }
 

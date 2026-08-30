@@ -504,7 +504,15 @@ typedef struct gs_scenario {
 } gs_scenario;
 
 static void gs_scenario_track(gs_track *t, const gs_scenario *sc) {
-    gs_track_init(t, 64, 24, sc->surface);
+    // **Long enough that nothing runs out of road.** The score is how far a car
+    // got in the time, so a strip shorter than the fastest machine can cover
+    // stops measuring anything: when the roster gained half as much speed
+    // again, four of the six reached the end of a sixty-four tile strip inside
+    // ten seconds and tied on the same number, and a comparison where four
+    // cars score identically cannot say which is best at what. The sprint car
+    // will do a hundred and seventeen tiles in ten seconds now, so the strip is
+    // as long as a track may be.
+    gs_track_init(t, GS_TRACK_MAX, 24, sc->surface);
 
     for (uint8_t y = 0; y <= t->h; y++) {
         for (uint8_t x = 0; x <= t->w; x++) {
