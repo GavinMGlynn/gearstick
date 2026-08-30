@@ -1101,6 +1101,24 @@ what moved is where the cars are put. The generator fold is untouched - "200
 generated tracks, all the ones they always were" - and so is the scripted
 replay, which does not start from a grid.
 
+**The shipped set is clean; the generator's output is not, and nothing checks
+it.** Having got every opponent round all eighteen shipped tracks from every
+slot, the same question was put to the generator: eighty seeds, 68 of which the
+chooser would accept, 272 cars raced four at a time. **Eleven did not finish** -
+ten wrecked and one stopped. Several are wrecked at x or y = -13, which is off
+the edge of the field, and one seed loses all four inside it.
+
+Nothing sees this, and the reason is worth stating plainly: a generated track is
+accepted by racing **one car** round from pole. One car alone is never shoved
+into anything, never sandwiched, and never has to get past three others at a
+corner - so the acceptance test is measuring a race that nobody will have. The
+shipped eighteen are clean because they were fixed one at a time by hand here,
+not because the process that chose them can tell.
+
+Racing a full grid in the chooser would change which seeds pass and therefore
+which tracks ship, which is a decision about the set rather than a defect to
+correct in passing. It is in COMPLETION_PLAN.md with the seeds that fail.
+
 **And the last two are fixed: every car finishes every shipped track now.**
 
 They oscillated at the foot of a ramp for the rest of the race - `accel right`,

@@ -824,6 +824,18 @@ review, and it fails it for good reasons.
       server race without `--relay` had never sent anything at all; only the
       welcome populated peers, so the first player could not see the second; and
       readiness meant introduced rather than able to race.*
+- [ ] **A track is chosen by racing one car, and a race has four.** The
+      eighteen tracks in the box are now clean — every opponent finishes every
+      one of them from every slot. Generated tracks are not: over eighty seeds,
+      68 of them shippable and 272 cars raced, **11 cars did not finish** — ten
+      wrecked and one stopped. Several wreck at x or y = -13, which is off the
+      edge of the field, and on seed 49 all four wreck inside it. None of this
+      is visible to the chooser, because a candidate is accepted by racing a
+      **single** car round from pole, and one car alone never gets shoved into
+      anything.
+      Fixing it means the acceptance test races a full grid, which would change
+      which seeds are shippable and therefore which tracks ship — so it is a
+      decision about the set rather than a defect to quietly correct.
 - [ ] **The transport has a written specification.** Message formats, the state
       machine, the key schedule, the message limit before a rekey, and the
       properties claimed **and explicitly not claimed**. A design nobody wrote
