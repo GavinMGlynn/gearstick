@@ -2768,6 +2768,121 @@ static bool gs_is_route_blue(const uint8_t *p) {
     return p[2] > 120 && p[2] > p[0] + 40 && p[1] > p[0] + 10 && p[1] < p[2];
 }
 
+// **The tracks that ship may not throw a car out of the world.**
+//
+// One car raced alone is never shoved, which is why the acceptance test could
+// not see this: four abreast, seven of the seventy-two on the shipped set did
+// not finish. Two kinds, and only one of them is the ground's fault - the cars
+// lost deep in a race went to landings and to each other, which is racing, and
+// the ones lost in the opening seconds went **over an edge**, past the run-off
+// and down, while the pack was still together.
+//
+// So this refuses the second kind and not the first. It is also not a thing
+// that can be asked of a track standing still: every track in the box lays its
+// route three or four tiles from the nearest edge, the ones that lose cars and
+// the ones that do not alike, so there is no margin to measure - it has to be
+// raced to be seen.
+TEST(no_track_that_ships_throws_a_car_off_the_world) {
+    (void)ren;                       // raced, not drawn
+
+    char dir[1024];
+    const char *assets = gs_assets_dir();
+    CHECK(assets != nullptr);
+    if (assets == nullptr) return;
+
+    static gs_stock_walk walk;
+    walk.count = 0;
+    walk.overflowed = false;
+    SDL_snprintf(dir, sizeof dir, "%s/tracks/", assets);
+    CHECK(SDL_EnumerateDirectory(dir, gs_take_stock, &walk));
+    CHECK(walk.count >= 16);
+    CHECK(!walk.overflowed);
+
+    // **The two that do, named with their reason rather than left out.**
+    //
+    // Both are written by hand, and a hand-written track lays its route with
+    // the same planner from a seed chosen for the ground it is built on - so
+    // they cannot be fixed the way a generated candidate is, by taking the next
+    // seed. Of the ninety-six seeds after theirs, only their own lays a sound
+    // route on their ground. Fixing them means re-shaping two tracks or
+    // widening the inset every route is laid at, which costs route length on
+    // all eighteen; both are decisions about the set rather than something to
+    // do quietly here.
+    //
+    // Required to still be failing, not merely permitted to: fixing one of them
+    // turns this red so the excuse goes with the fault.
+    static const char *excused[] = { "jupiter-run.gstrack", "which-way.gstrack" };
+    bool excuse_used[SDL_arraysize(excused)] = { false };
+
+    int raced = 0, lost = 0;
+    for (int i = 0; i < walk.count; i++) {
+        SDL_snprintf(dir, sizeof dir, "%s/tracks/%s", assets, walk.name[i]);
+        size_t len = 0;
+        void *bytes = SDL_LoadFile(dir, &len);
+        CHECK(bytes != nullptr);
+        if (bytes == nullptr) continue;
+
+        static gs_track t;
+        const bool read = gs_track_deserialize(&t, (const uint8_t *)bytes, len);
+        SDL_free(bytes);
+        CHECK(read);
+        if (!read) continue;
+
+        gs_world w;
+        gs_world_init(&w, GS_ONE);
+        for (uint8_t slot = 0; slot < GS_MAX_CARS; slot++) {
+            gs_fix x, y; gs_angle heading;
+            gs_track_grid(&t, slot, &x, &y, &heading);
+            gs_world_add_car(&w, &t, (uint8_t)(slot % GS_VEH_COUNT), x, y, heading);
+        }
+
+        // A minute, which is how long a pack stays a pack: the cars lost over
+        // an edge went at 6.5, 8.3 and 25.4 seconds and the ones lost to
+        // racing went at 86 and 193.
+        const gs_fix over = GS_INT(GS_RUNOFF_TILES);
+        bool off = false;
+        for (uint32_t k = 0; k < GS_TICK_HZ * 60u && !off; k++) {
+            gs_input in[GS_MAX_CARS] = { 0 };
+            for (uint8_t c = 0; c < w.car_count; c++) in[c] = gs_ai_drive(&w, &t, c);
+            gs_world_step(&w, &t, in);
+            for (uint8_t c = 0; c < w.car_count; c++) {
+                if (w.car[c].x < -over || w.car[c].y < -over ||
+                    w.car[c].x > GS_INT(t.w) + over ||
+                    w.car[c].y > GS_INT(t.h) + over) {
+                    off = true;
+                }
+            }
+        }
+
+        bool allowed = false;
+        for (size_t k = 0; k < SDL_arraysize(excused); k++) {
+            if (SDL_strcmp(walk.name[i], excused[k]) != 0) continue;
+            allowed = true;
+            if (off) excuse_used[k] = true;
+        }
+
+        if (off && !allowed) {
+            printf("  OFF THE WORLD %s puts a car past the run-off\n",
+                   walk.name[i]);
+            lost++;
+        }
+        CHECK(off == false || allowed);
+        raced++;
+    }
+
+    for (size_t k = 0; k < SDL_arraysize(excused); k++) {
+        if (!excuse_used[k]) {
+            printf("  OFF THE WORLD %s no longer needs excusing - remove it\n",
+                   excused[k]);
+        }
+        CHECK(excuse_used[k]);
+    }
+
+    printf("  OFF THE WORLD %d tracks raced by a full grid, %d threw a car, "
+           "%d named as known\n", raced, lost, (int)SDL_arraysize(excused));
+    CHECK(raced == walk.count);
+}
+
 TEST(the_way_round_is_painted_between_the_gates_and_not_only_at_them) {
     // **The fault this exists for.** A gate carries an arrow saying which way
     // through it, and at racing zoom a player sees one arrow at a time with no
@@ -11548,6 +11663,7 @@ int main(void) {
     run_a_time_reads_the_way_people_say_it(ren);
     run_a_finished_race_becomes_a_table_in_the_order_it_finished(ren);
     run_the_store_remembers_drivers_and_records_between_runs(ren);
+    run_no_track_that_ships_throws_a_car_off_the_world(ren);
     run_the_way_round_is_painted_between_the_gates_and_not_only_at_them(ren);
     run_the_stock_tracks_ship_and_are_worth_racing(ren);
     run_choosing_a_track_from_the_library_changes_what_is_raced(ren);

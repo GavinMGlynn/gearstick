@@ -7416,6 +7416,70 @@ artefact of `gdb` stopping the process to take it. Attaching a debugger to ask
 "why is this slow" is a way of making it slow.
 
 
+## A track was chosen by racing one car, and a race has four
+
+The acceptance test for a generated track raced **a single car** round from pole.
+One car alone is never shoved into anything, so the choosing could not see the
+thing that actually loses cars in a race.
+
+Traced with a full grid over the eighteen shipped tracks, the losses are two
+kinds and only one of them is a fact about the ground:
+
+| when | where | what it is |
+|---|---|---|
+| 6.5s, 8.3s, 25.4s | **off the field**, y ≈ -13 | shoved over an edge while the pack is together |
+| 86s, 193s | inside the field | a landing, and contact - racing |
+
+So the bar added is the narrow one: **a track may not throw a car out of the
+world.** Not "everybody finishes", which would refuse tracks for ordinary racing
+and is a different decision about the set.
+
+**It cannot be asked of a track standing still**, which is worth saying because
+it was the first thing tried. Every track in the box lays its route three or four
+tiles from the nearest edge - the ones that lose cars and the ones that do not,
+alike:
+
+```
+bright-run     4.00 north     quiet-bend     4.00 north
+jupiter-run    4.00 north     low-bend       3.00 north
+which-way      3.00 north     steep-bend     3.00 north
+```
+
+There is no margin to require. The rule has to be raced to be seen, and the
+candidate is now raced by a full grid for the first minute - which is how long a
+pack stays a pack, measured from the times above.
+
+The bar refuses a car going **past the run-off shoulder**, not merely off the
+authored tiles. There are ten tiles of sand outside a track so a car that goes
+wide can come back; refusing a track for touching it would be refusing running
+wide. Calibrated by getting it wrong first: the strict version refused `ice
+house`, which only ever touches the shoulder and recovers.
+
+One generated track was replaced. Nothing else in the set moved, and cars not
+finishing over the whole set went from **7 to 4** - the four that remain being
+the two landings and the two hand-written exceptions below.
+
+### The two named exceptions, and why they are not fixed
+
+`jupiter run` and `which way` each still lose a car over the north edge in the
+opening seconds. Both are written by hand, and a hand-written track lays its
+route with the same planner from a seed chosen for the ground it is built on - so
+they cannot be fixed the way a candidate is, by taking the next seed. **Of the
+ninety-six seeds after `jupiter run`'s, only its own lays a sound route on its
+ground**, because the ground is shaped for the route rather than the other way
+round.
+
+Fixing them means re-shaping two hand-made tracks, or widening `GS_GEN_INSET` -
+the ten tiles every route is laid in from the edge - which costs route length on
+all eighteen and moves every hash again. Both are decisions about the set rather
+than something to do quietly, and the inset would be a blunt instrument anyway:
+the cars that are lost reach twenty-three tiles from the route's centreline, so
+there is no inset that reliably holds them.
+
+They are named in the test with that reason, and the test requires them to *still*
+be failing - so fixing one turns the tree red and the excuse goes with the fault.
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

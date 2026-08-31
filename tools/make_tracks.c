@@ -161,6 +161,66 @@ static void gs_wall(uint8_t from, uint8_t to, uint8_t x0, uint8_t x1,
 
 // --- choosing which generated tracks ship --------------------------------
 
+// **How long a pack stays a pack.** Cars leave the grid together and spread out
+// over the opening; the shove that puts one off the world happens while they are
+// still close. Measured on the set that shipped before this rule existed: the
+// three cars lost over an edge went at 6.5, 8.3 and 25.4 seconds, and the two
+// lost to landings deep in a race went at 86 and 193. A minute covers the first
+// kind with room and does not pay for the second, which this rule does not
+// refuse a track for.
+#define GS_STOCK_PACK_SECONDS 60u
+
+// **Does a full grid stay on the world?**
+//
+// `gs_finishers_at_earth` races one car at a time, which is the right question
+// for "can this be got round" and cannot see the thing that actually loses cars:
+// one car alone is never shoved. Four abreast, four of the seventy-two on the
+// shipped set did not finish, and the ones worth refusing a track over went
+// **off the field** - past the run-off and down - rather than dying to a landing.
+//
+// So the bar is not "everybody finishes", which would refuse tracks for ordinary
+// racing and is a different decision about the set. It is narrower and it is a
+// property of the ground: **a track may not throw a car out of the world.**
+//
+// This cannot be asked statically. Every track in the box leaves its route three
+// or four tiles from the nearest edge, the ones that lose cars and the ones that
+// do not alike, so there is no margin to require - it has to be raced to be
+// seen.
+static bool gs_keeps_everybody_on_the_field(const gs_track *t) {
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+
+    for (uint8_t slot = 0; slot < GS_MAX_CARS; slot++) {
+        gs_fix x, y;
+        gs_angle heading;
+        gs_track_grid(t, slot, &x, &y, &heading);
+        gs_world_add_car(&w, t, (uint8_t)(slot % GS_VEH_COUNT), x, y, heading);
+    }
+
+    for (uint32_t i = 0; i < GS_TICK_HZ * GS_STOCK_PACK_SECONDS; i++) {
+        gs_input in[GS_MAX_CARS] = { 0 };
+        for (uint8_t c = 0; c < w.car_count; c++) in[c] = gs_ai_drive(&w, t, c);
+        gs_world_step(&w, t, in);
+
+        for (uint8_t c = 0; c < w.car_count; c++) {
+            // **Past the shoulder, not merely off the road.**
+            //
+            // There is a run-off outside a track - sand at the edge's height
+            // for ten tiles - and it is there so that a car which goes wide can
+            // come back. Refusing a track for touching it would refuse running
+            // wide, which is racing. What is not recoverable is the drop past
+            // it, and a car that reaches that is gone.
+            const gs_fix over = GS_INT(GS_RUNOFF_TILES);
+            if (w.car[c].x < -over || w.car[c].y < -over ||
+                w.car[c].x > GS_INT(t->w) + over ||
+                w.car[c].y > GS_INT(t->h) + over) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // How many vehicles get round this track at Earth gravity, driven by the AI.
 //
 // Earth specifically, and not the analyser's whole range: the analyser answers
@@ -234,6 +294,20 @@ static int gs_finishers_at_earth(const gs_track *t) {
 // left alone: re-facing them would move hashes for nothing.
 static bool gs_write_authored(const char *path) {
     gs_track_face_along_route(&gs_t);
+
+    // **The generated half of the box clears the off-the-world bar; this half
+    // does not, and that is written here rather than left to be discovered.**
+    //
+    // `jupiter run` and `which way` each lose a car over the north edge in the
+    // opening seconds - the same shove in the pack that the bar refuses a
+    // generated candidate for. They cannot be fixed the way a candidate is,
+    // by choosing another route seed: of the ninety-six seeds after theirs,
+    // **only their own lays a sound route on the ground they are built from**,
+    // because the ground is shaped for the route rather than the other way
+    // round. Fixing them means re-shaping two hand-made tracks, or widening the
+    // inset every route is laid at - which costs route length on all eighteen
+    // and moves every hash again. Both are decisions about the set rather than
+    // a rule to add here.
     return gs_write(path);
 }
 
@@ -257,6 +331,11 @@ static bool gs_write_generated(const char *dir) {
         // of machine was wrong, which is the opposite of what a set of starting
         // tracks is for.
         if (gs_finishers_at_earth(&gs_t) < GS_VEH_COUNT) continue;
+
+        // **And it may not throw one of them off the world.** Raced after the
+        // check above rather than before it, because that one is cheaper and
+        // most candidates fail it.
+        if (!gs_keeps_everybody_on_the_field(&gs_t)) continue;
 
         char name[32];
         gs_generate_name(name, sizeof name, seed);

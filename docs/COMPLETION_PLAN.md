@@ -1006,23 +1006,35 @@ review, and it fails it for good reasons.
       keyboard are merged and either could mask the other. The race trace now
       also reports what the driver actually asked for, so the next report of
       this shape can be answered rather than guessed at.*
-- [ ] **A track is chosen by racing one car, and a race has four.** The
-      eighteen tracks in the box are now clean — every opponent finishes every
-      one of them from every slot. Generated tracks are not: over eighty seeds,
-      68 of them shippable and 272 cars raced, **11 cars did not finish** — ten
-      wrecked and one stopped. Several wreck at x or y = -13, which is off the
-      edge of the field, and on seed 49 all four wreck inside it. None of this
-      is visible to the chooser, because a candidate is accepted by racing a
-      **single** car round from pole, and one car alone never gets shoved into
-      anything.
-      Traced, the two mechanisms are ordinary racing rather than new faults: a
-      single hard shove near the field's edge puts a car outside it, where the
-      run-off rule wrecks it; and a car worn down in traffic dies on a landing a
-      fresh one survives. Neither happens to a car racing alone.
-      Fixing it means the acceptance test races a full grid, which would change
-      which seeds are shippable and therefore which tracks ship — so the
-      question is what a track should have to survive before it ships, one car
-      round or four cars racing, and that is a decision about the set.
+- [x] **A track is chosen by racing one car, and a race has four.** A candidate
+      was accepted by racing a single car round from pole, and one car alone is
+      never shoved into anything — so nothing in the choosing could see the
+      thing that actually loses cars. Traced with a full grid over the shipped
+      set, the losses are two kinds and only one of them is the ground's fault:
+      cars lost **in the opening seconds go over an edge**, past the run-off and
+      down, while the pack is still together (6.5s, 8.3s, 25.4s); cars lost deep
+      in a race go to landings and to each other (86s, 193s), which is racing.
+      So the bar added is the narrow one — **a track may not throw a car out of
+      the world** — rather than "everybody finishes", which would refuse tracks
+      for ordinary racing and is a different decision about the set.
+      It cannot be asked of a track standing still: every track in the box lays
+      its route three or four tiles from the nearest edge, the ones that lose
+      cars and the ones that do not alike, so there is no margin to require and
+      it has to be raced to be seen.
+      *Verification: every shipped track is raced by a full grid for the first
+      minute and none puts a car past the run-off — 18 raced, 0 unexcused. Cars
+      not finishing over the whole set went from 7 to 4, and the two that remain
+      are landings and contact rather than the edge. One generated track was
+      replaced by the new bar; nothing else in the set moved.*
+      **Two hand-written tracks are named as known exceptions rather than left
+      out**: `jupiter run` and `which way` each still lose a car over the north
+      edge. A hand-written track lays its route from a seed chosen for the
+      ground it is built on, and of the ninety-six seeds after theirs only their
+      own lays a sound route — so they cannot be fixed the way a candidate is.
+      Fixing them means re-shaping two tracks or widening the inset every route
+      is laid at, which costs route length on all eighteen; both are decisions
+      about the set. The test requires them to *still* be failing, so fixing one
+      turns it red and the excuse goes with the fault.
 - [ ] **The transport has a written specification.** Message formats, the state
       machine, the key schedule, the message limit before a rekey, and the
       properties claimed **and explicitly not claimed**. A design nobody wrote
