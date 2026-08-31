@@ -981,6 +981,29 @@ review, and it fails it for good reasons.
       Left uncovered and said so: that the frontend *resumes* rather than
       restarts lives in the iterate loop rather than in anything callable, and
       is checked by hand.
+- [x] **The dialog you opened over a race ignored your first click.** Reported
+      from play, and the second report was the diagnosis: "it doesn't have focus
+      — I click on the dialog first". A menu opened over a race arrives behind
+      the race's own windows and ImGui leaves the focus where it was, so the
+      first click was spent taking the focus rather than pressing what it landed
+      on. The frontend asks for the focus at the one moment that happens.
+      *Verification: all eight screens that draw a panel are arrived at from
+      another screen and must be the window taking input on the frame they
+      appear. The walk is unchanged at 812 of 812 controls — the number that
+      says the fix cost nothing.*
+      The obvious rule, "focus whenever the screen changes", took the focus off
+      the dropdown the front-end walk had just opened and cut it from 812
+      controls to 289. Nothing could have caught the original fault: the walk
+      presses through ImGui's test engine, which sets focus itself.
+- [ ] **Delete asks before it throws a track away.** It is the one thing on the
+      tracks screen that cannot be undone and it goes through on a single click.
+      Written and working, and not landed: the walk tells menu states apart by
+      hashing them, and a dialog that is up or not up is a state — as a track
+      hash it is 32 more states a screen and the walk never finishes, as a bool
+      it is one more and the walk went from four minutes to over fifteen, and
+      kept out of the hash the walk cannot see the dialog at all and prunes the
+      screen behind it. All three measured. What is needed first is a cheap way
+      for this front end to represent a transient dialog.
 - [x] **The trace said one thing on arriving at a screen and then went quiet.**
       It rate-limited on the world's tick, which does not advance on a menu — so
       a front end that had stopped and one that was fine produced the same

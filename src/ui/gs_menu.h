@@ -212,6 +212,9 @@ typedef struct gs_menu {
     // A screen reachable from two places has to know which one it came from.
     // These are set by the frontend as it makes the move, so every path in is
     // covered by construction rather than by remembering to set it at each one.
+
+
+
     gs_screen setup_from;
     gs_screen tracks_from;
 
@@ -280,6 +283,31 @@ typedef struct gs_menu {
     // something a screenshot test notices, because the screenshot looks fine.
     // It is something a number can say.
     gs_panel_report panel;
+
+    // **Bookkeeping about the drawing, kept past `panel` on purpose.**
+    //
+    // Everything above is hashed to tell one state of the front end from
+    // another while it is walked, and the hash stops here. These two belong
+    // below that line: they are notes about the frame just drawn rather than
+    // anything a person chose, and putting them above it multiplied the states
+    // the walk had to explore until it stopped finishing.
+    //
+    // `focused` is which screen's panel has been given the focus - a panel that
+    // has just appeared has to take it, or the first click on it is spent
+    // giving it the focus instead of pressing what it landed on, which is what
+    // a menu opened over a race looked like from a chair. `panel_focused` is
+    // whether the panel drawn last frame was the one taking input, which is how
+    // the test for that reads the answer.
+    // **Set by the frontend when a menu opens over a race**, and cleared by the
+    // menu as it takes the focus. Narrow on purpose: this began as "focus the
+    // panel whenever the screen changes", which fires on every rebuild of the
+    // menu - including the one the front-end walk does for each of its passes -
+    // and took the focus off the dropdown it had just opened. The walk went
+    // from 810 controls to 289. The fault reported was a dialog opened over a
+    // race, so that is the only thing that asks for the focus.
+    bool      take_focus;
+    bool      panel_focused;
+
 } gs_menu;
 
 void gs_menu_init(gs_menu *m);

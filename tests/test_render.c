@@ -11347,6 +11347,80 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
                                            SDL_LOGICAL_PRESENTATION_DISABLED));
 }
 
+// **A screen that has just appeared is the one taking input.**
+//
+// Reported from play, twice, because the first report was not specific enough
+// to act on: Escape out of a race puts the setup screen up and "no control
+// works, eventually the controls do become accessible". What was happening is
+// in the second report - *"it doesn't have focus - I click on the dialog
+// first"*. A panel opened over a race arrives behind the race's own windows and
+// ImGui leaves the focus where it was, so the first click on it is spent taking
+// the focus rather than pressing what it landed on.
+//
+// **Nothing could have caught this before.** The panel walk drives controls
+// through ImGui's test engine, which sets focus itself before it presses
+// anything - so a panel that appears unfocused is invisible to the one test
+// that walks every control on every screen. It is a fault only a person with a
+// mouse could meet.
+TEST(a_screen_that_has_just_appeared_is_the_one_taking_input) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    static gs_menu m;
+    static gs_track t;
+    gs_panel_menu(&m, &t);
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+
+    // Every screen that draws a panel, arrived at from somewhere else. The race
+    // draws no panel of its own - it is the world with a HUD over it - so it is
+    // the one screen this cannot be asked of, and it is named here rather than
+    // quietly skipped.
+    static const gs_screen drawn[] = {
+        GS_SCREEN_LOGIN, GS_SCREEN_TITLE, GS_SCREEN_PROFILES, GS_SCREEN_SETUP,
+        GS_SCREEN_RESULTS, GS_SCREEN_RECORDS, GS_SCREEN_LOBBY, GS_SCREEN_TRACKS,
+    };
+    CHECK((int)SDL_arraysize(drawn) == GS_SCREEN_COUNT - 1);   // all but the race
+
+    int walked = 0;
+    for (size_t i = 0; i < SDL_arraysize(drawn); i++) {
+        // Somewhere else first, and settled there - a panel that has been up
+        // for several frames is the state a new one has to take the focus off.
+        const gs_screen from = drawn[(i + 1) % SDL_arraysize(drawn)];
+        (void)gs_panel_of(ren, &m, &t, from);
+
+        // Then arrive, the way the frontend arrives when a menu opens over a
+        // race: asking for the focus. One frame, because the first frame is the
+        // one the click lands on and the whole complaint is about that click.
+        m.panel_focused = false;
+        m.take_focus = true;
+        cImGui_ImplSDLRenderer3_NewFrame();
+        cImGui_ImplSDL3_NewFrame();
+        ImGui_NewFrame();
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+        SDL_RenderClear(ren);
+        m.screen = drawn[i];
+        (void)gs_menu_frame(&m, &t);
+        ImGui_Render();
+        cImGui_ImplSDLRenderer3_RenderDrawData(ImGui_GetDrawData(), ren);
+
+        if (!m.panel_focused) {
+            printf("  FOCUS %s arrived from %s without the focus\n",
+                   gs_screen_name(drawn[i]), gs_screen_name(from));
+        }
+        CHECK(m.panel_focused);
+        CHECK(!m.take_focus);        // asked once, and taken
+        walked++;
+    }
+
+    printf("  FOCUS %d screens took the focus on the frame they appeared\n",
+           walked);
+    CHECK(walked == (int)SDL_arraysize(drawn));
+}
+
 TEST(no_screen_is_drawn_bigger_than_the_window_it_is_in) {
     gs_imgui_start(gs_win, ren);
     CHECK(gs_imgui_ready);
@@ -11704,6 +11778,7 @@ int main(void) {
     run_every_control_is_known_by_name_and_answers_to_it(ren);
     run_the_hud_says_what_you_are_carrying_and_only_when_you_are(ren);
     run_at_the_smallest_window_every_control_can_be_scrolled_to(ren);
+    run_a_screen_that_has_just_appeared_is_the_one_taking_input(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
     run_the_condition_bar_stays_inside_the_hud(ren);

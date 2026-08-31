@@ -7480,6 +7480,67 @@ They are named in the test with that reason, and the test requires them to *stil
 be failing - so fixing one turns the tree red and the excuse goes with the fault.
 
 
+## The dialog you opened over a race ignored your first click
+
+Reported from play twice. The first report - *"no control works, eventually the
+controls do become accessible"* - sent me chasing frame rates, gamepad drift,
+the terrain sweep and HUD window flags, all of which measured fine. The second
+report was the answer: **"it doesn't have focus - I click on the dialog first"**.
+
+A menu opened over a race arrives behind the race's own windows, and ImGui leaves
+the focus where it was. Nothing in the menu had ever called
+`ImGui_SetNextWindowFocus`, so the first click on the panel was spent taking the
+focus rather than pressing what it landed on. From a chair that is a dialog that
+ignores you once and then works.
+
+The frontend now asks for the focus when a menu opens over a race - in
+`gs_note_origin`, where the move is made - and `gs_menu_frame` takes it and
+clears the request.
+
+**Narrow on purpose.** It began as "focus the panel whenever the screen changes",
+which is the obvious rule and the wrong one: the front-end walk rebuilds the menu
+for every pass, so the focus fired constantly and took itself off the dropdown
+the walk had just opened. **The walk went from 812 controls to 289**, and the
+tree stayed green because the walk's own coverage assertion was the thing being
+undermined. A request set by the frontend at the one moment a person meets the
+fault costs the walk nothing.
+
+*Verification: every screen that draws a panel - all eight, the race being the
+one that does not - is arrived at from another screen with the focus asked for,
+and has to be the window taking input on the frame it appears. The walk is
+unchanged at 10175 states and 812 of 812 controls, which is the number that says
+the fix did not cost anything.*
+
+**Nothing could have caught this before.** The walk drives controls through
+ImGui's test engine, which sets focus itself before it presses anything - so a
+panel that appears unfocused is invisible to the one test that walks every
+control on every screen. It is a fault only a person with a mouse could meet.
+
+### And a confirmation on Delete, which is not landed
+
+Asked for in the same session, and right: deleting a track is the one thing on
+that screen that cannot be undone - the library is the only copy of somebody's
+own work and there is no bin - and it goes through on a single click, between two
+buttons that are harmless.
+
+It is written and it works, and it is **not committed**, because of what it costs
+the front-end walk. The walk tells one state of the menu from another by hashing
+the menu's state, and a question that is up or not up is a state:
+
+- as the **hash of the track being asked about**, it is thirty-two more states
+  per screen and the walk stops finishing;
+- as a **bool**, it is one more state per screen on the busiest screen in the
+  game, and the walk went from four minutes to over fifteen without finishing;
+- kept **out of the hash**, the walk cannot see the question at all - pressing
+  Delete changes what is drawn without changing the state, so the walk decides
+  nothing happened and stops exploring past it. 812 controls became 289.
+
+All three were measured. The feature is not the problem; the problem is that this
+front end has no cheap way to represent a transient dialog, and giving it one is
+a larger piece of work than the confirmation itself. Written down here rather
+than left as a half-finished branch.
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

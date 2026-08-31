@@ -56,6 +56,7 @@ void gs_menu_init(gs_menu *m) {
     // is the front end throwing somebody out for glancing at a lap time. The
     // screen-graph test found this within an hour of the field being added.
     m->records_from = GS_SCREEN_TITLE;
+    m->take_focus = false;
     m->setup_from = GS_SCREEN_TITLE;
     m->tracks_from = GS_SCREEN_TITLE;
     m->resume = false;
@@ -308,6 +309,16 @@ static void gs_panel_measure(gs_menu *m) {
     ImGuiViewport *vp = ImGui_GetMainViewport();
     ImVec2 pos = ImGui_GetWindowPos();
     ImVec2 size = ImGui_GetWindowSize();
+
+    // **And whether it is the window listening.** A panel opened over a race
+    // arrives behind the race's own windows, and a panel that is drawn but not
+    // focused eats the first click on it to take the focus - which from a chair
+    // is a dialog that ignores you once and then works, and was reported as
+    // exactly that. Recorded here because here is inside every panel's begin
+    // and end, which is the only place the question can be asked.
+    m->panel_focused = ImGui_IsWindowFocused(
+        ImGuiFocusedFlags_RootAndChildWindows);
+
     m->panel = (gs_panel_report){ pos.x, pos.y, size.x, size.y,
                                   vp->WorkSize.x, vp->WorkSize.y,
                                   ImGui_GetScrollMaxY(), ImGui_GetScrollMaxX() };
@@ -2212,6 +2223,23 @@ gs_screen gs_menu_frame(gs_menu *m, const gs_track *t) {
     if (m->signed_in < 0 || m->signed_in >= (int)m->profiles.count) {
         m->signed_in = -1;
         m->screen = GS_SCREEN_LOGIN;
+    }
+
+    // **A panel that has just appeared takes the focus.**
+    //
+    // Reported from play: Escape out of a race puts the setup screen up and
+    // "no control works, eventually the controls do become accessible" - the
+    // first click was being spent focusing the dialog rather than pressing what
+    // it landed on. A menu opened over a race arrives behind the race's own
+    // windows, and ImGui leaves the focus where it was; the person driving has
+    // no way to know that the screen in front of them is not the one listening.
+    //
+    // Only on the frame the screen changes. Doing it every frame would drag the
+    // focus back to the panel from whatever is inside it, which is a text field
+    // losing what somebody is halfway through typing.
+    if (m->take_focus) {
+        ImGui_SetNextWindowFocus();
+        m->take_focus = false;
     }
 
     switch (m->screen) {

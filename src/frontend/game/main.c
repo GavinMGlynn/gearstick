@@ -1416,6 +1416,14 @@ static void gs_trace(gs_app *a, uint8_t views) {
 static void gs_note_origin(gs_app *a, gs_screen next) {
     if (next == GS_SCREEN_SETUP)  a->menu.setup_from = a->menu.screen;
     if (next == GS_SCREEN_TRACKS) a->menu.tracks_from = a->menu.screen;
+
+    // **A menu opening over a race takes the focus.** It arrives behind the
+    // race's own windows and ImGui leaves the focus where it was, so the first
+    // click on it is spent taking the focus rather than pressing what it landed
+    // on - reported from play as a dialog that ignores you once.
+    if (a->menu.screen == GS_SCREEN_RACE && next != GS_SCREEN_RACE) {
+        a->menu.take_focus = true;
+    }
 }
 
 static bool gs_back_out(gs_app *a, bool may_quit) {
