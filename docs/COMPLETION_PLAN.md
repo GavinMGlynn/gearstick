@@ -999,11 +999,21 @@ review, and it fails it for good reasons.
       tracks screen that cannot be undone and it goes through on a single click.
       Written and working, and not landed: the walk tells menu states apart by
       hashing them, and a dialog that is up or not up is a state — as a track
-      hash it is 32 more states a screen and the walk never finishes, as a bool
-      it is one more and the walk went from four minutes to over fifteen, and
-      kept out of the hash the walk cannot see the dialog at all and prunes the
-      screen behind it. All three measured. What is needed first is a cheap way
-      for this front end to represent a transient dialog.
+      hash it is 32 more states a screen and the walk never finishes; as a bool
+      it is one more and the walk went from four minutes to over fifteen; kept
+      out of the hash the walk cannot see the dialog and prunes the screen
+      behind it, 812 controls becoming 289. **A fourth attempt made the screen
+      inert underneath the question**, which is what a modal means and which
+      brought the walk back to 10,755 states against a 10,175 baseline - six per
+      cent, not four times. That failed differently: a disabled control is still
+      a control the walk records, so the thirty-two-row list became 665 entries
+      it could never press and the walk ran out of room. Drawing only the
+      question instead collapsed it to 289 again.
+      Four representations, four measurements, none of them affordable. The
+      feature is three lines; what is missing is a way for this walk to model a
+      dialog, and that is a change to the front end's main safety net rather
+      than to the tracks screen. The attempt is kept as a stash rather than a
+      branch, and the numbers are here so the next one starts from them.
 - [x] **The trace said one thing on arriving at a screen and then went quiet.**
       It rate-limited on the world's tick, which does not advance on a menu — so
       a front end that had stopped and one that was fine produced the same

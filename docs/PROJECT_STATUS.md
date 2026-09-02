@@ -7535,10 +7535,20 @@ the menu's state, and a question that is up or not up is a state:
   Delete changes what is drawn without changing the state, so the walk decides
   nothing happened and stops exploring past it. 812 controls became 289.
 
-All three were measured. The feature is not the problem; the problem is that this
-front end has no cheap way to represent a transient dialog, and giving it one is
-a larger piece of work than the confirmation itself. Written down here rather
-than left as a half-finished branch.
+A fourth attempt made the screen **inert underneath the question**, which is what
+a modal means and which very nearly worked: the walk came back to 10,755 states
+against a 10,175 baseline - six per cent, not four times. It failed for a reason
+worth writing down: **a disabled control is still a control the walk records**,
+so a thirty-two row list left drawn under the question became 665 entries it
+could never press, and the walk ran out of room. Drawing only the question in
+place of the screen collapsed it to 289 again.
+
+Four representations, four measurements, none affordable. The feature is three
+lines. What is missing is a way for this walk to model a dialog - a state where
+what is underneath is neither gone nor pressable - and that is a change to the
+front end's main safety net rather than to the tracks screen. Kept as a stash
+with the numbers here, so the next attempt starts from them instead of
+rediscovering them.
 
 
 ## Known risks
