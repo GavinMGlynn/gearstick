@@ -350,6 +350,63 @@ static ImU32 gs_map_rgba(float r, float g, float b, float a) {
                    (uint32_t)(g * 255.0f) << 8 | (uint32_t)(r * 255.0f));
 }
 
+// The shape itself - route, finish line, gates - shared with the tracks
+// screen's preview, which is the whole reason it is a function: two drawings
+// of "what does this track look like" drift, one cannot.
+int gs_hud_track_shape(const gs_track *t, ImDrawList *dl, float ox, float oy,
+                       float scale) {
+    // A track with no route on it has nothing to draw and no shape to say
+    // where you are in - the construction set's blank field, before anybody
+    // has put a gate down.
+    if (t == nullptr || dl == nullptr) return 0;
+    if (t->w == 0 || t->h == 0 || gs_track_route_legs(t) == 0) return 0;
+
+    // The route, in the blue it is painted in on the ground - the same curve
+    // from the same function, so the map and the track agree.
+    const ImU32 ink = gs_map_rgba(0.30f, 0.65f, 0.95f, 0.95f);
+    uint8_t legs = gs_track_route_legs(t);
+    int drawn = 0;
+    for (uint8_t leg = 0; leg < legs; leg++) {
+        for (int k = 0; k < GS_MAP_STEPS; k++) {
+            gs_fix ax, ay, bx, by;
+            gs_track_route_point(t, leg,
+                                 (gs_fix)((int64_t)k * GS_ONE / GS_MAP_STEPS),
+                                 &ax, &ay);
+            gs_track_route_point(t, leg,
+                                 (gs_fix)((int64_t)(k + 1) * GS_ONE / GS_MAP_STEPS),
+                                 &bx, &by);
+            ImDrawList_AddLineEx(dl,
+                (ImVec2){ ox + gs_to_f(ax) * scale, oy + gs_to_f(ay) * scale },
+                (ImVec2){ ox + gs_to_f(bx) * scale, oy + gs_to_f(by) * scale },
+                ink, 2.0f);
+            drawn++;
+        }
+    }
+
+    // The line you cross to finish, marked across the route rather than along
+    // it, so a loop says where it begins.
+    const gs_gate *fin = &t->gate[gs_track_finish_gate(t)];
+    float fx = gs_to_f(gs_cos(fin->heading)), fy = gs_to_f(gs_sin(fin->heading));
+    float hw = gs_to_f(fin->half_width);
+    ImDrawList_AddLineEx(dl,
+        (ImVec2){ ox + (gs_to_f(fin->x) - fy * hw) * scale,
+                  oy + (gs_to_f(fin->y) + fx * hw) * scale },
+        (ImVec2){ ox + (gs_to_f(fin->x) + fy * hw) * scale,
+                  oy + (gs_to_f(fin->y) - fx * hw) * scale },
+        gs_map_rgba(0.95f, 0.95f, 0.95f, 0.95f), 2.0f);
+
+    // Every gate as a dot, small enough that ninety of them read as beads on
+    // the route rather than as a second line.
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        const gs_gate *g = &t->gate[i];
+        ImDrawList_AddCircleFilled(dl,
+            (ImVec2){ ox + gs_to_f(g->x) * scale, oy + gs_to_f(g->y) * scale },
+            1.5f, gs_map_rgba(0.75f, 0.85f, 0.95f, 0.7f), 0);
+    }
+
+    return drawn;
+}
+
 static void gs_hud_minimap(const gs_world *w, const gs_track *t, const gs_view *v) {
     // A track with no route on it has nothing to draw and no shape to say
     // where you are in - the construction set's blank field, before anybody has
@@ -384,70 +441,30 @@ static void gs_hud_minimap(const gs_world *w, const gs_track *t, const gs_view *
         ImVec2 at = ImGui_GetWindowPos();
         float ox = at.x + GS_MAP_EDGE, oy = at.y + GS_MAP_EDGE;
 
-        // The route, in the blue it is painted in on the ground - the same
-        // curve from the same function, so the map and the track agree.
-        const ImU32 ink = gs_map_rgba(0.30f, 0.65f, 0.95f, 0.95f);
-        uint8_t legs = gs_track_route_legs(t);
-        for (uint8_t leg = 0; leg < legs; leg++) {
-            for (int k = 0; k < GS_MAP_STEPS; k++) {
-                gs_fix ax, ay, bx, by;
-                gs_track_route_point(t, leg, (gs_fix)((int64_t)k * GS_ONE / GS_MAP_STEPS),
-                                     &ax, &ay);
-                gs_track_route_point(t, leg,
-                                     (gs_fix)((int64_t)(k + 1) * GS_ONE / GS_MAP_STEPS),
-                                     &bx, &by);
-                ImDrawList_AddLineEx(dl,
-                    (ImVec2){ ox + gs_to_f(ax) * scale, oy + gs_to_f(ay) * scale },
-                    (ImVec2){ ox + gs_to_f(bx) * scale, oy + gs_to_f(by) * scale },
-                    ink, 2.0f);
-            }
-        }
+        // The shape - route, finish line, gate beads - from the one function
+        // the tracks screen's preview also draws with.
+        gs_hud_track_shape(t, dl, ox, oy, scale);
 
-        // The line you cross to finish, marked across the route rather than
-        // along it, so a loop says where it begins.
-        const gs_gate *fin = &t->gate[gs_track_finish_gate(t)];
-        float fx = gs_to_f(gs_cos(fin->heading)), fy = gs_to_f(gs_sin(fin->heading));
-        float hw = gs_to_f(fin->half_width);
-        ImDrawList_AddLineEx(dl,
-            (ImVec2){ ox + (gs_to_f(fin->x) - fy * hw) * scale,
-                      oy + (gs_to_f(fin->y) + fx * hw) * scale },
-            (ImVec2){ ox + (gs_to_f(fin->x) + fy * hw) * scale,
-                      oy + (gs_to_f(fin->y) - fx * hw) * scale },
-            gs_map_rgba(0.95f, 0.95f, 0.95f, 0.95f), 2.0f);
-
-        // **The checkpoints, and the one this driver owes.**
+        // **The checkpoint this driver owes**, ringed on top of its bead.
         //
         // The route says which way round; it does not say what you have to go
         // *through*. A player who ran wide at a corner drove the rest of the
         // lap, crossed the chequer, and only found out at the end that none of
         // it counted - and asked for the checkpoints on the map, which is the
-        // question answered before the mistake rather than after it.
-        //
-        // Every gate as a dot, small enough that ninety of them read as beads
-        // on the route rather than as a second line; the one owed as a ring
-        // around it, in white while it is ahead and in the warning's orange
-        // once it has been driven past. Nothing is drawn for a track whose
-        // route has no gates, which the guard at the top of this function has
-        // already returned for.
+        // question answered before the mistake rather than after it. The ring
+        // is white while the gate is ahead and the warning's orange once it
+        // has been driven past, because then the lap depends on going back.
         const gs_car *me = v->car < w->car_count ? &w->car[v->car] : nullptr;
-        const uint8_t owed = me != nullptr ? me->next_gate : 0;
-
-        for (uint8_t i = 0; i < t->gate_count; i++) {
-            const gs_gate *g = &t->gate[i];
-            const ImVec2 dot = { ox + gs_to_f(g->x) * scale,
-                                 oy + gs_to_f(g->y) * scale };
-
-            ImDrawList_AddCircleFilled(dl, dot, 1.5f,
-                                       gs_map_rgba(0.75f, 0.85f, 0.95f, 0.7f), 0);
-
-            if (me == nullptr || i != owed || me->finish_tick != 0) continue;
-
-            // The one to head for. Orange once it is behind you, because then
-            // the lap depends on going back for it.
+        if (me != nullptr && me->finish_tick == 0 &&
+            me->next_gate < t->gate_count) {
+            const gs_gate *g = &t->gate[me->next_gate];
             const ImU32 mark = v->missed
                                    ? gs_map_rgba(1.0f, 0.35f, 0.20f, 1.0f)
                                    : gs_map_rgba(1.0f, 1.0f, 1.0f, 1.0f);
-            ImDrawList_AddCircleEx(dl, dot, 4.0f, mark, 0, 2.0f);
+            ImDrawList_AddCircleEx(dl,
+                (ImVec2){ ox + gs_to_f(g->x) * scale,
+                          oy + gs_to_f(g->y) * scale },
+                4.0f, mark, 0, 2.0f);
         }
 
         // Everybody on it, in the colour they are driving, and this machine's

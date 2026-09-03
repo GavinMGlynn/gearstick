@@ -27,6 +27,7 @@
 #include "platform/gs_paths.h"
 #include "net/gs_auth.h"
 #include "ui/gs_menu.h"
+#include "core/gs_generate.h"
 #include "ui/gs_hud.h"
 #include "ui/gs_style.h"
 #include "ui/gs_ui_probe.h"
@@ -11366,6 +11367,111 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
 // anything - so a panel that appears unfocused is invisible to the one test
 // that walks every control on every screen. It is a fault only a person with a
 // mouse could meet.
+TEST(the_tracks_screen_shows_the_shape_of_the_chosen_track) {
+    // **"Could the tracks dialog contain a preview of the shape of the
+    // track?"** It could, and now it does: the same drawing the HUD's minimap
+    // makes mid-race - route, finish line, gate beads, one function for both
+    // so they cannot disagree - drawn beside the chosen track's details.
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    static gs_menu m;
+    static gs_track t;
+    gs_panel_menu(&m, &t);
+    m.screen = GS_SCREEN_TRACKS;
+    m.online = false;
+
+    // The walk's library is deliberately routeless, so a track with a real
+    // route goes in beside it - a generated one, which always has a route.
+    static gs_track routed;
+    gs_generate(&routed, 7919u);
+    CHECK(gs_track_route_legs(&routed) > 0);
+    int at = gs_library_put(&m.library, &routed, "a routed one", "somebody");
+    CHECK(at >= 0);
+    m.picked = at;
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+    gs_ui_probe_settle();
+    gs_ui ui;
+    gs_ui_begin(&ui, &m, &t, ren);
+
+    // The preview is on screen, inside the panel, at the width the layout
+    // promises - and found by prefix, because a child window's real name
+    // carries ImGui's id hash on the end.
+    float px, py, pw, ph;
+    CHECK(gs_ui_probe_window_box("Tracks", &px, &py, &pw, &ph));
+    float sx = 0, sy = 0, sw = 0, sh = 0;
+    CHECK(gs_ui_probe_window_like("Tracks/shape", &sx, &sy, &sw, &sh));
+    CHECK(sx >= px && sy >= py);
+    CHECK(sx + sw <= px + pw + 0.5f && sy + sh <= py + ph + 0.5f);
+    CHECK(sw >= 80.0f && sw <= 150.0f);
+
+    // And the drawing draws: the same function the screen just called, on the
+    // same track, says how many route segments it laid down - divisible by
+    // the legs, because every leg is sampled the same number of times.
+    cImGui_ImplSDLRenderer3_NewFrame();
+    cImGui_ImplSDL3_NewFrame();
+    ImGui_NewFrame();
+    int segs = gs_hud_track_shape(&routed, ImGui_GetForegroundDrawList(),
+                                  0.0f, 0.0f, 1.0f);
+    ImGui_Render();
+    CHECK(segs > 0);
+    CHECK(segs % (int)gs_track_route_legs(&routed) == 0);
+
+    // A track with no route on it keeps its details and shows no shape - the
+    // construction set's blank field has no shape to show.
+    m.picked = 0;
+    gs_ui_frame(&ui);
+    CHECK(gs_ui_probe_window_like("Tracks/detail", nullptr, nullptr, nullptr,
+                                  nullptr));
+    CHECK(!gs_ui_probe_window_like("Tracks/shape", nullptr, nullptr, nullptr,
+                                   nullptr));
+
+    // Nothing chosen is nothing shown.
+    m.picked = -1;
+    gs_ui_frame(&ui);
+    CHECK(!gs_ui_probe_window_like("Tracks/shape", nullptr, nullptr, nullptr,
+                                   nullptr));
+
+    // **And squeezed, the fields win outright.** At the smallest window the
+    // game runs in there is no room beside the widest detail row for a
+    // preview worth reading, so there is none - the fields are controls and
+    // the picture is not, and the picture is what disappears. What must
+    // survive is the Copy button, whole.
+    m.picked = at;
+    CHECK(SDL_SetWindowSize(gs_win, 640, 480));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 640, 480,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+    gs_ui_frame(&ui);
+    gs_ui_frame(&ui);
+    static gs_ui_item items[GS_UI_MAX_ITEMS];
+    gs_ui_probe_start(items, GS_UI_MAX_ITEMS);
+    gs_ui_probe_frame();
+    gs_ui_frame(&ui);
+    int n = gs_ui_probe_count();
+    gs_ui_probe_stop();
+    CHECK(n > 0 && n <= GS_UI_MAX_ITEMS);
+
+    CHECK(!gs_ui_probe_window_like("Tracks/shape", nullptr, nullptr, nullptr,
+                                   nullptr));
+
+    bool copy_seen = false;
+    for (int i = 0; i < n; i++) {
+        if (SDL_strcmp(items[i].label, "Copy") != 0) continue;
+        copy_seen = true;
+        CHECK(items[i].visible);
+        CHECK(items[i].whole);
+    }
+    CHECK(copy_seen);
+
+    CHECK(SDL_SetWindowSize(gs_win, 1280, 720));
+    CHECK(SDL_SetRenderLogicalPresentation(ren, 1280, 720,
+                                           SDL_LOGICAL_PRESENTATION_DISABLED));
+}
+
 TEST(a_screen_that_has_just_appeared_is_the_one_taking_input) {
     gs_imgui_start(gs_win, ren);
     CHECK(gs_imgui_ready);
@@ -11783,6 +11889,7 @@ int main(void) {
     run_the_hud_says_what_you_are_carrying_and_only_when_you_are(ren);
     run_at_the_smallest_window_every_control_can_be_scrolled_to(ren);
     run_a_screen_that_has_just_appeared_is_the_one_taking_input(ren);
+    run_the_tracks_screen_shows_the_shape_of_the_chosen_track(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);
     run_the_condition_bar_stays_inside_the_hud(ren);

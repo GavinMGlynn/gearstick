@@ -183,6 +183,31 @@ bool gs_ui_probe_window_box(const char *name, float *x, float *y,
     return true;
 }
 
+bool gs_ui_probe_window_like(const char *prefix, float *x, float *y,
+                             float *w, float *h)
+{
+    ImGuiContext *g = ImGui::GetCurrentContext();
+    if (g == nullptr || prefix == nullptr) return false;
+
+    // By prefix rather than by name, because a child window's real name
+    // carries ImGui's id hash on the end - "Tracks/shape_A1B2C3D4" - and the
+    // hash is nothing a test can type. And only a window submitted *this
+    // frame*: ImGui keeps every window it has ever seen in its registry, so
+    // an exact find would keep answering yes long after the screen stopped
+    // drawing the thing asked about.
+    const size_t n = strlen(prefix);
+    for (ImGuiWindow *win : g->Windows) {
+        if (win == nullptr || !win->Active) continue;
+        if (strncmp(win->Name, prefix, n) != 0) continue;
+        if (x != nullptr) *x = win->Pos.x;
+        if (y != nullptr) *y = win->Pos.y;
+        if (w != nullptr) *w = win->Size.x;
+        if (h != nullptr) *h = win->Size.y;
+        return true;
+    }
+    return false;
+}
+
 bool gs_ui_probe_place(const char *name, float x, float y, float w, float h)
 {
     if (ImGui::GetCurrentContext() == nullptr || name == nullptr) return false;

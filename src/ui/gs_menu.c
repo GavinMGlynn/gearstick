@@ -3,6 +3,7 @@
 #include "dcimgui.h"
 #include "gfx/gs_render.h"
 #include "net/gs_auth.h"
+#include "ui/gs_hud.h"
 #include "ui/gs_style.h"
 
 #include <SDL3/SDL.h>
@@ -1961,7 +1962,27 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
             ImGui_TextUnformatted("Nothing chosen.");
             ImGui_PopStyleColor();
         } else {
-            ImGui_BeginChild("detail", (ImVec2){ 0.0f, detail_h },
+            // **The shape of the track, beside its details.** The same picture
+            // the HUD's minimap draws mid-race - the route, the finish line,
+            // the gates - answered here, where the question is "what am I
+            // about to race" rather than "where am I on it". It takes the room
+            // the detail fields leave over, down to nothing on a window too
+            // narrow for both: the fields are controls and the picture is not,
+            // so the picture is what gives.
+            // The widest row the details hold: the label column, the code
+            // field, the Copy button and their spacing. The preview only
+            // exists in the room left after that row fits whole - at the
+            // smallest window the game runs in there is none, and the
+            // preview is what disappears.
+            const float room = ImGui_GetContentRegionAvail().x;
+            float shape_w = room - 560.0f;
+            if (shape_w > 150.0f) shape_w = 150.0f;
+            const bool shaped =
+                shape_w >= 80.0f && gs_track_route_legs(&picked->track) > 0;
+
+            ImGui_BeginChild("detail",
+                             (ImVec2){ shaped ? room - shape_w - 8.0f : 0.0f,
+                                       detail_h },
                              ImGuiChildFlags_None, ImGuiWindowFlags_None);
             ImGui_Text("%u x %u, %u gates, %016llx", picked->track.w,
                        picked->track.h, picked->track.gate_count,
@@ -2046,6 +2067,29 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
                 }
             }
             ImGui_EndChild();
+
+            if (shaped) {
+                ImGui_SameLine();
+                ImGui_BeginChild("shape", (ImVec2){ shape_w, detail_h },
+                                 ImGuiChildFlags_None, ImGuiWindowFlags_None);
+                ImDrawList *dl = ImGui_GetWindowDrawList();
+                ImVec2 at = ImGui_GetWindowPos();
+
+                // Fitted and centred, the way the minimap fits its corner: the
+                // track's longest side decides the scale, and a track that is
+                // not square floats in the middle rather than clinging to a
+                // corner of the box.
+                const float edge = 6.0f;
+                float tw = (float)picked->track.w, th = (float)picked->track.h;
+                float sx = (shape_w - edge * 2.0f) / tw;
+                float sy = (detail_h - edge * 2.0f) / th;
+                float scale = sx < sy ? sx : sy;
+                gs_hud_track_shape(&picked->track, dl,
+                                   at.x + (shape_w - tw * scale) * 0.5f,
+                                   at.y + (detail_h - th * scale) * 0.5f,
+                                   scale);
+                ImGui_EndChild();
+            }
         }
 
         ImGui_Dummy((ImVec2){ 0.0f, 8.0f });

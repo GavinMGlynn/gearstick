@@ -150,6 +150,14 @@ bool gs_ui_probe_scroll_to(const char *window, float x, float y);
 bool gs_ui_probe_window_box(const char *window, float *x, float *y,
                             float *w, float *h);
 
+// **A window by prefix, and only if this frame drew it.** A child window's
+// real name carries ImGui's id hash on the end, which nothing outside ImGui
+// can predict; and the registry remembers windows forever, so an exact find
+// says yes long after a screen stopped drawing the thing asked about. False
+// when no window submitted this frame starts with the prefix.
+bool gs_ui_probe_window_like(const char *prefix, float *x, float *y,
+                             float *w, float *h);
+
 // **Put a window back where it was.** ImGui remembers a window's position and
 // size under its name for the rest of the process, so a test that moves or
 // resizes one has changed the world for every test after it - the same hazard

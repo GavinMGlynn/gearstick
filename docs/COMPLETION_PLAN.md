@@ -2718,3 +2718,14 @@ are the places a fault could sit unnoticed.
       changes the ramps. The tool refuses to write a set that misses a band
       of the matrix, and the suite races the whole shipped set with a full
       grid.*
+
+- [x] **The tracks screen shows the shape of the chosen track.** The same
+      picture the HUD's minimap draws mid-race — route, finish line,
+      checkpoints — drawn beside the track's details, from one shared
+      function so the two can never disagree. It takes only the room the
+      detail fields leave over and disappears on a window too narrow for
+      both, because the fields are controls and the picture is not.
+      *Verification: the suite walks the preview's four states — beside a
+      routed track, absent for a routeless one, absent with nothing chosen,
+      and gone at the smallest window where the Copy button must stay whole
+      instead.*

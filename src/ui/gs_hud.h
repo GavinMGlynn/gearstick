@@ -37,6 +37,17 @@
 void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                  uint32_t tick, float waited, bool online);
 
+// **The shape of a track, drawn flat**: the route in the blue it is painted
+// in on the ground, the finish line across it, every gate as a bead. This is
+// the one drawing behind both the racing minimap and the tracks screen's
+// preview, so the two can never disagree about what a track looks like.
+// Draws into `dl` with the track's origin at (ox, oy) and `scale` pixels per
+// tile; returns how many route segments it drew - zero for a track with no
+// route on it, which is the construction set's blank field.
+struct ImDrawList_t;
+int gs_hud_track_shape(const gs_track *t, struct ImDrawList_t *dl, float ox,
+                       float oy, float scale);
+
 // **How much of the last HUD drawn was below the bottom of its own panel.**
 // Zero when everything fitted. The panel is sized by hand from what is going
 // into it - it has to be, because an auto-fitting window is invisible on its

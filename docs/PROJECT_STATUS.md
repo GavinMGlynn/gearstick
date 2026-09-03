@@ -7728,6 +7728,38 @@ shipped track raced by a full grid with no excused losses, the new dial tests
 printing their measurements, the golden replay unmoved. `gearstick_make_store`
 run twice produces byte-identical databases.*
 
+### The tracks screen shows the shape of the track, 2026-09-04
+
+Asked for in one line — "could the tracks dialog contain a preview of the
+shape of the track similar to the hud?" — and answered with the HUD's own
+drawing. The minimap's route-finish-and-gates picture was extracted into
+`gs_hud_track_shape`, one function drawn by both the racing minimap and the
+tracks screen, so the two can never disagree about what a track looks like;
+the minimap keeps for itself only what belongs to a race in progress (the
+owed-checkpoint ring and the cars).
+
+The preview sits beside the chosen track's details, fitted and centred, and
+takes only the room the detail fields leave over: at the smallest window the
+game runs in there is none, and the preview is what disappears — the fields
+are controls and the picture is not. A track with no route on it shows no
+shape, because the construction set's blank field has none to show.
+
+The probe grew `gs_ui_probe_window_like`, a find-by-prefix that only answers
+for windows the current frame actually drew — a child window's real name
+carries ImGui's id hash, and ImGui's registry remembers windows forever, so
+an exact find would keep saying yes after the screen stopped drawing the
+thing asked about.
+
+*Verification:
+`the_tracks_screen_shows_the_shape_of_the_chosen_track` walks the four states
+the preview has — drawn beside a routed track inside the panel at its
+promised width, absent for a routeless track, absent with nothing chosen,
+and absent at 640x480 where the Copy button is asserted whole instead. The
+drawing itself is asserted to lay segments divisible by the route's legs.
+The first version of the width budget failed exactly this test: the preview
+overlapped the Copy button at 640 because the label column had not been
+counted, which is the fault the test exists to refuse.*
+
 
 ## Known risks
 
