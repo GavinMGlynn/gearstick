@@ -7543,12 +7543,29 @@ so a thirty-two row list left drawn under the question became 665 entries it
 could never press, and the walk ran out of room. Drawing only the question in
 place of the screen collapsed it to 289 again.
 
-Four representations, four measurements, none affordable. The feature is three
-lines. What is missing is a way for this walk to model a dialog - a state where
-what is underneath is neither gone nor pressable - and that is a change to the
-front end's main safety net rather than to the tracks screen. Kept as a stash
-with the numbers here, so the next attempt starts from them instead of
+A fifth attempt kept the inert screen and gave the walk room: its pending-state
+queue is a fixed 4096 and the front end was already at 10,175 states, so six per
+cent more went over a ceiling nobody had measured the margin on. **Doubling it to
+8192 was not enough either** - `ran_out` fires on path *depth* as well, and an
+extra step through the tracks screen lengthens every path that crosses it.
+
+So the true cost is not one field. It is the queue, the depth limit, and what
+"never pressable" is allowed to mean when a screen is deliberately inert: 665
+controls that can be pressed elsewhere are disabled while the question is up, and
+the walk counts every one of them as a control it never managed to press.
+
+**Five representations, five measurements, none affordable.** The feature is
+three lines. What is missing is a way for this walk to model a dialog - a state
+where what is underneath is neither gone nor pressable, costing neither a branch
+per control nor a black mark against each one - and that is a change to the front
+end's main safety net rather than to the tracks screen. Both attempts are kept as
+stashes with the numbers here, so the next one starts from them instead of
 rediscovering them.
+
+The one thing worth doing regardless: **the walk is at 10,175 states against a
+4096 queue and a depth of 96, and nobody knew how close that was.** It is not
+failing today, and the margin is not written down anywhere. A front end that
+grows one more screen may find it the way this did.
 
 
 ## Known risks

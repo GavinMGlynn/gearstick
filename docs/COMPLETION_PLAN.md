@@ -1009,11 +1009,19 @@ review, and it fails it for good reasons.
       a control the walk records, so the thirty-two-row list became 665 entries
       it could never press and the walk ran out of room. Drawing only the
       question instead collapsed it to 289 again.
-      Four representations, four measurements, none of them affordable. The
-      feature is three lines; what is missing is a way for this walk to model a
-      dialog, and that is a change to the front end's main safety net rather
-      than to the tracks screen. The attempt is kept as a stash rather than a
-      branch, and the numbers are here so the next one starts from them.
+      A fifth kept the inert screen and raised the walk's pending-state queue
+      from 4096 to 8192, which was not enough either: it runs out on path depth
+      as well, because an extra step through the tracks screen lengthens every
+      path that crosses it.
+      Five representations, five measurements, none affordable. The feature is
+      three lines; what is missing is a way for this walk to model a dialog —
+      a state where what is underneath is neither gone nor pressable, costing
+      neither a branch per control nor a black mark against each one. That is a
+      change to the front end's main safety net rather than to the tracks
+      screen. Both attempts are kept as stashes and the numbers are here.
+      **Found on the way and worth its own item:** the walk sits at 10,175
+      states against a 4096 queue and a depth of 96, and how close that is was
+      not written down anywhere until it ran out.
 - [x] **The trace said one thing on arriving at a screen and then went quiet.**
       It rate-limited on the world's tick, which does not advance on a menu — so
       a front end that had stopped and one that was fine produced the same
