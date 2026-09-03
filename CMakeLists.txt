@@ -373,6 +373,7 @@ add_library(gearstick_shell STATIC
     src/platform/gs_bind.c
     src/platform/gs_paths.c
     src/platform/gs_input.c
+    src/platform/gs_winmem.c
     src/platform/gs_wire.c
     src/net/gs_auth.c
     src/net/gs_noise.c

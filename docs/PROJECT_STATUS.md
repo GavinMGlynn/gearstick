@@ -7760,6 +7760,49 @@ The first version of the width budget failed exactly this test: the preview
 overlapped the Copy button at 640 because the label column had not been
 counted, which is the fault the test exists to refuse.*
 
+### The window opens where it was left, 2026-09-04
+
+Asked for by pointing at another project — "I asked claude to remember where
+an SDL window was launched. Can we include similar logic here?" — and worth
+saying plainly: the other project's repository does not actually carry that
+logic; what is committed there is a fullscreen dance that restores geometry
+within one session. This is the real thing, and it took four attempts to
+stop the window wandering, every one caught by relaunching the game and
+reading the file it writes.
+
+**The memory** is `src/platform/gs_winmem.c`: a `key = value` text file,
+`window.txt`, in the preferences directory — text because window geometry is
+exactly what somebody wants to look at or delete by hand when a window has
+gone somewhere strange, and the file's own header says so. A damaged file is
+refused whole when the size is nonsense; garbage in the *position* costs the
+position and keeps a valid size, because a size is harmless and a position
+is what strands a window off every display.
+
+**Daring to go back is separate from remembering.** Monitors get unplugged,
+so a remembered position is only applied when at least a grabbable corner of
+the title strip — 64 by 24 pixels — lands on a single display that exists
+right now. That rule is a pure function over plain rectangles, so every desk
+arrangement that can hurt somebody is a test case rather than a monitor.
+
+**What the window manager taught, one red relaunch at a time:** a
+post-creation `SDL_SetWindowPosition` under WSLg landed only *sometimes*, so
+the position goes into the window's creation properties, which managers
+honour; reading the position back immediately raced the manager and measured
+garbage; and this manager parks the *frame* where the client asked to be
+born, a constant offset that made every save-as-read scheme walk the window
+across the desk — 12 by 54, or 50 by 113 with the frame-extents "fix" — one
+launch at a time. The offset is now measured once per session on the first
+frame, asked-minus-read, and subtracted at save; a drag during the session
+survives because the offset is the manager's constant, not the position.
+
+*Verification: the suite refuses six kinds of damaged file, keeps
+size-without-place for three more, and walks twelve desk arrangements
+against the on-a-display rule, boundaries on both sides, counts asserted.
+On the real machine: four consecutive launches with a planted
+`x = 300, y = 400, w = 900, h = 640` each closed and re-saved exactly that,
+to the pixel. A position saved above the top of every current display was
+refused and the manager chose instead, which is the rule working.*
+
 
 ## Known risks
 

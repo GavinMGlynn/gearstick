@@ -23,6 +23,7 @@
 #include "platform/gs_paths.h"
 #include "audio/gs_audio.h"
 #include "audio/gs_music.h"
+#include "platform/gs_winmem.h"
 #include "platform/gs_wire.h"
 #include "core/gs_net.h"
 #include "ui/gs_editor.h"
@@ -197,6 +198,19 @@ typedef struct gs_app {
     bool        net_settling;
     uint32_t    net_settle_frames;
     bool        quit;
+
+    // **What the window was asked to open at, and what the window manager
+    // heard.** Some managers park the frame where the client asked to be
+    // born, so the position read back is a constant decoration's offset from
+    // the one requested - and a memory saved as read then re-requested every
+    // launch walks the window across the desk one launch at a time. The
+    // offset is measured once, on the first frame, as asked-minus-read; the
+    // save subtracts it. A drag during the session survives, because the
+    // offset is the manager's constant and not the position.
+    bool win_asked;                  // a remembered position went into creation
+    bool win_measured;
+    int  win_ask_x, win_ask_y;
+    int  win_off_x, win_off_y;
     // **What the game ships, by hash, as of this start.** Filled by walking
     // assets/tracks/ and used twice: to withdraw the shipped tracks an older
     // version left in somebody's library, and to put the current ones in.
@@ -988,9 +1002,62 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         return SDL_APP_FAILURE;
     }
 
-    if (!SDL_CreateWindowAndRenderer("gearstick", GS_WINDOW_W, GS_WINDOW_H,
-                                     SDL_WINDOW_RESIZABLE, &a->win, &a->ren)) {
-        SDL_Log("SDL_CreateWindowAndRenderer: %s", SDL_GetError());
+    // **The window opens where it was left.** Size from the memory when
+    // there is one; position only after checking the remembered spot is on a
+    // display that still exists - monitors get unplugged, and a window
+    // restored onto one that is gone is a game nobody can see or grab.
+    gs_winmem wm;
+    gs_winmem_default(&wm, GS_WINDOW_W, GS_WINDOW_H);
+    char wm_path[1024];
+    SDL_snprintf(wm_path, sizeof wm_path, "%s%s", gs_pref_dir(),
+                 GS_WINMEM_FILE);
+    gs_winmem_load(&wm, wm_path);
+
+    // Whether the remembered spot is safe to go back to, asked of the
+    // displays that exist right now - before the window exists, because the
+    // position goes into its *creation*. A window manager honours where a
+    // window asks to be born far more reliably than a move after it is on
+    // screen: under WSLg a post-creation SDL_SetWindowPosition landed only
+    // sometimes, and a position that lands only sometimes is a window that
+    // wanders.
+    bool place = false;
+    if (wm.placed) {
+        int n = 0;
+        SDL_DisplayID *ids = SDL_GetDisplays(&n);
+        if (ids != nullptr) {
+            SDL_Rect bounds[16];
+            int have = 0;
+            for (int i = 0; i < n && have < (int)SDL_arraysize(bounds); i++) {
+                if (SDL_GetDisplayBounds(ids[i], &bounds[have])) have++;
+            }
+            SDL_free(ids);
+            place = gs_winmem_on_a_display(&wm, bounds, have);
+        }
+    }
+
+    SDL_PropertiesID wprops = SDL_CreateProperties();
+    SDL_SetStringProperty(wprops, SDL_PROP_WINDOW_CREATE_TITLE_STRING,
+                          "gearstick");
+    SDL_SetNumberProperty(wprops, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, wm.w);
+    SDL_SetNumberProperty(wprops, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, wm.h);
+    SDL_SetBooleanProperty(wprops, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN,
+                           true);
+    if (place) {
+        SDL_SetNumberProperty(wprops, SDL_PROP_WINDOW_CREATE_X_NUMBER, wm.x);
+        SDL_SetNumberProperty(wprops, SDL_PROP_WINDOW_CREATE_Y_NUMBER, wm.y);
+        a->win_asked = true;
+        a->win_ask_x = wm.x;
+        a->win_ask_y = wm.y;
+    }
+    a->win = SDL_CreateWindowWithProperties(wprops);
+    SDL_DestroyProperties(wprops);
+    if (a->win == nullptr) {
+        SDL_Log("SDL_CreateWindowWithProperties: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    a->ren = SDL_CreateRenderer(a->win, nullptr);
+    if (a->ren == nullptr) {
+        SDL_Log("SDL_CreateRenderer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
@@ -1547,6 +1614,19 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
     gs_app *a = (gs_app *)appstate;
+
+    // The window manager's placement offset, measured once the window has
+    // settled - see win_asked. Read here rather than at creation, because a
+    // read taken before the manager has finished placing measures garbage.
+    if (!a->win_measured) {
+        a->win_measured = true;
+        if (a->win_asked && a->win != nullptr) {
+            int gx = 0, gy = 0;
+            SDL_GetWindowPosition(a->win, &gx, &gy);
+            a->win_off_x = gx - a->win_ask_x;
+            a->win_off_y = gy - a->win_ask_y;
+        }
+    }
 
     uint64_t now = SDL_GetTicksNS();
     uint64_t delta = now - a->last_ns;
@@ -2305,6 +2385,24 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     (void)result;
     gs_app *a = (gs_app *)appstate;
     if (a == nullptr) return;
+
+    // Where the window is now is where it opens next time - unless it is
+    // minimised, because a minimised window's position is wherever the
+    // window system parked it, which is nowhere anybody chose.
+    if (a->win != nullptr &&
+        (SDL_GetWindowFlags(a->win) & SDL_WINDOW_MINIMIZED) == 0) {
+        gs_winmem wm;
+        gs_winmem_default(&wm, GS_WINDOW_W, GS_WINDOW_H);
+        SDL_GetWindowPosition(a->win, &wm.x, &wm.y);
+        SDL_GetWindowSize(a->win, &wm.w, &wm.h);
+        wm.x -= a->win_off_x;
+        wm.y -= a->win_off_y;
+        wm.placed = true;
+        char wm_path[1024];
+        SDL_snprintf(wm_path, sizeof wm_path, "%s%s", gs_pref_dir(),
+                     GS_WINMEM_FILE);
+        gs_winmem_save(&wm, wm_path);
+    }
 
     gs_store_save(a);
     gs_audio_close();

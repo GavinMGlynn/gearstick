@@ -28,6 +28,7 @@
 #include "net/gs_auth.h"
 #include "ui/gs_menu.h"
 #include "core/gs_generate.h"
+#include "platform/gs_winmem.h"
 #include "ui/gs_hud.h"
 #include "ui/gs_style.h"
 #include "ui/gs_ui_probe.h"
@@ -11367,6 +11368,148 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
 // anything - so a panel that appears unfocused is invisible to the one test
 // that walks every control on every screen. It is a fault only a person with a
 // mouse could meet.
+TEST(the_window_opens_where_it_was_left_and_never_somewhere_nobody_can_see) {
+    (void)ren;
+
+    // **"Remember where an SDL window was launched."** The memory is a text
+    // file in the preferences directory; whether the remembered spot is safe
+    // to go back to is a pure rule over rectangles, checked here against
+    // every arrangement of displays that can hurt somebody - because the
+    // dangerous ones are monitors that are no longer on the desk, which no
+    // test can plug in.
+    char path[1024];
+    SDL_snprintf(path, sizeof path, "%s%s", gs_pref_dir(), GS_WINMEM_FILE);
+    SDL_RemovePath(path);
+
+    // A first run: no file, defaults kept, nothing placed.
+    gs_winmem m;
+    gs_winmem_default(&m, 1280, 720);
+    CHECK(!m.placed);
+    CHECK(!gs_winmem_load(&m, path));
+    CHECK(m.w == 1280 && m.h == 720 && !m.placed);
+
+    // The round trip: what was saved is what is loaded, exactly.
+    m = (gs_winmem){ .x = -120, .y = 64, .w = 1024, .h = 700, .placed = true };
+    CHECK(gs_winmem_save(&m, path));
+    gs_winmem back;
+    gs_winmem_default(&back, 1280, 720);
+    CHECK(gs_winmem_load(&back, path));
+    CHECK(back.x == -120 && back.y == 64);
+    CHECK(back.w == 1024 && back.h == 700);
+    CHECK(back.placed);
+
+    // **Every way a file can be wrong, refused whole.** Each damaged file
+    // leaves the defaults standing - half a memory is a window the size it
+    // was in a place it was not.
+    static const struct { const char *name, *text; } bad[] = {
+        { "garbage", "not a window file at all\n" },
+        { "empty", "" },
+        { "no size", "x = 10\ny = 10\n" },
+        { "too small", "x = 0\ny = 0\nw = 320\nh = 200\n" },
+        { "too vast", "x = 0\ny = 0\nw = 90000\nh = 720\n" },
+        { "negative size", "x = 0\ny = 0\nw = -1280\nh = 720\n" },
+    };
+    int refused = 0;
+    for (size_t i = 0; i < SDL_arraysize(bad); i++) {
+        CHECK(SDL_SaveFile(path, bad[i].text, SDL_strlen(bad[i].text)));
+        gs_winmem d;
+        gs_winmem_default(&d, 1280, 720);
+        const bool took = gs_winmem_load(&d, path);
+        if (took || d.w != 1280 || d.h != 720 || d.placed) {
+            printf("  WINDOW a %s file was believed\n", bad[i].name);
+        }
+        CHECK(!took);
+        CHECK(d.w == 1280 && d.h == 720 && !d.placed);
+        refused++;
+    }
+    CHECK(refused == (int)SDL_arraysize(bad));
+
+    // **A damaged position costs the position and nothing else.** The size
+    // half of a memory is harmless - the worst it does is open a window the
+    // size it was - while the position half is what strands a window off
+    // every display. So garbage in x or y drops the placement and keeps a
+    // valid size, and a missing position altogether is the same case.
+    static const struct { const char *name, *text; } placeless[] = {
+        { "no position at all", "w = 800\nh = 600\n" },
+        { "words for a position", "x = ten\ny = 0\nw = 800\nh = 600\n" },
+        { "a position past any integer",
+          "x = 99999999999999\ny = 0\nw = 800\nh = 600\n" },
+    };
+    int kept = 0;
+    for (size_t i = 0; i < SDL_arraysize(placeless); i++) {
+        CHECK(SDL_SaveFile(path, placeless[i].text,
+                           SDL_strlen(placeless[i].text)));
+        gs_winmem sized;
+        gs_winmem_default(&sized, 1280, 720);
+        const bool took = gs_winmem_load(&sized, path);
+        if (!took || sized.w != 800 || sized.h != 600 || sized.placed) {
+            printf("  WINDOW %s: size not kept or place not dropped\n",
+                   placeless[i].name);
+        }
+        CHECK(took);
+        CHECK(sized.w == 800 && sized.h == 600 && !sized.placed);
+        kept++;
+    }
+    CHECK(kept == (int)SDL_arraysize(placeless));
+    SDL_RemovePath(path);
+
+    // **And when it is safe to go back.** The rule: at least a grabbable
+    // corner of the title strip - GS_WINMEM_GRAB_W by GS_WINMEM_GRAB_H - on a
+    // single display. Every branch of that rule, on both sides of it.
+    static const SDL_Rect desk[] = {
+        { 0, 0, 1920, 1080 },          // the main monitor
+        { 1920, -200, 1280, 1024 },    // a second, taller and to the right
+    };
+    static const struct {
+        const char *name;
+        int x, y, w, h;
+        int displays;                  // how much of the desk exists
+        bool safe;
+    } spot[] = {
+        { "the middle of the main display", 200, 200, 1280, 720, 2, true },
+        { "straddling both displays", 1800, 100, 1280, 720, 2, true },
+        { "entirely on the second display", 2000, 0, 640, 480, 2, true },
+        { "on a monitor that is gone", 2000, 0, 640, 480, 1, false },
+        { "past the right of everything", 4000, 100, 640, 480, 2, false },
+        { "title bar above every display", 100, -400, 1280, 720, 2, false },
+        { "below everything", 0, 2000, 1280, 720, 2, false },
+        { "only a sliver on screen", -1280 + GS_WINMEM_GRAB_W - 1, 100, 1280,
+          720, 2, false },
+        { "exactly a grab on screen", -1280 + GS_WINMEM_GRAB_W, 100, 1280,
+          720, 2, true },
+        { "top edge level with the display top", 100, 0, 1280, 720, 2, true },
+        { "one row above the display top", 100, -1, 1280, 720, 2, false },
+        { "no displays at all", 100, 100, 1280, 720, 0, false },
+    };
+    int walked = 0;
+    for (size_t i = 0; i < SDL_arraysize(spot); i++) {
+        const gs_winmem at = { .x = spot[i].x, .y = spot[i].y, .w = spot[i].w,
+                               .h = spot[i].h, .placed = true };
+        const bool safe = gs_winmem_on_a_display(&at, desk, spot[i].displays);
+        if (safe != spot[i].safe) {
+            printf("  WINDOW %s: said %s, wanted %s\n", spot[i].name,
+                   safe ? "safe" : "unsafe", spot[i].safe ? "safe" : "unsafe");
+        }
+        CHECK(safe == spot[i].safe);
+        walked++;
+    }
+    CHECK(walked == (int)SDL_arraysize(spot));
+
+    // A memory that was never placed has nowhere to go back to, however many
+    // displays there are.
+    gs_winmem unplaced;
+    gs_winmem_default(&unplaced, 1280, 720);
+    CHECK(!gs_winmem_on_a_display(&unplaced, desk, 2));
+
+    printf("  WINDOW %d damaged files refused, %d kept their size only, "
+           "%d desk arrangements walked\n", refused, kept, walked);
+
+    // What is not covered here, named: applying the position to a real window
+    // happens in the game's own start-up, two calls past this rule, and the
+    // window system has the last word on whether a position sticks - under
+    // Wayland it may not, and the size half of the memory is what survives.
+}
+
 TEST(the_tracks_screen_shows_the_shape_of_the_chosen_track) {
     // **"Could the tracks dialog contain a preview of the shape of the
     // track?"** It could, and now it does: the same drawing the HUD's minimap
@@ -11889,6 +12032,7 @@ int main(void) {
     run_the_hud_says_what_you_are_carrying_and_only_when_you_are(ren);
     run_at_the_smallest_window_every_control_can_be_scrolled_to(ren);
     run_a_screen_that_has_just_appeared_is_the_one_taking_input(ren);
+    run_the_window_opens_where_it_was_left_and_never_somewhere_nobody_can_see(ren);
     run_the_tracks_screen_shows_the_shape_of_the_chosen_track(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);
     run_a_store_with_tracks_in_it_is_saved_whole(ren);

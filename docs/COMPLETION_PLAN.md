@@ -2729,3 +2729,12 @@ are the places a fault could sit unnoticed.
       routed track, absent for a routeless one, absent with nothing chosen,
       and gone at the smallest window where the Copy button must stay whole
       instead.*
+
+- [x] **The window opens where it was left.** Position and size are written
+      to a small text file on the way out and restored on the way in — but
+      only when the remembered spot is still on a display that exists, so a
+      monitor unplugged since never leaves the game somewhere nobody can see
+      or grab.
+      *Verification: four consecutive real launches reopen at the same
+      pixel; the suite refuses every kind of damaged memory file and walks
+      twelve display arrangements, including the monitor that is gone.*
