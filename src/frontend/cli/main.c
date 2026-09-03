@@ -805,8 +805,8 @@ static int cmd_generate(int count) {
 
     if (count <= 0) count = 50;
 
-    printf("%-6s %-18s %-9s %5s %6s  %s\n", "seed", "name", "shape", "size",
-           "gates", "completable");
+    printf("%-6s %-18s %5s %6s %4s  %s\n", "seed", "name", "size", "gates",
+           "ok", "the draw");
 
     int bad = 0, flat = 0;
     uint64_t seen[256];
@@ -850,9 +850,11 @@ static int cmd_generate(int count) {
         if (!ok) bad++;
 
         if (count <= 12 || !ok) {
-            printf("%-6u %-18s %-9s %2ux%-2u %6u  %s\n", seed, name,
-                   gs_shape_name(gs_generate_shape_for(seed)), t.w,
-                   t.h, t.gate_count, ok ? "yes" : "NO");
+            char line[160];
+            gs_track_spec spec = gs_generate_spec_for(seed);
+            gs_spec_line(&spec, line, sizeof line);
+            printf("%-6u %-18s %2ux%-2u %6u %4s  %s\n", seed, name, t.w, t.h,
+                   t.gate_count, ok ? "yes" : "NO", line);
         }
     }
 

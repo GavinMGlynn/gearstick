@@ -206,7 +206,20 @@
 //
 // The layout is drawn from the same generator as everything else about a track,
 // so it consumes a draw and every seed's terrain moves with its shape.
-#define GS_SELFTEST_GENERATOR_HASH 0xb515b34ae0fde57cULL
+// **And it moved for the matrix, which retired the shapes altogether.**
+//
+// The four terrain shapes and the layout planner are gone. A track is now a
+// draw from ten dials - class, length, curviness, straightness, jumps,
+// relief, relief range, gravity, dress, road width - and the route is grown
+// by a biased self-avoiding walk over a cell grid rather than laid from a
+// template, so how a track folds is an outcome of the dice. Every seed
+// therefore builds entirely different ground, and every seed anybody shared
+// names a different track: asked for in so many words - "you need to have two
+// classes of tracks... the path needs to be reasonably randomized - the
+// tracks should be organic" - and worth exactly this cost. The dials are
+// asserted one by one in the suite, each measured on the track that comes
+// out. The world hash above did not move; the physics is untouched.
+#define GS_SELFTEST_GENERATOR_HASH 0xea105006e4f627b5ULL
 
 // **A race with nobody at the keyboard**, four opponents spread across the
 // skill dial, on a circuit none of them has seen.

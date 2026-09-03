@@ -1,67 +1,160 @@
 // gs_generate.h - tracks from a number.
 //
-// **Seeded, so a track is reproducible from a number.** That is not a
-// convenience: it is the same property the rest of this project is built on.
-// A generated track can be named by its seed, regenerated anywhere, and shared
-// as four bytes - and because the result is content-hashed like any other
-// track, two people generating seed 41 have provably the same ground.
+// **A track is a draw from a matrix, not a variation on a template.** There
+// were four hard-coded shapes and every one of them laid the same serpentine;
+// the shapes chose the scenery and nothing chose the track. What replaced them
+// is ten dials, each drawn from the seed: what class of track it is, how far it
+// is raced, how it corners, how it straightens, how much air it is about, what
+// the ground does, how hard the ground does it, what the weight is like, what
+// it is dressed in and how wide the road is. Two of those draws contradicting
+// each other is resolved at draw time, in gs_generate_spec_for, so the spec a
+// caller sees is always the spec that was built.
 //
-// The generator is deliberately not clever. It picks a shape, lays a route
-// through it, and decorates - because a track somebody can predict the shape of
-// is a track they can learn, and the whole ethic here is a model simple enough
-// to exploit. A generator that produced surprising terrain would produce tracks
-// nobody could read.
-//
-// Integers only, like everything in src/core/: the same seed has to give the
-// same track on every machine, and a float would make that a hope.
+// The route itself is *grown*, not laid: a randomised walk over a coarse cell
+// grid, biased by the curviness and straightness draws, so the way a track
+// folds is an outcome of the dice rather than a family it belongs to.
 #ifndef GS_GENERATE_H
 #define GS_GENERATE_H
 
+#include <stddef.h>
+
 #include "core/gs_track.h"
 
-typedef enum gs_track_shape {
-    GS_SHAPE_SPRINT = 0,   // out and back, the shape a first track should be
-    GS_SHAPE_CIRCUIT,      // a loop with corners
-    GS_SHAPE_JUMPS,        // a run of ridges, where the air time is the point
-    GS_SHAPE_MIXED,        // surfaces that change under you
-    GS_SHAPE_COUNT
-} gs_track_shape;
+// What kind of race it is. A circuit closes and is driven GS_STOCK_LAPS times;
+// a path runs end to end once, so all of its distance is in the route.
+typedef enum gs_gen_class {
+    GS_CLASS_CIRCUIT = 0,
+    GS_CLASS_PATH,
+    GS_CLASS_COUNT
+} gs_gen_class;
 
-// Half the width of the road a generated route is carved along, in tiles.
-//
-// Public because a gate has to be wider than it. A gate is finite across its
-// line - that is what makes it a gate rather than a tripwire across the world -
-// so one narrower than the road can be driven *past* on the outside, and
-// because gates count in order a checkpoint nobody crossed is a finish line
-// that never fires. A player drove over the finish and the game did not notice.
-#define GS_GEN_ROAD 4
+// How far the race is, in tiles actually raced - a circuit's route is one lap
+// of it. The epic ceiling is the field's: GS_TRACK_MAX bounds the world at 192
+// tiles a side, and about twelve hundred tiles of race is what an organic route
+// can spend inside that without folding into mush.
+typedef enum gs_gen_length {
+    GS_LEN_STANDARD = 0,   // about 630 to 840 tiles raced
+    GS_LEN_LONG,           // about 780 to 1030
+    GS_LEN_EPIC,           // about 950 to 1300; a path's tops out near 1100
+    GS_LEN_COUNT
+} gs_gen_length;
 
-const char *gs_shape_name(gs_track_shape s);
+// How often the route corners, and how gently when it does. This biases the
+// walk that grows the route - flowing hoards its straights and rounds what
+// corners it must take; technical corners constantly and sharply.
+typedef enum gs_gen_curve {
+    GS_CURVE_FLOWING = 0,
+    GS_CURVE_WINDING,
+    GS_CURVE_TECHNICAL,
+    GS_CURVE_COUNT
+} gs_gen_curve;
 
-// Build one. The seed decides everything - the shape, the size, the terrain,
-// the surfaces, the painted gravity and the route - so the same seed gives the
-// same track, byte for byte, on any machine.
+// What the straights are like, independent of the cornering: a technical track
+// with one huge straight is a real track, and this is the dial that builds it.
+typedef enum gs_gen_straight {
+    GS_STRAIGHT_BROKEN = 0,   // nothing long enough to rest on
+    GS_STRAIGHT_BALANCED,     // straights, but none that decides the race
+    GS_STRAIGHT_POWER,        // one long enough that top speed matters
+    GS_STRAIGHT_COUNT
+} gs_gen_straight;
+
+// How much air the track is about. None still shapes the ground - a flat field
+// is not a lesser track, it is a missing one - it just builds nothing meant to
+// be flown off.
+typedef enum gs_gen_jumps {
+    GS_JUMPS_NONE = 0,
+    GS_JUMPS_SMALL,   // bumps taken flat
+    GS_JUMPS_BIG,     // ramps left at speed
+    GS_JUMPS_COUNT
+} gs_gen_jumps;
+
+// The shape of the ground the route is cut through.
+typedef enum gs_gen_relief {
+    GS_RELIEF_FLAT = 0,
+    GS_RELIEF_ROLLING,   // continuous hills
+    GS_RELIEF_RIDGED,    // linear ridges at an angle to the world
+    GS_RELIEF_BASIN,     // a dished field, high at the rim
+    GS_RELIEF_COUNT
+} gs_gen_relief;
+
+// How hard the ground does it: the difference between the lowest and highest
+// ground, in bands. Drawn separately from the shape, because a subtle basin
+// and a severe basin are different tracks over the same idea.
+typedef enum gs_gen_range {
+    GS_RANGE_SUBTLE = 0,
+    GS_RANGE_MODERATE,
+    GS_RANGE_SEVERE,
+    GS_RANGE_COUNT
+} gs_gen_range;
+
+// What the weight is like. Painted onto the tiles, not set on the race - see
+// gs_track.h for why gravity is a field. Pockets are centred on the route so
+// they are driven through rather than decorating a corner of the map.
+typedef enum gs_gen_gravity {
+    GS_GRAV_EARTH = 0,
+    GS_GRAV_LIGHT,    // pockets below Earth
+    GS_GRAV_HEAVY,    // pockets above it
+    GS_GRAV_SPLIT,    // half the world one way, half the other
+    GS_GRAV_COUNT
+} gs_gen_gravity;
+
+// What the ground is dressed in, over the base surface.
+typedef enum gs_gen_dress {
+    GS_DRESS_PLAIN = 0,   // one ground, one road
+    GS_DRESS_BANDED,      // broad bands of a second ground
+    GS_DRESS_PATCHWORK,   // patches of foreign ground crossing the route
+    GS_DRESS_COUNT
+} gs_gen_dress;
+
+// How much room a mistake gets.
+typedef enum gs_gen_width {
+    GS_WIDTH_NARROW = 0,
+    GS_WIDTH_STANDARD,
+    GS_WIDTH_WIDE,
+    GS_WIDTH_COUNT
+} gs_gen_width;
+
+// One track, as its dials. Every field is one of the enums above plus the base
+// surface, and gs_generate_spec_for is the only place a spec is drawn - the
+// vetoes live there, so a spec in hand is always a spec that can be built.
+typedef struct gs_track_spec {
+    gs_gen_class    kind;
+    gs_gen_length   length;
+    gs_gen_curve    curve;
+    gs_gen_straight straight;
+    gs_gen_jumps    jumps;
+    gs_gen_relief   relief;
+    gs_gen_range    range;
+    gs_gen_gravity  gravity;
+    gs_gen_dress    dress;
+    gs_gen_width    width;
+    gs_surface      base;
+} gs_track_spec;
+
+// The dials a seed draws, vetoes already applied. Deterministic: the same seed
+// always answers the same, on every compiler and platform, like the physics.
+gs_track_spec gs_generate_spec_for(uint32_t seed);
+
+// The track a seed names: spec drawn, ground built, route grown, road carved,
+// gates laid. Deterministic for the same reason the physics is.
 void gs_generate(gs_track *t, uint32_t seed);
 
-// The same, with the shape chosen rather than drawn from the seed.
-void gs_generate_shape(gs_track *t, uint32_t seed, gs_track_shape shape);
+// The same, with the dials chosen by the caller rather than the seed - the
+// seed still decides everything the spec does not. gs_generate is exactly
+// gs_generate_from_spec(t, seed, gs_generate_spec_for(seed)).
+void gs_generate_from_spec(gs_track *t, uint32_t seed, const gs_track_spec *spec);
 
-// **The route, laid onto ground somebody else built.**
-//
-// A serpentine of the same shape the generator uses, carved into whatever
-// terrain is already there, with its gates. It is public because the tracks
-// written by hand in tools/make_tracks.c need to be as long as the generated
-// ones - each of them demonstrates one idea, and a route that crosses that idea
-// five times is a better demonstration than one that crosses it once.
-void gs_generate_route(gs_track *t, uint32_t seed, bool loop);
+// The road's half-width for this spec, in tiles. Public because a gate has to
+// be wider than the road it crosses, and anything checking that needs the
+// number the generator actually used.
+uint8_t gs_spec_road(const gs_track_spec *spec);
 
-// Which shape a seed gives, without building it - for a sweep that wants to
-// report what failed rather than merely that something did.
-gs_track_shape gs_generate_shape_for(uint32_t seed);
+// The one-line reason this track exists - "a winding epic circuit over rolling
+// ice, small jumps, light pockets" - after the 1985 manual, where every track
+// had a reason somebody could say in one line.
+void gs_spec_line(const gs_track_spec *spec, char *out, size_t cap);
 
-// A name for a generated track, from its seed. Deterministic, so the same seed
-// is the same name - two words, because "seed 2864434397" is not something
-// anybody repeats out loud.
+// Two words from the seed, the same two every time.
 void gs_generate_name(char *out, size_t cap, uint32_t seed);
 
 #endif // GS_GENERATE_H

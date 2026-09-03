@@ -8230,6 +8230,307 @@ TEST(a_generated_race_can_actually_be_finished) {
     CHECK(raced == shippable * GS_MAX_CARS);
 }
 
+// ---------------------------------------------------------------------------
+// The matrix, asserted
+// ---------------------------------------------------------------------------
+//
+// A track is a draw from ten dials, and each dial below is proven to *do*
+// something: the same seeds, the same benign base spec, one dial varied, and
+// the outcome measured on the track that comes out. The bounds are taken from
+// measurement with margin, and they are deterministic - these seeds always
+// build these tracks - so a drift here is the generator changing, not a test
+// being unlucky.
+
+static gs_track_spec gs_benign_spec(void) {
+    gs_track_spec s;
+    s.kind = GS_CLASS_PATH;
+    s.length = GS_LEN_LONG;
+    s.curve = GS_CURVE_WINDING;
+    s.straight = GS_STRAIGHT_BALANCED;
+    s.jumps = GS_JUMPS_NONE;
+    s.relief = GS_RELIEF_ROLLING;
+    s.range = GS_RANGE_MODERATE;
+    s.gravity = GS_GRAV_EARTH;
+    s.dress = GS_DRESS_PLAIN;
+    s.width = GS_WIDTH_STANDARD;
+    s.base = GS_SURF_PAVEMENT;
+    return s;
+}
+
+#define GS_DIAL_SEEDS 10
+static uint32_t gs_dial_seed(uint32_t i) { return 1000u + i * 7919u; }
+
+// Total turning along the gates, in degrees per hundred tiles of route.
+static double gs_gen_twist(void) {
+    int64_t total = 0;
+    for (uint8_t i = 0; i + 2 < gs_gen_a.gate_count; i++) {
+        const gs_gate *a = &gs_gen_a.gate[i];
+        const gs_gate *b = &gs_gen_a.gate[i + 1];
+        const gs_gate *c = &gs_gen_a.gate[i + 2];
+        gs_angle in_leg = gs_atan2(b->y - a->y, b->x - a->x);
+        gs_angle out_leg = gs_atan2(c->y - b->y, c->x - b->x);
+        int32_t d = gs_angle_delta(in_leg, out_leg);
+        total += d < 0 ? -d : d;
+    }
+    double route = (double)gs_track_route_length(&gs_gen_a) / (double)GS_ONE;
+    return (double)total * 360.0 / 65536.0 / route * 100.0;
+}
+
+// The longest stretch of gates that barely turn - under seven degrees a leg -
+// in tiles.
+static double gs_gen_longest_straight(void) {
+    double best = 0, cur = 0;
+    for (uint8_t i = 0; i + 2 < gs_gen_a.gate_count; i++) {
+        const gs_gate *a = &gs_gen_a.gate[i];
+        const gs_gate *b = &gs_gen_a.gate[i + 1];
+        const gs_gate *c = &gs_gen_a.gate[i + 2];
+        gs_angle in_leg = gs_atan2(b->y - a->y, b->x - a->x);
+        gs_angle out_leg = gs_atan2(c->y - b->y, c->x - b->x);
+        int32_t d = gs_angle_delta(in_leg, out_leg);
+        if (d < 0) d = -d;
+        double leg = (double)gs_fix_len2(b->x - a->x, b->y - a->y) /
+                     (double)GS_ONE;
+        if (d < 1274) {
+            cur += leg;
+        } else {
+            if (cur > best) best = cur;
+            cur = 0;
+        }
+    }
+    if (cur > best) best = cur;
+    return best;
+}
+
+// Highest corner less lowest, in tiles, over the field's interior - inside
+// the rim lip every generated world wears, which is safety furniture rather
+// than the relief dial's doing.
+static double gs_gen_field_p2p(void) {
+    gs_fix mn = INT32_MAX, mx = INT32_MIN;
+    for (int32_t y = 16; y <= (int32_t)gs_gen_a.h - 16; y++) {
+        for (int32_t x = 16; x <= (int32_t)gs_gen_a.w - 16; x++) {
+            gs_fix c = gs_track_corner_at(&gs_gen_a, (uint8_t)x, (uint8_t)y);
+            if (c < mn) mn = c;
+            if (c > mx) mx = c;
+        }
+    }
+    return (double)(mx - mn) / (double)GS_ONE;
+}
+
+static gs_fix gs_gen_min_gravity(void) {
+    gs_fix mn = INT32_MAX;
+    for (int32_t y = 0; y < (int32_t)gs_gen_a.h; y++) {
+        for (int32_t x = 0; x < (int32_t)gs_gen_a.w; x++) {
+            gs_fix g = gs_track_gravity(&gs_gen_a, GS_INT(x) + GS_ONE / 2,
+                                        GS_INT(y) + GS_ONE / 2);
+            if (g < mn) mn = g;
+        }
+    }
+    return mn;
+}
+
+TEST(every_band_of_every_dial_is_drawn_and_every_veto_holds) {
+    // Six hundred seeds through the spec drawer: every band of every dial has
+    // to turn up - a band nothing ever draws is a dial that lies - and no
+    // spec may carry a combination the vetoes exist to refuse. The counts are
+    // against the enum COUNTs, so a band added later and never wired into the
+    // draw turns this red by itself.
+    int kind[GS_CLASS_COUNT] = { 0 };
+    int length[GS_LEN_COUNT] = { 0 };
+    int curve[GS_CURVE_COUNT] = { 0 };
+    int straight[GS_STRAIGHT_COUNT] = { 0 };
+    int jumps[GS_JUMPS_COUNT] = { 0 };
+    int relief[GS_RELIEF_COUNT] = { 0 };
+    int range[GS_RANGE_COUNT] = { 0 };
+    int gravity[GS_GRAV_COUNT] = { 0 };
+    int dress[GS_DRESS_COUNT] = { 0 };
+    int width[GS_WIDTH_COUNT] = { 0 };
+    int base[GS_SURF_COUNT] = { 0 };
+
+    for (uint32_t seed = 1; seed <= 600; seed++) {
+        gs_track_spec sp = gs_generate_spec_for(seed);
+        kind[sp.kind]++;
+        length[sp.length]++;
+        curve[sp.curve]++;
+        straight[sp.straight]++;
+        jumps[sp.jumps]++;
+        relief[sp.relief]++;
+        range[sp.range]++;
+        gravity[sp.gravity]++;
+        dress[sp.dress]++;
+        width[sp.width]++;
+        base[sp.base]++;
+
+        // The vetoes, as invariants over everything the drawer can say.
+        CHECK(!(sp.relief == GS_RELIEF_FLAT && sp.range != GS_RANGE_SUBTLE));
+        CHECK(!(sp.relief == GS_RELIEF_FLAT && sp.jumps == GS_JUMPS_NONE));
+        CHECK(!(sp.width == GS_WIDTH_NARROW && sp.curve == GS_CURVE_TECHNICAL &&
+                (sp.base == GS_SURF_ICE || sp.base == GS_SURF_SLUSH)));
+    }
+
+    for (int i = 0; i < GS_CLASS_COUNT; i++) CHECK(kind[i] > 0);
+    for (int i = 0; i < GS_LEN_COUNT; i++) CHECK(length[i] > 0);
+    for (int i = 0; i < GS_CURVE_COUNT; i++) CHECK(curve[i] > 0);
+    for (int i = 0; i < GS_STRAIGHT_COUNT; i++) CHECK(straight[i] > 0);
+    for (int i = 0; i < GS_JUMPS_COUNT; i++) CHECK(jumps[i] > 0);
+    for (int i = 0; i < GS_RELIEF_COUNT; i++) CHECK(relief[i] > 0);
+    for (int i = 0; i < GS_RANGE_COUNT; i++) CHECK(range[i] > 0);
+    for (int i = 0; i < GS_GRAV_COUNT; i++) CHECK(gravity[i] > 0);
+    for (int i = 0; i < GS_DRESS_COUNT; i++) CHECK(dress[i] > 0);
+    for (int i = 0; i < GS_WIDTH_COUNT; i++) CHECK(width[i] > 0);
+    for (int i = 0; i < GS_SURF_COUNT; i++) CHECK(base[i] > 0);
+
+    printf("  MATRIX 600 seeds: %d/%d circuits/paths, every band of every "
+           "dial drawn, every veto held\n",
+           kind[GS_CLASS_CIRCUIT], kind[GS_CLASS_PATH]);
+}
+
+TEST(a_technical_draw_corners_more_than_a_winding_one_which_corners_more_than_flowing) {
+    double avg[GS_CURVE_COUNT] = { 0 };
+    for (int c = 0; c < GS_CURVE_COUNT; c++) {
+        for (uint32_t i = 0; i < GS_DIAL_SEEDS; i++) {
+            gs_track_spec sp = gs_benign_spec();
+            sp.curve = (gs_gen_curve)c;
+            gs_generate_from_spec(&gs_gen_a, gs_dial_seed(i), &sp);
+            avg[c] += gs_gen_twist();
+        }
+        avg[c] /= GS_DIAL_SEEDS;
+    }
+    printf("  CURVE twist per 100 tiles: flowing %.0f, winding %.0f, "
+           "technical %.0f\n", avg[0], avg[1], avg[2]);
+
+    // Measured at 229 / 267 / 348; the gaps asserted are half the real ones,
+    // so tuning has room to move without the dial being allowed to stop
+    // mattering.
+    CHECK(avg[GS_CURVE_WINDING] > avg[GS_CURVE_FLOWING] + 15.0);
+    CHECK(avg[GS_CURVE_TECHNICAL] > avg[GS_CURVE_WINDING] + 40.0);
+}
+
+TEST(a_power_straight_outruns_a_balanced_one_which_outruns_a_broken_one) {
+    for (int c = 0; c < GS_STRAIGHT_COUNT; c++) {
+        for (uint32_t i = 0; i < GS_DIAL_SEEDS; i++) {
+            gs_track_spec sp = gs_benign_spec();
+            sp.straight = (gs_gen_straight)c;
+            gs_generate_from_spec(&gs_gen_a, gs_dial_seed(i), &sp);
+            double longest = gs_gen_longest_straight();
+
+            // Every track of the band, not the band on average: a broken
+            // draw that ships one long straight is the dial not holding.
+            if (c == GS_STRAIGHT_BROKEN) CHECK(longest < 25.0);
+            if (c == GS_STRAIGHT_BALANCED) {
+                CHECK(longest > 25.0);
+                CHECK(longest < 65.0);
+            }
+            if (c == GS_STRAIGHT_POWER) CHECK(longest > 65.0);
+        }
+    }
+}
+
+TEST(the_length_bands_are_bands_and_they_are_ordered) {
+    static const double floor_of[GS_LEN_COUNT] = { 600.0, 720.0, 820.0 };
+    static const double ceil_of[GS_LEN_COUNT] = { 900.0, 1050.0, 1300.0 };
+
+    for (int k = 0; k < GS_CLASS_COUNT; k++) {
+        double mean[GS_LEN_COUNT] = { 0 };
+        for (int c = 0; c < GS_LEN_COUNT; c++) {
+            for (uint32_t i = 0; i < GS_DIAL_SEEDS; i++) {
+                gs_track_spec sp = gs_benign_spec();
+                sp.kind = (gs_gen_class)k;
+                sp.length = (gs_gen_length)c;
+                gs_generate_from_spec(&gs_gen_a, gs_dial_seed(i), &sp);
+                double raced =
+                    (double)gs_track_race_length(&gs_gen_a) / (double)GS_ONE;
+                CHECK(raced >= floor_of[c]);
+                CHECK(raced <= ceil_of[c]);
+                mean[c] += raced;
+            }
+            mean[c] /= GS_DIAL_SEEDS;
+        }
+        // Ordered with daylight between the means, for both classes. A
+        // path's epic tops out lower than a circuit's - the field caps how
+        // much route a walk can fold into it, and GS_TRACK_MAX caps the
+        // field - but epic still has to out-run long.
+        CHECK(mean[GS_LEN_LONG] > mean[GS_LEN_STANDARD] + 80.0);
+        CHECK(mean[GS_LEN_EPIC] > mean[GS_LEN_LONG] + 80.0);
+    }
+}
+
+TEST(a_severe_field_is_hillier_than_a_moderate_one_and_both_dwarf_subtle) {
+    double lo[GS_RANGE_COUNT], hi[GS_RANGE_COUNT];
+    for (int c = 0; c < GS_RANGE_COUNT; c++) {
+        lo[c] = 1e9;
+        hi[c] = 0;
+        for (uint32_t i = 0; i < GS_DIAL_SEEDS; i++) {
+            gs_track_spec sp = gs_benign_spec();
+            sp.range = (gs_gen_range)c;
+            gs_generate_from_spec(&gs_gen_a, gs_dial_seed(i), &sp);
+            double p2p = gs_gen_field_p2p();
+            if (p2p < lo[c]) lo[c] = p2p;
+            if (p2p > hi[c]) hi[c] = p2p;
+        }
+    }
+    printf("  RANGE relief in tiles: subtle %.1f-%.1f, moderate %.1f-%.1f, "
+           "severe %.1f-%.1f\n", lo[0], hi[0], lo[1], hi[1], lo[2], hi[2]);
+
+    // The bands are disjoint outright - the tamest severe field out-hills the
+    // wildest moderate one - which is a stronger claim than ordered means and
+    // the one a player turning the dial would make.
+    CHECK(hi[GS_RANGE_SUBTLE] < 1.6);
+    CHECK(lo[GS_RANGE_MODERATE] > hi[GS_RANGE_SUBTLE]);
+    CHECK(lo[GS_RANGE_SEVERE] > hi[GS_RANGE_MODERATE]);
+    CHECK(hi[GS_RANGE_SEVERE] < 6.0);
+}
+
+TEST(big_jumps_out_jump_small_ones_and_none_means_none_on_flat_ground) {
+    // On a flat subtle field the stamped hills are the only elevation there
+    // is, so the field's relief *is* the jumps dial.
+    double lo[GS_JUMPS_COUNT], hi[GS_JUMPS_COUNT];
+    for (int c = 0; c < GS_JUMPS_COUNT; c++) {
+        lo[c] = 1e9;
+        hi[c] = 0;
+        for (uint32_t i = 0; i < GS_DIAL_SEEDS; i++) {
+            gs_track_spec sp = gs_benign_spec();
+            sp.relief = GS_RELIEF_FLAT;
+            sp.range = GS_RANGE_SUBTLE;
+            sp.jumps = (gs_gen_jumps)c;
+            gs_generate_from_spec(&gs_gen_a, gs_dial_seed(i), &sp);
+            double p2p = gs_gen_field_p2p();
+            if (p2p < lo[c]) lo[c] = p2p;
+            if (p2p > hi[c]) hi[c] = p2p;
+        }
+    }
+    CHECK(hi[GS_JUMPS_NONE] == 0.0);      // none means none, exactly
+    CHECK(lo[GS_JUMPS_SMALL] > 0.8);
+    CHECK(hi[GS_JUMPS_SMALL] < 1.8);
+    CHECK(lo[GS_JUMPS_BIG] > hi[GS_JUMPS_SMALL]);
+    CHECK(hi[GS_JUMPS_BIG] < 3.4);
+}
+
+TEST(moon_gravity_never_shares_ground_with_big_jumps) {
+    // The one veto that lives at paint time rather than in the spec drawer: a
+    // light pocket under a big ramp is floored at three quarters of Earth,
+    // because a third of Earth under one is a car that leaves the world.
+    for (uint32_t i = 0; i < GS_DIAL_SEEDS; i++) {
+        gs_track_spec sp = gs_benign_spec();
+        sp.jumps = GS_JUMPS_BIG;
+        sp.gravity = GS_GRAV_LIGHT;
+        gs_generate_from_spec(&gs_gen_a, gs_dial_seed(i), &sp);
+        CHECK(gs_gen_min_gravity() >= GS_RATIO(74, 100));
+    }
+
+    // And the floor is the ramps' doing, not the dial quietly shrinking: the
+    // same draws with small jumps still reach genuinely light ground.
+    gs_fix lightest = INT32_MAX;
+    for (uint32_t i = 0; i < GS_DIAL_SEEDS; i++) {
+        gs_track_spec sp = gs_benign_spec();
+        sp.jumps = GS_JUMPS_SMALL;
+        sp.gravity = GS_GRAV_LIGHT;
+        gs_generate_from_spec(&gs_gen_a, gs_dial_seed(i), &sp);
+        gs_fix mn = gs_gen_min_gravity();
+        if (mn < lightest) lightest = mn;
+    }
+    CHECK(lightest <= GS_RATIO(50, 100));
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -8241,12 +8542,16 @@ TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // it was reached, because gates count in order. The track was completable
     // and the analyser said so: the AI aims at gate centres, so the AI never
     // missed one and nothing noticed.
+    // Against the road width this track's own spec drew, because the road is
+    // a dial now and a gate that clears the widest road on a narrow one is
+    // not the claim.
     for (uint32_t seed = 1; seed <= 40; seed++) {
         gs_generate(&gs_gen_a, seed * 7919u);
         CHECK(gs_gen_a.gate_count >= 2);
 
+        gs_track_spec spec = gs_generate_spec_for(seed * 7919u);
         for (uint8_t i = 0; i < gs_gen_a.gate_count; i++) {
-            CHECK(gs_gen_a.gate[i].half_width >= GS_INT(GS_GEN_ROAD));
+            CHECK(gs_gen_a.gate[i].half_width >= GS_INT(gs_spec_road(&spec)));
         }
     }
 }
@@ -9193,6 +9498,13 @@ int main(void) {
     run_every_generated_track_has_terrain_on_it();
     run_no_generated_slope_is_steeper_than_a_car_can_climb();
     run_a_generated_race_can_actually_be_finished();
+    run_every_band_of_every_dial_is_drawn_and_every_veto_holds();
+    run_a_technical_draw_corners_more_than_a_winding_one_which_corners_more_than_flowing();
+    run_a_power_straight_outruns_a_balanced_one_which_outruns_a_broken_one();
+    run_the_length_bands_are_bands_and_they_are_ordered();
+    run_a_severe_field_is_hillier_than_a_moderate_one_and_both_dwarf_subtle();
+    run_big_jumps_out_jump_small_ones_and_none_means_none_on_flat_ground();
+    run_moon_gravity_never_shares_ground_with_big_jumps();
     run_every_gate_is_wider_than_the_road_it_crosses();
     run_a_lap_of_a_loop_is_a_lap_and_arriving_ends_a_path();
     run_a_part_dropped_on_a_track_undoes_in_one_step();

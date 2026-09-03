@@ -2669,7 +2669,7 @@ TEST(a_store_with_tracks_in_it_is_saved_whole) {
     if (assets == nullptr) return;
 
     static const char *const shipped[] = {
-        "first-light", "the-long-drop", "ice-house", "jupiter-run",
+        "low-bend", "grey-mile", "far-drop", "steep-bend",
     };
 
     static gs_track t;
@@ -2795,29 +2795,16 @@ TEST(no_track_that_ships_throws_a_car_off_the_world) {
     walk.overflowed = false;
     SDL_snprintf(dir, sizeof dir, "%s/tracks/", assets);
     CHECK(SDL_EnumerateDirectory(dir, gs_take_stock, &walk));
-    CHECK(walk.count >= 16);
+    CHECK(walk.count >= 30);
     CHECK(!walk.overflowed);
 
-    // **The two that do, named with their reason rather than left out.**
-    //
-    // Both are written by hand, and a hand-written track lays its route with
-    // the same planner from a seed chosen for the ground it is built on - so
-    // they cannot be fixed the way a generated candidate is, by taking the next
-    // seed. Of the ninety-six seeds after theirs, only their own lays a sound
-    // route on their ground. Fixing them means re-shaping two tracks or
-    // widening the inset every route is laid at, which costs route length on
-    // all eighteen; both are decisions about the set rather than something to
-    // do quietly here.
-    //
-    // Required to still be failing, not merely permitted to: fixing one of them
-    // turns this red so the excuse goes with the fault.
-    // `jupiter run` was on this list and is not any more: the routes changed
-    // shape and its own stopped putting a car over the edge. That is the excuse
-    // going with the fault, which is what requiring them to still be failing is
-    // for - it came off the list because the test went red saying it no longer
-    // needed to be on it.
-    static const char *excused[] = { "which-way.gstrack", "the-big-one.gstrack" };
-    bool excuse_used[SDL_arraysize(excused)] = { false };
+    // **No excused tracks.** There used to be two, both written by hand and
+    // both losing a car over the north edge in the opening seconds - the
+    // shape of their ground allowed no other route, and re-shaping them was a
+    // decision about the set. The set was re-made: every track that ships now
+    // comes from the matrix generator and has to clear this exact bar at
+    // build time, so a name appearing in the failure below is a regression,
+    // not a known cost.
 
     int raced = 0, lost = 0;
     for (int i = 0; i < walk.count; i++) {
@@ -2859,32 +2846,17 @@ TEST(no_track_that_ships_throws_a_car_off_the_world) {
             }
         }
 
-        bool allowed = false;
-        for (size_t k = 0; k < SDL_arraysize(excused); k++) {
-            if (SDL_strcmp(walk.name[i], excused[k]) != 0) continue;
-            allowed = true;
-            if (off) excuse_used[k] = true;
-        }
-
-        if (off && !allowed) {
+        if (off) {
             printf("  OFF THE WORLD %s puts a car past the run-off\n",
                    walk.name[i]);
             lost++;
         }
-        CHECK(off == false || allowed);
+        CHECK(off == false);
         raced++;
     }
 
-    for (size_t k = 0; k < SDL_arraysize(excused); k++) {
-        if (!excuse_used[k]) {
-            printf("  OFF THE WORLD %s no longer needs excusing - remove it\n",
-                   excused[k]);
-        }
-        CHECK(excuse_used[k]);
-    }
-
     printf("  OFF THE WORLD %d tracks raced by a full grid, %d threw a car, "
-           "%d named as known\n", raced, lost, (int)SDL_arraysize(excused));
+           "none excused\n", raced, lost);
     CHECK(raced == walk.count);
 }
 
@@ -2991,7 +2963,7 @@ TEST(the_stock_tracks_ship_and_are_worth_racing) {
     // by walking nothing at all. Sixteen rather than twenty: every candidate is
     // now raced by every vehicle from every grid slot before it is allowed to
     // ship, which is a bar a route of a thousand tiles does not always clear.
-    CHECK(walk.count >= 16);
+    CHECK(walk.count >= 30);
     CHECK(!walk.overflowed);
 
     int checked = 0;
@@ -5408,7 +5380,7 @@ TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
     // The set that ships, asserted rather than assumed: a directory that has
     // quietly emptied would otherwise pass this in no time at all.
     printf("  STOCK %d tracks in assets/tracks\n", count);
-    CHECK(count >= 16);
+    CHECK(count >= 30);
 
     int raced = 0, stuck = 0;
     gs_fix shortest = INT32_MAX, longest = 0;

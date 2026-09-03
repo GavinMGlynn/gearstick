@@ -2700,3 +2700,21 @@ are the places a fault could sit unnoticed.
       dozen rather than every hundred; and the generator is now understood to
       propose candidates, about one in twelve of which is thrown away by racing
       it rather than shipped.
+
+- [x] **A track is a draw from a matrix, and thirty of them ship.** Every
+      track used to be the same serpentine with different scenery. The
+      generator now draws ten dials from the seed — circuit or path, three
+      lengths, three curvinesses, three kinds of straight, three sizes of
+      jump, four ground shapes at three severities, four gravities, three
+      dressings and three road widths — and grows an organic route to satisfy
+      the draw, so no two tracks fold the same way. The stock set is thirty
+      tracks drawn from that matrix and none written by hand, each picked by
+      racing it: every vehicle finishes from every grid slot and nobody is
+      thrown off the world, with no excused exceptions left.
+      *Verification: every dial is measured on the tracks it makes — a
+      technical draw corners half as much again as a flowing one, every power
+      straight is longer than any broken one, the severest ground out-hills
+      the mildest moderate outright, and turning the jumps dial visibly
+      changes the ramps. The tool refuses to write a set that misses a band
+      of the matrix, and the suite races the whole shipped set with a full
+      grid.*

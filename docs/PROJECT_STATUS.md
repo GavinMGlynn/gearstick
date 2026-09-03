@@ -7649,6 +7649,85 @@ different terrain, and the terrain half has always worked. A third layout wants
 the length spent somewhere other than folding - which is what the lap above is
 waiting to become.
 
+### The generator became a matrix, 2026-09-03
+
+The step above was taken back rather than extended: the player asked for an
+entirely new method — *"two classes of tracks - circuits, paths - then inside
+that no jumps, small jumps and big jumps, inside that different gravity,
+surface, etc - the path needs to be reasonably randomized - the tracks should
+be organic"* — and the four terrain shapes, the three route layouts and the ten
+hand-written stock tracks are all gone.
+
+**A track is now a draw from ten dials**, each drawn from the seed in
+`gs_generate_spec_for`: class (circuit/path), race length (standard/long/epic),
+curviness (flowing/winding/technical), straightness (broken/balanced/power),
+jumps (none/small/big), relief (flat/rolling/ridged/basin), relief range
+(subtle/moderate/severe), gravity (earth/light/heavy/split), dress
+(plain/banded/patchwork) and road width (narrow/standard/wide), plus a base
+surface from all nine. Contradictory draws are resolved at draw time by vetoes
+— flat ground cannot carry a severe range or no jumps at all; narrow, technical
+and iced cannot all hold — and one veto lives at paint time: big jumps floor
+light gravity at three quarters, because a third of Earth under a big ramp is a
+car that leaves the world.
+
+**The route is grown, not laid.** A self-avoiding walk over a coarse cell grid
+— depth-first with backtracking for paths, a ring grown by edge-bumps for
+circuits — biased by the curviness dial (keep-heading against turn weights) and
+capped by the straightness dial (maximum run length; a protected seeded
+straight for power draws). Cell centres are jittered as far as the corridors
+allow, corners past a right angle give their jitter back, and every corner is
+rounded with an arc whose radius the curviness dial draws, floored at eight
+tiles so no twelve-tile stretch between gates turns more than a right angle.
+How a track folds is an outcome of the dice. Everything downstream — carving
+the route through the terrain, relaxing the lattice to keep every slope
+climbable, laying gates along the centreline — is the machinery that already
+worked, fed by a polyline instead of segment templates.
+
+**What it took to make every draw raceable**, each found by a red test:
+- The severe relief band shipped at three tiles of amplitude and wedged cars on
+  ice hillsides; it is sized to the car now, not the drama.
+- Relief eases off over the outer thirty tiles and **every generated world
+  turns up at its rim** — a low lip over the last fifteen tiles, learnt from
+  the basin, which never lost a car while flat fields were losing them over
+  the drop.
+- Jump hills on already-severe ground compound; over a severe field they are
+  scaled to two thirds.
+- A power straight is straight: its waypoints keep no jitter, because two
+  tiles of organic wobble down a drag strip took the dial back a heading at a
+  time.
+
+**Every dial is asserted, not believed.** Seven new suite tests measure the
+dials on the tracks that come out, same seeds, one dial varied: technical
+corners more than winding, which corners more than flowing (335 / 252 / 225
+degrees per hundred tiles); every power straight beats 65 tiles, every broken
+one stays under 25; the length bands are ordered with daylight and bounded;
+severe/moderate/subtle relief are disjoint outright; big jumps out-jump small
+ones and none means none; and no seed pairs moon gravity with big ramps. A
+spec walk over six hundred seeds proves every band of every dial is drawn and
+every veto holds — a band added later and never wired in turns the tree red by
+itself.
+
+**Thirty stock tracks, all from the matrix, none by hand.** The hand-written
+ten were the less verified half of the set and two of them lost a car off the
+world with a written excuse; the excuse list in the suite is now empty and
+means it. Every shipped track clears the same four bars at build time — sound
+route, race length over the floor, every vehicle finishing from every grid
+slot, nobody thrown off the field — and `make_tracks` asserts the set's spread
+across the matrix (15 circuits, 15 paths; every length, curve and jumps band
+represented) so "the set is varied" is a build failure rather than an
+impression. The set runs 649 to 1,297 tiles raced. The library database is
+rebuilt from it and is byte-identical across two builds of the pinned writer.
+
+**The generator hash moved, deliberately** — every seed builds entirely
+different ground, and every seed anybody shared names a different track; the
+note in `golden.h` says so. The track and world hashes did not move: the file
+format and the physics are untouched.
+
+*Verification: both suites green — the release suite 21/21 including every
+shipped track raced by a full grid with no excused losses, the new dial tests
+printing their measurements, the golden replay unmoved. `gearstick_make_store`
+run twice produces byte-identical databases.*
+
 
 ## Known risks
 
