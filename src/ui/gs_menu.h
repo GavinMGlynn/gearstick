@@ -215,6 +215,22 @@ typedef struct gs_menu {
 
 
 
+    // **Is Delete waiting to be told to go ahead?**
+    //
+    // Deleting is the one thing on the tracks screen that cannot be undone -
+    // the library is the only copy of somebody's own work, there is no bin to
+    // fish it back out of, and the button sits between two that are harmless.
+    // It went through on a single click.
+    //
+    // A flag, and above the hash line so the walk can see it: a question that
+    // is up or not up really is a different screen, and below the line the walk
+    // decided pressing Delete had changed nothing and stopped exploring past
+    // it. As the *hash of the track being asked about*, which is what this was
+    // first, it was thirty-two more states a screen and the walk never
+    // finished. What makes one bool affordable is that the screen underneath
+    // goes inert while it is up - see the tracks screen.
+    bool confirm_delete;
+
     gs_screen setup_from;
     gs_screen tracks_from;
 

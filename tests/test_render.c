@@ -6633,8 +6633,20 @@ TEST(every_screen_has_a_way_off_it_and_the_ways_lead_somewhere_real) {
 // That is affordable now only because a frame costs a layout rather than a
 // rasterisation. The hash is what says whether a state is somewhere new.
 
-#define GS_WALK_STATES 4096
-#define GS_WALK_DEPTH  96
+// **How many states may be waiting to be walked.** Running out is a failure
+// that says so - see `ran_out` - and it fired for the first time when the tracks
+// screen gained a question to answer: the front end was already at 10,175 states
+// with a queue that fitted 4096 by a margin nobody had measured, and six per
+// cent more went over. A cap the front end has grown into is a cap, not a bug
+// bound; a path is a hundred bytes and a few thousand more of them is a few
+// hundred kilobytes of a test that already builds a window.
+#define GS_WALK_STATES 8192
+// **How long a path through the front end may be.** Raised with the queue above
+// and for the same reason: a screen that gains a question to answer adds a step
+// to every path that crosses it, and the tracks screen is crossed by a great
+// many. `ran_out` fires on this as well as on the queue, which is how a walk
+// that had been given a bigger queue still stopped short.
+#define GS_WALK_DEPTH  128
 #define GS_WALK_SLOTS  16384        // a power of two, comfortably over the states
 
 // **What a walk can do, which is more than press things.** Tab and Space reach
@@ -7665,6 +7677,16 @@ static void gs_seed_nobody_has_driven_here(gs_menu *m) {
 // running, and the main menu is its own button. No other starting state draws
 // those, and the walk had never seen them - which is how "Back" came to abandon
 // a paused race with nothing to say so and nothing to catch it.
+// **A track with the delete question up.** Deleting asks first, and the two
+// buttons that ask are drawn only while it is waiting - no other starting state
+// reaches them. The screen underneath goes inert while it is up, which is what
+// keeps this one extra state rather than one per track in the library.
+static void gs_seed_a_track_asked_about(gs_menu *m) {
+    if (m->library.count == 0) return;
+    m->picked = 0;
+    m->confirm_delete = true;
+}
+
 static void gs_seed_a_race_to_go_back_to(gs_menu *m) {
     m->online = false;
     m->setup_from = GS_SCREEN_RACE;
@@ -7732,6 +7754,7 @@ static const struct {
     { "asked for a code",    gs_seed_a_server_asking_for_a_code },
     { "a track that shipped", gs_seed_a_track_that_shipped },
     { "a race to go back to", gs_seed_a_race_to_go_back_to },
+    { "a track asked about", gs_seed_a_track_asked_about },
     { "nobody has driven here", gs_seed_nobody_has_driven_here },
     { "the longest names that fit", gs_seed_the_longest_names_that_fit },
 };

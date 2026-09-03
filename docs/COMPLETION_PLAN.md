@@ -995,87 +995,30 @@ review, and it fails it for good reasons.
       the dropdown the front-end walk had just opened and cut it from 812
       controls to 289. Nothing could have caught the original fault: the walk
       presses through ImGui's test engine, which sets focus itself.
-- [ ] **Delete asks before it throws a track away.** It is the one thing on the
-      tracks screen that cannot be undone and it goes through on a single click.
-      Written and working, and not landed: the walk tells menu states apart by
-      hashing them, and a dialog that is up or not up is a state — as a track
-      hash it is 32 more states a screen and the walk never finishes; as a bool
-      it is one more and the walk went from four minutes to over fifteen; kept
-      out of the hash the walk cannot see the dialog and prunes the screen
-      behind it, 812 controls becoming 289. **A fourth attempt made the screen
-      inert underneath the question**, which is what a modal means and which
-      brought the walk back to 10,755 states against a 10,175 baseline - six per
-      cent, not four times. That failed differently: a disabled control is still
-      a control the walk records, so the thirty-two-row list became 665 entries
-      it could never press and the walk ran out of room. Drawing only the
-      question instead collapsed it to 289 again.
-      A fifth kept the inert screen and raised the walk's pending-state queue
-      from 4096 to 8192, which was not enough either: it runs out on path depth
-      as well, because an extra step through the tracks screen lengthens every
-      path that crosses it.
-      Five representations, five measurements, none affordable. The feature is
-      three lines; what is missing is a way for this walk to model a dialog —
-      a state where what is underneath is neither gone nor pressable, costing
-      neither a branch per control nor a black mark against each one. That is a
-      change to the front end's main safety net rather than to the tracks
-      screen. Both attempts are kept as stashes and the numbers are here.
-      **Found on the way and worth its own item:** the walk sits at 10,175
-      states against a 4096 queue and a depth of 96, and how close that is was
-      not written down anywhere until it ran out.
-- [x] **The trace said one thing on arriving at a screen and then went quiet.**
-      It rate-limited on the world's tick, which does not advance on a menu — so
-      a front end that had stopped and one that was fine produced the same
-      silence, and a report of "it locked up on this screen" could not be
-      answered from the log. It is a wall clock now.
-      *Verification: sitting on the front door prints a line a second; a stall
-      reads as the log stopping at a named screen.*
-      It carries the frame rate too, because a loop that has stopped and a loop
-      running at half a frame a second are different faults that look the same
-      from a chair. That immediately retired the standing suspicion for the
-      report of dead controls: the front end draws the live race world behind
-      its menus and does it at the 30 fps cap, on the same track and grid the
-      report came from. **The report itself is still open and unexplained** —
-      what exists now is the instrument that will say which fault it is.
-- [x] **Two keys at once, all thirty-two ways.** Reported from play: "I don't
-      seem to be able to accelerate and turn at the same time." Everything
-      around this was already checked — each key doing its own job, a moved
-      binding moving, one key not driving two cars — and nothing anywhere
-      pressed **two keys together**, which is what driving is. No fault was
-      found; the path is sound, and the hole in the tests was real either way.
-      *Verification: every subset of the five controls, all 32 of them, held at
-      once and resolved, and then through `gs_input_combine`, where a pad and a
-      keyboard are merged and either could mask the other. The race trace now
-      also reports what the driver actually asked for, so the next report of
-      this shape can be answered rather than guessed at.*
-- [x] **A track is chosen by racing one car, and a race has four.** A candidate
-      was accepted by racing a single car round from pole, and one car alone is
-      never shoved into anything — so nothing in the choosing could see the
-      thing that actually loses cars. Traced with a full grid over the shipped
-      set, the losses are two kinds and only one of them is the ground's fault:
-      cars lost **in the opening seconds go over an edge**, past the run-off and
-      down, while the pack is still together (6.5s, 8.3s, 25.4s); cars lost deep
-      in a race go to landings and to each other (86s, 193s), which is racing.
-      So the bar added is the narrow one — **a track may not throw a car out of
-      the world** — rather than "everybody finishes", which would refuse tracks
-      for ordinary racing and is a different decision about the set.
-      It cannot be asked of a track standing still: every track in the box lays
-      its route three or four tiles from the nearest edge, the ones that lose
-      cars and the ones that do not alike, so there is no margin to require and
-      it has to be raced to be seen.
-      *Verification: every shipped track is raced by a full grid for the first
-      minute and none puts a car past the run-off — 18 raced, 0 unexcused. Cars
-      not finishing over the whole set went from 7 to 4, and the two that remain
-      are landings and contact rather than the edge. One generated track was
-      replaced by the new bar; nothing else in the set moved.*
-      **Two hand-written tracks are named as known exceptions rather than left
-      out**: `jupiter run` and `which way` each still lose a car over the north
-      edge. A hand-written track lays its route from a seed chosen for the
-      ground it is built on, and of the ninety-six seeds after theirs only their
-      own lays a sound route — so they cannot be fixed the way a candidate is.
-      Fixing them means re-shaping two tracks or widening the inset every route
-      is laid at, which costs route length on all eighteen; both are decisions
-      about the set. The test requires them to *still* be failing, so fixing one
-      turns it red and the excuse goes with the fault.
+- [x] **Delete asks before it throws a track away.** It is the one thing on the
+      tracks screen that cannot be undone — the library is the only copy of
+      somebody's own work and there is no bin — and it went through on a single
+      click, sitting between two buttons that are harmless. It names the track,
+      because "are you sure?" without a name is a question nobody can answer
+      safely, and the screen behind it goes inert, which is what a modal means.
+      *Verification: the walk reaches all 54 controls the menu names, including
+      the two the question draws, from a starting state with a question up; the
+      panel fits the window in that state as in every other; and the walk is
+      whole at 814 of 814 controls.*
+      **It took six attempts, and the five that failed are why the walk needed
+      changing.** A dialog is a menu state, and the walk tells states apart by
+      hashing them: as the hash of the track asked about it was 32 more states
+      a screen and the walk never finished; as a bool it was one more and the
+      walk went from four minutes to fifteen; kept out of the hash the walk
+      could not see the dialog at all and pruned the screen behind it, 812
+      controls becoming 289. Making the screen inert underneath cost only six
+      per cent more states — the right shape — and then ran the walk out of its
+      **pending-state queue**, and after that out of its **path depth**, neither
+      of whose margins had ever been measured. Both are raised, and both say why.
+      The last of it was not the walk at all: the question was being added to
+      the bottom of a screen that was already the tightest fit in the game. The
+      detail panel stands down while the question is up — it describes the track
+      the question already names — and that is what made it fit.
 - [ ] **The transport has a written specification.** Message formats, the state
       machine, the key schedule, the message limit before a rekey, and the
       properties claimed **and explicitly not claimed**. A design nobody wrote

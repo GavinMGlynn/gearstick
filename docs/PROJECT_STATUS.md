@@ -7516,57 +7516,45 @@ ImGui's test engine, which sets focus itself before it presses anything - so a
 panel that appears unfocused is invisible to the one test that walks every
 control on every screen. It is a fault only a person with a mouse could meet.
 
-### And a confirmation on Delete, which is not landed
+### And a confirmation on Delete, which took six attempts
 
 Asked for in the same session, and right: deleting a track is the one thing on
 that screen that cannot be undone - the library is the only copy of somebody's
-own work and there is no bin - and it goes through on a single click, between two
-buttons that are harmless.
+own work and there is no bin - and it went through on a single click, between two
+buttons that are harmless. It names the track now, because "are you sure?"
+without a name is a question nobody can answer safely, and the screen behind it
+goes inert, which is what a modal means.
 
-It is written and it works, and it is **not committed**, because of what it costs
-the front-end walk. The walk tells one state of the menu from another by hashing
-the menu's state, and a question that is up or not up is a state:
+**Three lines of feature, and five failed attempts, because a dialog is a menu
+state and the walk tells states apart by hashing them:**
 
-- as the **hash of the track being asked about**, it is thirty-two more states
-  per screen and the walk stops finishing;
-- as a **bool**, it is one more state per screen on the busiest screen in the
-  game, and the walk went from four minutes to over fifteen without finishing;
-- kept **out of the hash**, the walk cannot see the question at all - pressing
-  Delete changes what is drawn without changing the state, so the walk decides
-  nothing happened and stops exploring past it. 812 controls became 289.
+| representation | what it cost |
+|---|---|
+| the hash of the track asked about | 32 more states a screen; the walk never finished |
+| a bool | one more; four minutes became fifteen |
+| kept out of the hash | the walk could not see it and pruned the screen behind it: 812 controls became 289 |
+| inert underneath | **+6% states** - the right shape - then out of pending-state queue |
+| inert, queue doubled | out of path depth instead |
+| inert, queue and depth raised, detail panel stood down | **passes** |
 
-A fourth attempt made the screen **inert underneath the question**, which is what
-a modal means and which very nearly worked: the walk came back to 10,755 states
-against a 10,175 baseline - six per cent, not four times. It failed for a reason
-worth writing down: **a disabled control is still a control the walk records**,
-so a thirty-two row list left drawn under the question became 665 entries it
-could never press, and the walk ran out of room. Drawing only the question in
-place of the screen collapsed it to 289 again.
+Two of those failures were the walk's own ceilings, and neither margin had ever
+been measured: a **pending-state queue of 4096** against a front end already at
+10,175 states, and a **path depth of 96** which one extra step through the
+busiest screen in the game was enough to exceed. Both are raised and both say
+why. A cap a front end has grown into is a cap, not a bound.
 
-A fifth attempt kept the inert screen and gave the walk room: its pending-state
-queue is a fixed 4096 and the front end was already at 10,175 states, so six per
-cent more went over a ceiling nobody had measured the margin on. **Doubling it to
-8192 was not enough either** - `ran_out` fires on path *depth* as well, and an
-extra step through the tracks screen lengthens every path that crosses it.
+The last of it was not the walk at all. The question was being added to the
+bottom of a screen that was already the tightest fit in the game, so at 1280x720
+seventeen rows of a thirty-two track library went under the fold. Three attempts
+at making room in the list did nothing, because at that size the list is limited
+by the library's length rather than by the window. What worked was giving up the
+**detail panel** while the question is up: it is the tall optional half of that
+screen and it describes the track the question already names.
 
-So the true cost is not one field. It is the queue, the depth limit, and what
-"never pressable" is allowed to mean when a screen is deliberately inert: 665
-controls that can be pressed elsewhere are disabled while the question is up, and
-the walk counts every one of them as a control it never managed to press.
-
-**Five representations, five measurements, none affordable.** The feature is
-three lines. What is missing is a way for this walk to model a dialog - a state
-where what is underneath is neither gone nor pressable, costing neither a branch
-per control nor a black mark against each one - and that is a change to the front
-end's main safety net rather than to the tracks screen. Both attempts are kept as
-stashes with the numbers here, so the next one starts from them instead of
-rediscovering them.
-
-The one thing worth doing regardless: **the walk is at 10,175 states against a
-4096 queue and a depth of 96, and nobody knew how close that was.** It is not
-failing today, and the margin is not written down anywhere. A front end that
-grows one more screen may find it the way this did.
-
+*Verification: the walk reaches all 54 controls `gs_menu.c` names - including the
+two the question draws - from a starting state with a question up, the panel fits
+the window in that state as in every other, and the walk is whole at 814 of 814
+controls.*
 
 ## Known risks
 

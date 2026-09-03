@@ -57,6 +57,7 @@ void gs_menu_init(gs_menu *m) {
     // screen-graph test found this within an hour of the field being added.
     m->records_from = GS_SCREEN_TITLE;
     m->take_focus = false;
+    m->confirm_delete = false;
     m->setup_from = GS_SCREEN_TITLE;
     m->tracks_from = GS_SCREEN_TITLE;
     m->resume = false;
@@ -1822,23 +1823,60 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
     float row = gs_row_height();
     // The detail box is only there when there is a track to detail, so with
     // nothing chosen the list gets the room instead of a blank box holding it.
-    bool detailing = gs_library_at(&m->library, m->picked) != nullptr;
+    // **While the question is up, the detail panel stands down.** It is the tall
+    // optional half of this screen, and it is about the track being asked about
+    // - which the question already names. Trading it for the question keeps the
+    // panel the size it was rather than adding to the bottom of a screen that
+    // was already the tightest fit in the game.
+    bool detailing = !m->confirm_delete &&
+                     gs_library_at(&m->library, m->picked) != nullptr;
     float detail_h = detailing ? GS_TRACKS_DETAIL : 0.0f;
 
+    // **What the question costs, taken out of the list rather than added under
+    // it.** The question is a line of text and a row of buttons, drawn after
+    // everything else - and the panel is sized before any of it exists, so it
+    // has to be counted here. Counted as *less room for the list*, not as more
+    // panel: added on top it is seventeen rows of a thirty-two track library
+    // under the fold at 640x480, which is a list you cannot see the bottom of
+    // while being asked a question about the middle of it.
+    const float asking_h =
+        m->confirm_delete ? ImGui_GetTextLineHeight() + 34.0f +
+                            ImGui_GetStyle()->ItemSpacing.y * 4.0f
+                          : 0.0f;
+
     float spare = vp->WorkSize.y - GS_PANEL_MARGIN * 2.0f -
-                  GS_TRACKS_CHROME - detail_h;
+                  GS_TRACKS_CHROME - detail_h - asking_h;
 
     int rows = m->library.count > 0 ? m->library.count : 1;
     int fits = (int)(spare / row) - 1;          // less the table's header row
     if (fits < 3) fits = 3;                     // something to aim at, always
     if (rows > fits) rows = fits;
 
+    // **And the question takes its rows off the list even when the list fits.**
+    // Subtracting from `spare` above only helps when the window is what limits
+    // the list; on a taller one the limit is the library's own length, `rows`
+    // is left alone and the question goes on the end - seventeen rows of a
+    // thirty-two track library under the fold.
     float list_h = row * (float)(rows + 1);
+
     const ImGuiWindowFlags panel =
         gs_centre_window("tracks", 720.0f,
-                         GS_TRACKS_CHROME + detail_h + list_h);
+                         GS_TRACKS_CHROME + detail_h + list_h + asking_h);
 
     if (ImGui_Begin("Tracks", nullptr, panel)) {
+        // **While the question is up, nothing underneath it answers.**
+        //
+        // That is what a modal means, and it is also what makes the question
+        // affordable: the walk explores a screen by pressing what is on it, and
+        // a list of thirty-two tracks left live under an unanswered question is
+        // thirty-two more states with the question up. Inert, the question is
+        // one small state with two buttons in it.
+        // **Inert underneath, not gone.** That is what a modal means, and it
+        // is what keeps the question one small state rather than one per track
+        // in the library: nothing under it can be pressed, so nothing under it
+        // is a branch for the walk to follow.
+        ImGui_BeginDisabled(m->confirm_delete);
+
         ImGui_TextUnformatted("Everything you have built. A track is known by "
                               "what it is, so the same");
         ImGui_TextUnformatted("track from two people is one entry.");
@@ -1915,7 +1953,9 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
         // scrolled. Nothing drew wrong; everything was simply somewhere nobody
         // could press it. Found by a machine building a track and then trying
         // to keep it.
-        if (picked == nullptr) {
+        // `detailing` rather than `picked`, so what is drawn and what the panel
+        // was sized for cannot disagree - they are the same answer asked once.
+        if (!detailing) {
             ImGui_PushStyleColorImVec4(ImGuiCol_Text,
                                        ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
             ImGui_TextUnformatted("Nothing chosen.");
@@ -2045,11 +2085,7 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
         ImGui_SameLine();
         ImGui_BeginDisabled(builtin);
         if (ImGui_ButtonEx("Delete", (ImVec2){ 110.0f, 38.0f })) {
-            if (picked != nullptr) {
-                gs_library_remove(&m->library, picked->hash);
-                m->picked = -1;
-                m->store_dirty = true;
-            }
+            if (picked != nullptr) m->confirm_delete = true;
         }
         ImGui_EndDisabled();
         ImGui_EndDisabled();
@@ -2081,6 +2117,42 @@ static gs_screen gs_tracks_screen(gs_menu *m, const gs_track *t) {
         // was halfway through filling in - which this used to throw away.
         if (ImGui_ButtonEx("Back", (ImVec2){ 100.0f, 38.0f })) {
             next = gs_tracks_back(m);
+        }
+
+        ImGui_EndDisabled();     // the screen-wide one, opened at the top
+
+        // **And the question, when one is outstanding.**
+        //
+        // A row on the panel rather than a window over it: this screen is
+        // already centred and clamped to fit, and a second window on top is a
+        // second thing to size, to keep on screen and to walk. It names the
+        // track, because "are you sure?" without a name is a question nobody
+        // can answer safely.
+        if (m->confirm_delete) {
+            // Looked up here rather than shared with the screen above, which is
+            // not drawn while this is: the question replaces it.
+            const gs_library_entry *going = gs_library_at(&m->library, m->picked);
+
+            if (going == nullptr) {
+                m->confirm_delete = false;   // the pick went; so does the question
+            } else {
+                ImGui_Spacing();
+                ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                           (ImVec4){ 0.95f, 0.5f, 0.3f, 1.0f });
+                ImGui_Text("Delete \"%s\"? This cannot be undone.", going->name);
+                ImGui_PopStyleColor();
+
+                if (ImGui_ButtonEx("Delete it", (ImVec2){ 120.0f, 34.0f })) {
+                    gs_library_remove(&m->library, going->hash);
+                    m->picked = -1;
+                    m->store_dirty = true;
+                    m->confirm_delete = false;
+                }
+                ImGui_SameLine();
+                if (ImGui_ButtonEx("Keep it", (ImVec2){ 120.0f, 34.0f })) {
+                    m->confirm_delete = false;
+                }
+            }
         }
 
         if (m->status[0] != '\0') ImGui_TextUnformatted(m->status);
