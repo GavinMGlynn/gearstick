@@ -2811,7 +2811,12 @@ TEST(no_track_that_ships_throws_a_car_off_the_world) {
     //
     // Required to still be failing, not merely permitted to: fixing one of them
     // turns this red so the excuse goes with the fault.
-    static const char *excused[] = { "jupiter-run.gstrack", "which-way.gstrack" };
+    // `jupiter run` was on this list and is not any more: the routes changed
+    // shape and its own stopped putting a car over the edge. That is the excuse
+    // going with the fault, which is what requiring them to still be failing is
+    // for - it came off the list because the test went red saying it no longer
+    // needed to be on it.
+    static const char *excused[] = { "which-way.gstrack", "the-big-one.gstrack" };
     bool excuse_used[SDL_arraysize(excused)] = { false };
 
     int raced = 0, lost = 0;
@@ -5429,9 +5434,13 @@ TEST(an_opponent_finishes_every_track_that_ships_from_every_grid_slot) {
         // box were held to nothing. That is exactly how a set of twenty-seven
         // second tracks shipped once already: the rule existed, in a place that
         // was not consulted by anything that ran.
-        const gs_fix route = gs_track_route_length(&t);
-        printf("  STOCK %-26s %4d tiles of route\n", found[i],
-               (int)(route / GS_ONE));
+        // **How far it is raced**, which for a circuit is its route times the
+        // laps - see gs_track_race_length. Held to the same one definition the
+        // tool uses, so the floor cannot mean two things.
+        const gs_fix route = gs_track_race_length(&t);
+        printf("  STOCK %-26s %4d tiles of racing (%s)\n", found[i],
+               (int)(route / GS_ONE),
+               gs_track_is_circuit(&t) ? "circuit" : "path");
         CHECK(route >= GS_INT(GS_STOCK_MIN_ROUTE));
         if (route < shortest) shortest = route;
         if (route > longest) longest = route;

@@ -192,6 +192,12 @@ gs_fix gs_track_route_length(const gs_track *t) {
     return len;
 }
 
+gs_fix gs_track_race_length(const gs_track *t) {
+    const gs_fix route = gs_track_route_length(t);
+    if (!gs_track_is_circuit(t)) return route;
+    return (gs_fix)((int64_t)route * GS_STOCK_LAPS);
+}
+
 void gs_track_route_point(const gs_track *t, uint8_t leg, gs_fix s,
                           gs_fix *out_x, gs_fix *out_y) {
     if (out_x != nullptr) *out_x = 0;

@@ -174,7 +174,39 @@
 // a different track. The physics is untouched - the world hash above moved for
 // the roster, not for this - and what these seeds named before was a circuit
 // with an unnavigable corner on it.
-#define GS_SELFTEST_GENERATOR_HASH 0x461ff0a1e3fb9f69ULL
+// **And once more when the routes stopped all being the same shape.**
+//
+// There were four `gs_track_shape`s from the start and not one of them reached
+// the route planner: they choose the terrain and the surfaces, and every track
+// in the game came out as the identical serpentine of horizontal passes.
+// Eighteen shipped tracks, 83 to 92 gates each, 188 to 260 seconds each, and
+// the same picture on every minimap. A player said it: "every track can't be
+// the same shape".
+//
+// The planner has layouts now and the seed picks one - the serpentine as it
+// was, or the same turned a quarter so its passes run north and south. That is
+// two silhouettes where there was one, and the set it produces runs from 55 to
+// 92 gates and 131 to 250 seconds where it used to run from 83 to 92 and 188 to
+// 260. Every seed therefore builds different ground, which is what this number
+// is for saying out loud.
+//
+// **And a circuit stopped being a fold at all.** The longest closed curve that
+// fits a field under two hundred tiles across is four hundred tiles, and the
+// stock floor is six hundred and thirty - so a circuit could only ever meet it
+// by folding, and anything folded six times in a square field is a serpentine.
+// That was the whole reason every track looked alike, and it was arithmetic
+// rather than an oversight.
+//
+// A circuit is a closed curve now, drawn in polar form about the middle of the
+// field, three hundred-odd tiles round and driven three times. The floor is a
+// floor on the *race* rather than on the route - see gs_track_race_length - so
+// what it was written to guarantee is unchanged and what it was accidentally
+// dictating is gone. Paths still fold, because a path is driven once and all of
+// its length has to be in the route.
+//
+// The layout is drawn from the same generator as everything else about a track,
+// so it consumes a draw and every seed's terrain moves with its shape.
+#define GS_SELFTEST_GENERATOR_HASH 0xb515b34ae0fde57cULL
 
 // **A race with nobody at the keyboard**, four opponents spread across the
 // skill dial, on a circuit none of them has seen.

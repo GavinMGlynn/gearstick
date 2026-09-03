@@ -217,11 +217,166 @@ static void gs_seg_arc(gs_route_plan *p, gs_fix cx, gs_fix cy, gs_fix radius,
     p->total += g->len;
 }
 
-static void gs_plan_route(const gs_track *t, bool loop, gs_route_plan *p) {
-    p->count = 0;
-    p->total = 0;
-    p->loop = loop;
+// **What shape the route is, as distinct from what the ground under it is.**
+//
+// There were four `gs_track_shape`s from the beginning and not one of them
+// reached this function: they choose the terrain and the surfaces, and every
+// track in the game - generated and hand-written alike, because the authored
+// ones lay their routes with this same planner - came out as the identical
+// serpentine of horizontal passes. Eighteen tracks, 83 to 92 gates each, 188 to
+// 260 seconds each, and the same picture on every minimap. A player put it
+// plainly: "every track can't be the same shape".
+//
+// The constraint that makes them all look alike is real and does not go away: a
+// route has to be at least GS_STOCK_MIN_ROUTE tiles and the field is under two
+// hundred across, so any layout has to fold back on itself five or six times.
+// What was missing is that folding is not the only way to spend a thousand
+// tiles, and folding the same way every time is a choice nobody made.
+typedef enum gs_route_layout {
+    GS_LAY_ACROSS = 0,   // passes left and right, joined at the ends
+    GS_LAY_DOWN,         // the same, turned a quarter: passes up and down
+    GS_LAY_ORGANIC,      // a closed curve, driven several times round
+    GS_LAY_COUNT
+} gs_route_layout;
 
+// **A lap that is a shape rather than a fold.**
+//
+// A closed curve in polar form about the middle of the field:
+//
+//     r(a) = base * (1 + amp * sin(k*a + phase))
+//
+// Single valued in the angle, so it can never cross itself; bounded by `base`
+// and `amp`, so it can never leave the field; and with `amp` kept small enough
+// that the tightest place on it is still a wider turn than the serpentine's
+// hairpin. One lobe rather than several - two lobes of any useful size take the
+// tightest turn from twenty-odd tiles to five, which is a corner no car takes.
+//
+// **It is about 300 tiles round, and that is the whole reason circuits looked
+// like everything else.** A route has to clear the stock floor, the field is
+// under two hundred tiles across, and the longest closed curve that fits is a
+// plain circle at four hundred - so the floor could only ever be met by folding,
+// and anything folded six times in a square field is a serpentine. Measured
+// rather than assumed: adding lobes makes a loop *shorter*, because the base
+// radius has to shrink to keep them inside. A rounded rectangle on the inset was
+// tried first and is worse on both counts - seven hundred tiles, but ten from
+// the edge the whole way round, and cars were shoved off it on the first corner.
+//
+// What makes this shippable is that a circuit is driven several times. The floor
+// is a floor on the race, and three laps of three hundred tiles is nine hundred
+// - see gs_track_race_length, which is where that is now decided for both the
+// tool that writes tracks and the suite that checks them.
+#define GS_GEN_LOOP_STEPS 48
+
+static void gs_plan_organic(const gs_track *t, gs_rng *rng, gs_route_plan *p) {
+    const gs_fix cx = GS_INT(t->w) / 2, cy = GS_INT(t->h) / 2;
+
+    // As far out as the field allows, less the room every route keeps: the
+    // inset, and a turn's radius on top of it, which is where the serpentine
+    // puts its passes.
+    const gs_fix room = GS_INT(GS_GEN_INSET) + GS_INT(GS_GEN_PITCH) / 2;
+    gs_fix limit = (GS_INT(t->w) < GS_INT(t->h) ? GS_INT(t->w) : GS_INT(t->h)) / 2;
+    limit -= room;
+
+    // **The band that keeps every turn wider than the hairpin.** Found by
+    // walking four hundred random shapes: below about a quarter, a single lobe
+    // leaves the tightest turn above twenty tiles; above it, the curve starts
+    // folding into itself and the turn collapses.
+    const gs_fix amp = GS_RATIO(8, 100) +
+                       (gs_fix)((int64_t)GS_RATIO(14, 100) *
+                                (int32_t)gs_pick(rng, 100) / 100);
+    const uint32_t k = 2u + gs_pick(rng, 3);
+    const gs_angle phase = (gs_angle)gs_pick(rng, 65536);
+
+    const gs_fix base = gs_fix_div(limit, GS_ONE + amp);
+
+    p->passes = (uint8_t)k;
+
+    gs_fix fx = 0, fy = 0;
+    for (int i = 0; i <= GS_GEN_LOOP_STEPS; i++) {
+        const gs_angle a =
+            (gs_angle)((int64_t)i * 65536 / GS_GEN_LOOP_STEPS);
+        const gs_angle wob = (gs_angle)((uint32_t)a * k + phase);
+        const gs_fix r = base + gs_fix_mul(gs_fix_mul(base, amp), gs_sin(wob));
+
+        const gs_fix x = cx + gs_fix_mul(r, gs_cos(a));
+        const gs_fix y = cy + gs_fix_mul(r, gs_sin(a));
+
+        if (i == 0) { fx = x; fy = y; continue; }
+        gs_seg_line(p, fx, fy, x, y);
+        fx = x; fy = y;
+    }
+}
+
+// **The serpentine, turned a quarter.** Passes up and down rather than left and
+// right. The same construction and the same turn; what changes is which axis
+// the passes run along, and on a minimap that is a different track.
+static void gs_plan_down(const gs_track *t, bool loop, gs_route_plan *p) {
+    const gs_fix x0 = GS_INT(GS_GEN_INSET), x1 = GS_INT(t->w - GS_GEN_INSET);
+    const gs_fix y0 = GS_INT(GS_GEN_INSET), y1 = GS_INT(t->h - GS_GEN_INSET);
+    const gs_fix pitch = GS_INT(GS_GEN_PITCH);
+    const gs_fix r = pitch / 2;
+
+    const gs_fix ym = loop ? y1 - pitch : y1;
+
+    // **A pass's worth of margin on the first one, not a turn's.**
+    //
+    // A grid is staggered across the route as well as back along it, and the
+    // first pass here runs north-south - so "across" is east-west, straight at
+    // the left edge. Started on the inset, the outer slots began ten tiles from
+    // the world's edge and the first contact put them over it: seed 5 lost two
+    // of its four before a lap, at x = -13. The across layout is not exposed the
+    // same way, because its first pass runs east-west and the field is wider
+    // than the grid is deep.
+    const gs_fix xs = x0 + pitch;
+
+    int cols = (int)((x1 - xs) / pitch) + 1;
+    if (cols < 2) cols = 2;
+    if (cols > (GS_GEN_MAX_SEG - 8) / 2) cols = (GS_GEN_MAX_SEG - 8) / 2;
+    if (loop && (cols & 1) == 0) cols--;
+    p->passes = (uint8_t)cols;
+
+    // **And the turns pulled in as well as the first pass.** A half circle
+    // bulges a radius past the end of the pass it leaves, so passes ending a
+    // radius inside the inset put their turns *on* it - ten tiles from the
+    // world, which is where the run-off starts. A solo car taking one wide
+    // drove off the top. A pass's worth rather than a radius keeps every part
+    // of this route as far in as the across layout keeps its passes.
+    const gs_fix py0 = y0 + pitch, pym = ym - pitch;
+
+    for (int i = 0; i < cols; i++) {
+        const gs_fix x = xs + (gs_fix)((int64_t)pitch * i);
+        const bool downward = (i & 1) == 0;
+        const gs_fix a = downward ? py0 : pym;
+        const gs_fix b = downward ? pym : py0;
+
+        gs_seg_line(p, x, a, x, b);
+
+        // The half circle onto the next pass. Its centre is a radius east of
+        // where the pass ended, so the start point is due west of it - a
+        // hundred and eighty degrees - and the sweep is whichever way bulges
+        // the way the pass was already going: south off a downward pass, north
+        // off an upward one.
+        if (i + 1 < cols) {
+            gs_seg_arc(p, x + r, b, r, GS_DEG(180), downward ? -32768 : 32768);
+        }
+    }
+
+    if (!loop) return;
+
+    // Home along the corridor: out to it, along the bottom, up the left side,
+    // and back onto the first pass with one half circle - the mirror of what
+    // the across layout does, and closed the same way so it arrives where it
+    // started rather than a radius away from it.
+    const gs_fix x_last = xs + (gs_fix)((int64_t)pitch * (cols - 1));
+    gs_seg_line(p, x_last, pym, x_last, y1 - r);
+    gs_seg_arc(p, x_last - r, y1 - r, r, 0, 16384);
+    gs_seg_line(p, x_last - r, y1, x0 + r, y1);
+    gs_seg_arc(p, x0 + r, y1 - r, r, GS_DEG(90), 16384);
+    gs_seg_line(p, x0, y1 - r, x0, py0);
+    gs_seg_arc(p, x0 + r, py0, r, GS_DEG(180), 32768);
+}
+
+static void gs_plan_across(const gs_track *t, bool loop, gs_route_plan *p) {
     const gs_fix x0 = GS_INT(GS_GEN_INSET);
     const gs_fix x1 = GS_INT(t->w - GS_GEN_INSET);
     const gs_fix y0 = GS_INT(GS_GEN_INSET);
@@ -302,6 +457,38 @@ static void gs_plan_route(const gs_track *t, bool loop, gs_route_plan *p) {
     // tightest turn this generator lays anywhere - so the sharpest corner on a
     // loop is now the same hairpin as the sharpest corner on a straight.
     gs_seg_arc(p, px0, y0 + r, r, GS_DEG(270), -32768);
+}
+
+// **Which of them this track gets.**
+//
+// A loop is either the serpentine it always was or one big lap; a path is the
+// serpentine one way round or the other. The choice is the seed's, so it is
+// reproducible and so two people typing the same number still get the same
+// ground - and it is made here rather than from `gs_track_shape`, because the
+// shape says what the terrain is like and this says what the route looks like,
+// and a track wants both to vary independently.
+static void gs_plan_route(const gs_track *t, gs_rng *rng, bool loop,
+                          gs_route_layout lay, gs_route_plan *p) {
+    p->count = 0;
+    p->total = 0;
+    p->loop = loop;
+
+    switch (lay) {
+    case GS_LAY_ORGANIC:
+        // **A circuit is a shape; a path is a fold.** Only a loop can be one of
+        // these: it is three hundred tiles round, which is a race when it is
+        // driven three times and half a track when it is driven once.
+        if (loop) { gs_plan_organic(t, rng, p); return; }
+        gs_plan_across(t, loop, p);
+        return;
+    case GS_LAY_DOWN:
+        gs_plan_down(t, loop, p);
+        return;
+    case GS_LAY_ACROSS:
+    case GS_LAY_COUNT:
+        break;
+    }
+    gs_plan_across(t, loop, p);
 }
 
 // A point on the plan, `along` running from zero to GS_ONE over the whole
@@ -564,8 +751,20 @@ static void gs_lay_route(gs_track *t, gs_rng *r, bool loop, gs_surface base) {
     if (road == base) road = (base == GS_SURF_PAVEMENT) ? GS_SURF_DIRT
                                                         : GS_SURF_PAVEMENT;
 
+    // **A layout of its own, drawn like everything else about the track.** A
+    // loop is a serpentine or a lap; a path runs its passes one way or the
+    // other. Two silhouettes each, where there was one for all of them.
+    // **A circuit is a shape and a path is a fold**, which is not a style
+    // choice: a path is driven once, so all of its length has to be in the
+    // route, and the only way to spend six hundred tiles in a field this size
+    // is to fold. A circuit is driven several times and can afford to be a
+    // shape. Paths still get their two orientations.
+    const gs_route_layout lay =
+        loop ? GS_LAY_ORGANIC
+             : (gs_pick(r, 2) == 0 ? GS_LAY_ACROSS : GS_LAY_DOWN);
+
     static gs_route_plan plan;
-    gs_plan_route(t, loop, &plan);
+    gs_plan_route(t, r, loop, lay, &plan);
 
     gs_carve(t, &plan, road);
     gs_relax(t);

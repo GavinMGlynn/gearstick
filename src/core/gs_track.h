@@ -388,6 +388,34 @@ gs_fix gs_track_route_length(const gs_track *t);
 // anybody is asked to remember.
 #define GS_STOCK_MIN_ROUTE 630
 
+// **How many times a stock circuit is driven.** A circuit's route is one lap of
+// it, and a lap is not a race.
+#define GS_STOCK_LAPS 3
+
+// **How far a stock track is actually raced**, which is the number the floor is
+// a floor on: a path once end to end, a circuit its route times the laps.
+//
+// The floor was written against the serpentine, when every route - loop and path
+// alike - was one long fold driven once, and route length and race length were
+// the same number. They are not the same number for a circuit that is a shape
+// rather than a fold, and holding a shape to a fold's floor is what kept every
+// track in the game looking identical: the longest closed curve that fits a
+// field under two hundred tiles across is four hundred tiles, so six hundred and
+// thirty could only ever be met by folding, and anything folded six times in a
+// square field is a serpentine. A player said it plainly - "every track can't be
+// the same shape".
+//
+// **What the floor is for is unchanged**: a default track being a race rather
+// than a demonstration, asked for repeatedly and lost repeatedly. Three laps of
+// a three hundred tile circuit is nine hundred tiles of driving, which is the
+// thing that was being asked for; one lap of it is not, and this is why the laps
+// are in the sum rather than left to whoever sets up the race.
+//
+// One definition, because the verdict decides what ships and cannot depend on
+// who measured it: `tools/make_tracks.c` refuses to write a track under the
+// floor and the suite holds the tracks already in `assets/tracks/` to it.
+gs_fix gs_track_race_length(const gs_track *t);
+
 // **Where a car waits for the flag.** Behind the start line, abreast across it,
 // facing the way the route runs through it - so the first thing a car does is
 // cross the line it has to cross, at whatever speed it managed on the way.

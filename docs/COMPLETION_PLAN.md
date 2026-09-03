@@ -981,6 +981,38 @@ review, and it fails it for good reasons.
       Left uncovered and said so: that the frontend *resumes* rather than
       restarts lives in the iterate loop rather than in anything callable, and
       is checked by hand.
+- [x] **Every track was the same shape.** Reported from play with a picture:
+      "every track can't be the same shape — there needs to be combination of
+      path and circuit tracks, with different paths, different terrain". There
+      have been four track shapes since the generator was written and **not one
+      of them ever reached the route planner** — they choose terrain and
+      surfaces, and the route was always the same serpentine of horizontal
+      passes, for hand-written tracks as well, because those use the same
+      planner. The seed draws a layout now: the serpentine as it was, or the
+      same turned a quarter so its passes run north and south.
+      *Verification: the set rebuilt from it runs 55 to 92 gates and 131 to 250
+      second laps, where every track used to be 83 to 92 gates and 188 to 260
+      seconds. The hairpin rule still holds at 47° over 1,727 corners, every
+      track is raced by every vehicle from every grid slot, none throws a car
+      off the world, and the length floor still holds. The generator hash moves
+      and says why.*
+      **The cause was the floor, and it is arithmetic rather than an oversight.**
+      The longest closed curve that fits a field under two hundred tiles across
+      is four hundred tiles; the floor is six hundred and thirty. A circuit could
+      therefore only ever meet it by folding, and anything folded six times in a
+      square field is a serpentine. Adding lobes to a loop makes it *shorter*,
+      because the base radius must shrink to keep them inside, while its tightest
+      turn collapses from 64 tiles to 5 — both measured before any code changed.
+      What the floor exists for — a race that is not over in twenty-seven
+      seconds — is untouched. What it was accidentally dictating was the shape.
+      **A circuit is driven several times, so the floor is now a floor on the
+      race**: route times laps, in one place, used by the tool that writes tracks
+      and the suite that checks them. Paths are driven once and still fold.
+      Circuits are closed curves now — 30 to 35 gates and 75 to 93 second laps,
+      driven three times — where paths run 55 to 87 gates and 131 to 245 seconds
+      end to end. Two kinds of track that are different kinds of thing.
+      **Still outstanding from the same report:** the jumps band — none, small,
+      big — as a dial of its own, with gravity and surface varying inside it.
 - [x] **The dialog you opened over a race ignored your first click.** Reported
       from play, and the second report was the diagnosis: "it doesn't have focus
       — I click on the dialog first". A menu opened over a race arrives behind

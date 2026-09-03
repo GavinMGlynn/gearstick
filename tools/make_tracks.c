@@ -99,10 +99,13 @@ static bool gs_write(const char *path) {
     // and the requirement kept being lost between one piece of work and the
     // next. It is not a thing to remember any more: a track under the floor is
     // not written, and the build fails.
-    gs_fix route = gs_track_route_length(&gs_t);
-    if (route < GS_INT(GS_STOCK_MIN_ROUTE)) {
-        printf("  %s: %d tiles of route, and the floor is %d\n", path,
-               (int)(route / GS_ONE), GS_STOCK_MIN_ROUTE);
+    // **How far it is raced, not how long the route is** - a circuit's route is
+    // one lap of it. See gs_track_race_length for why that distinction had to be
+    // made and what it cost while it was missing.
+    gs_fix raced = gs_track_race_length(&gs_t);
+    if (raced < GS_INT(GS_STOCK_MIN_ROUTE)) {
+        printf("  %s: %d tiles of racing, and the floor is %d\n", path,
+               (int)(raced / GS_ONE), GS_STOCK_MIN_ROUTE);
         return false;
     }
 

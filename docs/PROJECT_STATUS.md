@@ -7461,8 +7461,11 @@ the two landings and the two hand-written exceptions below.
 
 ### The two named exceptions, and why they are not fixed
 
-`jupiter run` and `which way` each still lose a car over the north edge in the
-opening seconds. Both are written by hand, and a hand-written track lays its
+`which way` and `the big one` each still lose a car over the north edge in the
+opening seconds. The list used to name `jupiter run` instead: the routes changed
+shape, its own stopped throwing a car, and the test went red to say the excuse
+was no longer needed - which is what requiring an excuse to still be in use is
+for. Both are written by hand, and a hand-written track lays its
 route with the same planner from a seed chosen for the ground it is built on - so
 they cannot be fixed the way a candidate is, by taking the next seed. **Of the
 ninety-six seeds after `jupiter run`'s, only its own lays a sound route on its
@@ -7555,6 +7558,97 @@ screen and it describes the track the question already names.
 two the question draws - from a starting state with a question up, the panel fits
 the window in that state as in every other, and the walk is whole at 814 of 814
 controls.*
+
+## Every track was the same shape, and the shapes were never used
+
+Reported from play, with a picture of two minimaps side by side: *"every track
+can't be the same shape - there needs to be combination of path and circuit
+tracks, with different paths, different terrain"*.
+
+There have been four `gs_track_shape`s since the generator was written - sprint,
+circuit, jumps, mixed - and **not one of them ever reached the route planner**.
+`gs_plan_route(t, loop, p)` takes whether it is a loop and nothing else. The
+shapes choose terrain and surfaces; the route was always the same serpentine of
+horizontal passes, for generated and hand-written tracks alike, because the
+authored ones lay their routes with the same planner.
+
+**The evidence was in my own measurements an hour earlier and I read it the wrong
+way round.** Timing every shipped track to check they were long enough gave 83 to
+92 gates and 188 to 260 seconds across all eighteen, and I reported that as proof
+the set was good. That uniformity *was* the finding.
+
+### The floor was drawing the shape, and it was arithmetic rather than an oversight
+
+The first attempt gave the planner a second orientation and left it there. That
+is not what was asked for and it does not reach the cause, which is this: **the
+longest closed curve that fits a field under two hundred tiles across is four
+hundred tiles, and the stock floor is six hundred and thirty.** Measured, not
+assumed - a plain circle at the usable radius is 402 tiles, and adding lobes
+makes a loop *shorter*, because the base radius has to shrink to keep them
+inside, while the tightest turn on it collapses from 64 tiles to 5.
+
+So a circuit could only ever meet the floor by folding, and anything folded six
+times in a square field is a serpentine. Every track in the game had the same
+silhouette because the floor left the generator no other option.
+
+**What the floor is for is a race that is not over in twenty-seven seconds**, and
+that is untouched. What it was accidentally dictating was the shape. A circuit is
+driven several times, so the floor is now a floor on the *race* - route times
+laps - and lives in one place, `gs_track_race_length`, used by the tool that
+writes tracks and the suite that checks them. A path is driven once, so all of
+its length still has to be in the route, and paths still fold.
+
+A circuit is a closed curve now: polar form about the middle of the field,
+`r(a) = base * (1 + amp * sin(k*a + phase))`. Single valued in the angle, so it
+cannot cross itself; bounded, so it cannot leave the field; one lobe rather than
+several, with the amplitude kept inside a band found by walking four hundred
+random shapes and keeping the ones whose tightest turn stayed wider than the
+serpentine's hairpin.
+
+The two kinds of track are now different kinds of thing:
+
+| | before | after |
+|---|---|---|
+| circuits | 83 - 92 gates, 188 - 260s, one fold | **30 - 35 gates, 75 - 93s a lap, driven three times** |
+| paths | 83 - 92 gates, 188 - 260s, one fold | **55 - 87 gates, 131 - 245s end to end** |
+
+### What it cost to get the second one right
+
+The constraint that made them all alike is real: a route must clear
+`GS_STOCK_MIN_ROUTE`, the field is under two hundred tiles across, so any layout
+has to fold back five or six times. Folding is not the only way to spend a
+thousand tiles, but it is the cheapest.
+
+**A single lap does not work, and the reason is written into the code rather than
+forgotten.** A rounded rectangle round the field is about seven hundred tiles,
+which clears the floor - but drawn on the inset it runs ten tiles from the edge
+the whole way, and cars were shoved off the top and the left on the first corner.
+Insetting it far enough takes it to four hundred tiles, under the floor, and the
+floor is not the thing to give way. `gs_plan_lap` is left in place with that
+written on it, as the start of the shape that would work: two rings joined, or an
+infield section.
+
+**The turned serpentine needed two goes at the edge**, both caught by
+`a_generated_race_can_actually_be_finished`, which is exactly what it is for.
+Its passes run north and south, so a grid staggered *across* the route points at
+the left edge rather than along the field's long axis - the outer slots started
+ten tiles from the world and the first contact put them over it. And its turns
+bulge a radius past the end of each pass, so passes ending a radius inside the
+inset put their turns *on* it, where a solo car taking one wide drove off the
+top. Both are a pass's worth of margin now rather than a turn's.
+
+*Verification: the whole suite, on a set rebuilt from the new planner - the
+hairpin rule still holds at 47 degrees over 1,727 corners, every shipped track is
+still raced by every vehicle from every grid slot, none throws a car off the
+world, and the route-length floor still holds. The generator hash moves,
+deliberately, and says why.*
+
+**This is a first step and not the whole answer.** Two silhouettes is more than
+one and less than variety; what the report asked for was different paths and
+different terrain, and the terrain half has always worked. A third layout wants
+the length spent somewhere other than folding - which is what the lap above is
+waiting to become.
+
 
 ## Known risks
 
