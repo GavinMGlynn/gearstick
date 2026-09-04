@@ -2185,7 +2185,8 @@ TEST(every_control_can_be_moved_and_every_player_can_drive_from_a_pad_alone) {
 
         gs_input in = gs_bind_resolve(&b, p, nullptr, 0, all);
         CHECK(in == (gs_input)(GS_IN_ACCEL | GS_IN_BRAKE | GS_IN_LEFT |
-                               GS_IN_RIGHT | GS_IN_FIRE));
+                               GS_IN_RIGHT | GS_IN_FIRE | GS_IN_RESCUE |
+                               GS_IN_SHIFT_UP | GS_IN_SHIFT_DOWN));
     }
 
     // The default keyboard drives the first two cars and nothing else, so a
@@ -3694,7 +3695,9 @@ static void gs_hud_frame(SDL_Renderer *ren, const gs_track *t, const gs_world *w
 // because the cars move between the frames being compared and the whole-frame
 // difference would then be true whatever the HUD did.
 #define GS_HUD_BOX_W 170
-#define GS_HUD_BOX_H 340
+// Grew by a row when the gear readout joined the stack between the speed bar
+// and the condition bar - the gear a manual driver watches for.
+#define GS_HUD_BOX_H 400
 
 static int gs_hud_pixels_differing(const gs_frame *a, const gs_frame *b) {
     if (a->px == nullptr || b->px == nullptr) return -1;
@@ -11460,6 +11463,109 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
 // anything - so a panel that appears unfocused is invisible to the one test
 // that walks every control on every screen. It is a fault only a person with a
 // mouse could meet.
+TEST(every_action_resolves_to_its_own_bit_and_none_to_silence) {
+    (void)ren;
+
+    // **The tow shipped bound to a key that did nothing**: its action had no
+    // entry in the action-to-bit table, a designated initializer filled the
+    // gap with zero, and Backspace resolved every press to silence. The
+    // suite drove the simulation with the bit directly and never once
+    // through the binding, which is the gap this closes: every action,
+    // pressed on its own bound key, must arrive as a bit no other action
+    // produces.
+    gs_bindings b;
+    gs_bind_defaults(&b);
+
+    static bool keys[SDL_SCANCODE_COUNT];
+    gs_input seen[GS_ACT_COUNT];
+    int walked = 0;
+    for (int a = 0; a < GS_ACT_COUNT; a++) {
+        SDL_memset(keys, 0, sizeof keys);
+        SDL_Scancode k = b.key[0][a];
+        CHECK(k != GS_KEY_NONE);               // player one can reach it
+        keys[k] = true;
+
+        seen[a] = gs_bind_resolve(&b, 0, keys, SDL_SCANCODE_COUNT, 0);
+        CHECK(seen[a] != 0);                   // never silence
+        for (int prior = 0; prior < a; prior++) {
+            CHECK(seen[a] != seen[prior]);     // never somebody else's bit
+        }
+        walked++;
+    }
+    CHECK(walked == GS_ACT_COUNT);
+}
+
+TEST(a_key_flapping_faster_than_a_finger_is_a_key_being_held) {
+    (void)ren;
+
+    // **The sticky accelerator, finally in evidence.** A player held the up
+    // arrow and the trace showed what the keyboard stack delivered: real
+    // press/release pairs at thirty hertz, repeat flag clear, the down phase
+    // lasting nothing and the up phase a frame - so the poll nearly always
+    // found the key "up" and a held throttle read dead until re-pressed.
+    // The debounce's rule: a release only counts after the key has stayed
+    // up for GS_INPUT_GRACE_MS. Walked here with the flapping from the
+    // player's own log, and with the human tap that must still release.
+    gs_input_state st = { 0 };
+    SDL_Event e;
+
+#define GS_AT(ms) ((uint64_t)(ms) * 1000000ull)
+
+    // The log's shape: down and up in the same millisecond, the next pair
+    // thirty-three later. Between pairs, the bridge holds.
+    uint64_t t = 5000;
+    for (int i = 0; i < 10; i++) {
+        e = (SDL_Event){ 0 };
+        e.type = SDL_EVENT_KEY_DOWN;
+        e.common.timestamp = GS_AT(t);
+        e.key.scancode = SDL_SCANCODE_UP;
+        gs_input_event(&st, &e);
+
+        e = (SDL_Event){ 0 };
+        e.type = SDL_EVENT_KEY_UP;
+        e.common.timestamp = GS_AT(t);
+        e.key.scancode = SDL_SCANCODE_UP;
+        gs_input_event(&st, &e);
+
+        // Polled at any moment inside the gap, the key still reads held.
+        CHECK(gs_input_graced(&st, SDL_SCANCODE_UP, t + 1));
+        CHECK(gs_input_graced(&st, SDL_SCANCODE_UP, t + 32));
+        t += 33;
+    }
+
+    // The flapping stops - the finger really left. The grace runs out and
+    // the release stands.
+    CHECK(gs_input_graced(&st, SDL_SCANCODE_UP, t - 33 + GS_INPUT_GRACE_MS - 1));
+    CHECK(!gs_input_graced(&st, SDL_SCANCODE_UP, t - 33 + GS_INPUT_GRACE_MS));
+
+    // A deliberate tap: down, up, and sixty milliseconds of air before the
+    // next press. The release must be a release, or pumping the brake would
+    // weld it on.
+    gs_input_state tap = { 0 };
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.common.timestamp = GS_AT(9000);
+    e.key.scancode = SDL_SCANCODE_DOWN;
+    gs_input_event(&tap, &e);
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_KEY_UP;
+    e.common.timestamp = GS_AT(9100);
+    e.key.scancode = SDL_SCANCODE_DOWN;
+    gs_input_event(&tap, &e);
+    CHECK(!gs_input_graced(&tap, SDL_SCANCODE_DOWN, 9100 + GS_INPUT_GRACE_MS));
+
+    // And a key that came back down owns its state again - the bridge only
+    // ever spans a gap, it never overrides a press.
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.common.timestamp = GS_AT(9200);
+    e.key.scancode = SDL_SCANCODE_DOWN;
+    gs_input_event(&tap, &e);
+    CHECK(!gs_input_graced(&tap, SDL_SCANCODE_DOWN, 9210));
+
+#undef GS_AT
+}
+
 TEST(a_focus_blip_never_releases_the_keys_a_driver_is_holding) {
     (void)ren;
 
@@ -12234,6 +12340,8 @@ int main(void) {
     run_the_hud_says_what_you_are_carrying_and_only_when_you_are(ren);
     run_at_the_smallest_window_every_control_can_be_scrolled_to(ren);
     run_a_screen_that_has_just_appeared_is_the_one_taking_input(ren);
+    run_every_action_resolves_to_its_own_bit_and_none_to_silence(ren);
+    run_a_key_flapping_faster_than_a_finger_is_a_key_being_held(ren);
     run_a_focus_blip_never_releases_the_keys_a_driver_is_holding(ren);
     run_the_window_opens_where_it_was_left_and_never_somewhere_nobody_can_see(ren);
     run_the_tracks_screen_shows_the_shape_of_the_chosen_track(ren);

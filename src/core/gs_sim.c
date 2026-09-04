@@ -65,6 +65,72 @@ uint32_t gs_world_countdown(const gs_world *w) {
     return w->green_tick - (uint32_t)w->tick;
 }
 
+void gs_world_set_manual(gs_world *w, uint8_t car, bool manual) {
+    if (car >= w->car_count) return;
+    w->car[car].manual = manual ? 1 : 0;
+    if (w->car[car].gear < 1) w->car[car].gear = 1;
+}
+
+// **The gear curve, in the one form simple enough to predict.** Gear g of G
+// tops out at top * g / G. Within the gear the pull falls linearly to
+// nothing at that ceiling - the limiter a driver shifts off - and the pull
+// at the *bottom* of the gear is power scaled by how tall the gear is: a
+// low gear is punchy off its floor, a tall gear is lazy. That is a torque
+// curve a person already has in their hands from any car, and it is what
+// makes the wrong gear the wrong choice: top gear from a standstill barely
+// moves, first gear launches. The automatic, picking the strongest gear
+// each tick, always launches in first - so its behaviour is the punchy
+// low-gear pull the game always had, and no recorded automatic race is a
+// surprise.
+//
+// The scale is 2/(g+1) of full power at the gear's floor: first gear (of
+// any count) pulls full power off the line, and each taller gear pulls
+// proportionally less, smoothly.
+gs_fix gs_gear_force(const gs_vehicle_def *v, uint8_t gear, gs_fix vlong) {
+    const uint8_t G = v->gears < 1 ? 1 : v->gears;
+    if (gear < 1) gear = 1;
+    if (gear > G) gear = G;
+
+    const gs_fix top_g = (gs_fix)((int64_t)v->top * gear / G);
+    const gs_fix floor_g = (gs_fix)((int64_t)v->top * (gear - 1) / G);
+    if (vlong >= top_g) return 0;               // the limiter
+    if (vlong < 0) vlong = 0;
+
+    // A gear's pull peaks at its floor speed and tapers to nothing at both
+    // ends of its band - the ceiling (the limiter) above, and a bog below,
+    // because an engine under its powerband lugs. So a too-tall gear at low
+    // speed makes little, which is what a launch in top feels like, and the
+    // automatic - picking the strongest each tick - climbs the ladder as a
+    // shift schedule that falls straight out of the physics.
+    gs_fix shape;
+    if (vlong >= floor_g) {
+        const gs_fix span = top_g - floor_g;
+        shape = span > 0 ? GS_ONE - gs_fix_div(vlong - floor_g, span) : 0;
+    } else {
+        shape = floor_g > 0 ? gs_fix_div(vlong, floor_g) : GS_ONE;
+    }
+
+    // The peak: full power in first, tailing off in taller gears.
+    const gs_fix peak = (gs_fix)((int64_t)v->power * 2 / (gear + 1));
+    return gs_fix_mul(peak, shape);
+}
+
+// The automatic: the strongest gear right now, lowest on a tie so pulling
+// away is always in first.
+uint8_t gs_gear_auto(const gs_vehicle_def *v, gs_fix vlong) {
+    const uint8_t G = v->gears < 1 ? 1 : v->gears;
+    uint8_t best = 1;
+    gs_fix most = -1;
+    for (uint8_t g = 1; g <= G; g++) {
+        gs_fix f = gs_gear_force(v, g, vlong);
+        if (f > most) {
+            most = f;
+            best = g;
+        }
+    }
+    return best;
+}
+
 void gs_world_set_mode(gs_world *w, gs_mode mode) {
     w->mode = (uint8_t)mode;
     w->over = false;
@@ -90,6 +156,7 @@ int gs_world_add_car(gs_world *w, const gs_track *t,
     c->vehicle  = vehicle < GS_VEH_COUNT ? vehicle : (uint8_t)GS_VEH_STOCK_CAR;
     c->grounded = true;
     c->active   = true;
+    c->gear     = 1;          // everybody pulls away in first
 
     // **Armed with whatever this race arms people with**, so a car put on the
     // grid after the loadout was set is carrying the same as everybody else.
@@ -419,11 +486,40 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
 
         // --- Drive and brake. Engine force falls to nothing at the vehicle's
         // top speed, and the surface decides how much of it reaches the ground.
+        // The gearbox first: an automatic re-picks the strongest gear every
+        // tick, a manual shifts one gear per press of either button.
+        if (c->manual != 0) {
+            uint8_t held = 0;
+            if ((in & GS_IN_SHIFT_UP) != 0) held |= 1u;
+            if ((in & GS_IN_SHIFT_DOWN) != 0) held |= 2u;
+            const uint8_t pressed = (uint8_t)(held & (uint8_t)~c->shift_held);
+            c->shift_held = held;
+            const uint8_t G = v->gears < 1 ? 1 : v->gears;
+            if (c->gear < 1) c->gear = 1;
+            if ((pressed & 1u) != 0 && c->gear < G) c->gear++;
+            if ((pressed & 2u) != 0 && c->gear > 1) c->gear--;
+        } else {
+            c->gear = gs_gear_auto(v, vlong);
+        }
+
         gs_fix accel = 0;
         if ((in & GS_IN_ACCEL) != 0) {
-            gs_fix headroom = GS_ONE - gs_fix_div(vlong, v->top);
-            if (headroom < 0) headroom = 0;
-            accel += gs_fix_mul(gs_fix_mul(v->power, headroom), sd->drive);
+            // **The automatic is the continuous engine the game always had.**
+            // A real automatic with a torque converter and enough ratios
+            // approximates a smooth curve, so its propulsion is exactly the
+            // old headroom engine - which is why every automatic race, the
+            // whole suite included, drives bit-for-bit as before, and only
+            // the gear on the HUD is new. A manual gets the discrete gears,
+            // with the limiter and the bog a driver can fall into.
+            gs_fix pull;
+            if (c->manual != 0) {
+                pull = gs_gear_force(v, c->gear, vlong);
+            } else {
+                gs_fix headroom = GS_ONE - gs_fix_div(vlong, v->top);
+                if (headroom < 0) headroom = 0;
+                pull = gs_fix_mul(v->power, headroom);
+            }
+            accel += gs_fix_mul(pull, sd->drive);
         }
         if ((in & GS_IN_BRAKE) != 0) {
             // Brake going forwards, reverse from a standstill.
@@ -1227,6 +1323,9 @@ uint64_t gs_world_hash(const gs_world *w) {
         gs_hash_u64(&h, c->air_ticks);
         gs_hash_u64(&h, c->drop_cooldown);
         gs_hash_u64(&h, c->tow_ticks);
+        gs_hash_u64(&h, c->gear);
+        gs_hash_u64(&h, c->manual);
+        gs_hash_u64(&h, c->shift_held);
         gs_hash_u64(&h, c->next_gate);
         gs_hash_u64(&h, c->laps);
         gs_hash_u64(&h, c->finish_tick);

@@ -81,6 +81,11 @@ typedef struct gs_race_setup {
     // driven by the game, at the skill below.
     bool     computer[GS_MAX_CARS];
 
+    // **Which box each driver takes.** Manual is a choice, not a difficulty
+    // setting: the shift is one more thing to be good at. Computer drivers
+    // always take the automatic - the AI does not shift.
+    bool     manual[GS_MAX_CARS];
+
     // How hard they push, from a driver who brakes far too early to one who is
     // quicker than you are. A point on `gs_ai_skill_margin`'s dial rather than
     // a name.

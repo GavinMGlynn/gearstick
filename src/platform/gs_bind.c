@@ -3,12 +3,13 @@
 #include "platform/gs_bind.h"
 
 #define GS_BIND_MAGIC   0x444e4247u   // "GBND"
-// Two: version one had five actions and no tow. A version-one file is still
-// read - its five actions verbatim, the tow at its default - because "your
-// controls survived the update" is not a feature anybody should lose to an
-// enum growing.
-#define GS_BIND_VERSION 2u
+// Three: version one had five actions and no tow; two had six and no
+// gearbox. Every older version is still read - its own actions verbatim,
+// the newer ones at their defaults - because "your controls survived the
+// update" is not a feature anybody should lose to an enum growing.
+#define GS_BIND_VERSION 3u
 #define GS_BIND_V1_ACTS 5
+#define GS_BIND_V2_ACTS 6
 #define GS_BIND_V1_BYTES (4 + 4 + GS_MAX_CARS * GS_BIND_V1_ACTS * 6)
 
 static const gs_input gs_action_bit[GS_ACT_COUNT] = {
@@ -17,6 +18,13 @@ static const gs_input gs_action_bit[GS_ACT_COUNT] = {
     [GS_ACT_LEFT]  = GS_IN_LEFT,
     [GS_ACT_RIGHT] = GS_IN_RIGHT,
     [GS_ACT_FIRE]  = GS_IN_FIRE,
+    // Forgetting this line is how the tow shipped bound to a key that did
+    // nothing: a designated initializer fills the gap with zero, and an
+    // action whose bit is zero resolves every press to silence. The suite
+    // now refuses a zero or duplicated bit for any action.
+    [GS_ACT_RESCUE] = GS_IN_RESCUE,
+    [GS_ACT_SHIFT_UP]   = GS_IN_SHIFT_UP,
+    [GS_ACT_SHIFT_DOWN] = GS_IN_SHIFT_DOWN,
 };
 
 const char *gs_action_name(gs_action a) {
@@ -27,6 +35,8 @@ const char *gs_action_name(gs_action a) {
     case GS_ACT_RIGHT: return "right";
     case GS_ACT_FIRE:  return "drop";
     case GS_ACT_RESCUE: return "tow";
+    case GS_ACT_SHIFT_UP:   return "shift up";
+    case GS_ACT_SHIFT_DOWN: return "shift down";
     case GS_ACT_COUNT: break;
     }
     return "?";
@@ -47,6 +57,10 @@ void gs_bind_defaults(gs_bindings *b) {
         b->button[p][GS_ACT_RIGHT] = (int16_t)SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
         b->button[p][GS_ACT_FIRE]  = (int16_t)SDL_GAMEPAD_BUTTON_WEST;
         b->button[p][GS_ACT_RESCUE] = (int16_t)SDL_GAMEPAD_BUTTON_NORTH;
+        b->button[p][GS_ACT_SHIFT_UP] =
+            (int16_t)SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+        b->button[p][GS_ACT_SHIFT_DOWN] =
+            (int16_t)SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
     }
 
     // Two people at one keyboard, which is how most of this gets played before
@@ -57,6 +71,8 @@ void gs_bind_defaults(gs_bindings *b) {
     b->key[0][GS_ACT_RIGHT] = SDL_SCANCODE_RIGHT;
     b->key[0][GS_ACT_FIRE]  = SDL_SCANCODE_RSHIFT;
     b->key[0][GS_ACT_RESCUE] = SDL_SCANCODE_BACKSPACE;
+    b->key[0][GS_ACT_SHIFT_UP]   = SDL_SCANCODE_X;
+    b->key[0][GS_ACT_SHIFT_DOWN] = SDL_SCANCODE_Z;
 
     b->key[1][GS_ACT_ACCEL] = SDL_SCANCODE_W;
     b->key[1][GS_ACT_BRAKE] = SDL_SCANCODE_S;
@@ -64,6 +80,8 @@ void gs_bind_defaults(gs_bindings *b) {
     b->key[1][GS_ACT_RIGHT] = SDL_SCANCODE_D;
     b->key[1][GS_ACT_FIRE]  = SDL_SCANCODE_LSHIFT;
     b->key[1][GS_ACT_RESCUE] = SDL_SCANCODE_Q;
+    b->key[1][GS_ACT_SHIFT_UP]   = SDL_SCANCODE_E;
+    b->key[1][GS_ACT_SHIFT_DOWN] = SDL_SCANCODE_C;
 }
 
 gs_input gs_bind_resolve(const gs_bindings *b, uint8_t player,
@@ -207,9 +225,11 @@ bool gs_bind_deserialize(gs_bindings *b, const uint8_t *buf, size_t len) {
     if (gs_get_u32(p) != GS_BIND_MAGIC) return false;
     p += 4;
     const uint32_t version = gs_get_u32(p);
-    if (version != GS_BIND_VERSION && version != 1u) return false;
+    if (version < 1u || version > GS_BIND_VERSION) return false;
     p += 4;
-    const int acts = version == 1u ? GS_BIND_V1_ACTS : (int)GS_ACT_COUNT;
+    const int acts = version == 1u   ? GS_BIND_V1_ACTS
+                     : version == 2u ? GS_BIND_V2_ACTS
+                                     : (int)GS_ACT_COUNT;
     if (len < (size_t)(8 + GS_MAX_CARS * acts * 6)) return false;
 
     // Checked before anything is written, so a refused file leaves the player

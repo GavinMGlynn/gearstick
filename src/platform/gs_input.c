@@ -31,13 +31,17 @@ void gs_input_event(gs_input_state *s, const SDL_Event *e) {
     case SDL_EVENT_KEY_DOWN:
         if (e->key.scancode < SDL_SCANCODE_COUNT) {
             s->held[e->key.scancode] = true;
+            s->up_at[e->key.scancode] = 0;       // the release never happened
         }
         return;
     case SDL_EVENT_KEY_UP:
-        // A release always releases - the shield exists to keep keys that
-        // were never let go of, not to argue with a driver's own fingers.
+        // A release releases - after it has stood for the grace. The
+        // timestamp starts the debounce clock; see up_at in the header for
+        // the thirty-hertz flapping this bridges.
         if (e->key.scancode < SDL_SCANCODE_COUNT) {
             s->held[e->key.scancode] = false;
+            s->up_at[e->key.scancode] = e->common.timestamp / 1000000u;
+            if (s->up_at[e->key.scancode] == 0) s->up_at[e->key.scancode] = 1;
         }
         s->shielding = false;
         return;
@@ -139,20 +143,36 @@ bool gs_input_shielded(const gs_input_state *s, SDL_Scancode key) {
     return s->shielding && key < SDL_SCANCODE_COUNT && s->held[key];
 }
 
+bool gs_input_graced(const gs_input_state *s, SDL_Scancode key,
+                     uint64_t now_ms) {
+    if (key >= SDL_SCANCODE_COUNT) return false;
+    if (s->held[key]) return false;              // down again: nothing to bridge
+    const uint64_t up = s->up_at[key];
+    return up != 0 && now_ms >= up && now_ms - up < (uint64_t)GS_INPUT_GRACE_MS;
+}
+
 void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars) {
     int key_count = 0;
     const bool *keys = SDL_GetKeyboardState(&key_count);
 
     // The keys SDL believes in, plus the ones the blip shield is carrying
-    // over a focus loss it knows the driver never noticed. The shield stands
-    // down the moment any key is genuinely released, so while everything is
-    // ordinary this copies SDL's answer exactly.
+    // over a focus loss, plus every release younger than the debounce grace
+    // - the thirty-hertz flapping a held key arrives as under WSLg, bridged
+    // back into the hold the finger is performing. In ordinary play every
+    // release is older than the grace by the time anybody could care, and
+    // this copies SDL's answer exactly.
     static bool merged[SDL_SCANCODE_COUNT];
     const bool *effective = keys;
-    if (s->shielding && keys != nullptr) {
+    if (keys != nullptr) {
+        const uint64_t now = SDL_GetTicks();
         int n = key_count < SDL_SCANCODE_COUNT ? key_count : SDL_SCANCODE_COUNT;
-        for (int i = 0; i < n; i++) merged[i] = keys[i] || s->held[i];
-        effective = merged;
+        bool any = false;
+        for (int i = 0; i < n; i++) {
+            merged[i] = keys[i] || (s->shielding && s->held[i]) ||
+                        gs_input_graced(s, (SDL_Scancode)i, now);
+            any = any || merged[i] != keys[i];
+        }
+        if (any) effective = merged;
     }
 
     gs_input from_pads[GS_MAX_CARS] = { 0 };

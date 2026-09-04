@@ -1074,16 +1074,19 @@ static int cmd_analyse(const char *path) {
 }
 
 static int cmd_vehicles(void) {
-    printf("%-13s %7s %7s %6s %6s %8s %6s\n",
-           "vehicle", "power", "brake", "top", "grip", "steer", "tough");
+    printf("%-13s %7s %7s %6s %6s %8s %6s %6s\n",
+           "vehicle", "power", "brake", "top", "grip", "steer", "tough",
+           "gears");
     for (uint8_t i = 0; i < GS_VEH_COUNT; i++) {
         const gs_vehicle_def *v = gs_vehicle(i);
-        printf("%-13s %7.2f %7.2f %6.2f %6.2f %8.0f %6.2f\n", v->name,
+        printf("%-13s %7.2f %7.2f %6.2f %6.2f %8.0f %6.2f %6u\n", v->name,
                as_double(v->power), as_double(v->brake), as_double(v->top),
-               as_double(v->grip), as_double(v->steer), as_double(v->toughness));
+               as_double(v->grip), as_double(v->steer), as_double(v->toughness),
+               (unsigned)v->gears);
     }
     printf("\npower and brake in tiles/s^2, top in tiles/s, steer in angle "
-           "units/s.\nOne tile is %d metres.\n", GS_TILE_METRES);
+           "units/s.\nGears are forward gears; every machine has one reverse.\n"
+           "One tile is %d metres.\n", GS_TILE_METRES);
     return 0;
 }
 

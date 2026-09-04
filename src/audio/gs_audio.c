@@ -473,17 +473,19 @@ void gs_audio_update(const gs_world *w, const gs_track *t, float lx, float ly) {
 
         float speed = gs_to_f(gs_car_speed(c));
 
-        // --- The gearbox. Hysteresis on both changes, or a car sitting at a
-        // shift point hunts between two gears and sounds broken.
-        if (o->gear < 0 || o->gear >= GS_GEARS) o->gear = 0;
+        // --- The gearbox, read from the simulation rather than guessed
+        // from speed. The car itself knows which gear it is in - the
+        // automatic picked it, or the driver shifted into it - so the note
+        // climbs and drops through exactly the gears the wheels are using,
+        // and a manual shift is heard the instant it happens. The audio's
+        // own ratios still shape the *note* within a gear; which gear it is
+        // comes from `c->gear`, 1-based, mapped onto the ratio table.
+        const gs_vehicle_def *def = gs_vehicle(c->vehicle);
+        const uint8_t gears = def != nullptr && def->gears > 0 ? def->gears : 1;
+        int idx = (int)c->gear - 1;
+        idx = (idx * GS_GEARS) / (gears > 0 ? gears : 1);
+        o->gear = SDL_clamp(idx, 0, GS_GEARS - 1);
         float rpm = gs_rpm_for(speed, o->gear);
-        if (rpm > GS_SHIFT_UP && o->gear < GS_GEARS - 1) {
-            o->gear++;
-            rpm = gs_rpm_for(speed, o->gear);
-        } else if (rpm < GS_SHIFT_DOWN && o->gear > 0) {
-            o->gear--;
-            rpm = gs_rpm_for(speed, o->gear);
-        }
 
         // **In the air the engine goes light.** Nothing is loading it, so it
         // runs up towards the limiter - which, with the tyre noise gone at the

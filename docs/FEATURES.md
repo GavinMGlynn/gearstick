@@ -80,6 +80,14 @@ predict what the car will do is out, however impressive it looks.
 - **Everything unlocked from the first second.** `CORE`
   No progression, no currency, no earning the good car.
 
+- **Automatic and manual transmission.** `WANTED`
+  A gearbox as a choice, not a difficulty setting: automatic shifts for you,
+  manual gives you the shift as one more thing to be good at. How many forward
+  gears a machine has - and its one reverse - is a property of the vehicle,
+  like its power and its tyres. The engine's sound climbs and drops through the
+  gears, which is how a driver hears the race, and the HUD shows the gear you
+  are in.
+
 - **Elevation, ramps and jumps as the track's third dimension.** `CORE`
   Airborne time is where gravity becomes visible, and the shadow under the car
   is what makes it readable.

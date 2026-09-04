@@ -83,7 +83,10 @@ void gs_menu_init(gs_menu *m) {
     // one car on the grid is the thing this exists to stop; the first slot is
     // whoever is at the keyboard and the rest are the game until somebody says
     // otherwise.
-    for (uint8_t i = 0; i < GS_MAX_CARS; i++) m->setup.computer[i] = i > 0;
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        m->setup.computer[i] = i > 0;
+        m->setup.manual[i] = false;
+    }
 
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
         m->setup.profile[i] = -1;
@@ -1135,12 +1138,13 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         const float built = GS_SETUP_WIDE - (ImGui_GetWindowWidth() - room);
         const float wide  = room > built ? room : built;
 
-        if (ImGui_BeginTableEx("grid", 4,
+        if (ImGui_BeginTableEx("grid", 5,
                                ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit,
                                (ImVec2){ wide, 0.0f }, 0.0f)) {
             ImGui_TableSetupColumnEx("", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
             ImGui_TableSetupColumnEx("driver", ImGuiTableColumnFlags_WidthFixed, 160.0f, 0);
             ImGui_TableSetupColumnEx("machine", ImGuiTableColumnFlags_WidthFixed, 165.0f, 0);
+            ImGui_TableSetupColumnEx("gearbox", ImGuiTableColumnFlags_WidthFixed, 92.0f, 0);
             ImGui_TableSetupColumnEx("paint", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
             ImGui_TableHeadersRow();
 
@@ -1201,7 +1205,27 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
                 }
                 m->setup.vehicle[i] = (uint8_t)v;
 
+                // **The box.** A computer driver always takes the automatic -
+                // the AI does not shift - so its combo is disabled rather
+                // than lying about a choice it cannot make.
                 ImGui_TableSetColumnIndex(3);
+                ImGui_SetNextItemWidth(-1.0f);
+                ImGui_BeginDisabled(m->setup.computer[i]);
+                const bool man = !m->setup.computer[i] && m->setup.manual[i];
+                if (ImGui_BeginCombo("##box", man ? "manual" : "auto", 0)) {
+                    if (ImGui_SelectableEx("auto", !man, 0,
+                                           (ImVec2){ 0.0f, 0.0f })) {
+                        m->setup.manual[i] = false;
+                    }
+                    if (ImGui_SelectableEx("manual", man, 0,
+                                           (ImVec2){ 0.0f, 0.0f })) {
+                        m->setup.manual[i] = true;
+                    }
+                    ImGui_EndCombo();
+                }
+                ImGui_EndDisabled();
+
+                ImGui_TableSetColumnIndex(4);
                 for (int c = 0; c < GS_COLOUR_COUNT; c++) {
                     if (c > 0) ImGui_SameLine();
                     ImGui_PushIDInt(c);
@@ -2410,6 +2434,10 @@ void gs_setup_build(const gs_race_setup *s, const gs_track *t, gs_world *w) {
         gs_angle facing;
         gs_track_grid_of(t, i, racing, &sx, &sy, &facing);
         gs_world_add_car(w, t, s->vehicle[i], sx, sy, facing);
+
+        // The box this driver chose. Computers always take the automatic:
+        // the AI does not shift.
+        gs_world_set_manual(w, i, !s->computer[i] && s->manual[i]);
     }
 }
 

@@ -36,6 +36,15 @@ typedef struct gs_vehicle_def {
     // How hard it is to break. A landing's damage is divided by this, so the
     // rover survives what folds the sprint car.
     gs_fix toughness;
+
+    // **How many forward gears the box has.** Every machine has exactly one
+    // reverse, which is the existing brake-at-a-standstill gear and is not
+    // counted here. Gear g of G covers speeds up to top * g / G; the engine
+    // pulls harder in a lower gear - power * G / g, capped at `power` so a
+    // launch is exactly as traction-limited as it always was - and has
+    // nothing left at the top of the gear, which is the limiter a manual
+    // driver must shift off. See gs_gear_force in gs_sim.c.
+    uint8_t gears;
 } gs_vehicle_def;
 
 extern const gs_vehicle_def gs_vehicles[GS_VEH_COUNT];

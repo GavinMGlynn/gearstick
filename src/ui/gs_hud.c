@@ -521,8 +521,12 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // row - how many are left - so it is one row tall plus whatever the
         // countdown is doing.
         .bigs = derby ? 1.0f : 2.0f,          // still driving | position, lap
+        // **And the gear**, which is a small row of its own in a race - the
+        // thing a manual driver watches for. A derby has no gear readout,
+        // for the same reason it has no lap clock: it is not that kind of
+        // driving.
         .smalls = derby ? (counting ? 1.0f : 0.0f)   // get ready
-                        : 2.0f,                       // this lap, best
+                        : 3.0f,                       // this lap, best, gear
         .finished = c->finish_tick != 0,
         .carrying = gs_car_selected(c) != GS_HAZ_NONE,
         .missed = v->missed && c->finish_tick == 0,
@@ -692,6 +696,26 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
             ImGui_Spacing();
             gs_time_text(text, sizeof text, c->best_lap);
             gs_hud_stat("best", text, GS_HUD_SMALL);
+        }
+
+        // --- The gear, which is what a manual driver is watching for. R
+        // when the car is travelling backwards under the reverse gear every
+        // machine has; N held on the line, where the box is not engaged;
+        // otherwise the forward gear, with a small "M" beside it so a manual
+        // driver can see at a glance the box is theirs to work.
+        if (!derby) {
+            const gs_fix vlong = gs_fix_mul(c->vx, gs_cos(c->heading)) +
+                                 gs_fix_mul(c->vy, gs_sin(c->heading));
+            char gear[8];
+            if (counting) {
+                SDL_snprintf(gear, sizeof gear, "N");
+            } else if (vlong < -GS_RATIO(20, 100)) {
+                SDL_snprintf(gear, sizeof gear, "R");
+            } else {
+                SDL_snprintf(gear, sizeof gear, "%u", (unsigned)c->gear);
+            }
+            ImGui_Spacing();
+            gs_hud_stat(c->manual ? "gear  M" : "gear", gear, GS_HUD_SMALL);
         }
 
         // --- How fast it is going, and then what is left of it.

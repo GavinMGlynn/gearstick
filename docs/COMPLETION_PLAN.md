@@ -2785,3 +2785,28 @@ are the places a fault could sit unnoticed.
       the nose, exact placement from mid-air, the same gate still owed,
       nothing gained by re-crossing, the flash pinned on counted pixels,
       and old control files load with the tow on its default key.*
+
+- [x] **A held key that the keyboard stack delivers as flapping is still a
+      held key.** Under WSLg a held arrow arrives as thirty press/release
+      pairs a second, so the throttle read dead until re-pressed - caught
+      in the act by the keystroke trace. A release now only counts after
+      the key has stayed up for fifty milliseconds; a deliberate tap still
+      releases. The tow's key also did nothing on release day - its action
+      was missing from the action-to-bit table - and both the fix and a
+      tripwire for the next missing entry are in.
+      *Verification: the debounce walked against the flapping from the
+      player's own log with forged clocks, and every action pressed on its
+      real binding must resolve to its own bit, never silence.*
+
+- [x] **Automatic and manual transmission.** Every machine has a forward
+      gear count of its own - two for the rover, six for the sprint car -
+      and one reverse. The box is picked per driver on the setup screen.
+      An automatic drives exactly as the game always did; a manual gives
+      you the shift, the limiter to shift off, and the bog of being left in
+      too tall a gear. The engine is heard through the gears and the HUD
+      shows the one you are in.
+      *Verification: the gear ladder measured on its own numbers, the
+      automatic driven to terminal speed and found in top, the manual
+      shifting once per press and visibly slower off the line in the wrong
+      gear. Online races still give everyone the automatic - the flag is
+      not on the wire yet, and that is named in the status doc.*

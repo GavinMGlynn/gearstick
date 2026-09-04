@@ -124,7 +124,14 @@
 // agree about, so it is hashed even while it is zero in every race ever
 // recorded. The physics of driving did not change; the description of a car
 // did.
-#define GS_SELFTEST_WORLD_HASH 0x73a042b3d31adcf8ULL
+// And with the gearbox, though not one car in the selftest race drives
+// differently for it: the automatic transmission *is* the continuous engine
+// the game always had - a real automatic with enough ratios approximates a
+// smooth curve - so every automatic car's position is bit-for-bit what it
+// was. What moved the number is three new fields on every car: which gear it
+// is in, whether its box is manual, and the shift buttons held. A manual
+// gearbox changes how a car drives, but no car in this race has one.
+#define GS_SELFTEST_WORLD_HASH 0x17613037cf7bffa6ULL
 
 // The track generator, folded over its first two hundred seeds.
 //
@@ -300,6 +307,8 @@
 // tick, so its hash moves with them.
 // And with the tow truck, exactly as the world hash above did and for the
 // same sentence: one more number on every car.
-#define GS_OPPONENTS_WORLD_HASH 0x0d1974dfb16b0cadULL
+// And with the gearbox, the same way and for the same sentence: three new
+// fields per car, every opponent on the automatic the AI has always driven.
+#define GS_OPPONENTS_WORLD_HASH 0x19e4d0a05c8e04ebULL
 
 #endif // GS_GOLDEN_H

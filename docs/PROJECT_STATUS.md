@@ -77,7 +77,8 @@ each fail the configure with the file and the offending line named.
   endianness. Two tracks built independently to the same design hash equal; a
   one-tile edit changes it; undoing the edit restores it.
 - **Six vehicles** as a table of blunt trade-offs — power, brake, top speed, tyre
-  grip, steering authority, drag, toughness. `gearstick_cli vehicles` prints it.
+  grip, steering authority, drag, toughness, and how many forward gears its
+  box has. `gearstick_cli vehicles` prints it.
 - **The physics step, fixed at 120 Hz.** Steering that loses authority with
   speed; drive force that falls to nothing at the vehicle's top speed; a grip
   limit that scrubs sideways velocity at whatever the tyres and surface will
@@ -7991,6 +7992,110 @@ a wreck left where it lay. The flash is pinned on pixels: the car's paint
 counted through a full blink cycle, absent on every off-beat, present on
 every on-beat, and solid at zero. A forged version-one bindings file loads
 with its five actions intact and the tow on its default.*
+
+
+### The throttle, convicted by its own log, 2026-09-04
+
+**"The throttle is still an issue"** - and this time the trace caught it in
+the act. A held up arrow arrives from the keyboard stack as a thirty-hertz
+stream of genuine press/release pairs, repeat flag clear: the down phase
+lasts nothing, the up phase a frame. Under WSLg, Windows key auto-repeat is
+translated into full release-plus-press pairs that SDL fails to reassemble,
+so the poll nearly always found the accelerator "up" and a held throttle
+read dead until re-pressed. The blip shield built for the earlier theory was
+aimed at the wrong layer: no state was ever lost, the key honestly flapped.
+
+**The debounce**: a release only counts after the key has stayed up for
+fifty milliseconds. Flapping gaps of thirty-three are bridged back into the
+hold the finger is actually performing; a deliberate human tap - sixty
+milliseconds and more of air - still releases. The rule takes the clock as
+an argument, so the suite walks it with the flapping taken from the player's
+own log, the tap that must still release, and the press that reclaims its
+own key.
+
+**And the tow shipped bound to a key that did nothing.** Its action had no
+entry in the action-to-bit table; a designated initializer filled the gap
+with zero, and Backspace resolved every press to silence. The suite drove
+the simulation with the bit directly and never once through the binding -
+the gap a new test closes by pressing every action's own key and refusing
+silence or a duplicated bit for any of them, so the next action added
+without its bit turns the tree red by itself.
+
+*Verification: the debounce walked with forged clocks against the logged
+flapping; every action resolved to its own bit through the real bindings;
+both suites green.*
+
+
+### Transmissions, 2026-09-04
+
+Asked for as a feature: "automatic and manual transmission - in the manual
+case, we need to change gears. The sounds should show us moving through the
+gears. The HUD should show the gear we are currently in - the number of
+forward and one reverse gear should be a property of the vehicles."
+
+**Gears are a vehicle property.** Every machine has a forward gear count -
+the rover has two, the stock car four, the sprint car and motorcycle six -
+and exactly one reverse, which is the brake-at-a-standstill gear the game
+has always had and is not counted. The box is chosen per driver on the setup
+screen, a column beside the machine; a computer driver always takes the
+automatic, because the AI does not shift, and its combo says so by being
+disabled rather than by lying.
+
+**The automatic is the continuous engine the game always had.** A real
+automatic with a torque converter and enough ratios approximates a smooth
+curve, so an automatic car's propulsion is exactly the old headroom engine -
+every automatic race, which is every race the suite drives and every track
+the generator ships, is bit-for-bit what it was. Its displayed gear is the
+gear a manual driver would be in, picked as the strongest each tick.
+
+**A manual gets discrete gears, and the mistakes they make possible.** Gear
+g of G peaks at its floor speed and tapers to nothing at its ceiling - the
+limiter to shift off - and bogs below its band, because an engine under its
+powerband lugs. So top gear from a standstill barely moves and first gear
+launches, which is the wrong-gear-wrong-launch the feature exists for. X and
+Z shift for player one, E and C for player two, the pad's shoulders for
+everybody, all rebindable. One shift per press: a held button is one gear,
+not a hundred and twenty a second.
+
+**Heard and seen.** The engine note is derived from the simulation's gear
+rather than guessed from speed, so the note climbs and drops through exactly
+the gears the wheels are using and a manual shift is audible the instant it
+happens - the audio had a five-ratio fiction of its own, and now it reads
+the truth. The HUD shows the gear between the lap times and the speed bar:
+the number, R when the car is travelling backwards, N while the lights are
+red, and a small M beside the label when the box is the driver's to work.
+
+**The golden hashes moved, and no car drives differently for it**: three new
+fields on every car - which gear, whether manual, which shift buttons are
+held - all of them state two machines must agree about. The generator fold
+did not move, so the shipped set is untouched.
+
+*Verification: the gear ladder pinned on its own numbers - every gear
+limiting at its own ceiling, a low gear out-pulling a high one inside its
+band, top gear bogging from rest at under half first gear's pull; the
+automatic driven to terminal speed and found at the top of the ladder and
+within a tenth of the vehicle table's own top; the manual holding its gear,
+shifting once per press however long the button is held, refusing to climb
+past top or drop below first, and visibly slower off the line left in top.
+Old bindings files from before either the tow or the gearbox still load with
+the new controls at their defaults.*
+
+**And the audio tests found a latent flake while this landed.** Every scene
+in them poked a velocity into a car without stepping the world, and the
+audio used to guess a gear from speed with hysteresis carried over from
+whatever scene ran before - so which gear a note was in depended on test
+order. Reading the simulation's gear made that visible immediately: with no
+step, every car sat in first, pinned on the limiter at six tiles a second,
+and the engine drowned the ground it was supposed to be telling apart. The
+scenes now set the gear through `gs_gear_auto` - the same function the
+simulation uses - so what they measure is deterministic and is what a car
+at that speed actually sounds like.
+
+**Named as not done:** the manual flag does not cross the network yet - an
+online race gives every car the automatic. The gearbox is per-car simulation
+state and hashed, so the wire carrying it is a protocol change rather than a
+patch, and it is written down here rather than discovered by two machines
+disagreeing.
 
 
 ## Known risks

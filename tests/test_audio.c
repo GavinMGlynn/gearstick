@@ -104,6 +104,13 @@ static gs_track gs_t;
 
 // Settle the chased values - the master fade, the engine's inertia - so what is
 // measured is the steady state rather than the ramp into it.
+// **In the gear the simulation would have put it in.** The engine note is
+// derived from the car's gear, and the gear is simulation state - so a scene
+// that pokes a velocity in and never steps the world leaves every car in
+// first whatever speed it is doing, and the gearbox cannot be heard at all.
+// Stepping instead would drag wear and collision into scenes that are about
+// neither, so the gear is set the way an automatic sets it, through the same
+// function the simulation uses.
 static void gs_settle(const gs_world *w, const gs_track *t) {
     float lx = w->car_count > 0 ? gs_f(w->car[0].x) : 0.0f;
     float ly = w->car_count > 0 ? gs_f(w->car[0].y) : 0.0f;
@@ -111,6 +118,15 @@ static void gs_settle(const gs_world *w, const gs_track *t) {
         gs_audio_update(w, t, lx, ly);
         gs_audio_render(gs_buf, FRAMES);
     }
+}
+
+// The speed a scene is about, with the gearbox told about it. The gear comes
+// from the forward component, which is what a gearbox is geared to.
+static void gs_at_speed(gs_world *w, gs_fix vx, gs_fix vy) {
+    if (w->car_count == 0) return;
+    w->car[0].vx = vx;
+    w->car[0].vy = vy;
+    w->car[0].gear = gs_gear_auto(gs_vehicle(w->car[0].vehicle), vx);
 }
 
 static void gs_scene(gs_world *w, gs_surface surface) {
@@ -133,7 +149,7 @@ TEST(a_race_makes_a_noise_and_an_empty_world_does_not) {
 
     // One car, moving.
     gs_scene(&w, GS_SURF_PAVEMENT);
-    w.car[0].vx = GS_INT(6);
+    gs_at_speed(&w, GS_INT(6), 0);
     gs_settle(&w, &gs_t);
     CHECK(gs_rms(gs_buf, FRAMES) > 0.01f);
 
@@ -148,12 +164,18 @@ TEST(the_engine_note_follows_the_drivetrain_up_and_down) {
     // Idling, then walking pace, then quick. The note has to rise with the
     // first two - and then, because there is a gearbox, *not* simply keep
     // rising: a change drops it back.
+    // **Two of these share a gear and two do not**, which is the whole shape
+    // of the claim. A stock car holds first gear to about one and a third
+    // tiles a second, and the engine idles below about six tenths - so three
+    // quarters and five quarters are both inside first and both above idle,
+    // where the note is proportional to speed, while seven tiles a second is
+    // three gears further up.
     float pitch[4];
-    const int speeds[4] = { 0, 1, 2, 7 };
+    const gs_fix speeds[4] = { 0, GS_RATIO(3, 4), GS_RATIO(5, 4), GS_INT(7) };
 
     for (int i = 0; i < 4; i++) {
         gs_scene(&w, GS_SURF_PAVEMENT);
-        w.car[0].vx = GS_INT(speeds[i]);
+        gs_at_speed(&w, speeds[i], 0);
         gs_settle(&w, &gs_t);
         pitch[i] = gs_pitch(gs_buf, FRAMES);
     }
@@ -164,17 +186,17 @@ TEST(the_engine_note_follows_the_drivetrain_up_and_down) {
 
     // Within a gear the note is very nearly proportional to road speed, because
     // in a gear that is exactly what it is. Doubling the speed doubles it.
-    CHECK(pitch[1] > pitch[0] * 1.4f);
-    CHECK(pitch[2] > pitch[1] * 1.8f);
-    CHECK(pitch[2] < pitch[1] * 2.2f);
+    CHECK(pitch[1] > pitch[0] * 1.2f);
+    CHECK(pitch[2] > pitch[1] * 1.5f);      // five thirds of the speed
+    CHECK(pitch[2] < pitch[1] * 1.85f);
 
-    // **And here is the gearbox.** Seven tiles a second is three and a half
-    // times two tiles a second, so without a gearbox the note would be three
-    // and a half times higher. It is about one and a half, because the car has
-    // changed up twice on the way - which is the entire reason to model a
+    // **And here is the gearbox.** Seven tiles a second is seven times one
+    // tile a second, so without a gearbox the note would be seven times
+    // higher. It is between two and three times, because the car has changed
+    // up three times on the way - which is the entire reason to model a
     // drivetrain rather than to multiply a frequency by a speed.
-    CHECK(pitch[3] > pitch[0]);
-    CHECK(pitch[3] < pitch[2] * 2.0f);
+    CHECK(pitch[3] > pitch[2]);
+    CHECK(pitch[3] < pitch[2] * 3.0f);
 }
 
 TEST(the_ground_a_car_is_on_changes_what_it_sounds_like) {
@@ -197,8 +219,10 @@ TEST(the_ground_a_car_is_on_changes_what_it_sounds_like) {
 
     for (int i = 0; i < GS_SURF_COUNT; i++) {
         gs_scene(&w, (gs_surface)i);
-        w.car[0].vx = GS_INT(5);
-        w.car[0].vy = GS_INT(4);          // sideways, so the tyres are working
+        // Sideways as well as forwards, so the tyres are working - and in the
+        // gear the simulation would have chosen, or every car sits pinned on
+        // the limiter in first and the engine drowns the ground.
+        gs_at_speed(&w, GS_INT(5), GS_INT(4));
         gs_settle(&w, &gs_t);
         level[i] = gs_rms(gs_buf, FRAMES);
         bright[i] = gs_crossings(gs_buf, FRAMES);
@@ -270,7 +294,7 @@ TEST(a_car_in_the_air_makes_no_tyre_noise_at_all) {
 
     // On the ground, sliding hard on dirt: about as much tyre noise as there is.
     gs_scene(&w, GS_SURF_DIRT);
-    w.car[0].vx = GS_INT(6);
+    gs_at_speed(&w, GS_INT(6), 0);
     w.car[0].vy = GS_INT(5);
     w.car[0].grounded = true;
     gs_settle(&w, &gs_t);
@@ -280,7 +304,7 @@ TEST(a_car_in_the_air_makes_no_tyre_noise_at_all) {
     // louder, if anything, because nothing is loading it - but the tyres have
     // gone completely.
     gs_scene(&w, GS_SURF_DIRT);
-    w.car[0].vx = GS_INT(6);
+    gs_at_speed(&w, GS_INT(6), 0);
     w.car[0].vy = GS_INT(5);
     w.car[0].grounded = false;
     w.car[0].z = GS_INT(3);
@@ -297,7 +321,7 @@ TEST(a_car_in_the_air_makes_no_tyre_noise_at_all) {
 TEST(a_car_further_away_is_quieter_than_the_one_being_driven) {
     gs_world w;
     gs_scene(&w, GS_SURF_PAVEMENT);
-    w.car[0].vx = GS_INT(6);
+    gs_at_speed(&w, GS_INT(6), 0);
 
     for (int i = 0; i < 200; i++) {
         gs_audio_update(&w, &gs_t, 16.0f, 8.0f);      // listener on the car
@@ -345,7 +369,7 @@ TEST(a_race_sounds_the_same_loudness_on_every_platform) {
     // looser than a last-bit difference.
     gs_world w;
     gs_scene(&w, GS_SURF_DIRT);
-    w.car[0].vx = GS_INT(6);
+    gs_at_speed(&w, GS_INT(6), 0);
     w.car[0].vy = GS_INT(4);          // sideways, so the tyres are working too
     gs_settle(&w, &gs_t);
 
@@ -593,7 +617,7 @@ TEST(fire_is_heard_while_it_burns_and_not_after) {
 TEST(silence_is_a_fade_and_not_a_cut) {
     gs_world w;
     gs_scene(&w, GS_SURF_PAVEMENT);
-    w.car[0].vx = GS_INT(6);
+    gs_at_speed(&w, GS_INT(6), 0);
     gs_settle(&w, &gs_t);
 
     gs_audio_silence();
@@ -852,7 +876,7 @@ static void gs_device_test(void) {
 
     gs_world w;
     gs_scene(&w, GS_SURF_DIRT);
-    w.car[0].vx = GS_INT(6);
+    gs_at_speed(&w, GS_INT(6), 0);
     w.car[0].vy = GS_INT(4);
     gs_audio_update(&w, &gs_t, 16.0f, 8.0f);
 

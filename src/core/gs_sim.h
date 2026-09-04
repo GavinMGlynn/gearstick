@@ -45,6 +45,12 @@ enum {
     // the network exactly like every other thing a driver does. Before the
     // first checkpoint there is nowhere to go back to, and it does nothing.
     GS_IN_RESCUE = 1u << 5,
+
+    // **The manual gearbox**, on press edges: one shift per press, tracked
+    // through gs_car.shift_held so a held button is one shift and not a
+    // hundred and twenty a second. Ignored entirely by an automatic car.
+    GS_IN_SHIFT_UP   = 1u << 6,
+    GS_IN_SHIFT_DOWN = 1u << 7,
 };
 
 // Earth gravity in tiles per second squared, a tile being four metres.
@@ -131,6 +137,17 @@ typedef struct gs_car {
     // a front-end effect - because when a car becomes drivable again decides
     // races, so it is hashed, replayed and rolled back like everything else.
     uint16_t tow_ticks;
+
+    // **The gearbox.** `gear` is 1-based and forward-only - reverse is the
+    // brake-at-a-standstill gear every machine has exactly one of. An
+    // automatic car re-picks the strongest gear every tick; a manual one
+    // holds whatever its driver chose and pays the limiter for forgetting.
+    // `manual` is per car and set when the race is built, because which box
+    // a car has decides races; `shift_held` is the two shift buttons' held
+    // state, for one-shift-per-press. All simulation state, all hashed.
+    uint8_t  gear;
+    uint8_t  manual;
+    uint8_t  shift_held;
 
     // How long since the wheels last touched. The renderer wants it for the
     // shadow, and the landing-prediction arc will want it later.
@@ -251,6 +268,24 @@ void gs_world_set_countdown(gs_world *w, uint32_t ticks);
 
 // Is the race still on the line? True until the lights go green.
 bool gs_world_held(const gs_world *w);
+
+// Give one car a manual gearbox (or take it back). Set when the race is
+// built, like the mode and the laps - a gearbox swapped mid-race would be
+// changing what everybody was doing.
+void gs_world_set_manual(gs_world *w, uint8_t car, bool manual);
+
+// The engine's pull in a given gear at a given forward speed, before the
+// grip circle has its say. Public because the automatic picks gears by
+// asking it, the suite pins the curve with it, and the audio derives the
+// engine note from the same truth the wheels get.
+gs_fix gs_gear_force(const gs_vehicle_def *v, uint8_t gear, gs_fix vlong);
+
+// The gear an automatic box would be in at this speed: the strongest, lowest
+// on a tie so pulling away is always in first. Public because the engine note
+// is derived from the gear a car is in, and anything that wants to know what
+// a car at a speed sounds like has to be able to ask the same question the
+// simulation answers.
+uint8_t gs_gear_auto(const gs_vehicle_def *v, gs_fix vlong);
 
 // How long is left, in ticks, or zero once it has gone green.
 uint32_t gs_world_countdown(const gs_world *w);

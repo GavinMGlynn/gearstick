@@ -31,6 +31,18 @@ typedef struct gs_input_state {
     uint64_t     lost_at;          // SDL_GetTicks() at focus loss, 0 focused
     bool         shielding;        // a blip survived; merge held into polls
 
+    // **The debounce: a release only counts after the key has stayed up for
+    // GS_INPUT_GRACE_MS.** Under WSLg a *held* key arrives as a thirty-hertz
+    // stream of press/release pairs - the down phase lasting nothing, the up
+    // phase a frame - so the poll nearly always found the accelerator "up"
+    // and a held throttle read dead until re-pressed. Real events, repeat
+    // flag clear, straight off the wire: no game state was ever wrong, the
+    // key honestly flapped. Bridging releases shorter than the grace turns
+    // the flapping back into the hold the finger is actually performing,
+    // while a deliberate human tap - sixty milliseconds and up between
+    // presses - still releases.
+    uint64_t     up_at[SDL_SCANCODE_COUNT];   // ms of the last release, 0 none
+
     // Last frame's buttons on pad zero, so the editor can tell a press from a
     // hold. The race does not care - a held accelerator is a held accelerator -
     // but undo repeating sixty times a second would be a disaster.
@@ -69,11 +81,19 @@ void gs_input_combine(const gs_input *from_pads, int pads,
 void gs_input_init(gs_input_state *s);
 
 #define GS_INPUT_BLIP_MS 1000u
+#define GS_INPUT_GRACE_MS 50u
 
 // What the shield believes about one key, for the suite: true while the key
 // is held and shielded through a blip. Tests feed gs_input_event synthetic
 // events and ask this, so the shield's rules are pinned without a keyboard.
 bool gs_input_shielded(const gs_input_state *s, SDL_Scancode key);
+
+// Whether the debounce is bridging this key's release at `now_ms`: true when
+// the key's last release is younger than the grace and no newer press has
+// claimed it. Takes the clock as an argument so the suite can walk the rule
+// without waiting for one.
+bool gs_input_graced(const gs_input_state *s, SDL_Scancode key,
+                     uint64_t now_ms);
 
 // Read and write the player's bindings. Failure to load is not an error - it
 // means they have never changed anything - and leaves the defaults in place.

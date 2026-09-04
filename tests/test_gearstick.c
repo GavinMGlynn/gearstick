@@ -465,6 +465,7 @@ TEST(a_race_is_identified_by_everything_that_decides_it) {
         sizeof any->heading, sizeof any->vehicle, sizeof any->damage,
         sizeof any->grounded, sizeof any->wrecked, sizeof any->active,
         sizeof any->air_ticks, sizeof any->drop_cooldown, sizeof any->tow_ticks,
+        sizeof any->gear, sizeof any->manual, sizeof any->shift_held,
         sizeof any->next_gate,
         sizeof any->laps, sizeof any->finish_tick, sizeof any->lap_start,
         sizeof any->best_lap,
@@ -9154,6 +9155,177 @@ TEST(a_grid_of_any_size_is_centred_on_its_start_line) {
     }
 }
 
+TEST(the_gears_are_a_ladder_and_each_runs_out_at_its_own_top) {
+    // **The gear curve, pinned as a ladder.** Gear g of G tops out at
+    // top * g / G and pulls harder the lower it is - power * G / g, capped
+    // at power so a launch is exactly as traction-limited as it always was.
+    // A stock car has four forward gears; every claim here is measured
+    // against its own numbers.
+    const gs_vehicle_def *v = gs_vehicle((uint8_t)GS_VEH_STOCK_CAR);
+    CHECK(v->gears == 4);
+
+    // Off the line, first gear pulls the full engine and no more - the cap
+    // is what keeps the launch identical to the pre-gearbox game.
+    CHECK(gs_gear_force(v, 1, 0) == v->power);
+
+    // Each gear has nothing left at its own ceiling, and pulls at the foot
+    // of it. Walked for all four.
+    int walked = 0;
+    for (uint8_t g = 1; g <= v->gears; g++) {
+        const gs_fix top_g = (gs_fix)((int64_t)v->top * g / v->gears);
+        CHECK(gs_gear_force(v, g, top_g) == 0);              // limiter
+        CHECK(gs_gear_force(v, g, top_g - GS_ONE) > 0);      // still pulling
+        walked++;
+    }
+    CHECK(walked == 4);
+
+    // A lower gear out-pulls a higher one *within its own band* - at a
+    // third of first gear's range, first is the stronger, which is the whole
+    // reason to change down. (Near the top of a gear the next one up wins,
+    // and that is the upshift the automatic makes on its own.)
+    const gs_fix low = (gs_fix)((int64_t)v->top * 1 / (v->gears * 3));
+    CHECK(gs_gear_force(v, 1, low) > gs_gear_force(v, 2, low));
+
+    // A gear in top from a standstill barely pulls - the bog below its band,
+    // which is the wrong-gear-wrong-launch the manual box makes possible.
+    CHECK(gs_gear_force(v, v->gears, 0) < gs_gear_force(v, 1, 0) / 2);
+
+    // The top gear reaches the car's actual top speed, so no speed is
+    // unreachable for want of a gear.
+    CHECK(gs_gear_force(v, v->gears, v->top - GS_ONE) > 0);
+    CHECK(gs_gear_force(v, v->gears, v->top) == 0);
+}
+
+TEST(an_automatic_matches_the_engine_the_game_always_had) {
+    // **The automatic is the old engine.** It picks the strongest gear each
+    // tick, and under the force cap that is exactly the headroom curve the
+    // game drove on before gears existed: a car flat out from rest reaches
+    // the same speed in the same time whether it is thinking about gears or
+    // not. Driven here, not asserted - a full-throttle run to terminal
+    // speed, checked against the vehicle's own top.
+    static gs_track t;
+    gs_track_init(&t, 200, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10),
+                     0);
+    CHECK(w.car[0].manual == 0);                  // automatic by default
+
+    const gs_vehicle_def *v = gs_vehicle((uint8_t)GS_VEH_STOCK_CAR);
+    for (int i = 0; i < GS_TICK_HZ * 20; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        // On a treadmill: the interest is the speed reached, not the ground
+        // covered, and a straight long enough to reach terminal is longer
+        // than a test track wants to be.
+        w.car[0].x = GS_INT(4);
+        w.car[0].y = GS_INT(10);
+    }
+    // Settled near the top the vehicle table names - drag holds it a touch
+    // under, the same touch the pre-gearbox engine was held under.
+    const double reached = (double)gs_car_speed(&w.car[0]) / (double)GS_ONE;
+    const double top = (double)v->top / (double)GS_ONE;
+    CHECK(reached > top * 0.90);
+    CHECK(reached <= top + 0.01);
+
+    // And it climbed the ladder to get there: by terminal speed it is in top.
+    CHECK(w.car[0].gear == v->gears);
+
+    // Pulling away from rest, it is in first.
+    gs_world w2;
+    gs_world_init(&w2, GS_ONE);
+    gs_world_add_car(&w2, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10),
+                     0);
+    gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+    gs_world_step(&w2, &t, in);
+    CHECK(w2.car[0].gear == 1);
+}
+
+TEST(a_manual_holds_its_gear_and_shifts_one_per_press) {
+    // **Manual is the driver's gear, held.** It does not re-pick; it shifts
+    // one gear per press of either button, and a held button is one shift
+    // and not a hundred and twenty a second. And it can be got wrong in the
+    // audible way the whole feature is about: left in a tall gear off the
+    // line, it crawls where the automatic would launch.
+    static gs_track t;
+    gs_track_init(&t, 200, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10),
+                     0);
+    gs_world_set_manual(&w, 0, true);
+    CHECK(w.car[0].manual == 1);
+    CHECK(w.car[0].gear == 1);
+
+    const uint8_t gears = gs_vehicle((uint8_t)GS_VEH_STOCK_CAR)->gears;
+
+    // A held up-shift is one shift: after a second of holding it, one gear up.
+    for (int i = 0; i < GS_TICK_HZ; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_SHIFT_UP, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        w.car[0].x = GS_INT(4); w.car[0].y = GS_INT(10);
+        w.car[0].vx = 0; w.car[0].vy = 0;         // hold it still
+    }
+    CHECK(w.car[0].gear == 2);
+
+    // Release and press again is a second shift; another hold is not.
+    {
+        gs_input in[GS_MAX_CARS] = { 0, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    for (int i = 0; i < GS_TICK_HZ; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_SHIFT_UP, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        w.car[0].vx = 0; w.car[0].vy = 0;
+    }
+    CHECK(w.car[0].gear == 3);
+
+    // It never climbs past the top gear or drops below first, however many
+    // presses arrive.
+    for (uint8_t g = 0; g < gears + 3; g++) {
+        gs_input up[GS_MAX_CARS] = { GS_IN_SHIFT_UP, 0, 0, 0 };
+        gs_world_step(&w, &t, up);
+        gs_input none[GS_MAX_CARS] = { 0, 0, 0, 0 };
+        gs_world_step(&w, &t, none);
+    }
+    CHECK(w.car[0].gear == gears);
+    for (uint8_t g = 0; g < gears + 3; g++) {
+        gs_input dn[GS_MAX_CARS] = { GS_IN_SHIFT_DOWN, 0, 0, 0 };
+        gs_world_step(&w, &t, dn);
+        gs_input none[GS_MAX_CARS] = { 0, 0, 0, 0 };
+        gs_world_step(&w, &t, none);
+    }
+    CHECK(w.car[0].gear == 1);
+
+    // **Wrong gear, wrong launch.** In top gear from a standstill a manual
+    // car pulls far less than the automatic does in first - the mistake the
+    // gearbox makes possible, which is the point of offering it.
+    gs_world man;
+    gs_world_init(&man, GS_ONE);
+    gs_world_add_car(&man, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10),
+                     0);
+    gs_world_set_manual(&man, 0, true);
+    man.car[0].gear = gears;                       // left in top
+    gs_world auto_;
+    gs_world_init(&auto_, GS_ONE);
+    gs_world_add_car(&auto_, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4),
+                     GS_INT(10), 0);
+    for (int i = 0; i < GS_TICK_HZ; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&man, &t, in);
+        gs_world_step(&auto_, &t, in);
+        man.car[0].y = GS_INT(10);
+        auto_.car[0].y = GS_INT(10);
+    }
+    CHECK(gs_car_speed(&man.car[0]) < gs_car_speed(&auto_.car[0]));
+}
+
 TEST(a_lost_car_is_towed_to_its_last_checkpoint_and_gains_nothing_by_it) {
     // **"If you go off track too far, maybe we should have a key that would
     // place the car back on the track at the last checkpoint?"** The tow: a
@@ -9848,6 +10020,9 @@ int main(void) {
     run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
     run_a_grid_of_any_size_is_centred_on_its_start_line();
+    run_the_gears_are_a_ladder_and_each_runs_out_at_its_own_top();
+    run_an_automatic_matches_the_engine_the_game_always_had();
+    run_a_manual_holds_its_gear_and_shifts_one_per_press();
     run_a_lost_car_is_towed_to_its_last_checkpoint_and_gains_nothing_by_it();
     run_the_shoulder_is_level_and_a_car_on_it_answers_its_wheel();
     run_full_lock_at_top_speed_is_a_slide_that_sheds_speed();
