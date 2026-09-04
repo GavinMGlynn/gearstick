@@ -7907,6 +7907,42 @@ during development - the sprint car's sweep and the ice path's hover - both
 finish, watched tick by tick.*
 
 
+### A focus blip no longer releases the keys, 2026-09-04
+
+**"I hold the up arrow down, but in cases the acceleration does not increase,
+until I lift the key and press it again."** The trace run for this report
+never caught the fault mid-race, but it proved the mechanism's precondition
+on this exact machine: three window-focus blips in two idle minutes under
+WSLg. SDL clears its entire keyboard state the moment focus leaves, and the
+state it reconciles on return has been seen empty under WSLg's X server - so
+a compositor blip mid-race silently releases a physically held accelerator,
+and nothing brings it back but lifting and pressing again. Re-press-fixes-it
+is that recovery exactly; the physics cannot be it, because a re-press
+changes nothing the simulation sees.
+
+**The blip shield**, in the input layer: keys are tracked from the events
+themselves, and a focus loss shorter than a second never releases the keys a
+driver is holding. A longer loss is somebody actually leaving, and
+everything held is forgotten rather than guessed about - a key held on the
+way out may have been released anywhere at all. A real release always
+releases and stands the shield down, so while the window is focused SDL's
+own state is the truth and the shield stays out of the way. The window's
+focus events are also stamped into `--trace` now, beside the once-a-second
+input flags, so the next "the controls did not work" report can be answered
+by reading rather than guessing.
+
+*Verification: the shield's rules are pinned by forged events carrying
+forged clocks - held through a half-second blip, dropped after a two-second
+absence, the boundary second given to the driver, a release always
+releasing, and nothing shielded while focus never left. Named as not
+covered: the three lines merging shielded keys into the poll ride on SDL's
+live keyboard state, which a test cannot forge. The mechanism itself is
+strongly evidenced rather than reproduced in a harness - WSLg's focus blips
+and SDL's reset-on-focus-loss are both confirmed, every other suspect is
+eliminated by reading, and the trace instrumentation stays armed to catch a
+recurrence if this diagnosis is wrong.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

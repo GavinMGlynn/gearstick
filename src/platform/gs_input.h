@@ -15,6 +15,22 @@ typedef struct gs_input_state {
     SDL_Gamepad *pad[GS_MAX_CARS];
     int          pads;
 
+    // **The blip shield: a focus loss shorter than a second never releases
+    // the keys a driver is holding.**
+    //
+    // SDL clears its whole keyboard state the moment the window loses focus,
+    // and under WSLg the state it reads back on regaining it has been seen
+    // empty - so a compositor blip mid-race left a physically held
+    // accelerator dead until it was released and pressed again, reported as
+    // "the acceleration does not increase until I lift the key". These keys
+    // are tracked from the events themselves and survive a blip; a loss
+    // longer than GS_INPUT_BLIP_MS is somebody actually leaving, and
+    // everything is dropped, because a key held on the way out may have been
+    // released anywhere at all while the game could not hear it.
+    bool         held[SDL_SCANCODE_COUNT];
+    uint64_t     lost_at;          // SDL_GetTicks() at focus loss, 0 focused
+    bool         shielding;        // a blip survived; merge held into polls
+
     // Last frame's buttons on pad zero, so the editor can tell a press from a
     // hold. The race does not care - a held accelerator is a held accelerator -
     // but undo repeating sixty times a second would be a disaster.
@@ -52,13 +68,22 @@ void gs_input_combine(const gs_input *from_pads, int pads,
 
 void gs_input_init(gs_input_state *s);
 
+#define GS_INPUT_BLIP_MS 1000u
+
+// What the shield believes about one key, for the suite: true while the key
+// is held and shielded through a blip. Tests feed gs_input_event synthetic
+// events and ask this, so the shield's rules are pinned without a keyboard.
+bool gs_input_shielded(const gs_input_state *s, SDL_Scancode key);
+
 // Read and write the player's bindings. Failure to load is not an error - it
 // means they have never changed anything - and leaves the defaults in place.
 bool gs_input_load_bindings(gs_input_state *s);
 bool gs_input_save_bindings(const gs_input_state *s);
 void gs_input_quit(gs_input_state *s);
 
-// Reacts to pads arriving and leaving. Safe to call with any event.
+// Reacts to pads arriving and leaving, and keeps the blip shield fed with
+// key and focus events. Safe to call with any event; the game calls it with
+// every one.
 void gs_input_event(gs_input_state *s, const SDL_Event *e);
 
 // Fill `out` with one byte per car. Pad N drives car N; the keyboard drives

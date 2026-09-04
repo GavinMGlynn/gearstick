@@ -28,6 +28,7 @@
 #include "net/gs_auth.h"
 #include "ui/gs_menu.h"
 #include "core/gs_generate.h"
+#include "platform/gs_input.h"
 #include "platform/gs_winmem.h"
 #include "ui/gs_hud.h"
 #include "ui/gs_style.h"
@@ -11372,6 +11373,114 @@ TEST(at_the_smallest_window_every_control_can_be_scrolled_to) {
 // anything - so a panel that appears unfocused is invisible to the one test
 // that walks every control on every screen. It is a fault only a person with a
 // mouse could meet.
+TEST(a_focus_blip_never_releases_the_keys_a_driver_is_holding) {
+    (void)ren;
+
+    // **"I hold the up arrow down, but in cases the acceleration does not
+    // increase, until I lift the key and press it again."** SDL clears its
+    // whole keyboard state the moment the window loses focus, and under WSLg
+    // - where this machine showed three focus blips in two idle minutes -
+    // the state read back on return has been seen empty. So a compositor
+    // blip mid-race silently released a physically held accelerator. The
+    // shield's rule: a focus loss shorter than a second never releases the
+    // keys a driver is holding; a longer one drops everything, because a key
+    // held on the way out may have been released anywhere at all.
+    //
+    // Driven with forged events carrying forged clocks, which is what the
+    // shield reads time from - so every rule is walked without a keyboard,
+    // a window system, or a wait.
+    gs_input_state st = { 0 };
+    SDL_Event e;
+
+#define GS_AT(ms) ((uint64_t)(ms) * 1000000ull)
+
+    // A key held, the focus blinks for half a second: still held.
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.common.timestamp = GS_AT(1000);
+    e.key.scancode = SDL_SCANCODE_UP;
+    gs_input_event(&st, &e);
+
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+    e.common.timestamp = GS_AT(2000);
+    gs_input_event(&st, &e);
+
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_WINDOW_FOCUS_GAINED;
+    e.common.timestamp = GS_AT(2500);
+    gs_input_event(&st, &e);
+
+    CHECK(gs_input_shielded(&st, SDL_SCANCODE_UP));
+    CHECK(!gs_input_shielded(&st, SDL_SCANCODE_DOWN));   // never pressed
+
+    // The driver lets go: the release always releases, and the shield stands
+    // down with it.
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_KEY_UP;
+    e.common.timestamp = GS_AT(3000);
+    e.key.scancode = SDL_SCANCODE_UP;
+    gs_input_event(&st, &e);
+    CHECK(!gs_input_shielded(&st, SDL_SCANCODE_UP));
+
+    // Held again, but this time the window is gone for two seconds: that is
+    // somebody leaving, and everything held is forgotten rather than guessed
+    // about.
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.common.timestamp = GS_AT(4000);
+    e.key.scancode = SDL_SCANCODE_UP;
+    gs_input_event(&st, &e);
+
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+    e.common.timestamp = GS_AT(5000);
+    gs_input_event(&st, &e);
+
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_WINDOW_FOCUS_GAINED;
+    e.common.timestamp = GS_AT(5000 + GS_INPUT_BLIP_MS + 1);
+    gs_input_event(&st, &e);
+    CHECK(!gs_input_shielded(&st, SDL_SCANCODE_UP));
+
+    // Exactly at the boundary is still a blip - the rule says "shorter than
+    // a second never releases", and the second itself is given to the driver.
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.common.timestamp = GS_AT(7000);
+    e.key.scancode = SDL_SCANCODE_UP;
+    gs_input_event(&st, &e);
+
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+    e.common.timestamp = GS_AT(8000);
+    gs_input_event(&st, &e);
+
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_WINDOW_FOCUS_GAINED;
+    e.common.timestamp = GS_AT(8000 + GS_INPUT_BLIP_MS);
+    gs_input_event(&st, &e);
+    CHECK(gs_input_shielded(&st, SDL_SCANCODE_UP));
+
+    // And with no blip at all there is nothing to shield: while the window
+    // is focused, SDL's own state is the truth and the shield stays out of
+    // the way.
+    gs_input_state calm = { 0 };
+    e = (SDL_Event){ 0 };
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.common.timestamp = GS_AT(100);
+    e.key.scancode = SDL_SCANCODE_UP;
+    gs_input_event(&calm, &e);
+    CHECK(!gs_input_shielded(&calm, SDL_SCANCODE_UP));
+
+#undef GS_AT
+
+    // What is not covered here, named: the merge of shielded keys into
+    // gs_input_poll rides on SDL's live keyboard state, which a test cannot
+    // forge - it is three lines that read gs_input_shielded's answer, and
+    // the game exercises them every frame.
+}
+
 TEST(the_window_opens_where_it_was_left_and_never_somewhere_nobody_can_see) {
     (void)ren;
 
@@ -12036,6 +12145,7 @@ int main(void) {
     run_the_hud_says_what_you_are_carrying_and_only_when_you_are(ren);
     run_at_the_smallest_window_every_control_can_be_scrolled_to(ren);
     run_a_screen_that_has_just_appeared_is_the_one_taking_input(ren);
+    run_a_focus_blip_never_releases_the_keys_a_driver_is_holding(ren);
     run_the_window_opens_where_it_was_left_and_never_somewhere_nobody_can_see(ren);
     run_the_tracks_screen_shows_the_shape_of_the_chosen_track(ren);
     run_no_screen_is_drawn_bigger_than_the_window_it_is_in(ren);

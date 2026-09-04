@@ -2762,3 +2762,13 @@ are the places a fault could sit unnoticed.
       speed shed in two seconds of full lock, and the brake working
       mid-corner - and both suites are green over a shipped set re-raced
       under the new physics.*
+
+- [x] **A window-focus blip no longer silently releases held keys.** Under
+      WSLg the window loses focus in sub-second blips, and SDL forgets every
+      held key when it does - so a held accelerator sometimes went dead
+      mid-race until lifted and pressed again. Keys a driver never let go of
+      now survive any focus loss shorter than a second; a longer absence
+      drops everything rather than guessing.
+      *Verification: the shield's rules are walked with forged events and
+      forged clocks - the blip, the boundary, the real absence, and the
+      release that always releases.*

@@ -27,6 +27,45 @@ void gs_input_quit(gs_input_state *s) {
 }
 
 void gs_input_event(gs_input_state *s, const SDL_Event *e) {
+    switch (e->type) {
+    case SDL_EVENT_KEY_DOWN:
+        if (e->key.scancode < SDL_SCANCODE_COUNT) {
+            s->held[e->key.scancode] = true;
+        }
+        return;
+    case SDL_EVENT_KEY_UP:
+        // A release always releases - the shield exists to keep keys that
+        // were never let go of, not to argue with a driver's own fingers.
+        if (e->key.scancode < SDL_SCANCODE_COUNT) {
+            s->held[e->key.scancode] = false;
+        }
+        s->shielding = false;
+        return;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        // The event's own clock, not SDL_GetTicks: a real event carries the
+        // moment it happened, and a test can carry any moment it needs.
+        s->lost_at = e->common.timestamp / 1000000u;
+        if (s->lost_at == 0) s->lost_at = 1;
+        return;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        if (s->lost_at != 0 &&
+            e->common.timestamp / 1000000u - s->lost_at <=
+                (uint64_t)GS_INPUT_BLIP_MS) {
+            // A blip. SDL has already forgotten every held key; what the
+            // driver never released carries on from here.
+            s->shielding = true;
+        } else {
+            // Long enough gone that a key held on the way out may have been
+            // released anywhere. Forget everything rather than guess.
+            SDL_memset(s->held, 0, sizeof s->held);
+            s->shielding = false;
+        }
+        s->lost_at = 0;
+        return;
+    default:
+        break;
+    }
+
     if (e->type == SDL_EVENT_GAMEPAD_ADDED) {
         if (s->pads >= GS_MAX_CARS) return;
         SDL_Gamepad *g = SDL_OpenGamepad(e->gdevice.which);
@@ -96,9 +135,25 @@ void gs_input_combine(const gs_input *from_pads, int pads,
     }
 }
 
+bool gs_input_shielded(const gs_input_state *s, SDL_Scancode key) {
+    return s->shielding && key < SDL_SCANCODE_COUNT && s->held[key];
+}
+
 void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars) {
     int key_count = 0;
     const bool *keys = SDL_GetKeyboardState(&key_count);
+
+    // The keys SDL believes in, plus the ones the blip shield is carrying
+    // over a focus loss it knows the driver never noticed. The shield stands
+    // down the moment any key is genuinely released, so while everything is
+    // ordinary this copies SDL's answer exactly.
+    static bool merged[SDL_SCANCODE_COUNT];
+    const bool *effective = keys;
+    if (s->shielding && keys != nullptr) {
+        int n = key_count < SDL_SCANCODE_COUNT ? key_count : SDL_SCANCODE_COUNT;
+        for (int i = 0; i < n; i++) merged[i] = keys[i] || s->held[i];
+        effective = merged;
+    }
 
     gs_input from_pads[GS_MAX_CARS] = { 0 };
     gs_input from_keys[GS_MAX_CARS] = { 0 };
@@ -106,7 +161,7 @@ void gs_input_poll(const gs_input_state *s, gs_input *out, uint8_t cars) {
     for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
         uint32_t buttons = (int)i < s->pads ? gs_pad_buttons(s->pad[i]) : 0;
         from_pads[i] = gs_bind_resolve(&s->bind, i, nullptr, 0, buttons);
-        from_keys[i] = gs_bind_resolve(&s->bind, i, keys, key_count, 0);
+        from_keys[i] = gs_bind_resolve(&s->bind, i, effective, key_count, 0);
     }
 
     gs_input_combine(from_pads, s->pads, from_keys, GS_MAX_CARS, out, cars);
