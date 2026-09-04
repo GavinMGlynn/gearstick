@@ -93,6 +93,22 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
     gs_fix dx = target->x - c->x;
     gs_fix dy = target->y - c->y;
 
+    // **Every driver gets a lane.** All of them used to aim at the gate's
+    // exact centre, so any two cars near the same gate converged on a point -
+    // and a car crawling through its hairpin rotation was rammed there by one
+    // arriving flat out, hard enough to punt it across the run-off and off
+    // the drop. Spread across the gate the way the grid spreads across the
+    // line, by the same slot order, and kept inside the gate's own width so
+    // a lane is never a missed crossing.
+    {
+        const gs_fix lane = gs_fix_mul(
+            target->half_width,
+            (gs_fix)(((int64_t)(2 * car + 1) - GS_MAX_CARS) * GS_ONE /
+                     (GS_MAX_CARS + 1)));
+        dx -= gs_fix_mul(gs_sin(target->heading), lane);
+        dy += gs_fix_mul(gs_cos(target->heading), lane);
+    }
+
     // --- Approach a gate from behind it, not from in front.
     //
     // **A gate is directional**, so a car that has gone past one has to come
@@ -322,6 +338,23 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
             }
         }
 
+        // **Off the field, the only plan is back onto it.** The run-off is
+        // sand at the edge's height for ten tiles and then the drop, and a
+        // car out there manoeuvring for a gate - backing away from a slope,
+        // wriggling round to face a hairpin - has none of the room those
+        // moves assume. One did all of that eleven minutes into an epic ice
+        // path, five gates from home, and crept over the edge at walking
+        // pace. Out here the gate can wait: aim for ground six tiles inside
+        // the boundary, and the chase resumes the moment the world is back
+        // underfoot.
+        if (c->x < 0 || c->y < 0 || c->x > GS_INT(t->w) ||
+            c->y > GS_INT(t->h)) {
+            const gs_fix inx = GS_CLAMP(c->x, GS_INT(6), GS_INT(t->w) - GS_INT(6));
+            const gs_fix iny = GS_CLAMP(c->y, GS_INT(6), GS_INT(t->h) - GS_INT(6));
+            dx = inx - c->x;
+            dy = iny - c->y;
+        }
+
         distance = gs_fix_len2(dx, dy);
         want = gs_atan2(dy, dx);
         turn = gs_angle_delta(c->heading, want);
@@ -399,6 +432,16 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
         if (radius < GS_HALF) radius = GS_HALF;
         corner_speed = gs_fix_mul(gs_fix_sqrt(gs_fix_mul(traction, radius)),
                                   margin);
+
+        // **Room for the slide.** The steady-state speed above assumes the
+        // car follows the arc it is steered onto, and since the wheel gained
+        // authority it does not: the nose comes round faster than the tyres
+        // can bend the path, and the car travels wide while it rotates.
+        // That transient is the new handling's character, so the driver
+        // plans for it - fifteen percent under the tyres' answer, which is
+        // what stopped the sprint car drifting off the world at a hairpin
+        // it used to take on rails.
+        corner_speed = gs_fix_mul(corner_speed, GS_RATIO(85, 100));
     }
 
     // And the turn it needs *right now* to stay pointed at the gate. Planning
@@ -408,11 +451,24 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
     // circling outside a corner it could never have made.
     gs_fix here_limit = INT32_MAX;
     {
-        gs_fix sine = gs_fix_abs(gs_sin((gs_angle)(turn < 0 ? -turn : turn)));
+        // **Half the turn, which is the chord's own geometry - and it is what
+        // sees a reversal.** The arc that ends on the target after turning
+        // through `turn` has radius chord / (2 sin(turn/2)). With sin(turn)
+        // here instead, a hundred and eighty degrees read as a straight -
+        // sin of pi is zero - so a driver pointed exactly away from its gate
+        // had no speed limit at all, floored it, and swept an arc the width
+        // of the run-off: the same hairpin blindness the corner planner was
+        // cured of, alive in the rule that was added to back it up. It was
+        // masked while the wheel was slow, because a car that turns at
+        // twenty-five degrees a second is never pointed away from anything
+        // for long.
+        int32_t mag = turn < 0 ? -turn : turn;
+        gs_fix sine = gs_fix_abs(gs_sin((gs_angle)(mag / 2)));
         if (sine >= GS_RATIO(4, 100) && distance > 0) {
             gs_fix radius = gs_fix_div(distance, gs_fix_mul(sine, GS_INT(2)));
             here_limit = gs_fix_mul(gs_fix_sqrt(gs_fix_mul(traction, radius)),
                                     margin);
+            here_limit = gs_fix_mul(here_limit, GS_RATIO(85, 100));
         }
     }
 
@@ -431,6 +487,23 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
     }
 
     if (speed > here_limit) must_brake = true;
+
+    // **Pointed away from the gate, get slow before getting clever.** The
+    // arc-through-the-target model above is honest about radius, but a car
+    // that carries real speed through a reversal drifts wider than any plan -
+    // the wheel now turns faster than the tyres can bend the path, and the
+    // difference is travel in a direction nobody chose. The right technique
+    // at a reversal is the one a person uses: slow right down, let the nose
+    // come round - seventy degrees a second at a crawl - and launch when the
+    // gate is somewhere in front. The sprint car swept twenty tiles into the
+    // run-off and off the drop without this, twice a lap, on the plainest
+    // two-gate track there is.
+    {
+        int32_t mag = turn < 0 ? -turn : turn;
+        if (mag > (int32_t)GS_DEG(100) && speed > GS_RATIO(25, 10)) {
+            must_brake = true;
+        }
+    }
 
     // --- And the edge of the world, which is a corner like any other.
     //

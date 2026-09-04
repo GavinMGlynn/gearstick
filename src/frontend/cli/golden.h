@@ -100,7 +100,25 @@
 // landing. That is the physics of every car in every race, so every replay,
 // ghost and shared time recorded before it is a race nobody can drive now -
 // which is what this number failing is for. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0x0550a8a6ccd255d5ULL
+// **And it moved for the wheel, deliberately, on a player's report.** "At
+// high speed the cornering is just completely unresponsive" - measured at
+// twenty-seven degrees a second of held arrow at top speed, with the velocity
+// tracking the heading exactly: a slow arc on rails, nothing to feel and
+// nothing to exploit. Steering is half as much again now - the same raise the
+// cars got; the dune buggy takes a fifth, or its wheel plus its grip owned
+// every loose-ground contest - and its falloff with speed eased from half
+// at top to three quarters, so the wheel can out-turn the tyres and the
+// difference is a slide that scrubs speed: sixty-two degrees a second of
+// nose, twenty-three of path, and a third of top speed shed by two seconds
+// of full lock. Pinned in full_lock_at_top_speed_is_a_slide_that_sheds_speed.
+//
+// The same release fixed a physics fault the new handling surfaced: on the
+// run-off shelf the height said level and the slope still said the edge
+// tile's gradient, so a car out there hopped in place, deaf to its wheel -
+// see the_shoulder_is_level_and_a_car_on_it_answers_its_wheel. Every replay
+// and ghost recorded before either change is a race nobody can drive now,
+// which is what this number failing is for. See docs/PROJECT_STATUS.md.
+#define GS_SELFTEST_WORLD_HASH 0x0ebdbd570d9e7718ULL
 
 // The track generator, folded over its first two hundred seeds.
 //
@@ -219,7 +237,14 @@
 // tracks should be organic" - and worth exactly this cost. The dials are
 // asserted one by one in the suite, each measured on the track that comes
 // out. The world hash above did not move; the physics is untouched.
-#define GS_SELFTEST_GENERATOR_HASH 0xea105006e4f627b5ULL
+// **And once for the rim learning about gravity.** A light pocket that
+// reaches the field's edge turns the rim lip from a fence into a launcher: a
+// car cresting it outward at a third of Earth glides the whole run-off shelf
+// with nothing to brake against. The lip and light gravity are two features
+// fighting, so the outer eighteen tiles stay at Earth now - the same shape
+// as every other veto. Only seeds that painted light gravity near a rim
+// build different ground; the fold covers two hundred, so it moves.
+#define GS_SELFTEST_GENERATOR_HASH 0x5d7ebf04f81664e4ULL
 
 // **A race with nobody at the keyboard**, four opponents spread across the
 // skill dial, on a circuit none of them has seen.
@@ -259,6 +284,14 @@
 // And with it when the roster got quicker, for the plainest reason of all: the
 // cars in this race are half as fast again as the ones the old number was taken
 // from.
-#define GS_OPPONENTS_WORLD_HASH 0x9d61c6f26883878eULL
+// And with the wheel, twice over: the physics under every car changed, and
+// so did the driver. Opponents plan fifteen percent under the tyres' answer
+// now - room for the slide the new handling carries into every corner - they
+// get slow before turning through a reversal instead of sweeping the run-off,
+// each aims at its own lane across a gate so two of them never converge on a
+// point, and one that finds itself off the field aims back onto it before
+// anything else. Every one of those is a decision this race re-makes every
+// tick, so its hash moves with them.
+#define GS_OPPONENTS_WORLD_HASH 0x7180d6844f08158dULL
 
 #endif // GS_GOLDEN_H

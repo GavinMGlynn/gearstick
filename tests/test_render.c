@@ -1507,8 +1507,12 @@ TEST(two_cars_take_their_input_from_different_places_and_go_different_ways) {
     CHECK(w.car_count == 2);
 
     // One accelerates and turns left, the other accelerates and turns right.
-    // Nothing here is shared but the track.
-    for (int i = 0; i < GS_TICK_HZ * 3; i++) {
+    // Nothing here is shared but the track. Two seconds, not three: the wheel
+    // turns a car through about seventy degrees a second now, and a heading
+    // past a hundred and eighty reads as the other sign to gs_angle_delta -
+    // the claim is that the inputs are per car, and two seconds of opposite
+    // arcs says so unambiguously.
+    for (int i = 0; i < GS_TICK_HZ * 2; i++) {
         gs_input in[GS_MAX_CARS] = {
             (gs_input)(GS_IN_ACCEL | GS_IN_LEFT),
             (gs_input)(GS_IN_ACCEL | GS_IN_RIGHT),
@@ -2671,7 +2675,7 @@ TEST(a_store_with_tracks_in_it_is_saved_whole) {
     if (assets == nullptr) return;
 
     static const char *const shipped[] = {
-        "low-bend", "grey-mile", "far-drop", "steep-bend",
+        "low-bend", "grey-mile", "far-drop", "grey-bowl",
     };
 
     static gs_track t;

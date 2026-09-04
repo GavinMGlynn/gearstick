@@ -468,8 +468,26 @@ void gs_track_slope(const gs_track *t, gs_fix x, gs_fix y, gs_fix *dzdx, gs_fix 
     // The average of the tile's two edges along each axis: the plane of best
     // fit through four corners that need not be coplanar. Taking one edge alone
     // makes a twisted tile read as flat from one side and steep from the other.
-    if (dzdx != nullptr) *dzdx = ((h10 - h00) + (h11 - h01)) / 2;
-    if (dzdy != nullptr) *dzdy = ((h01 - h00) + (h11 - h10)) / 2;
+    gs_fix sx = ((h10 - h00) + (h11 - h01)) / 2;
+    gs_fix sy = ((h01 - h00) + (h11 - h10)) / 2;
+
+    // **On the shoulder, the outside axis is level - because the height says
+    // so.** gs_track_height clamps the fractional position, so walking off
+    // the east edge the ground stops changing with x: the shelf is flat that
+    // way, at the height of the edge it left. This function kept answering
+    // with the edge tile's own gradient out there - the two disagreed about
+    // the same ground - and once the generator put a lip on every rim, that
+    // gradient was the lip's. Every landing on the shelf then set the car's
+    // vertical speed as if the ground still rose ahead, the flat shelf
+    // un-grounded it the next tick, and a car "parked" on the shoulder hopped
+    // in place forever: airborne twenty-nine ticks in thirty, deaf to its own
+    // wheel and brakes, drifting over the drop at walking pace. Level is what
+    // the height function promises, so level is what the slope reports.
+    if (x < 0 || x > GS_INT(t->w)) sx = 0;
+    if (y < 0 || y > GS_INT(t->h)) sy = 0;
+
+    if (dzdx != nullptr) *dzdx = sx;
+    if (dzdy != nullptr) *dzdy = sy;
 }
 
 gs_surface gs_track_surface(const gs_track *t, gs_fix x, gs_fix y) {

@@ -2748,3 +2748,17 @@ are the places a fault could sit unnoticed.
       *Verification: the suite checks every field size from one to four for
       symmetry and spacing, and that the four-car grid is bit-identical to
       before.*
+
+- [x] **High-speed cornering slides instead of ploughing.** Held steering at
+      top speed used to turn the car at twenty-seven degrees a second on
+      rails - reported as "completely unresponsive". Steering is half as
+      much again on every machine and falls off less with speed; grip is
+      untouched, so the surplus becomes a visible slide that scrubs speed,
+      throttle holds it wide and brake tightens it. The AI learned to drive
+      the new handling, a run-off physics fault it surfaced was fixed, and
+      every golden hash moved deliberately with its note.
+      *Verification: the slide is pinned with measured numbers - sixty-two
+      degrees a second of nose against twenty-three of path, a third of top
+      speed shed in two seconds of full lock, and the brake working
+      mid-corner - and both suites are green over a shipped set re-raced
+      under the new physics.*

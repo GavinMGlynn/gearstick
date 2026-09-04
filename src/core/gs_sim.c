@@ -118,12 +118,22 @@ gs_fix gs_car_speed(const gs_car *c) {
     return gs_fix_len2(c->vx, c->vy);
 }
 
-// How much a car can steer at a given speed. Full authority at a crawl, falling
-// away as it speeds up - which is what stops a car pirouetting at 80 and is
-// also, deliberately, a rule simple enough to feel in the hands after two
-// corners.
+// How much a car can steer at a given speed. Full authority at a crawl,
+// falling away as it speeds up - which is what stops a car pirouetting at 80
+// and is also, deliberately, a rule simple enough to feel in the hands after
+// two corners.
+//
+// **Three quarters at top speed, not half.** Halving was tuned when the
+// heading rate and the grip limit happened to meet at top speed, and a car
+// whose velocity exactly keeps up with its heading corners on rails - slowly,
+// with nothing to feel and nothing for a held arrow to change. With three
+// quarters the wheel can ask for more than the tyres will give: the surplus
+// becomes slip, the grip limit scrubs it off as speed, and a full-lock corner
+// entered too fast is a visible, predictable slide that slows the car until
+// the tyres catch up. That is the original's charm and it is a dial a player
+// can exploit on purpose.
 static gs_fix gs_steer_authority(const gs_vehicle_def *v, gs_fix speed) {
-    gs_fix denom = GS_ONE + gs_fix_div(speed, v->top);
+    gs_fix denom = GS_ONE + gs_fix_div(speed, (gs_fix)(3 * (int64_t)v->top));
     return gs_fix_div(v->steer, denom);
 }
 

@@ -1026,8 +1026,14 @@ static void gs_lay_gravity(gs_track *t, gs_rng *r, const gs_track_spec *spec,
         uint32_t hc = 120u + gs_pick(r, 41);
         gs_fix mul = lightside != 0 ? GS_RATIO((int32_t)pc, 100)
                                     : GS_RATIO((int32_t)hc, 100);
+        const bool light = mul < GS_ONE;
         for (int32_t y = 0; y < (int32_t)t->h; y++) {
             for (int32_t x = 0; x < (int32_t)t->w; x++) {
+                // The same rim veto as the pockets - see GS_GRAV_RIM below.
+                if (light && (x < 18 || y < 18 || x >= (int32_t)t->w - 18 ||
+                              y >= (int32_t)t->h - 18)) {
+                    continue;
+                }
                 gs_fix rel = gs_fix_mul(GS_INT(x) + GS_ONE / 2 - cx, c) +
                              gs_fix_mul(GS_INT(y) + GS_ONE / 2 - cy, s);
                 if (rel > 0) {
@@ -1037,6 +1043,17 @@ static void gs_lay_gravity(gs_track *t, gs_rng *r, const gs_track_spec *spec,
         }
         return;
     }
+
+    // **And never light at the rim.** The rim lip exists to push a wayward
+    // car back into the play - but a car that crests it *outward* gets a
+    // small launch, and in a third of Earth's gravity that launch is a long
+    // ballistic glide across the whole run-off shelf, unbrakeable because
+    // nothing in the air has brakes. A car did exactly that eleven minutes
+    // into an epic ice path and landed a hundredth of a tile past the drop.
+    // The lip and light gravity are two features fighting, so the veto is
+    // the same shape as every other: the outer band of the field stays at
+    // Earth, and a pocket is clipped to the ground inland of it.
+#define GS_GRAV_RIM 18
 
     // Pockets, centred on the route so they are driven through rather than
     // decorating a corner of the map.
@@ -1055,10 +1072,16 @@ static void gs_lay_gravity(gs_track *t, gs_rng *r, const gs_track_spec *spec,
         gs_fix cx, cy;
         gs_route_at(plan, along, &cx, &cy);
         int32_t tx = gs_fix_floor(cx), ty = gs_fix_floor(cy);
+        const bool light = mul < GS_ONE;
         for (int32_t y = ty - radius; y <= ty + radius; y++) {
             for (int32_t x = tx - radius; x <= tx + radius; x++) {
                 if (x < 0 || y < 0 || x >= (int32_t)t->w ||
                     y >= (int32_t)t->h) {
+                    continue;
+                }
+                if (light && (x < GS_GRAV_RIM || y < GS_GRAV_RIM ||
+                              x >= (int32_t)t->w - GS_GRAV_RIM ||
+                              y >= (int32_t)t->h - GS_GRAV_RIM)) {
                     continue;
                 }
                 int32_t dx = x - tx, dy = y - ty;

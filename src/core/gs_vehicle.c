@@ -13,7 +13,8 @@ const gs_vehicle_def gs_vehicles[GS_VEH_COUNT] = {
     //
     // Asked for after driving the shipped tracks: the game felt sluggish
     // against the one it is after. Power, top speed and grip are each
-    // multiplied by 1.5 on every machine. Braking, steering and drag are
+    // multiplied by 1.5 on every machine, and steering followed later - see
+    // below. Braking and drag are
     // untouched.
     //
     // **All three together, because no one of them is the pace.** Measured on
@@ -63,10 +64,27 @@ const gs_vehicle_def gs_vehicles[GS_VEH_COUNT] = {
 
     // The baseline. Good at nothing in particular, bad at nothing in
     // particular, and the one to learn a track in.
+    // **Steering went up with the cars - by half on most machines.** The
+    // dune buggy gets a fifth instead: its wheel was already the roster's
+    // biggest, and raised by half it cashed the surplus through its grip on
+    // every loose-ground scenario at once - the roster check caught the stock
+    // car left best at nothing. The buggy keeps the biggest wheel in the box;
+    // it just does not get the biggest raise on top of it.
+    //
+    // **Steering went up by half on every machine, after the cars did.**
+    // The roster got half again quicker and the wheel did not, so at the new
+    // top speeds a held arrow turned a stock car at twenty-seven degrees a
+    // second - a ninety-degree corner took three seconds of full lock, and a
+    // player said what that is: "the cornering is just completely
+    // unresponsive". The same multiplier as the speed change, applied to the
+    // dial that was left behind, and the grip deliberately not touched: the
+    // heading can now out-turn what the tyres can follow, and the difference
+    // is a car that steps out and scrubs speed - a slide you can see and
+    // predict - instead of a slow arc on rails.
     [GS_VEH_STOCK_CAR] = {
         "stock car",
         GS_INT(9), GS_RATIO(90, 10), GS_INT(9),
-        GS_RATIO(150, 100), GS_INT(9500), GS_RATIO(6, 1000), GS_RATIO(165, 100),
+        GS_RATIO(150, 100), GS_INT(14250), GS_RATIO(6, 1000), GS_RATIO(165, 100),
     },
     // The fastest thing here in a straight line on good ground, and it pays for
     // it everywhere else: least grip in the roster, so it slides in corners and
@@ -75,27 +93,27 @@ const gs_vehicle_def gs_vehicles[GS_VEH_COUNT] = {
     [GS_VEH_SPRINT_CAR] = {
         "sprint car",
         GS_RATIO(1275, 100), GS_RATIO(105, 10), GS_RATIO(117, 10),
-        GS_RATIO(117, 100), GS_INT(7000), GS_RATIO(5, 1000), GS_RATIO(825, 1000),
+        GS_RATIO(117, 100), GS_INT(10500), GS_RATIO(5, 1000), GS_RATIO(825, 1000),
     },
     // Turns in beautifully and shrugs off rough ground; gives away a lot of
     // straight-line speed for it.
     [GS_VEH_DUNE_BUGGY] = {
         "dune buggy",
         GS_RATIO(84, 10), GS_RATIO(85, 10), GS_RATIO(795, 100),
-        GS_RATIO(192, 100), GS_INT(12500), GS_RATIO(9, 1000), GS_RATIO(210, 100),
+        GS_RATIO(192, 100), GS_INT(15000), GS_RATIO(9, 1000), GS_RATIO(210, 100),
     },
     // Slow, and it does not care what you drive it over or how you land it.
     [GS_VEH_BAJA_BUG] = {
         "baja bug",
         GS_RATIO(75, 10), GS_RATIO(75, 10), GS_RATIO(75, 10),
-        GS_RATIO(162, 100), GS_INT(10500), GS_RATIO(10, 1000), GS_RATIO(390, 100),
+        GS_RATIO(162, 100), GS_INT(15750), GS_RATIO(10, 1000), GS_RATIO(390, 100),
     },
     // Enormous grip and steering and the best acceleration in the game, and it
     // folds on a landing that the rest would shrug off.
     [GS_VEH_MOTORCYCLE] = {
         "motorcycle",
         GS_RATIO(135, 10), GS_RATIO(115, 10), GS_RATIO(99, 10),
-        GS_RATIO(195, 100), GS_INT(15000), GS_RATIO(4, 1000), GS_RATIO(525, 1000),
+        GS_RATIO(195, 100), GS_INT(22500), GS_RATIO(4, 1000), GS_RATIO(525, 1000),
     },
     // A joke on Earth and the only sane choice on the Moon. Huge tyres, so it
     // still has traction where gravity has taken everyone else's away - and no
@@ -103,7 +121,7 @@ const gs_vehicle_def gs_vehicles[GS_VEH_COUNT] = {
     [GS_VEH_LUNAR_ROVER] = {
         "lunar rover",
         GS_RATIO(51, 10), GS_INT(5), GS_RATIO(54, 10),
-        GS_RATIO(2325, 1000), GS_INT(8500), GS_RATIO(14, 1000), GS_RATIO(390, 100),
+        GS_RATIO(2325, 1000), GS_INT(12750), GS_RATIO(14, 1000), GS_RATIO(390, 100),
     },
 };
 

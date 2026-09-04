@@ -1547,6 +1547,25 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         gs_layout(a);
         break;
+
+    // **Focus, in the trace.** A report of "I held the key and nothing
+    // happened" has two very different suspects: the game's input path, and
+    // the window system taking the keyboard away mid-press - SDL resets every
+    // key when focus leaves, and under WSLg the state it reads back on return
+    // has been seen empty, which leaves a physically held key dead until it
+    // is released and pressed again. The trace already says what input
+    // arrived once a second; this stamps the exact moments the window system
+    // touched the keyboard, so the two lines side by side answer which
+    // suspect it was.
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        if (a->trace) {
+            SDL_Log("trace focus=%s tick=%llu",
+                    e->type == SDL_EVENT_WINDOW_FOCUS_GAINED ? "gained"
+                                                             : "lost",
+                    (unsigned long long)a->world.tick);
+        }
+        break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         // **A pad's cancel is back too**, and nothing else here listens for a
         // pad button: driving reads them by polling, and the construction set's

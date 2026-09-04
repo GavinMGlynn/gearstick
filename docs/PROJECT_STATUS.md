@@ -7825,6 +7825,88 @@ centre, neighbours keep the full pitch, and the four-car grid is
 bit-identical to what gs_track_grid has always produced.*
 
 
+### The wheel answers at speed, 2026-09-04
+
+**"When you get to high speed, the cornering is just completely unresponsive
+- instead of the car sliding like in real life... In real life, you could
+decelerate while cornering, but that doesn't seem to work."** Measured before
+touching anything: at top speed a held arrow turned the stock car at
+twenty-seven degrees a second with the velocity tracking the heading exactly
+- a slow arc on rails, nothing to feel - and braking mid-corner *did* work
+(top speed to a standstill in two and a half seconds), it just had no
+cornering drama around it to be felt against.
+
+**The change is two dials.** Steering is half as much again - the same
+raise the cars got in the roster retune, applied to the dial that was left
+behind - and its falloff with speed eased from half-at-top to
+three-quarters-at-top. One machine takes less: the dune buggy's wheel was
+already the roster's biggest, and raised by half it cashed the surplus
+through its grip on every loose-ground scenario at once - the roster check
+caught the stock car left best at nothing, so the buggy gets a fifth and
+keeps the biggest wheel in the box without the biggest raise on top of it. Grip is deliberately untouched: the wheel can now ask
+for more than the tyres will give, and the difference is the slide. At top
+speed the stock car turns its nose at sixty-two degrees a second, its path
+follows at twenty-three, and two seconds of full lock scrubs nine tiles a
+second down to four. Throttle holds the drift wide; brake tightens it.
+Pinned with those numbers in
+`full_lock_at_top_speed_is_a_slide_that_sheds_speed`.
+
+**The driver learned four things**, each taught by a car going off the world
+in a test:
+- Corners are planned fifteen percent under the tyres' steady-state answer,
+  because the entry transient - nose ahead of path - runs wide of any plan.
+- Pointed more than a hundred degrees from its gate, a driver gets slow and
+  lets the nose come round instead of sweeping a twenty-tile arc through the
+  run-off, which is what the sprint car did, twice a lap, until it found the
+  drop.
+- Every driver aims at its own lane across a gate, spread like the grid
+  spreads across its line, so a car crawling through its hairpin rotation is
+  never rammed at the apex by one arriving flat out.
+- A driver that finds itself off the field aims back onto it before anything
+  else; the gate can wait.
+
+**And the new handling surfaced a real physics fault.** On the run-off shelf,
+`gs_track_height` says the ground is level - the shelf holds the height of
+the edge it left - but `gs_track_slope` still answered with the edge tile's
+own gradient, and once every generated rim wore a lip that gradient was the
+lip's. Every landing out there set the car's vertical speed as if the ground
+still rose ahead, the flat shelf un-grounded it a tick later, and a car on
+the shoulder hopped in place forever: airborne twenty-nine ticks in thirty,
+deaf to its own wheel and brakes, drifting over the drop at walking pace.
+One did exactly that eleven minutes into an epic ice path, five gates from
+home, and missed surviving by a hundredth of a tile. The slope now reports
+level on any axis that is outside the field, which is what the height was
+promising all along - pinned in
+`the_shoulder_is_level_and_a_car_on_it_answers_its_wheel`.
+
+**The generator learned one veto from the same investigation**: light gravity
+keeps off the outer eighteen tiles of the field, because a light pocket at
+the rim turns the lip from a fence into a launcher - a car cresting it
+outward at a third of Earth glides the entire run-off shelf with nothing to
+brake against.
+
+**All three golden hashes moved, deliberately**: the world for the physics,
+the opponents for the physics and the driver both, the generator for the rim
+veto. Every replay and ghost recorded before this is a race nobody can drive
+now; the notes in `golden.h` say so at each number. Six tests were
+recalibrated to the new handling, each with the reason written in: the
+full-lock circle the lap-counter drives shrank by half; the two-car scene
+grew straights long enough that top speed decides it again; pavement's
+corner is taken with the tail out now, so the claim is the spread between
+surfaces rather than zero slip; the friction plateau moved out with the
+wheel; the braking harness got hairline gates because it drives along the
+gate's own line, where a lane reads as range; and dead ahead means a
+driver's own lane. The shipped set was regenerated under the new physics -
+every track re-raced by every vehicle from every grid slot before shipping,
+as always.
+
+*Verification: the slide pinned with measured rates; the shelf pinned on
+every side of the world plus a two-second park on the shoulder with zero
+airborne ticks; both suites green; the two seeds that went off the world
+during development - the sprint car's sweep and the ice path's hover - both
+finish, watched tick by tick.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

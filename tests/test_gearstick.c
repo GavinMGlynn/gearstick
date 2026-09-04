@@ -1277,15 +1277,20 @@ TEST(the_same_corner_at_the_same_speed_is_takeable_on_pavement_and_not_on_ice) {
     gs_corner dirt = gs_take_corner(GS_SURF_DIRT);
     gs_corner ice = gs_take_corner(GS_SURF_ICE);
 
-    // On pavement the car goes exactly where it points: the corner is simply
-    // taken, and there is nothing to correct for.
-    CHECK(pavement.slip < 2.0);
-    CHECK(pavement.turned > 35.0);
+    // On pavement the corner is taken - and taken with the tail out now:
+    // since the wheel can out-turn the tyres, full lock at five tiles a
+    // second steps the car out about thirty degrees even on the best ground,
+    // scrubbing speed as it goes. That slide is the handling's character,
+    // asked for in so many words, so the claim here is no longer "no slip on
+    // pavement" - it is that pavement turns hardest and slides least, and
+    // that the three surfaces stay a spread.
+    CHECK(pavement.slip < 40.0);
+    CHECK(pavement.turned > 50.0);
 
     // On ice it points into the corner and carries straight on, which is the
     // whole character of the surface and the reason a corner that is nothing on
     // pavement is a problem here.
-    CHECK(ice.slip > 20.0);
+    CHECK(ice.slip > 70.0);
     CHECK(ice.turned < pavement.turned / 3.0);
 
     // Dirt is between them on both counts, so the three are a spread rather
@@ -1547,18 +1552,23 @@ TEST(the_friction_scale_is_a_dial_and_more_of_it_means_more_grip_until_it_does_n
         last = deg;
     }
 
-    // Past full grip it stops mattering, because the limit is no longer the
-    // tyres - it is how fast the car can be steered. That plateau is the model
-    // being honest rather than the dial being broken, and it is worth pinning:
-    // a version of this that kept climbing would mean grip was buying
-    // something it should not.
+    // Past enough grip it stops mattering, because the limit is no longer
+    // the tyres - it is how fast the car can be steered. That plateau is the
+    // model being honest rather than the dial being broken, and it is worth
+    // pinning: a version of this that kept climbing would mean grip was
+    // buying something it should not. **The plateau moved out when the wheel
+    // sped up**: with more steering to spend, grip keeps paying to about
+    // triple, where it used to saturate just past full - so full-to-double is
+    // now part of the climb, asserted as such, and the flat spot is pinned
+    // between triple and quadruple.
     double full = gs_turn_at_friction(GS_ONE);
     double double_grip = gs_turn_at_friction(GS_INT(2));
+    double triple = gs_turn_at_friction(GS_INT(3));
     double quadruple = gs_turn_at_friction(GS_INT(4));
 
     CHECK(full > last);
-    CHECK(double_grip - full < 0.5);
-    CHECK(quadruple - full < 0.5);
+    CHECK(double_grip > full + 5.0);
+    CHECK(quadruple - triple < 0.5);
 
     // And the whole range is worth having: full grip turns several times as
     // much as a tenth of it.
@@ -2835,9 +2845,13 @@ TEST(the_ai_steers_both_ways) {
     CHECK((away_from_y & GS_IN_LEFT) != 0);
     CHECK((away_from_y & GS_IN_RIGHT) == 0);
 
-    // And straight at it, no steering at all - a driver that cannot hold a line
-    // weaves down every straight.
-    w.car[0].y = GS_INT(20);
+    // And straight at it, no steering at all - a driver that cannot hold a
+    // line weaves down every straight. Straight ahead means the car's own
+    // *lane* across the gate, not the gate's centre: every driver aims a
+    // little to its own side now so two cars never converge on a point, and
+    // car zero's lane on this gate sits at three fifths of the half-width
+    // below the centre.
+    w.car[0].y = GS_INT(20) - gs_fix_mul(GS_INT(4), GS_RATIO(3, 5));
     gs_input dead_ahead = gs_ai_drive(&w, &t, 0);
     CHECK((dead_ahead & (gs_input)(GS_IN_LEFT | GS_IN_RIGHT)) == 0);
 }
@@ -3109,8 +3123,15 @@ static double gs_braking_distance(gs_fix gravity, uint8_t vehicle, gs_surface su
     gs_track_init(&t, 60, 60, surface);
 
     // A gate square across the road, so reaching it means a right angle.
-    gs_track_add_gate(&t, GS_INT(40), GS_INT(30), GS_QUARTER, GS_INT(5));
-    gs_track_add_gate(&t, GS_INT(40), GS_INT(50), GS_QUARTER, GS_INT(5));
+    //
+    // **Hairline gates, because this car drives along the gate's own line.**
+    // Every driver aims at its own lane across a gate now, and a lane is
+    // sideways on any real approach - but this harness pins the car parallel
+    // to the gate's span, so a lane reads as three tiles of extra range and
+    // every distance it measures comes back skewed by it. Gates half a tile
+    // wide make the lanes vanish without touching the corner's geometry.
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(30), GS_QUARTER, GS_RATIO(1, 2));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(50), GS_QUARTER, GS_RATIO(1, 2));
 
     gs_world w;
     gs_world_init(&w, gravity);
@@ -5070,12 +5091,15 @@ TEST(a_race_that_is_over_stays_over_until_a_new_one_replaces_it) {
 TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
     // **A field the cars of the day can get round.** This was forty by sixteen
     // with the gates twenty-four apart, which was room enough when the roster's
-    // best did six tiles a second. At half as much again it is a hairpin every
-    // two seconds in a field narrower than the braking distance, and the race
-    // that used to finish inside two minutes stopped finishing at all. The
-    // scene is scaled with the cars; what it asks is unchanged.
+    // best did six tiles a second; sixty by twenty-four when the cars got half
+    // as much again; and ninety-six now that the wheel got the same raise.
+    // With straights of thirty-six the corners decided everything and the
+    // grippy rover out-raced the "quick" sprint car - which inverts what this
+    // scene exists to show. Seventy-eight tiles of straight is where top
+    // speed gets its say back. The scene is scaled with the cars; what it
+    // asks is unchanged.
     static gs_track t;
-    gs_track_init(&t, 60, 24, GS_SURF_PAVEMENT);
+    gs_track_init(&t, 96, 24, GS_SURF_PAVEMENT);
     for (uint8_t y = 0; y <= t.h; y++)
         for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
 
@@ -5084,7 +5108,7 @@ TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
     // Left as a path this would be finished by arriving at the far gate once,
     // because that is what a path is.
     gs_track_add_gate(&t, GS_INT(9), GS_INT(12), 0, GS_INT(9));
-    gs_track_add_gate(&t, GS_INT(45), GS_INT(12), 0, GS_INT(9));
+    gs_track_add_gate(&t, GS_INT(87), GS_INT(12), 0, GS_INT(9));
     t.route = (uint8_t)GS_ROUTE_CIRCUIT;
 
     gs_world w;
@@ -5242,7 +5266,12 @@ TEST(every_lap_count_the_dial_offers_is_the_race_that_is_run) {
         // circle later it is travelling in the opposite direction, and a gate
         // is a line with a side to it - pointed the same way as the first, the
         // car sails past the back of it and the lap never completes.
-        gs_track_add_gate(&t, GS_INT(22), GS_INT(46), 32768, GS_INT(4));
+        //
+        // On the circle the car actually drives, which moved when the wheel
+        // did: full lock at four tiles a second is a nine-tile circle now
+        // where it was seventeen, measured by driving it. A gate placed on
+        // the old circle is a gate this car can never reach.
+        gs_track_add_gate(&t, GS_INT(26), GS_INT(39), 32768, GS_INT(4));
         t.route = (uint8_t)GS_ROUTE_CIRCUIT;
 
         gs_world w;
@@ -5254,8 +5283,8 @@ TEST(every_lap_count_the_dial_offers_is_the_race_that_is_run) {
         gs_world_add_car(&w, &t, (uint8_t)GS_VEH_SPRINT_CAR,
                          GS_INT(32), GS_INT(32), 0);
 
-        // A lap of this circle is about seventeen seconds, so twenty of them is
-        // under six minutes; this allows fifteen and expects to stop long
+        // A lap of this circle is about seven seconds, so twenty of them is
+        // under three minutes; this allows fifteen and expects to stop long
         // before it.
         for (uint32_t i = 0; i < GS_TICK_HZ * 60u * 15u && !w.over; i++) {
             const gs_fix vx = w.car[0].vx;
@@ -9124,6 +9153,132 @@ TEST(a_grid_of_any_size_is_centred_on_its_start_line) {
     }
 }
 
+TEST(the_shoulder_is_level_and_a_car_on_it_answers_its_wheel) {
+    // **Height and slope must tell the same story about the shelf.** Walking
+    // off the east edge, gs_track_height stops changing with x - the run-off
+    // is level at the height of the edge it left. gs_track_slope kept
+    // answering with the edge tile's own gradient out there, and once every
+    // generated rim wore a lip, that gradient was the lip's: every landing on
+    // the shelf set the car's vertical speed as if the ground still rose
+    // ahead, the flat shelf un-grounded it a tick later, and a car "parked"
+    // on the shoulder hopped in place forever - airborne twenty-nine ticks in
+    // thirty, deaf to its own wheel and brakes, drifting over the drop at
+    // walking pace. One did, eleven minutes into an epic ice path, five gates
+    // from home.
+    static gs_track t;
+    gs_track_init(&t, 40, 40, GS_SURF_PAVEMENT);
+    // A rim like the generator's: the last corners rise toward the edge.
+    for (uint8_t y = 0; y <= t.h; y++) {
+        for (uint8_t x = 0; x <= t.w; x++) {
+            uint8_t d = (uint8_t)(t.w - x < y ? t.w - x : y);
+            if ((uint8_t)(x) < d) d = (uint8_t)x;
+            if ((uint8_t)(t.h - y) < d) d = (uint8_t)(t.h - y);
+            gs_fix h = d >= 5 ? 0 : GS_RATIO(90, 100) / (d + 1);
+            gs_track_set_corner(&t, x, y, h);
+        }
+    }
+
+    // The slope agrees with the height on every side of the world.
+    gs_fix dzdx, dzdy;
+    gs_track_slope(&t, GS_INT(43), GS_INT(20), &dzdx, &dzdy);   // east shelf
+    CHECK(dzdx == 0);
+    gs_track_slope(&t, GS_INT(-3), GS_INT(20), &dzdx, &dzdy);   // west
+    CHECK(dzdx == 0);
+    gs_track_slope(&t, GS_INT(20), GS_INT(43), &dzdx, &dzdy);   // south
+    CHECK(dzdy == 0);
+    gs_track_slope(&t, GS_INT(20), GS_INT(-3), &dzdx, &dzdy);   // north
+    CHECK(dzdy == 0);
+
+    // And a car out there is a car, not a hoverfly: after a moment to settle,
+    // it is grounded every single tick while its driver holds the brake - and
+    // a grounded car with a brake held comes to a stop instead of drifting
+    // over the drop.
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(43), GS_INT(20),
+                     0);
+    w.car[0].vx = GS_INT(3);
+
+    // Brake to a stop, then hands off - held past the stop the brake key is
+    // reverse, which is its own feature and not this test's.
+    int airborne_after_settling = 0;
+    for (int i = 0; i < GS_TICK_HZ * 2; i++) {
+        gs_input in[GS_MAX_CARS] = {
+            i < GS_TICK_HZ ? GS_IN_BRAKE : (gs_input)0, 0, 0, 0
+        };
+        gs_world_step(&w, &t, in);
+        if (i > GS_TICK_HZ / 2 && !w.car[0].grounded) airborne_after_settling++;
+    }
+    CHECK(airborne_after_settling == 0);
+    CHECK(gs_car_speed(&w.car[0]) < GS_RATIO(30, 100));
+    CHECK((double)w.car[0].x / 65536.0 < 50.0);   // never near the drop
+}
+
+TEST(full_lock_at_top_speed_is_a_slide_that_sheds_speed) {
+    // **"The cornering is just completely unresponsive... in real life, you
+    // could decelerate while cornering."** The claims that answer it, pinned
+    // with numbers: at top speed a held arrow turns the nose fast; the tyres
+    // cannot follow all of it, so the difference is a visible slide; the
+    // slide scrubs speed; and the brake works mid-corner. Measured on the
+    // stock car on pavement, which is the everyman case.
+    static gs_track t;
+    gs_track_init(&t, 190, 190, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(20), GS_INT(100), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(180), GS_INT(100), 0, GS_INT(6));
+
+    const gs_vehicle_def *v = gs_vehicle((uint8_t)GS_VEH_STOCK_CAR);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(95),
+                     GS_INT(95), 0);
+    w.car[0].vx = v->top;                        // at its own top speed
+
+    const gs_angle h0 = w.car[0].heading;
+    const gs_angle v0 = gs_atan2(w.car[0].vy, w.car[0].vx);
+    for (int i = 0; i < GS_TICK_HZ * 2; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_LEFT, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        // Held in the middle of the field so the ground never varies.
+        w.car[0].x = GS_INT(95);
+        w.car[0].y = GS_INT(95);
+    }
+
+    int32_t nose = gs_angle_delta(h0, w.car[0].heading);
+    int32_t path = gs_angle_delta(v0, gs_atan2(w.car[0].vy, w.car[0].vx));
+    if (nose < 0) nose = -nose;
+    if (path < 0) path = -path;
+    const double nose_rate = (double)nose * 360.0 / 65536.0 / 2.0;
+    const double path_rate = (double)path * 360.0 / 65536.0 / 2.0;
+    printf("  SLIDE nose %.0f deg/s, path %.0f deg/s, %0.1f -> %0.1f tiles/s "
+           "over two seconds of full lock\n", nose_rate, path_rate,
+           (double)v->top / 65536.0, (double)gs_car_speed(&w.car[0]) / 65536.0);
+
+    // The nose answers the wheel - over fifty degrees a second at top speed,
+    // where twenty-seven was "completely unresponsive"...
+    CHECK(nose_rate > 50.0);
+    // ...the tyres keep less than two thirds of it, which is the slide...
+    CHECK(path_rate < nose_rate * 2.0 / 3.0);
+    // ...and the slide scrubs: two seconds of full lock sheds over a third
+    // of top speed without a brake being touched.
+    CHECK(gs_car_speed(&w.car[0]) < gs_fix_mul(v->top, GS_RATIO(65, 100)));
+
+    // And the brake works mid-corner: the same two seconds with it held
+    // brings the car under a third of its top.
+    gs_world w2;
+    gs_world_init(&w2, GS_ONE);
+    gs_world_add_car(&w2, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(95),
+                     GS_INT(95), 0);
+    w2.car[0].vx = v->top;
+    for (int i = 0; i < GS_TICK_HZ * 2; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_LEFT | GS_IN_BRAKE, 0, 0, 0 };
+        gs_world_step(&w2, &t, in);
+        w2.car[0].x = GS_INT(95);
+        w2.car[0].y = GS_INT(95);
+    }
+    CHECK(gs_car_speed(&w2.car[0]) < gs_fix_mul(v->top, GS_RATIO(34, 100)));
+}
+
 TEST(no_machine_reverses_faster_than_it_drives_forwards) {
     // **Reverse was the fastest gear in the game.**
     //
@@ -9584,6 +9739,8 @@ int main(void) {
     run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
     run_a_grid_of_any_size_is_centred_on_its_start_line();
+    run_the_shoulder_is_level_and_a_car_on_it_answers_its_wheel();
+    run_full_lock_at_top_speed_is_a_slide_that_sheds_speed();
     run_no_machine_reverses_faster_than_it_drives_forwards();
     run_no_generated_route_turns_tighter_than_its_own_hairpin();
     run_a_step_past_a_gate_is_told_from_a_step_through_it();
