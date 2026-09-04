@@ -19,6 +19,10 @@
 
 #include <SDL3/SDL.h>
 
+// For `nullptr` on a toolchain that took -std=c23 without implementing it,
+// the same way every other file outside the core gets it.
+#include "core/gs_common.h"
+
 #define GS_WINMEM_FILE "window.txt"
 
 typedef struct gs_winmem {
