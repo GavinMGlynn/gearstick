@@ -320,6 +320,15 @@ bool gs_gate_missed(const gs_gate *g, gs_fix px, gs_fix py, gs_fix nx, gs_fix ny
 
 void gs_track_grid(const gs_track *t, uint8_t slot,
                    gs_fix *x, gs_fix *y, gs_angle *heading) {
+    gs_track_grid_of(t, slot, GS_TRACK_GRID, x, y, heading);
+}
+
+void gs_track_grid_of(const gs_track *t, uint8_t slot, uint8_t racing,
+                      gs_fix *x, gs_fix *y, gs_angle *heading) {
+    if (racing < 1) racing = 1;
+    if (racing > GS_TRACK_GRID) racing = GS_TRACK_GRID;
+    if (slot >= racing) slot = (uint8_t)(racing - 1);
+
     if (t->gate_count == 0) {
         *x = GS_INT(t->w) / 2;
         *y = GS_INT(t->h) / 2;
@@ -328,15 +337,15 @@ void gs_track_grid(const gs_track *t, uint8_t slot,
     }
 
     const gs_gate *g = &t->gate[0];
-    if (slot >= GS_TRACK_GRID) slot = GS_TRACK_GRID - 1;
 
     gs_fix fx = gs_cos(g->heading);
     gs_fix fy = gs_sin(g->heading);
 
-    // Evenly across the gate rather than from one edge, so the grid is centred
-    // on the line whatever the field size.
+    // At the full grid's pitch, centred on the cars that are actually here:
+    // the pack is symmetric about the line however many race, and a full
+    // grid lands exactly where it always has.
     gs_fix across = gs_fix_mul(g->half_width,
-                               (gs_fix)(((int64_t)(2 * slot + 1) - GS_TRACK_GRID) *
+                               (gs_fix)(((int64_t)(2 * slot + 1) - racing) *
                                         GS_ONE / GS_TRACK_GRID));
 
     // Alternate slots a stagger further back, so no car is level with the car

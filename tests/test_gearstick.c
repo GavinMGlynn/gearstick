@@ -9058,6 +9058,72 @@ static gs_fix gs_reverse_terminal(uint8_t vehicle, gs_surface surface,
     return fastest;
 }
 
+TEST(a_grid_of_any_size_is_centred_on_its_start_line) {
+    // **"The blue car is in the middle of the start line and the red car is
+    // right on the edge."** gs_track_grid spread slots across the gate as if
+    // all four were taken, so a two-car race sat entirely on one side of the
+    // line and a solo start was off-centre for no reason anybody chose.
+    //
+    // The claim: for every field size the game can race, the pack's lateral
+    // offsets are symmetric about the gate's centre, neighbours keep the full
+    // grid's pitch - that spacing is what the pack-shove measurements were
+    // taken at - and a full grid lands exactly where gs_track_grid has
+    // always put it, so no recorded race moves.
+    gs_generate(&gs_gen_a, 7919u);
+    const gs_gate *g = &gs_gen_a.gate[0];
+    const gs_fix nx = -gs_sin(g->heading);   // the gate's own left
+    const gs_fix ny = gs_cos(g->heading);
+
+    // What one slot of pitch measures, from the placement that must not move.
+    gs_fix ax, ay, bx, by;
+    gs_angle facing;
+    gs_track_grid(&gs_gen_a, 0, &ax, &ay, &facing);
+    gs_track_grid(&gs_gen_a, 1, &bx, &by, &facing);
+
+    int walked = 0;
+    for (uint8_t racing = 1; racing <= GS_TRACK_GRID; racing++) {
+        gs_fix lateral[GS_TRACK_GRID];
+        for (uint8_t i = 0; i < racing; i++) {
+            gs_fix x, y;
+            gs_track_grid_of(&gs_gen_a, i, racing, &x, &y, &facing);
+            CHECK(facing == g->heading);
+            lateral[i] = gs_fix_mul(x - g->x, nx) + gs_fix_mul(y - g->y, ny);
+        }
+
+        // Symmetric about the centre: the outermost pair mirror each other,
+        // and so does every pair inside them. A field of one sits dead on
+        // the line.
+        for (uint8_t i = 0; i < racing; i++) {
+            gs_fix mirrored = -lateral[racing - 1 - i];
+            gs_fix off = lateral[i] - mirrored;
+            if (off < 0) off = -off;
+            CHECK(off <= GS_ONE / 16);
+        }
+
+        // Neighbours at the full grid's pitch, whatever the field size.
+        for (uint8_t i = 0; i + 1 < racing; i++) {
+            gs_fix pitch = lateral[i + 1] - lateral[i];
+            gs_fix want = gs_fix_mul(g->half_width,
+                                     GS_ONE * 2 / GS_TRACK_GRID);
+            gs_fix off = pitch - want;
+            if (off < 0) off = -off;
+            CHECK(off <= GS_ONE / 16);
+        }
+        walked++;
+    }
+    CHECK(walked == GS_TRACK_GRID);
+
+    // And the full grid is the grid it always was, to the bit - which is
+    // what keeps every golden hash and recorded race exactly where it is.
+    for (uint8_t i = 0; i < GS_TRACK_GRID; i++) {
+        gs_fix x1, y1, x2, y2;
+        gs_angle h1, h2;
+        gs_track_grid(&gs_gen_a, i, &x1, &y1, &h1);
+        gs_track_grid_of(&gs_gen_a, i, GS_TRACK_GRID, &x2, &y2, &h2);
+        CHECK(x1 == x2 && y1 == y2 && h1 == h2);
+    }
+}
+
 TEST(no_machine_reverses_faster_than_it_drives_forwards) {
     // **Reverse was the fastest gear in the game.**
     //
@@ -9517,6 +9583,7 @@ int main(void) {
     run_a_driver_already_backing_off_a_hill_does_not_change_its_mind_at_the_edge();
     run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
+    run_a_grid_of_any_size_is_centred_on_its_start_line();
     run_no_machine_reverses_faster_than_it_drives_forwards();
     run_no_generated_route_turns_tighter_than_its_own_hairpin();
     run_a_step_past_a_gate_is_told_from_a_step_through_it();

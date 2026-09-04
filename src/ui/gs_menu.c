@@ -2403,10 +2403,12 @@ void gs_setup_build(const gs_race_setup *s, const gs_track *t, gs_world *w) {
         gs_world_arm(w, (gs_hazard_kind)k, s->weapons ? s->ammo[k] : 0);
     }
 
-    for (uint8_t i = 0; i < s->players && i < GS_MAX_CARS; i++) {
+    const uint8_t racing = s->players < GS_MAX_CARS ? s->players
+                                                     : GS_MAX_CARS;
+    for (uint8_t i = 0; i < racing; i++) {
         gs_fix sx, sy;
         gs_angle facing;
-        gs_track_grid(t, i, &sx, &sy, &facing);
+        gs_track_grid_of(t, i, racing, &sx, &sy, &facing);
         gs_world_add_car(w, t, s->vehicle[i], sx, sy, facing);
     }
 }

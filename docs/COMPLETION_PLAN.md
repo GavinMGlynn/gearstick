@@ -2738,3 +2738,13 @@ are the places a fault could sit unnoticed.
       *Verification: four consecutive real launches reopen at the same
       pixel; the suite refuses every kind of damaged memory file and walks
       twelve display arrangements, including the monitor that is gone.*
+
+- [x] **The starting grid is centred on the line for the cars actually
+      racing.** Two cars used to sit on one side of the start line - one in
+      the middle, one at the edge - because slots were spread as if all four
+      were taken. The pack is symmetric about the line now for any field
+      size, at the same spacing as ever, and a full grid starts exactly
+      where it always did so no recorded race moves.
+      *Verification: the suite checks every field size from one to four for
+      symmetry and spacing, and that the four-car grid is bit-identical to
+      before.*

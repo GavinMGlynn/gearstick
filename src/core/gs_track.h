@@ -432,6 +432,19 @@ gs_fix gs_track_race_length(const gs_track *t);
 void gs_track_grid(const gs_track *t, uint8_t slot,
                    gs_fix *x, gs_fix *y, gs_angle *heading);
 
+// The same grid, centred on the line for the number of cars actually racing.
+//
+// gs_track_grid spreads slots across the gate as if all GS_TRACK_GRID of
+// them were taken, so a two-car race put both cars on one side of the line -
+// one in the middle, one at the edge - and a solo start was off-centre for
+// no reason anybody chose. The slot *pitch* is the full grid's either way:
+// that spacing is what the pack-shove measurements were taken at, and how
+// far apart neighbours start should not depend on how many neighbours there
+// are. What moves is only where the pack sits: symmetric about the gate's
+// centre. A full grid is placed exactly where gs_track_grid places it.
+void gs_track_grid_of(const gs_track *t, uint8_t slot, uint8_t racing,
+                      gs_fix *x, gs_fix *y, gs_angle *heading);
+
 // --- validation -----------------------------------------------------------
 //
 // What can be checked about a route without driving it. **Completability is

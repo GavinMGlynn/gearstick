@@ -413,7 +413,9 @@ static void gs_start_race(gs_app *a) {
         // recover from.
         for (uint8_t i = 0; i < players; i++) {
             gs_fix sx, sy; gs_angle facing;
-            gs_track_grid(&a->t, i, &sx, &sy, &facing);
+            // Centred for the cars the server named - every machine knows
+            // the same count, so every machine builds the same grid.
+            gs_track_grid_of(&a->t, i, players, &sx, &sy, &facing);
             gs_world_add_car(&a->world, &a->t, grid[i], sx, sy, facing);
         }
 

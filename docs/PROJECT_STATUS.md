@@ -7804,6 +7804,27 @@ to the pixel. A position saved above the top of every current display was
 refused and the manager chose instead, which is the rule working.*
 
 
+### The grid is centred on its line for the cars actually racing, 2026-09-04
+
+"The blue car is in the middle of the start line and the red car is right on
+the edge" — because `gs_track_grid` spread slots across the gate as if all
+four were taken, a two-car race sat entirely on one side of the line and a
+solo start was off-centre for no reason anybody chose. `gs_track_grid_of`
+takes the racing count and centres the pack; the slot *pitch* stays the full
+grid's, because that spacing is what the pack-shove measurements were taken
+at, and how far apart neighbours start should not depend on how many
+neighbours there are. A full grid lands exactly where it always has, to the
+bit, so no golden hash and no recorded race moves. The local race setup and
+the server-directed build both pass their counts; the analyser and the
+shipping bars keep racing the full grid's slots deliberately, which is the
+stricter question.
+
+*Verification: `a_grid_of_any_size_is_centred_on_its_start_line` checks
+every field size one to four - lateral offsets mirror about the gate's
+centre, neighbours keep the full pitch, and the four-car grid is
+bit-identical to what gs_track_grid has always produced.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
