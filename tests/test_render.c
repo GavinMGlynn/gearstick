@@ -1697,6 +1697,98 @@ TEST(four_players_get_four_views_that_tile_the_window_without_overlapping) {
     }
 }
 
+// How much of a frame is bright - anything well above the terrain's own
+// tones. Confetti and fireworks are bright things over ground that is not,
+// so this is what "something is happening" looks like as a number.
+static int gs_count_bright(const gs_frame *f) {
+    if (f->px == nullptr) return -1;
+    int n = 0;
+    for (int y = 0; y < GS_H; y++) {
+        for (int x = 0; x < GS_W; x++) {
+            const uint8_t *px = &f->px[((size_t)y * (size_t)GS_W + (size_t)x) * 4];
+            if (px[0] > 200 && px[1] > 200 && px[2] > 200) n++;
+        }
+    }
+    return n;
+}
+
+TEST(winning_is_something_you_can_see_happen) {
+    // **"It is not obvious that you have won the race."** Crossing the line
+    // moved a number on a panel of numbers and nothing else. Now it is an
+    // event: the flags wave, fireworks go up over the line and confetti
+    // falls across the view. All of it is arithmetic on the finishing tick -
+    // nothing is stored, nothing is in the simulation - so this test is the
+    // whole verification that any of it exists.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(24), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(24), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(24),
+                     0);
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    gs_render_track_camera(&v, &t, &w, &w, 1.0f);
+
+    // Before anybody has finished: the quiet frame, counted as the control.
+    gs_frame quiet = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(quiet.px != nullptr);
+    if (quiet.px == nullptr) return;
+    const int calm = gs_count_bright(&quiet);
+    gs_frame_free(&quiet);
+
+    // Now somebody wins. The world is not stepped - the celebration is a
+    // function of the finishing tick and the world's tick, which is exactly
+    // what lets a replay show it and two machines agree about it.
+    w.tick = 600;
+    w.car[0].finish_tick = 595;                 // finished a moment ago
+
+    gs_frame party = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(party.px != nullptr);
+    if (party.px == nullptr) return;
+    const int cheering = gs_count_bright(&party);
+    gs_frame_free(&party);
+
+    printf("  PARTY %d bright pixels racing, %d at the finish\n", calm,
+           cheering);
+
+    // **Visibly more going on.** Confetti and fireworks are bright things
+    // over a track that is mostly not, so a finish is a frame that has
+    // changed, by a margin nobody could argue is noise.
+    CHECK(cheering > calm + 200);
+
+    // **And it ends.** Once the party is over the frame is quiet again -
+    // a celebration that never stops is scenery, not an event.
+    w.tick = 595 + (uint32_t)GS_TICK_HZ * 20u;
+    gs_frame after = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(after.px != nullptr);
+    if (after.px == nullptr) return;
+    const int settled = gs_count_bright(&after);
+    gs_frame_free(&after);
+    CHECK(settled < calm + 200);
+
+    // **The same frame twice is the same frame.** Everything here is derived,
+    // so drawing the identical tick again has to give the identical picture -
+    // which is what makes it safe in a replay and across a network.
+    w.tick = 600;
+    gs_frame once = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    gs_frame twice = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(once.px != nullptr && twice.px != nullptr);
+    if (once.px != nullptr && twice.px != nullptr) {
+        CHECK(SDL_memcmp(once.px, twice.px,
+                         (size_t)GS_W * (size_t)GS_H * 4) == 0);
+    }
+    gs_frame_free(&once);
+    gs_frame_free(&twice);
+}
+
 TEST(a_car_on_the_tow_trucks_hook_flashes_and_lands_solid) {
     // **"It should start flashing, and then be replaced at the last
     // checkpoint and stop flashing and be active."** The flash is the tow's
@@ -12278,6 +12370,7 @@ int main(void) {
     run_the_second_pad_drives_the_second_car(ren);
     run_each_half_of_a_split_screen_shows_its_own_car(ren);
     run_four_players_get_four_views_that_tile_the_window_without_overlapping(ren);
+    run_winning_is_something_you_can_see_happen(ren);
     run_a_car_on_the_tow_trucks_hook_flashes_and_lands_solid(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);
     run_the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not(ren);

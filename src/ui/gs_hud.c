@@ -490,6 +490,87 @@ static void gs_hud_minimap(const gs_world *w, const gs_track *t, const gs_view *
     ImGui_End();
 }
 
+// --- The banner ---------------------------------------------------------
+//
+// **"It is not obvious that you have won the race."** The finishing time
+// appeared as one more row on a panel of rows, in the same small type as
+// everything else, and a race that had just been won looked exactly like a
+// race still being driven. So crossing the line now puts words across the
+// middle of the screen: what you did, and where you came.
+//
+// Big, brief and out of the way of the driving - it fades after a couple of
+// seconds, because the other cars are still racing and the screen is still
+// theirs. Placed and sized from the view rather than the window, so each
+// player in a split screen gets their own.
+#define GS_BANNER_TICKS (GS_TICK_HZ * 5u)
+
+static void gs_hud_banner(const gs_world *w, const gs_track *t,
+                          const gs_view *v) {
+    if (v->car >= w->car_count) return;
+    const gs_car *c = &w->car[v->car];
+    if (c->finish_tick == 0 || w->tick < c->finish_tick) return;
+
+    const uint32_t since = (uint32_t)w->tick - c->finish_tick;
+    if (since > GS_BANNER_TICKS) return;
+
+    // Fades out over the last second rather than vanishing.
+    float alpha = 1.0f;
+    const uint32_t fade_from = GS_BANNER_TICKS - (uint32_t)GS_TICK_HZ;
+    if (since > fade_from) {
+        alpha = 1.0f - (float)(since - fade_from) / (float)GS_TICK_HZ;
+    }
+    if (alpha <= 0.0f) return;
+
+    const uint8_t place = gs_world_place(w, t, v->car);
+    const char *headline = place == 1 ? "WINNER" : "FINISHED";
+    char under[64];
+    static const char *const ordinal[] = { "", "1st", "2nd", "3rd", "4th" };
+    SDL_snprintf(under, sizeof under, "%s place",
+                 place < SDL_arraysize(ordinal) ? ordinal[place] : "");
+
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground;
+
+    char id[32];
+    SDL_snprintf(id, sizeof id, "##won%d", (int)v->car);
+
+    // A little above the middle, so it does not sit on the car it is about.
+    ImGui_SetNextWindowPosEx(
+        (ImVec2){ (float)v->rect.x + (float)v->rect.w * 0.5f,
+                  (float)v->rect.y + (float)v->rect.h * 0.34f },
+        ImGuiCond_Always, (ImVec2){ 0.5f, 0.5f });
+
+    if (ImGui_Begin(id, nullptr, flags)) {
+        float r, g, b;
+        gs_style_accent(&r, &g, &b);
+        // Gold for a win, the panel's own accent for a finish: the colour is
+        // the first thing read and it should not say "first" to everybody.
+        const ImVec4 tint = place == 1 ? (ImVec4){ 1.0f, 0.84f, 0.25f, alpha }
+                                       : (ImVec4){ r, g, b, alpha };
+
+        const float big = 2.6f * gs_hud_zoom;
+        ImGui_SetWindowFontScale(big);
+        const float wide = ImGui_CalcTextSize(headline).x;
+        ImGui_PushStyleColorImVec4(ImGuiCol_Text, tint);
+        ImGui_TextUnformatted(headline);
+        ImGui_PopStyleColor();
+        ImGui_SetWindowFontScale(gs_hud_zoom);
+
+        // The place, centred under the headline.
+        const float small = ImGui_CalcTextSize(under).x;
+        ImGui_SetCursorPosX(ImGui_GetCursorPosX() + (wide - small) * 0.5f);
+        ImGui_PushStyleColorImVec4(
+            ImGuiCol_Text, (ImVec4){ 1.0f, 1.0f, 1.0f, alpha });
+        ImGui_TextUnformatted(under);
+        ImGui_PopStyleColor();
+    }
+    ImGui_End();
+}
+
 void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                  uint32_t tick, float waited, bool online) {
     if (w == nullptr || t == nullptr || v == nullptr) return;
@@ -802,6 +883,7 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
     // a corner over the lap counter is a great deal less confusing than a lap
     // counter over the map.
     gs_hud_minimap(w, t, v);
+    gs_hud_banner(w, t, v);
 }
 
 const char *gs_hud_carrying(void) { return gs_hud_carried; }

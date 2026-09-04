@@ -8098,6 +8098,37 @@ patch, and it is written down here rather than discovered by two machines
 disagreeing.
 
 
+### Winning is something you can see happen, 2026-09-04
+
+**"We need something more obvious when we cross the finish line... at the
+moment it is not obvious that you have won the race."** It was not: the
+finishing time appeared as one more small row on a panel of small rows, and
+a race that had just been won looked exactly like a race still being driven.
+
+Crossing the line is an event now. The chequered flags at the line **wave** -
+a travelling sine down the cloth, so the far edge moves most. **Fireworks**
+climb out of the finish line and burst into rings that spread and fall, each
+with its own moment and colour. **Confetti** falls across the whole view,
+tumbling as it goes, thinning out as the party ends rather than being
+switched off. And a **banner** - WINNER in gold, or FINISHED in the panel's
+accent, with the place under it - sits above the middle of the view for a
+few seconds and fades.
+
+**All of it is derived, none of it stored.** Every particle's position is
+arithmetic on the finishing tick, the world's tick and its own index: no
+particle system, no allocation, nothing added to `gs_world`, and **not one
+golden hash moved**. Two machines watching the same race see the same
+celebration because they are doing the same arithmetic, and a replay shows
+the party exactly as it happened. The simulation does not know that anybody
+is cheering, which is the whole architecture working as intended.
+
+*Verification: `winning_is_something_you_can_see_happen` counts bright
+pixels in a rendered frame before and after a finish - 10,090 racing against
+10,760 at the line - checks the frame goes quiet again once the party is
+over, and draws the same tick twice to prove the picture is identical, which
+is what makes it safe in a replay and across a network.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

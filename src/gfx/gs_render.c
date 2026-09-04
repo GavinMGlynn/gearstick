@@ -230,9 +230,61 @@ static void gs_draw_kerb(SDL_Renderer *ren, const gs_camera *cam,
 // disappears on some tracks and not others is worse than no flag at all. Sizes
 // are still given in tiles and turned into pixels by the same numbers the
 // projection uses, so a flag keeps its size against the world at every zoom.
+// --- Winning, made obvious ---------------------------------------------------
+//
+// **"It is not obvious that you have won the race."** Crossing the line moved
+// a number on a panel and nothing else: no moment, no reward, and the whole
+// point of a race arriving without any ceremony at all. So a finish now
+// *happens* - the flags wave, fireworks go up over the line, and confetti
+// falls across the view.
+//
+// **All of it derived, none of it stored.** Every particle's position is a
+// function of the finishing tick, the world's tick and its own index, so
+// there is no particle system, no allocation, nothing in gs_world and no
+// golden hash moved - and two machines watching the same race, or one
+// machine watching a replay of it, see the identical celebration because
+// they are looking at the same arithmetic. The simulation does not know that
+// anybody is cheering.
+
+// How long the party lasts, in ticks, and how long a single firework does.
+#define GS_PARTY_TICKS   (GS_TICK_HZ * 8u)
+#define GS_ROCKET_TICKS  (GS_TICK_HZ / 2u)
+#define GS_ROCKETS       7
+#define GS_CONFETTI      140
+
+// A cheap deterministic hash, for scattering things that must scatter the
+// same way on every machine. Not the simulation's RNG: this decides nothing
+// and is allowed to be whatever is fastest to read.
+static float gs_party_rand(uint32_t seed) {
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return (float)(seed & 0xffffffu) / (float)0x1000000u;
+}
+
+// How far into the party this car is, 0 before it finished and past 1 once
+// the celebrating is done. The one number every piece below is drawn from.
+static float gs_party_age(const gs_world *w, const gs_car *c) {
+    if (c->finish_tick == 0 || w->tick < c->finish_tick) return 0.0f;
+    const uint32_t since = (uint32_t)w->tick - c->finish_tick;
+    return (float)since / (float)GS_PARTY_TICKS;
+}
+
+// Is anybody on this screen celebrating, and how far along is the first of
+// them? The flags wave for whoever finished first, because the line belongs
+// to the race rather than to a driver.
+static float gs_party_here(const gs_world *w) {
+    float best = 0.0f;
+    for (uint8_t i = 0; i < w->car_count; i++) {
+        const float age = gs_party_age(w, &w->car[i]);
+        if (age > 0.0f && age < 1.0f && (best == 0.0f || age < best)) best = age;
+    }
+    return best;
+}
+
 static void gs_draw_flag(SDL_Renderer *ren, const gs_camera *cam,
                          const gs_track *t, float bx, float by,
-                         float mid_x, float mid_y) {
+                         float mid_x, float mid_y, float wave) {
     float bz = gs_to_f(gs_track_height(t, (gs_fix)(bx * (float)GS_ONE),
                                        (gs_fix)(by * (float)GS_ONE)));
     float px = 0.0f, py = 0.0f;
@@ -267,13 +319,22 @@ static void gs_draw_flag(SDL_Renderer *ren, const gs_camera *cam,
 
     // Four squares across and three down: enough to read as a chequered flag,
     // few enough that each square is still a square and not a pixel.
+    //
+    // **And it waves once somebody has won.** The wave is a travelling sine
+    // down the flag's length, so the squares furthest from the pole move
+    // most - which is how cloth behaves and how a chequered flag is waved.
+    // `wave` is zero at every other moment and the flag is exactly the still
+    // one it always was.
     const int across = 4, down = 3;
     for (int i = 0; i < across; i++) {
+        const float along = (float)i / (float)across;
+        const float swing = wave * along * flag_h * 0.55f *
+                            SDL_sinf(wave * 26.0f - along * 5.0f);
         for (int j = 0; j < down; j++) {
             float x0 = px + away * flag_w * (float)i / (float)across;
             float x1 = px + away * flag_w * (float)(i + 1) / (float)across;
-            float y0 = top + flag_h * (float)j / (float)down;
-            float y1 = top + flag_h * (float)(j + 1) / (float)down;
+            float y0 = top + flag_h * (float)j / (float)down + swing;
+            float y1 = top + flag_h * (float)(j + 1) / (float)down + swing;
 
             SDL_FColor c = ((i + j) & 1)
                                ? (SDL_FColor){ 0.06f, 0.06f, 0.07f, 1.0f }
@@ -1733,7 +1794,8 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                 if (fd == d - fringe * 2) {
                     const gs_gate *fg = &t->gate[gs_track_finish_gate(t)];
                     gs_draw_flag(ren, &cam, t, feet[k][0], feet[k][1],
-                                 gs_to_f(fg->x), gs_to_f(fg->y));
+                                 gs_to_f(fg->x), gs_to_f(fg->y),
+                                 gs_party_here(now));
                 }
             }
         }
@@ -1821,6 +1883,109 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                                 oy + dy * (to + barb) };
             gs_ground_mark_over_everything(ren, &cam, t, head_x, head_y,
                                            0.06f, warn);
+        }
+    }
+
+    // --- **And the party**, over everything, because a win you cannot see is
+    // not a win. Fireworks climb out of the finish line and burst; confetti
+    // falls across the whole view. Every particle is arithmetic on the
+    // finishing tick, so nothing is stored and every machine sees the same
+    // celebration - see the block above gs_draw_flag.
+    {
+        const float age = gs_party_here(now);
+        if (age > 0.0f && age < 1.0f) {
+            const float vw = (float)view->rect.w, vh = (float)view->rect.h;
+
+            // Where the line is on this screen, so the rockets come from it.
+            float lx = vw * 0.5f, ly = vh * 0.35f;
+            if (t->gate_count > 0) {
+                const gs_gate *fg = &t->gate[gs_track_finish_gate(t)];
+                const float gx = gs_to_f(fg->x), gy = gs_to_f(fg->y);
+                float gz = gs_to_f(gs_track_height(t, fg->x, fg->y));
+                gs_iso_project(&cam, gx, gy, gz, &lx, &ly);
+            }
+
+            // **Fireworks.** Each rocket has its own moment to go up and its
+            // own colour; it rises, then bursts into a ring that falls and
+            // fades. Drawn as small quads, which is what everything here is.
+            for (int r = 0; r < GS_ROCKETS; r++) {
+                const uint32_t seed = (uint32_t)r * 2654435761u ^ 0x9e37u;
+                const float when = gs_party_rand(seed) * 0.55f;
+                const float life = (age - when) /
+                                   ((float)GS_ROCKET_TICKS /
+                                    (float)GS_PARTY_TICKS);
+                if (life < 0.0f || life > 2.4f) continue;
+
+                const float side = (gs_party_rand(seed ^ 1u) - 0.5f) * vw * 0.55f;
+                const float peak = vh * (0.18f + gs_party_rand(seed ^ 2u) * 0.22f);
+                const SDL_FColor hue = {
+                    0.45f + gs_party_rand(seed ^ 3u) * 0.55f,
+                    0.45f + gs_party_rand(seed ^ 4u) * 0.55f,
+                    0.45f + gs_party_rand(seed ^ 5u) * 0.55f, 1.0f };
+
+                if (life <= 1.0f) {
+                    // Climbing: a bright head with a short tail.
+                    const float y = ly - peak * life;
+                    const float x = lx + side * life;
+                    const float sz = 3.0f;
+                    const SDL_FPoint q[4] = {
+                        { x - sz, y - sz }, { x + sz, y - sz },
+                        { x + sz, y + sz }, { x - sz, y + sz } };
+                    gs_quad(ren, q, hue);
+                } else {
+                    // Burst: a ring of sparks, spreading and falling.
+                    const float b = life - 1.0f;           // 0..1.4
+                    const float fade = b < 1.0f ? 1.0f - b * 0.7f : 0.3f;
+                    const float spread = vh * 0.16f * b;
+                    const float x0 = lx + side, y0 = ly - peak;
+                    for (int k = 0; k < 12; k++) {
+                        const float a = (float)k / 12.0f * 6.2831853f;
+                        const float x = x0 + SDL_cosf(a) * spread;
+                        const float y = y0 + SDL_sinf(a) * spread +
+                                        vh * 0.10f * b * b;
+                        const float sz = 2.4f;
+                        const SDL_FColor c = { hue.r, hue.g, hue.b, fade };
+                        const SDL_FPoint q[4] = {
+                            { x - sz, y - sz }, { x + sz, y - sz },
+                            { x + sz, y + sz }, { x - sz, y + sz } };
+                        gs_quad(ren, q, c);
+                    }
+                }
+            }
+
+            // **Confetti**, falling the whole width of the view and tumbling
+            // as it goes - each piece a rectangle whose width breathes, which
+            // reads as paper turning over without costing a rotation.
+            for (int i = 0; i < GS_CONFETTI; i++) {
+                const uint32_t seed = (uint32_t)i * 2246822519u ^ 0x85ebu;
+                const float lane = gs_party_rand(seed);
+                const float speed = 0.55f + gs_party_rand(seed ^ 7u) * 0.85f;
+                const float start = gs_party_rand(seed ^ 11u);
+
+                // Falls from above the view, wraps, and thins out as the
+                // party ends so it stops rather than being switched off.
+                float fall = start + age * speed * 1.6f;
+                if (fall > 1.0f) fall -= SDL_floorf(fall);
+                if (age > 0.75f && gs_party_rand(seed ^ 13u) < (age - 0.75f) * 4.0f) {
+                    continue;
+                }
+
+                const float x = lane * vw +
+                                SDL_sinf(age * 9.0f + lane * 24.0f) * vw * 0.02f;
+                const float y = fall * (vh + 40.0f) - 20.0f;
+                const float w2 = 1.5f + 3.0f * SDL_fabsf(
+                    SDL_sinf(age * 11.0f + gs_party_rand(seed ^ 17u) * 6.28f));
+                const float h2 = 4.0f;
+
+                const SDL_FColor c = {
+                    0.35f + gs_party_rand(seed ^ 19u) * 0.65f,
+                    0.35f + gs_party_rand(seed ^ 23u) * 0.65f,
+                    0.35f + gs_party_rand(seed ^ 29u) * 0.65f, 0.95f };
+                const SDL_FPoint q[4] = {
+                    { x - w2, y - h2 }, { x + w2, y - h2 },
+                    { x + w2, y + h2 }, { x - w2, y + h2 } };
+                gs_quad(ren, q, c);
+            }
         }
     }
 

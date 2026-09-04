@@ -2798,6 +2798,15 @@ are the places a fault could sit unnoticed.
       player's own log with forged clocks, and every action pressed on its
       real binding must resolve to its own bit, never silence.*
 
+- [x] **Winning is something you can see happen.** Crossing the finish line
+      used to move a number on a panel. Now the chequered flags wave,
+      fireworks go up over the line, confetti falls across the view, and a
+      banner says WINNER - in gold for a win - with your place under it.
+      *Verification: the celebration is counted in pixels before and after a
+      finish, it stops when the party is over, and the same tick drawn twice
+      gives the identical frame - so a replay shows what happened. No golden
+      hash moved: it is drawing, not simulation.*
+
 - [x] **Automatic and manual transmission.** Every machine has a forward
       gear count of its own - two for the rover, six for the sprint car -
       and one reverse. The box is picked per driver on the setup screen.
