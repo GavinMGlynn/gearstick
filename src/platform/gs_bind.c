@@ -3,7 +3,13 @@
 #include "platform/gs_bind.h"
 
 #define GS_BIND_MAGIC   0x444e4247u   // "GBND"
-#define GS_BIND_VERSION 1u
+// Two: version one had five actions and no tow. A version-one file is still
+// read - its five actions verbatim, the tow at its default - because "your
+// controls survived the update" is not a feature anybody should lose to an
+// enum growing.
+#define GS_BIND_VERSION 2u
+#define GS_BIND_V1_ACTS 5
+#define GS_BIND_V1_BYTES (4 + 4 + GS_MAX_CARS * GS_BIND_V1_ACTS * 6)
 
 static const gs_input gs_action_bit[GS_ACT_COUNT] = {
     [GS_ACT_ACCEL] = GS_IN_ACCEL,
@@ -20,6 +26,7 @@ const char *gs_action_name(gs_action a) {
     case GS_ACT_LEFT:  return "left";
     case GS_ACT_RIGHT: return "right";
     case GS_ACT_FIRE:  return "drop";
+    case GS_ACT_RESCUE: return "tow";
     case GS_ACT_COUNT: break;
     }
     return "?";
@@ -39,6 +46,7 @@ void gs_bind_defaults(gs_bindings *b) {
         b->button[p][GS_ACT_LEFT]  = (int16_t)SDL_GAMEPAD_BUTTON_DPAD_LEFT;
         b->button[p][GS_ACT_RIGHT] = (int16_t)SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
         b->button[p][GS_ACT_FIRE]  = (int16_t)SDL_GAMEPAD_BUTTON_WEST;
+        b->button[p][GS_ACT_RESCUE] = (int16_t)SDL_GAMEPAD_BUTTON_NORTH;
     }
 
     // Two people at one keyboard, which is how most of this gets played before
@@ -48,12 +56,14 @@ void gs_bind_defaults(gs_bindings *b) {
     b->key[0][GS_ACT_LEFT]  = SDL_SCANCODE_LEFT;
     b->key[0][GS_ACT_RIGHT] = SDL_SCANCODE_RIGHT;
     b->key[0][GS_ACT_FIRE]  = SDL_SCANCODE_RSHIFT;
+    b->key[0][GS_ACT_RESCUE] = SDL_SCANCODE_BACKSPACE;
 
     b->key[1][GS_ACT_ACCEL] = SDL_SCANCODE_W;
     b->key[1][GS_ACT_BRAKE] = SDL_SCANCODE_S;
     b->key[1][GS_ACT_LEFT]  = SDL_SCANCODE_A;
     b->key[1][GS_ACT_RIGHT] = SDL_SCANCODE_D;
     b->key[1][GS_ACT_FIRE]  = SDL_SCANCODE_LSHIFT;
+    b->key[1][GS_ACT_RESCUE] = SDL_SCANCODE_Q;
 }
 
 gs_input gs_bind_resolve(const gs_bindings *b, uint8_t player,
@@ -191,13 +201,16 @@ size_t gs_bind_serialize(const gs_bindings *b, uint8_t *buf, size_t cap) {
 }
 
 bool gs_bind_deserialize(gs_bindings *b, const uint8_t *buf, size_t len) {
-    if (len < GS_BIND_BYTES) return false;
+    if (len < GS_BIND_V1_BYTES) return false;
 
     const uint8_t *p = buf;
     if (gs_get_u32(p) != GS_BIND_MAGIC) return false;
     p += 4;
-    if (gs_get_u32(p) != GS_BIND_VERSION) return false;
+    const uint32_t version = gs_get_u32(p);
+    if (version != GS_BIND_VERSION && version != 1u) return false;
     p += 4;
+    const int acts = version == 1u ? GS_BIND_V1_ACTS : (int)GS_ACT_COUNT;
+    if (len < (size_t)(8 + GS_MAX_CARS * acts * 6)) return false;
 
     // Checked before anything is written, so a refused file leaves the player
     // with the controls they had rather than with half of somebody else's.
@@ -206,9 +219,13 @@ bool gs_bind_deserialize(gs_bindings *b, const uint8_t *buf, size_t len) {
     // MSVC cannot see that they do and refuses to build it, and a struct that
     // gains a field later would silently start carrying stack rubbish into a
     // player's controls. Both reasons point the same way.
-    gs_bindings loaded = { 0 };
+    // Started from the defaults rather than from zero, so an action a file
+    // is too old to know about arrives set to something rather than to
+    // nothing - a version-one player gets the tow on its default key.
+    gs_bindings loaded;
+    gs_bind_defaults(&loaded);
     for (uint8_t pl = 0; pl < GS_MAX_CARS; pl++) {
-        for (int a = 0; a < GS_ACT_COUNT; a++) {
+        for (int a = 0; a < acts; a++) {
             loaded.key[pl][a] = (SDL_Scancode)gs_get_u32(p);
             p += 4;
             uint16_t btn = (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));

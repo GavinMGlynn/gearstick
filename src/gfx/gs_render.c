@@ -1651,6 +1651,15 @@ void gs_view_note_missed(gs_view *views, uint8_t count, const gs_track *t,
     }
 }
 
+// **A car on the tow truck's hook flashes.** Off-beats are simply not drawn:
+// the flash says "this car is being moved, not driven" and it ends the frame
+// the car lands, solid, at its checkpoint. Derived from the simulation's own
+// counter rather than from a frame clock, so every machine watching the same
+// race sees the same flashes on the same ticks.
+static bool gs_tow_blinked_off(const gs_car *c) {
+    return c->tow_ticks > 0 && (c->tow_ticks / GS_TOW_BLINK) % 2u == 1u;
+}
+
 void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
                     const gs_world *now, float alpha, const gs_view *view) {
     SDL_SetRenderViewport(ren, &view->rect);
@@ -1740,6 +1749,7 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         int world_d = d - fringe * 2;
 
         for (uint8_t i = 0; i < now->car_count; i++) {
+            if (gs_tow_blinked_off(&now->car[i])) continue;
             gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
             if (gs_car_diagonal(&c) == world_d) {
                 gs_draw_car(ren, &cam, t, &c, i, 1.0f);
@@ -1752,6 +1762,7 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
     // Cars beyond even the fringe are past every diagonal the sweep covered, so
     // they are drawn after everything - which is where they are.
     for (uint8_t i = 0; i < now->car_count; i++) {
+        if (gs_tow_blinked_off(&now->car[i])) continue;
         gs_car c = gs_car_lerp(&prev->car[i], &now->car[i], alpha);
         int cd = gs_car_diagonal(&c);
         if (cd >= diagonals - fringe * 2 || cd < -fringe * 2) {

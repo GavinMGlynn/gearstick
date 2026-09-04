@@ -464,7 +464,8 @@ TEST(a_race_is_identified_by_everything_that_decides_it) {
         sizeof any->vx, sizeof any->vy, sizeof any->vz,
         sizeof any->heading, sizeof any->vehicle, sizeof any->damage,
         sizeof any->grounded, sizeof any->wrecked, sizeof any->active,
-        sizeof any->air_ticks, sizeof any->drop_cooldown, sizeof any->next_gate,
+        sizeof any->air_ticks, sizeof any->drop_cooldown, sizeof any->tow_ticks,
+        sizeof any->next_gate,
         sizeof any->laps, sizeof any->finish_tick, sizeof any->lap_start,
         sizeof any->best_lap,
         // What it is carrying, what a tap would leave, and how long the button
@@ -9153,6 +9154,114 @@ TEST(a_grid_of_any_size_is_centred_on_its_start_line) {
     }
 }
 
+TEST(a_lost_car_is_towed_to_its_last_checkpoint_and_gains_nothing_by_it) {
+    // **"If you go off track too far, maybe we should have a key that would
+    // place the car back on the track at the last checkpoint?"** The tow: a
+    // rescue bit in the input byte - so it replays, rolls back and crosses
+    // the network like any other thing a driver does - that sets the car one
+    // tile before the last gate it crossed, standing still. Lost time is the
+    // whole cost, and the leg has to be driven again.
+    static gs_track t;
+    gs_track_init(&t, 60, 60, GS_SURF_PAVEMENT);
+    gs_track_add_gate(&t, GS_INT(20), GS_INT(30), 0, GS_INT(5));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(30), 0, GS_INT(5));
+    t.route = (uint8_t)GS_ROUTE_CIRCUIT;
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(10), GS_INT(30),
+                     0);
+
+    // **Before the first crossing there is nowhere to go back to** - and a
+    // tow on the grid would otherwise be a head start on the whole field.
+    {
+        gs_input in[GS_MAX_CARS] = { GS_IN_RESCUE, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        CHECK(w.car[0].x == GS_INT(10) && w.car[0].y == GS_INT(30));
+    }
+
+    // Drive through the first gate, so there is a checkpoint to be owed to.
+    for (int i = 0; i < GS_TICK_HZ * 6 && w.car[0].next_gate == 0; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].next_gate == 1);
+
+    // Lost: off in the scenery, at speed, in the air for good measure.
+    w.car[0].x = GS_INT(55);
+    w.car[0].y = GS_INT(8);
+    w.car[0].z = GS_INT(3);
+    w.car[0].vx = GS_INT(6);
+    w.car[0].vy = -GS_INT(4);
+    w.car[0].vz = GS_INT(2);
+    w.car[0].grounded = false;
+
+    // One press of the tow: the car is on the hook, not yet moved - frozen
+    // exactly where it was lost, flashing (the renderer's business, from
+    // this counter), and untouchable.
+    const gs_fix lost_x = w.car[0].x, lost_y = w.car[0].y;
+    {
+        gs_input in[GS_MAX_CARS] = { GS_IN_RESCUE, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].tow_ticks == GS_TOW_TICKS);
+    CHECK(w.car[0].x == lost_x && w.car[0].y == lost_y);
+
+    // Untouchable: a car parked inside it trades no impulses with it.
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, lost_x, lost_y, 0);
+    {
+        gs_input in[GS_MAX_CARS] = { 0, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].x == lost_x && w.car[0].y == lost_y);
+    CHECK(w.car[1].x == lost_x && w.car[1].y == lost_y);
+
+    // The hook holds for its second - input does nothing, the car stays
+    // put - and then the car lands at its checkpoint, still and drivable.
+    int hooked = 0;
+    while (w.car[0].tow_ticks > 0 && hooked < (int)GS_TOW_TICKS + 2) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+        if (w.car[0].tow_ticks > 0) {
+            CHECK(w.car[0].x == lost_x);
+        }
+        hooked++;
+    }
+    CHECK(hooked == (int)GS_TOW_TICKS - 1);        // the second, on the nose
+    CHECK(w.car[0].tow_ticks == 0);
+    CHECK(w.car[0].x == GS_INT(19));                // one tile before gate 0
+    CHECK(w.car[0].y == GS_INT(30));
+    CHECK(w.car[0].heading == 0);                   // facing the gate's way
+    CHECK(gs_car_speed(&w.car[0]) == 0);
+    CHECK(w.car[0].grounded);
+    CHECK(w.car[0].next_gate == 1);                 // still owes the same gate
+
+    // **Gains nothing**: re-crossing the gate it was towed behind counts for
+    // nothing, because the race only tests the gate a car expects - the leg
+    // to the next checkpoint has to be driven in full.
+    for (int i = 0; i < GS_TICK_HZ * 3 / 2; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].x > GS_INT(20));                 // past the old gate again
+    CHECK(w.car[0].next_gate == 1);                 // and no further along
+
+    for (int i = 0; i < GS_TICK_HZ * 6 && w.car[0].next_gate == 1; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].next_gate == 0);                 // the honest way forward
+
+    // A wrecked car is not towed - it has its own way back into a race.
+    w.car[0].wrecked = true;
+    w.car[0].x = GS_INT(50);
+    {
+        gs_input in[GS_MAX_CARS] = { GS_IN_RESCUE, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].x == GS_INT(50));
+}
+
 TEST(the_shoulder_is_level_and_a_car_on_it_answers_its_wheel) {
     // **Height and slope must tell the same story about the shelf.** Walking
     // off the east edge, gs_track_height stops changing with x - the run-off
@@ -9739,6 +9848,7 @@ int main(void) {
     run_a_hill_that_starts_gently_is_still_a_hill_the_driver_backs_off_from();
     run_a_car_a_little_under_the_ground_can_still_drive_away();
     run_a_grid_of_any_size_is_centred_on_its_start_line();
+    run_a_lost_car_is_towed_to_its_last_checkpoint_and_gains_nothing_by_it();
     run_the_shoulder_is_level_and_a_car_on_it_answers_its_wheel();
     run_full_lock_at_top_speed_is_a_slide_that_sheds_speed();
     run_no_machine_reverses_faster_than_it_drives_forwards();

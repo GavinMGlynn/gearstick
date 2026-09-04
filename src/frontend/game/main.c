@@ -971,6 +971,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  M turns the music off and on.");
             SDL_Log("  H shows or hides the ghost of your last run,");
             SDL_Log("  F5 saves that run as a ghost file and F9 loads one.");
+            SDL_Log("  Backspace tows you back to your last checkpoint.");
             SDL_Log("  --ghost FILE    race against a recorded run");
             SDL_Log("  --ghost-out F   with --shot: write the captured run as a ghost");
             SDL_Log("  --host PORT [N]   wait for N players in total (2-4, default 2)");
@@ -1537,6 +1538,21 @@ static bool gs_back_out(gs_app *a, bool may_quit) {
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
     gs_app *a = (gs_app *)appstate;
+
+    // **Every keystroke, when tracing.** The blip shield was built for a
+    // sticky accelerator and the accelerator stayed sticky, so the next
+    // diagnosis gets evidence instead of a theory: the exact stream of key
+    // events, with the auto-repeat flag - because a spurious KEY_UP arriving
+    // mid-hold is a keyboard stack dropping the key, and no game-side state
+    // can be blamed for a release the hardware reported.
+    if (a->trace &&
+        (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP)) {
+        SDL_Log("trace key=%s %s repeat=%u t=%llums",
+                SDL_GetScancodeName(e->key.scancode),
+                e->type == SDL_EVENT_KEY_DOWN ? "down" : "up",
+                e->key.repeat ? 1u : 0u,
+                (unsigned long long)(e->common.timestamp / 1000000u));
+    }
 
     gs_input_event(&a->input, e);
     cImGui_ImplSDL3_ProcessEvent(e);

@@ -2772,3 +2772,16 @@ are the places a fault could sit unnoticed.
       *Verification: the shield's rules are walked with forged events and
       forged clocks - the blip, the boundary, the real absence, and the
       release that always releases.*
+
+- [x] **A lost car can be towed back to its last checkpoint.** Backspace
+      (rebindable, pad button too) hands the car to the tow: it flashes
+      where it was lost for a second, untouchable, then lands one tile
+      before the last gate it crossed, solid and drivable - lost time is
+      the whole cost. It rides in the input byte so replays, rollback and
+      netplay all carry it; it gains nothing that was not already earned,
+      does nothing before the first checkpoint, and leaves wrecks to their
+      own flow.
+      *Verification: refused on the grid, the hook held for its second on
+      the nose, exact placement from mid-air, the same gate still owed,
+      nothing gained by re-crossing, the flash pinned on counted pixels,
+      and old control files load with the tow on its default key.*

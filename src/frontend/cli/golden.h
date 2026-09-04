@@ -118,7 +118,13 @@
 // see the_shoulder_is_level_and_a_car_on_it_answers_its_wheel. Every replay
 // and ghost recorded before either change is a race nobody can drive now,
 // which is what this number failing is for. See docs/PROJECT_STATUS.md.
-#define GS_SELFTEST_WORLD_HASH 0x0ebdbd570d9e7718ULL
+// And with the tow truck, for the plainest of the hash's reasons: a car
+// carries one more number - how long the tow has it - and a number that
+// decides when a car is drivable again is a number two machines have to
+// agree about, so it is hashed even while it is zero in every race ever
+// recorded. The physics of driving did not change; the description of a car
+// did.
+#define GS_SELFTEST_WORLD_HASH 0x73a042b3d31adcf8ULL
 
 // The track generator, folded over its first two hundred seeds.
 //
@@ -292,6 +298,8 @@
 // point, and one that finds itself off the field aims back onto it before
 // anything else. Every one of those is a decision this race re-makes every
 // tick, so its hash moves with them.
-#define GS_OPPONENTS_WORLD_HASH 0x7180d6844f08158dULL
+// And with the tow truck, exactly as the world hash above did and for the
+// same sentence: one more number on every car.
+#define GS_OPPONENTS_WORLD_HASH 0x0d1974dfb16b0cadULL
 
 #endif // GS_GOLDEN_H

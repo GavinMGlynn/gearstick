@@ -307,6 +307,40 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
     // there to be looked at, and later to be driven into.
     if (!c->active || c->wrecked) return;
 
+    // **The tow truck answers before the physics.** Pressing rescue hands
+    // the car to the tow: it freezes and flashes where it was lost - inert,
+    // untouchable, exactly as it stood - and when the tow's second is up it
+    // lands one tile before the last gate it crossed, facing the way the
+    // gate faces, standing still and drivable. Re-crossing that gate counts
+    // for nothing (the race only tests the gate a car expects), so the leg
+    // has to be driven again and lost time is the whole cost. Before any
+    // crossing there is nowhere to go back to, and a tow on the grid would
+    // otherwise be a head start on the field.
+    if (c->tow_ticks > 0) {
+        c->tow_ticks--;
+        if (c->tow_ticks > 0) return;             // still on the hook
+
+        const gs_gate *back =
+            &t->gate[(c->next_gate + t->gate_count - 1u) % t->gate_count];
+        gs_fix fx = gs_cos(back->heading);
+        gs_fix fy = gs_sin(back->heading);
+        c->x = back->x - fx;
+        c->y = back->y - fy;
+        c->z = gs_track_height(t, c->x, c->y);
+        c->vx = 0;
+        c->vy = 0;
+        c->vz = 0;
+        c->heading = back->heading;
+        c->grounded = true;
+        c->air_ticks = 0;
+        return;                                    // drivable next tick
+    }
+    if ((in & GS_IN_RESCUE) != 0 && t->gate_count > 0 &&
+        !(c->laps == 0 && c->next_gate == 0)) {
+        c->tow_ticks = GS_TOW_TICKS;
+        return;
+    }
+
     // Gravity is sampled where the car is, every tick. The per-tile multiplier
     // is the gravity brush; caching it for a race would break the feature.
     gs_fix g = gs_fix_mul(w->gravity, gs_track_gravity(t, c->x, c->y));
@@ -673,6 +707,10 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
 #define GS_CAR_HEIGHT GS_RATIO(60, 100)
 
 static void gs_collide(gs_world *w, gs_car *a, gs_car *b) {
+    // A car on the tow truck's hook is not on the road: nothing hits it and
+    // it hits nothing, or a flashing car parked mid-crash-site would go on
+    // trading impulses with whatever it crashed near.
+    if (a->tow_ticks > 0 || b->tow_ticks > 0) return;
     if (!a->active || !b->active) return;
 
     gs_fix dx = b->x - a->x;
@@ -1188,6 +1226,7 @@ uint64_t gs_world_hash(const gs_world *w) {
         gs_hash_u64(&h, (uint64_t)c->active);
         gs_hash_u64(&h, c->air_ticks);
         gs_hash_u64(&h, c->drop_cooldown);
+        gs_hash_u64(&h, c->tow_ticks);
         gs_hash_u64(&h, c->next_gate);
         gs_hash_u64(&h, c->laps);
         gs_hash_u64(&h, c->finish_tick);

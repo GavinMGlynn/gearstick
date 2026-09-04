@@ -37,6 +37,14 @@ enum {
     GS_IN_LEFT  = 1u << 2,
     GS_IN_RIGHT = 1u << 3,
     GS_IN_FIRE  = 1u << 4,
+
+    // **The tow truck.** Held or tapped, a car is returned to one tile
+    // before the last checkpoint it crossed, standing still - lost time is
+    // the whole cost, which is the original's ethic. In the input byte
+    // rather than anywhere else so a rescue replays, rolls back and crosses
+    // the network exactly like every other thing a driver does. Before the
+    // first checkpoint there is nowhere to go back to, and it does nothing.
+    GS_IN_RESCUE = 1u << 5,
 };
 
 // Earth gravity in tiles per second squared, a tile being four metres.
@@ -116,6 +124,13 @@ typedef struct gs_car {
     // Ticks until this car can drop another. Without it, holding the button
     // paves the track at a hundred and twenty hazards a second.
     uint16_t drop_cooldown;
+
+    // **The tow in progress.** Counting down while the tow truck has the
+    // car: it flashes where it was lost, frozen and untouchable, and lands
+    // at its last checkpoint when this reaches zero. Simulation state - not
+    // a front-end effect - because when a car becomes drivable again decides
+    // races, so it is hashed, replayed and rolled back like everything else.
+    uint16_t tow_ticks;
 
     // How long since the wheels last touched. The renderer wants it for the
     // shadow, and the landing-prediction arc will want it later.
@@ -258,6 +273,15 @@ uint32_t gs_world_countdown(const gs_world *w);
 
 // How long the green shows after the start, in ticks.
 #define GS_GREEN_TICKS ((uint32_t)GS_TICK_HZ)
+
+// How long the tow truck takes, in ticks - one second of flashing where the
+// car was lost, then it lands at its checkpoint, solid and drivable. Long
+// enough to read as a consequence, short enough not to be a punishment on
+// top of the time already lost. The renderer blinks the car while the tow
+// has it, on GS_TOW_BLINK-tick beats, derived from this counter so every
+// machine flashes the same frames.
+#define GS_TOW_TICKS ((uint16_t)GS_TICK_HZ)
+#define GS_TOW_BLINK 15u
 
 // **What a race is worth when nobody chose.** An online race is the server's
 // race and the protocol carries no lap count, so every machine has to arrive at

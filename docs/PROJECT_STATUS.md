@@ -7943,6 +7943,56 @@ eliminated by reading, and the trace instrumentation stays armed to catch a
 recurrence if this diagnosis is wrong.*
 
 
+### The tow truck, 2026-09-04
+
+"If you go off track too far, maybe we should have a key that would place
+the car back on the track at the last checkpoint?" It does now, as a small
+ceremony rather than a teleport - asked for in a follow-up: "it should
+start flashing, and then be replaced at the last checkpoint and stop
+flashing and be active." Backspace (Q for the second keyboard player, the
+pad's top button, all rebindable - the controls screen grew the row by
+itself) hands the car to the tow: it freezes and flashes where it was lost
+for one second, untouchable - nothing hits it and it hits nothing - then
+lands one tile before the last gate it crossed, facing the way the gate
+faces, standing still, solid and drivable. Lost time is the whole cost,
+which is the original's ethic. The flash is the simulation's own counter
+read by the renderer, so every machine watching the same race sees the
+same flashes on the same ticks.
+
+**A rescue is a bit in the input byte**, not a front-end teleport: it
+replays, rolls back and crosses the network exactly like steering does. The
+tow's countdown is car state - when a car becomes drivable again decides
+races - so it is hashed, and the world and opponents hashes moved for the
+plainest of the hash's reasons: a car carries one more number, even though
+it is zero in every race ever recorded. Re-crossing
+the gate it was towed behind counts for nothing - the race only tests the
+gate a car expects - so the leg has to be driven again and there is nothing
+to farm. Before the first crossing it does nothing at all, because a tow on
+the grid would be a head start. Wrecked cars are not towed; wrecks have
+their own way back.
+
+Bindings files from before the tow still load, their five actions verbatim
+and the tow on its default key - a version bump with the old version still
+readable, because "your controls survived the update" is not a feature
+anybody should lose to an enum growing.
+
+**And the sticky accelerator is still at large.** The blip shield did not
+cure it - that diagnosis was wrong, or at least incomplete - so `--trace`
+now logs every key event with its auto-repeat flag: if a spurious KEY_UP
+arrives mid-hold, the keyboard stack dropped the key and no game-side state
+can be blamed; if no release arrives and the key still dies, the fault is
+inside. The next report convicts by reading.
+
+*Verification: the tow is pinned end to end - refused on the grid, frozen
+and untouchable on the hook for its second on the nose, the landing's
+placement and stillness after a mid-air rescue, the same gate still owed,
+nothing gained by re-crossing, the honest leg driven to the next gate, and
+a wreck left where it lay. The flash is pinned on pixels: the car's paint
+counted through a full blink cycle, absent on every off-beat, present on
+every on-beat, and solid at zero. A forged version-one bindings file loads
+with its five actions intact and the tow on its default.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

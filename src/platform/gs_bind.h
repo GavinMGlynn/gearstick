@@ -21,6 +21,7 @@ typedef enum gs_action {
     GS_ACT_LEFT,
     GS_ACT_RIGHT,
     GS_ACT_FIRE,
+    GS_ACT_RESCUE,
     GS_ACT_COUNT
 } gs_action;
 

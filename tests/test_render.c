@@ -1697,6 +1697,53 @@ TEST(four_players_get_four_views_that_tile_the_window_without_overlapping) {
     }
 }
 
+TEST(a_car_on_the_tow_trucks_hook_flashes_and_lands_solid) {
+    // **"It should start flashing, and then be replaced at the last
+    // checkpoint and stop flashing and be active."** The flash is the tow's
+    // own counter read by the renderer - off-beats simply are not drawn - so
+    // every machine watching the same race sees the same flashes on the same
+    // ticks, and the moment the counter reaches zero the car is standing at
+    // its checkpoint, drawn solid every frame. Pinned on pixels: the car's
+    // paint counted in a rendered frame through one full blink cycle.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(24), GS_INT(24),
+                     0);
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    gs_render_track_camera(&v, &t, &w, &w, 1.0f);
+
+    int on_beats = 0, off_beats = 0, wrong = 0;
+    for (uint16_t ticks = 0; ticks <= 2 * GS_TOW_BLINK; ticks++) {
+        w.car[0].tow_ticks = ticks;
+        gs_frame f = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+        CHECK(f.px != nullptr);
+        const int px = gs_count_car(&f, 0);
+        gs_frame_free(&f);
+
+        const bool off = ticks > 0 && (ticks / GS_TOW_BLINK) % 2u == 1u;
+        if (off) {
+            off_beats++;
+            if (px != 0) wrong++;
+        } else {
+            on_beats++;
+            if (px <= 50) wrong++;
+        }
+    }
+    // Both halves of the cycle actually happened - a blink with no off-beat
+    // is a car that never flashed, and zero tow ticks is the solid, active
+    // car at the end of it.
+    CHECK(on_beats >= (int)GS_TOW_BLINK);
+    CHECK(off_beats >= (int)GS_TOW_BLINK);
+    CHECK(wrong == 0);
+}
+
 TEST(each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one) {
     static gs_track t;
     gs_flat_pavement(&t, 48, 48);
@@ -3557,6 +3604,46 @@ TEST(changed_controls_survive_being_written_and_read_back) {
     CHECK(kept.key[0][GS_ACT_ACCEL] == was);
 
     CHECK(gs_bind_serialize(&b, buf, 8) == 0);
+}
+
+TEST(controls_saved_before_the_tow_existed_still_open_with_it_on_its_key) {
+    (void)ren;
+
+    // A version-one bindings file has five actions and no tow. It still
+    // loads - its five actions verbatim, the tow at its default - because
+    // "your controls survived the update" is not a feature anybody should
+    // lose to an enum growing. Forged byte by byte in version one's own
+    // layout, since nothing left in the tree can write one.
+    uint8_t buf[512];
+    uint8_t *p = buf;
+    const uint32_t words[2] = { 0x444e4247u /* magic */, 1u /* version */ };
+    for (int wi = 0; wi < 2; wi++) {
+        *p++ = (uint8_t)(words[wi] & 0xffu);
+        *p++ = (uint8_t)((words[wi] >> 8) & 0xffu);
+        *p++ = (uint8_t)((words[wi] >> 16) & 0xffu);
+        *p++ = (uint8_t)((words[wi] >> 24) & 0xffu);
+    }
+    for (uint8_t pl = 0; pl < GS_MAX_CARS; pl++) {
+        for (int a = 0; a < 5; a++) {
+            // A distinctive, un-default key so the survival is provable:
+            // keypad 1 through 5 for player zero, none for the rest.
+            uint32_t key = pl == 0 ? (uint32_t)(SDL_SCANCODE_KP_1 + a) : 0u;
+            *p++ = (uint8_t)(key & 0xffu);
+            *p++ = (uint8_t)((key >> 8) & 0xffu);
+            *p++ = (uint8_t)((key >> 16) & 0xffu);
+            *p++ = (uint8_t)((key >> 24) & 0xffu);
+            *p++ = 0xffu;               // button: none (-1)
+            *p++ = 0xffu;
+        }
+    }
+
+    gs_bindings got;
+    CHECK(gs_bind_deserialize(&got, buf, (size_t)(p - buf)));
+    CHECK(got.key[0][GS_ACT_ACCEL] == SDL_SCANCODE_KP_1);
+    CHECK(got.key[0][GS_ACT_FIRE] == SDL_SCANCODE_KP_5);
+    CHECK(got.key[0][GS_ACT_RESCUE] == SDL_SCANCODE_BACKSPACE);
+    CHECK(got.key[1][GS_ACT_RESCUE] == SDL_SCANCODE_Q);
+    CHECK(got.button[2][GS_ACT_RESCUE] == (int16_t)SDL_GAMEPAD_BUTTON_NORTH);
 }
 
 // ---------------------------------------------------------------------------
@@ -12085,6 +12172,7 @@ int main(void) {
     run_the_second_pad_drives_the_second_car(ren);
     run_each_half_of_a_split_screen_shows_its_own_car(ren);
     run_four_players_get_four_views_that_tile_the_window_without_overlapping(ren);
+    run_a_car_on_the_tow_trucks_hook_flashes_and_lands_solid(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);
     run_the_screen_merges_when_the_cars_are_close_and_splits_when_they_are_not(ren);
     run_placing_the_views_leaves_everything_it_does_not_own_alone(ren);
@@ -12095,6 +12183,7 @@ int main(void) {
     run_every_combination_of_keys_reaches_the_car_at_once(ren);
     run_a_rebind_waits_for_the_key_that_started_it_to_be_let_go(ren);
     run_changed_controls_survive_being_written_and_read_back(ren);
+    run_controls_saved_before_the_tow_existed_still_open_with_it_on_its_key(ren);
     run_every_vehicle_has_a_mesh_and_no_two_are_the_same_shape(ren);
     run_a_car_is_drawn_from_its_mesh_and_faces_where_it_is_pointing(ren);
     run_a_car_on_a_slope_leans_with_the_ground(ren);
