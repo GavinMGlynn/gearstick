@@ -49,6 +49,12 @@ typedef struct gs_view {
     // them.
     bool     missed;
     uint8_t  missed_at;
+    // **The split at the last checkpoint**: how many ticks behind the ghost
+    // this car crossed it, negative when ahead, and the world tick it was
+    // noted at, so the HUD can show it for a moment and let it go.
+    bool     split_known;
+    int32_t  split;
+    uint32_t split_tick;
 
     // The analyser's heatmap, or null for none. Borrowed, not owned: the view
     // paints whatever the editor last worked out and never runs the sweep
@@ -69,6 +75,14 @@ typedef struct gs_view {
 // Here rather than in the frontend so that it can be tested, and rather than in
 // `gs_world` so that it does not move the golden hash: which gate a car owes is
 // already in the world, and *having been told* is a property of a screen.
+// **Note the split** for every car that crossed a gate this tick: the
+// difference between its tick and the ghost's at the same crossing. Nothing
+// is noted where the ghost has no time for that crossing.
+struct gs_ghost;
+void gs_view_note_split(gs_view *views, uint8_t count, const gs_track *t,
+                        const struct gs_ghost *ghost, const gs_world *was,
+                        const gs_world *now);
+
 void gs_view_note_missed(gs_view *views, uint8_t count, const gs_track *t,
                          const gs_world *was, const gs_world *now);
 

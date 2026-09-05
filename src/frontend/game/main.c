@@ -1988,6 +1988,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             gs_world seen = a->world;
             a->world = *gs_net_world(&a->net);
             gs_view_note_missed(a->view, GS_MAX_CARS, &a->t, &seen, &a->world);
+            gs_view_note_split(a->view, GS_MAX_CARS, &a->t,
+                               a->show_ghost ? &a->ghost : nullptr, &seen, &a->world);
         }
         steps = 0;
     }

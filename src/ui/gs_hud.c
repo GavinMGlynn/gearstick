@@ -218,6 +218,21 @@ static void gs_hud_way_out(bool online) {
 // by eleven pixels, and the wreck message by a whole line. What is drawn below
 // adds a row here, or the test that renders every state and asks what did not
 // fit will say so.
+// What the split row last said, for a test to read back - the same
+// arrangement as gs_hud_carrying.
+static char gs_hud_split_text[16];
+
+// How long a split stays on the panel after the checkpoint it is about.
+#define GS_HUD_SPLIT_TICKS (GS_TICK_HZ * 3u)
+
+static bool gs_hud_split_showing(uint32_t tick, const gs_view *v, const gs_car *c) {
+    // Not on a wreck: the last split is stale the moment the car is, the
+    // wreck's own message is what matters, and the panel's tallest state -
+    // wrecked, carrying, waiting - is already at the edge of what fits.
+    if (!v->split_known || c->finish_tick != 0 || c->wrecked) return false;
+    return tick - v->split_tick < GS_HUD_SPLIT_TICKS;
+}
+
 typedef struct gs_hud_rows {
     float bigs, smalls, gaps;
     bool  finished, wrecked, waiting, online;
@@ -233,6 +248,9 @@ typedef struct gs_hud_rows {
     // missed one is about to finish a lap that will not count and the game has
     // to say so before they cross the line rather than after.
     bool  missed;
+    // **The split**, for a few seconds after a checkpoint: ahead of the
+    // ghost or behind it, and by how much.
+    bool  split;
 } gs_hud_rows;
 
 // **What a line of text will actually measure.** ImGui bakes a font at whole
@@ -297,6 +315,8 @@ static float gs_hud_height(const gs_hud_rows *r, float base, float zoom,
     if (r->carrying) h += row_small + gap;
     // The missed checkpoint, and the gap above it.
     if (r->missed) h += row_small + gap;
+    // The split, and the gap above it.
+    if (r->split) h += row_small + gap;
     // A finished car's time, and the gap above it.
     if (r->finished) h += row_small + gap;
     // The one or two keys a wrecked driver is offered. Counted here rather than
@@ -613,6 +633,7 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         .finished = c->finish_tick != 0,
         .carrying = gs_car_selected(c) != GS_HAZ_NONE,
         .missed = v->missed && c->finish_tick == 0,
+        .split = gs_hud_split_showing(tick, v, c),
         .wrecked = c->wrecked,
         .waiting = waited > 0.5f,
         .online = online,
@@ -834,6 +855,27 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
         // finish will do nothing - and a player who ran wide at a corner and
         // was told nothing drove the whole rest of the lap and crossed the
         // chequer for it. The arrow on the ground points back at the one owed.
+        // **The split.** How far ahead of or behind the ghost this car
+        // crossed the last checkpoint, for three seconds after it: green
+        // and negative when ahead, red and positive when behind. "I was
+        // slower" becomes "I was slower there", which is the difference
+        // between knowing you lost time and knowing where to find it.
+        if (gs_hud_split_showing(tick, v, c)) {
+            ImGui_Spacing();
+            const int32_t d = v->split;
+            const uint32_t mag = (uint32_t)(d < 0 ? -d : d);
+            SDL_snprintf(text, sizeof text, "%c%u.%02u", d < 0 ? '-' : '+',
+                         mag / GS_TICK_HZ, (mag % GS_TICK_HZ) * 100u / GS_TICK_HZ);
+            SDL_strlcpy(gs_hud_split_text, text, sizeof gs_hud_split_text);
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       d < 0 ? (ImVec4){ 0.45f, 0.95f, 0.50f, 1.0f }
+                                             : (ImVec4){ 1.00f, 0.45f, 0.40f, 1.0f });
+            gs_hud_stat("split", text, GS_HUD_SMALL);
+            ImGui_PopStyleColor();
+        } else {
+            gs_hud_split_text[0] = '\0';
+        }
+
         if (v->missed && c->finish_tick == 0) {
             ImGui_Spacing();
             // "checkpoint missed" does not fit the panel, whose width is set by
@@ -889,6 +931,7 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
 }
 
 const char *gs_hud_carrying(void) { return gs_hud_carried; }
+const char *gs_hud_split_said(void) { return gs_hud_split_text; }
 
 float gs_hud_overflow(void) { return gs_hud_hidden; }
 float gs_hud_spare(void) { return gs_hud_room; }

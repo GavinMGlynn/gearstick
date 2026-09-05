@@ -70,4 +70,8 @@ float gs_hud_spare(void);
 // read back from the item hooks, only from here.
 const char *gs_hud_carrying(void);
 
+// What the split row last said - "-0.42", "+1.03" - or "" when it was not
+// drawn. For a test.
+const char *gs_hud_split_said(void);
+
 #endif // GS_HUD_H

@@ -8414,6 +8414,34 @@ than the flat one; every band drawn in six hundred specs and the gaps veto
 held; the shipped set covering every band.*
 
 
+### Split times, 2026-09-05
+
+**"I was slower" becomes "I was slower there."** At every checkpoint the
+HUD says how far ahead of or behind the ghost you crossed it - `-0.42` in
+green, `+1.03` in red - for three seconds, and then lets it go. The ghost
+is the run the HUD already shows: your last, or a loaded ghost file.
+
+**One fact, taken once.** When a ghost is armed it plays its recording back
+once, headless, and notes the tick at which its car crossed each gate,
+indexed by lap and gate - the same index a live car's crossing computes, so
+the split is a subtraction the moment the gate is taken. A race pays
+nothing for it: the survey runs at race start, in the time a recording
+takes to replay. Nothing is added to the simulation; the note lives on the
+view, beside the missed-checkpoint flag, and the HUD reads it there.
+
+**Not on a wreck.** The last split is stale the moment the car is, the
+wreck's own message matters more, and the panel's tallest state was
+already at the edge of what fits: a wrecked car's row would have left
+eighteen pixels of nothing under the panel, which the fit test measures.
+
+*Verification: a scripted run recorded and taken as a ghost gives back the
+tick it crossed each of six gates, equal to what the live run saw; a live
+car crossing the same gate sixty ticks later is told `+0.50`, thirty ticks
+earlier `-0.25`, nothing without a ghost or a crossing, nothing four
+seconds on, nothing on a wreck; and the panel fits with the row in every
+state it has. No golden moved.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

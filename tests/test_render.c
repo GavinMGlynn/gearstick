@@ -16,6 +16,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "core/gs_ghost.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
 #include "gfx/gs_render.h"
@@ -5104,9 +5105,15 @@ TEST(the_hud_fits_what_is_in_it_in_every_state_it_has) {
     // as a dimension rather than as six more hand-written states: it is
     // independent of every other flag here, and hand-picking combinations is
     // how a state goes unmeasured.
-    for (size_t si = 0; si < SDL_arraysize(states) * 2; si++) {
+    for (size_t si = 0; si < SDL_arraysize(states) * 3; si++) {
         const size_t i = si % SDL_arraysize(states);
         const bool carrying = si >= SDL_arraysize(states);
+        // The third pass adds the split row to the carrying states, which is
+        // the tallest the panel gets.
+        const bool split = si >= SDL_arraysize(states) * 2;
+        v.split_known = split;
+        v.split = split ? -42 : 0;
+        v.split_tick = 590;
 
         for (int k = GS_HAZ_NONE + 1; k < GS_HAZ_COUNT; k++) {
             gs_world_arm(&w, (gs_hazard_kind)k, carrying ? 3 : 0);
@@ -11233,17 +11240,25 @@ TEST(every_control_is_known_by_name_and_answers_to_it) {
 }
 
 // The HUD, drawn and nothing else, so what it says can be read back.
-static void gs_hud_frame_only(SDL_Renderer *ren, const gs_track *t,
-                              const gs_world *w, const gs_view *v) {
+// The same, at a tick of the caller's choosing: the HUD is handed the tick
+// separately from the world, and a test about something that fades needs
+// to move it.
+static void gs_hud_frame_at(SDL_Renderer *ren, const gs_track *t,
+                            const gs_world *w, const gs_view *v, uint32_t tick) {
     for (int frame = 0; frame < 3; frame++) {
         cImGui_ImplSDLRenderer3_NewFrame();
         cImGui_ImplSDL3_NewFrame();
         ImGui_NewFrame();
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
         SDL_RenderClear(ren);
-        gs_hud_draw(w, t, v, 600, 0.0f, false);
+        gs_hud_draw(w, t, v, tick, 0.0f, false);
         ImGui_Render();
     }
+}
+
+static void gs_hud_frame_only(SDL_Renderer *ren, const gs_track *t,
+                              const gs_world *w, const gs_view *v) {
+    gs_hud_frame_at(ren, t, w, v, 600);
 }
 
 // One frame of a screen with its panel put at a given scroll position, and
@@ -11262,6 +11277,98 @@ static int gs_reach_at(gs_ui *ui, gs_screen hold, const char *window,
     return n;
 }
 
+
+static gs_ghost  gs_hud_ghost;
+static gs_replay gs_hud_recording;
+
+TEST(a_checkpoint_says_how_far_ahead_of_the_ghost_you_are) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    // A ghost that drove a straight road flat out; then the same road driven
+    // by a live car that reaches the first gate later, and the HUD asked
+    // what it says at the crossing.
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+    for (int i = 0; i < 6; i++) {
+        gs_track_add_gate(&t, GS_INT(8 + i * 8), GS_INT(8), 0, GS_INT(3));
+    }
+    t.route = (uint8_t)GS_ROUTE_SPRINT;
+
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(8), 0);
+    gs_replay_begin(&gs_hud_recording, &w, &t);
+    uint32_t first = 0;
+    for (uint32_t k = 0; k < GS_TICK_HZ * 30 && w.car[0].finish_tick == 0; k++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        const uint8_t was = w.car[0].next_gate;
+        gs_replay_record(&gs_hud_recording, in);
+        gs_world_step(&w, &t, in);
+        if (first == 0 && w.car[0].next_gate != was) first = (uint32_t)w.tick;
+    }
+    CHECK(first > 0);
+    CHECK(gs_ghost_take(&gs_hud_ghost, &gs_hud_recording, &t));
+
+    // **The live car, half a second later at the same gate.** Two worlds a
+    // tick apart in which the car took gate zero, at a tick sixty later
+    // than the ghost's.
+    static gs_world was, now;
+    gs_world_init(&was, GS_ONE);
+    gs_world_set_mode(&was, GS_MODE_RACE);
+    gs_world_set_laps(&was, 1);
+    gs_world_add_car(&was, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(7), GS_INT(8), 0);
+    was.tick = first + 59;
+    now = was;
+    now.tick = first + 60;
+    now.car[0].next_gate = 1;
+    now.car[0].x = GS_INT(9);
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    gs_render_track_camera(&v, &t, &now, &now, 1.0f);
+
+    // Nothing noted without a ghost, or when no gate was taken.
+    gs_view_note_split(&v, 1, &t, nullptr, &was, &now);
+    CHECK(!v.split_known);
+    gs_view_note_split(&v, 1, &t, &gs_hud_ghost, &was, &was);
+    CHECK(!v.split_known);
+
+    gs_view_note_split(&v, 1, &t, &gs_hud_ghost, &was, &now);
+    CHECK(v.split_known);
+    CHECK(v.split == 60);
+    CHECK(v.split_tick == now.tick);
+
+    // The HUD says so - "+0.50" - for three seconds, and then does not.
+    gs_hud_frame_at(ren, &t, &now, &v, (uint32_t)now.tick);
+    printf("  SPLIT the HUD said '%s' half a second behind the ghost\n", gs_hud_split_said());
+    CHECK(SDL_strcmp(gs_hud_split_said(), "+0.50") == 0);
+
+    now.tick = first + 60 + GS_TICK_HZ * 4;
+    gs_hud_frame_at(ren, &t, &now, &v, (uint32_t)now.tick);
+    CHECK(gs_hud_split_said()[0] == '\0');
+
+    // And ahead reads as ahead: a car that got there a quarter second early.
+    now.tick = first - 30;
+    v.split_known = false;
+    gs_view_note_split(&v, 1, &t, &gs_hud_ghost, &was, &now);
+    CHECK(v.split_known && v.split == -30);
+    gs_hud_frame_at(ren, &t, &now, &v, (uint32_t)now.tick);
+    CHECK(SDL_strcmp(gs_hud_split_said(), "-0.25") == 0);
+
+    // **Not on a wreck.** The last split is stale the moment the car is, the
+    // wreck's own message is what matters, and the panel's tallest state is
+    // already at the edge of what fits.
+    now.car[0].wrecked = true;
+    now.car[0].damage = 255;
+    gs_hud_frame_at(ren, &t, &now, &v, (uint32_t)now.tick);
+    CHECK(gs_hud_split_said()[0] == '\0');
+}
 
 TEST(the_hud_says_what_you_are_carrying_and_only_when_you_are) {
     gs_imgui_start(gs_win, ren);
@@ -12512,6 +12619,7 @@ int main(void) {
     run_four_players_get_four_views_that_tile_the_window_without_overlapping(ren);
     run_only_a_checkpoint_is_marked_and_the_waypoints_between_are_the_line(ren);
     run_driving_past_a_waypoint_is_not_a_missed_checkpoint(ren);
+    run_a_checkpoint_says_how_far_ahead_of_the_ghost_you_are(ren);
     run_winning_is_something_you_can_see_happen(ren);
     run_a_car_on_the_tow_trucks_hook_flashes_and_lands_solid(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);

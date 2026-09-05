@@ -136,6 +136,11 @@ and a car that arrives short drives out of it slowly; *crests that drop
 away* fall away on the far side, so the landing is the decision. A *level
 road* is what every track used to be.
 
+**The split at every checkpoint.** With a ghost on the track - your last
+run, or a loaded one - each post you cross shows how far ahead or behind
+it you are: `-0.42` in green is ahead, `+1.03` in red is behind. It stays
+three seconds. "I was slower" becomes "I was slower *there*".
+
 **Every track goes both ways.** The **direction** dial on the setup screen
 races the track reversed: the same road the other way round, with the
 start line crossed the other way on a loop and a path run from its old

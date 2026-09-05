@@ -2900,12 +2900,16 @@ better done once the reversed routes are being verified too.
       reversed circuit completable, and the shipped set checked both ways
       on disk.*
 
-- [ ] **Split times, and where you actually lost it.** The gates are already
-      sectors. Crossing one shows the difference against your own best for
-      that sector, so a slower lap says *where* it went.
-      *Verification: driven against a recorded ghost, the splits sum to the
-      lap difference, and a sector nobody has driven before shows nothing
-      rather than a wrong number.*
+- [x] **Split times, and where you actually lost it.** At every checkpoint
+      the HUD says how far ahead of or behind the ghost you crossed it, for
+      three seconds. A ghost plays its recording back once when it is armed
+      and notes the tick it crossed each gate; the split is a subtraction
+      when a live car takes the same one. Nothing in the simulation moved.
+      *Verification: a recorded run's ghost gives back the tick at each of
+      six gates equal to what the run saw; a car sixty ticks later at the
+      same gate is told +0.50, thirty earlier -0.25, nothing without a
+      ghost, nothing four seconds on, nothing on a wreck; the panel fits
+      with the row in every state.*
 
 - [ ] **A time to beat on every track.** The analyser already drives every
       track with every machine before it ships, so the target is computed

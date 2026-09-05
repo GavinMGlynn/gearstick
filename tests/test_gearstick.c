@@ -8979,6 +8979,55 @@ TEST(a_banked_ring_turns_a_car_tighter_than_the_flat_ring_does) {
     CHECK(on_bank < on_flat - GS_RATIO(15, 100));
 }
 
+// A straight road with six gates across it and a car driven flat out along
+// it, recorded as it goes - so the tick it crossed each gate is known.
+static gs_ghost  gs_split_ghost;
+static gs_replay gs_split_recording;
+
+TEST(a_ghost_knows_the_tick_it_crossed_each_gate) {
+    // **Split times need one fact: when the ghost got to each gate.** Taken
+    // by playing the recording back once when the ghost is armed, and it
+    // has to agree, tick for tick, with what the live run saw as it was
+    // recorded - because that is the run the ghost is.
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+    for (int i = 0; i < 6; i++) {
+        gs_track_add_gate(&t, GS_INT(8 + i * 8), GS_INT(8), 0, GS_INT(3));
+    }
+    t.route = (uint8_t)GS_ROUTE_SPRINT;
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(2), GS_INT(8), 0);
+    gs_replay_begin(&gs_split_recording, &w, &t);
+
+    uint32_t seen[8] = { 0 };
+    int crossings = 0;
+    for (uint32_t k = 0; k < GS_TICK_HZ * 30 && w.car[0].finish_tick == 0; k++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        const uint8_t was = w.car[0].next_gate;
+        CHECK(gs_replay_record(&gs_split_recording, in));
+        gs_world_step(&w, &t, in);
+        if (w.car[0].next_gate != was && crossings < 8) {
+            seen[crossings++] = (uint32_t)w.tick;
+            CHECK(gs_split_index(&t, &w.car[0]) == crossings - 1);
+        }
+    }
+    CHECK(crossings == 6);
+
+    CHECK(gs_ghost_take(&gs_split_ghost, &gs_split_recording, &t));
+    for (int k = 0; k < crossings; k++) {
+        uint32_t tick = 0;
+        CHECK(gs_ghost_split(&gs_split_ghost, k, &tick));
+        CHECK(tick == seen[k]);
+    }
+    // And nothing for a crossing it never made.
+    CHECK(!gs_ghost_split(&gs_split_ghost, crossings, nullptr));
+    printf("  SPLITS %d gates, the ghost's tick at each equal to the run's\n", crossings);
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -10327,6 +10376,7 @@ int main(void) {
     run_a_waypoint_may_be_missed_and_a_checkpoint_may_not();
     run_a_track_reversed_twice_is_the_track_it_was_and_once_is_a_different_one();
     run_a_reversed_circuit_can_still_be_lapped();
+    run_a_ghost_knows_the_tick_it_crossed_each_gate();
     run_a_banked_corner_is_higher_on_the_outside_and_a_pipe_at_both_edges();
     run_a_gap_is_a_trench_after_a_ramp_and_a_crest_falls_away_beyond_it();
     run_every_kind_of_drama_can_still_be_got_round();

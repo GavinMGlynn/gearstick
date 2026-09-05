@@ -1,5 +1,6 @@
 // gs_render.c - see gs_render.h for why the ground is geometry and not art.
 
+#include "core/gs_ghost.h"
 #include "gfx/gs_render.h"
 
 #include "gfx/gs_meshes.h"
@@ -1795,6 +1796,27 @@ static void gs_draw_hazards(SDL_Renderer *ren, const gs_camera *cam,
         // Cut up like every other mark: smoke is over two tiles across, which
         // is three diagonals of ground for one shape to answer for.
         gs_ground_mark(ren, cam, t, x, y, 0.02f, col, world_d);
+    }
+}
+
+void gs_view_note_split(gs_view *views, uint8_t count, const gs_track *t,
+                        const gs_ghost *ghost, const gs_world *was,
+                        const gs_world *now) {
+    if (views == nullptr || t == nullptr || was == nullptr || now == nullptr) return;
+    if (ghost == nullptr || !ghost->ready || t->gate_count == 0) return;
+    for (uint8_t i = 0; i < now->car_count && i < GS_MAX_CARS; i++) {
+        const gs_car *before = &was->car[i];
+        const gs_car *after = &now->car[i];
+        if (!after->active) continue;
+        if (after->next_gate == before->next_gate && after->laps == before->laps) continue;
+        uint32_t theirs = 0;
+        if (!gs_ghost_split(ghost, gs_split_index(t, after), &theirs)) continue;
+        for (uint8_t v = 0; v < count; v++) {
+            if (views[v].car != i) continue;
+            views[v].split_known = true;
+            views[v].split = (int32_t)now->tick - (int32_t)theirs;
+            views[v].split_tick = (uint32_t)now->tick;
+        }
     }
 }
 

@@ -368,7 +368,7 @@ file.
   unlocked, and the record for a track backwards is its own record. This is
   the cheapest content in the file by a wide margin.
 
-- **Split times, and where you actually lost it.** `WANTED`
+- **Split times, and where you actually lost it.** `DONE`
   The gates are already sectors. Crossing one against your own best says
   **+0.4** or **−0.2** for that sector, so "I was slower" becomes "I was
   slower *there*" — which is the difference between knowing you lost and

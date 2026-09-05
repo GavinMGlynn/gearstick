@@ -18,6 +18,14 @@
 
 // Around 300 KB, nearly all of it the replay. A static or a heap object, never
 // a local - the same rule the replay itself carries.
+// **When the ghost reached each gate.** One tick per crossing, indexed by
+// lap and gate - see gs_split_index - taken from one headless playback of
+// the recording when the ghost is armed, so that the moment a live car
+// crosses the same gate the answer to "am I ahead" is a subtraction. Twenty
+// laps of the most gates a track can have; zero means the ghost never got
+// there, and a tick is stored one high so that zero can mean that.
+#define GS_GHOST_SPLITS (GS_TRACK_MAX_GATES * 20)
+
 typedef struct gs_ghost {
     gs_replay replay;
 
@@ -26,6 +34,7 @@ typedef struct gs_ghost {
     // interpolates a car anybody is driving.
     gs_world  world;
     gs_world  prev;
+    uint32_t  split[GS_GHOST_SPLITS];
 
     bool     loaded;      // there is a replay in here
     bool     ready;       // and it matches the track we are racing on
@@ -62,5 +71,13 @@ const gs_car *gs_ghost_prev_car(const gs_ghost *g);
 
 // How many ticks of recording there are, and how far in we are.
 uint32_t gs_ghost_length(const gs_ghost *g);
+
+// The index of the crossing a car has just made: its lap times the gate
+// count plus the gate it crossed. The same number for the ghost and for the
+// live car, which is what makes them comparable. -1 if it has crossed none.
+int32_t gs_split_index(const gs_track *t, const gs_car *c);
+
+// The tick at which the ghost made crossing `index`, if it did.
+bool gs_ghost_split(const gs_ghost *g, int32_t index, uint32_t *tick);
 
 #endif // GS_GHOST_H
