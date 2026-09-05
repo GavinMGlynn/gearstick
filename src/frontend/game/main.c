@@ -124,6 +124,7 @@ typedef struct gs_app {
     uint8_t     server_key[GS_NOISE_KEY_BYTES];
     bool        has_server_key;
     const char *online_name;      // who to appear as
+    bool        online_manual;    // --manual: take the manual gearbox online
     bool        use_relay;        // go through the server, for awkward routers
     uint16_t    port;
     uint8_t     online_players;   // how many the host is waiting for
@@ -539,12 +540,22 @@ static void gs_start_race(gs_app *a) {
         // two-player race the two machines would have built different worlds
         // from their own screens - which is the one thing rollback cannot
         // recover from.
+        // **And which way round, and which box each driver has**, both from
+        // the server: the START says whether the track is reversed, and the
+        // lobby says who took the manual. Every machine hears the same, so
+        // every machine builds the same race - which is the only reason a
+        // setup can be on the wire at all.
+        const gs_lobby *lobby = a->online && a->wire != nullptr ? gs_wire_lobby(a->wire) : nullptr;
+        if (a->online && a->wire != nullptr) gs_face_track(a, gs_wire_reversed(a->wire));
         for (uint8_t i = 0; i < players; i++) {
             gs_fix sx, sy; gs_angle facing;
             // Centred for the cars the server named - every machine knows
             // the same count, so every machine builds the same grid.
             gs_track_grid_of(&a->t, i, players, &sx, &sy, &facing);
             gs_world_add_car(&a->world, &a->t, grid[i], sx, sy, facing);
+            if (lobby != nullptr && i < GS_PROTO_MAX_PLAYERS) {
+                gs_world_set_manual(&a->world, i, lobby->player[i].manual);
+            }
         }
 
         // **A race with no lap count never ends.** This branch set the grid and
@@ -1027,6 +1038,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->use_relay = true;
         } else if (SDL_strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
             a->online_name = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--manual") == 0) {
+            a->online_manual = true;
         } else if (SDL_strcmp(argv[i], "--demo-library") == 0) {
             a->demo_library = true;
         } else if (SDL_strcmp(argv[i], "--track") == 0 && i + 1 < argc) {
@@ -1116,6 +1129,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --server-key HEX    the public key of the server or "
                     "host being joined, which it prints when it starts");
             SDL_Log("  --name NAME     who to appear as online");
+            SDL_Log("  --manual        take the manual gearbox online");
             SDL_Log("  --relay         send through the server, if peers cannot connect");
             SDL_Log("  J toggles the landing arc while airborne.");
             SDL_Log("  G toggles the painted-gravity overlay, R restarts, "
@@ -1343,6 +1357,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                       ? gs_wire_join(a->join_host, a->port,
                                      a->has_server_key ? a->server_key : nullptr)
                       : gs_wire_host(a->port, want);
+
+        // **The box this player takes goes on the wire.** From --manual, or
+        // from the gearbox the setup screen gives the first driver - the one
+        // choice on that screen that is this player's own rather than the
+        // race's. Said before the JOIN goes, which is on the first poll.
+        if (a->wire != nullptr) {
+            gs_wire_drive_manual(a->wire, a->online_manual || a->menu.setup.manual[0]);
+        }
 
         if (a->wire != nullptr && a->server_host == nullptr &&
             a->join_host == nullptr && gs_wire_error(a->wire) == nullptr) {

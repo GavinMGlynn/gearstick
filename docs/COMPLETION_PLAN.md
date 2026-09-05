@@ -2981,15 +2981,24 @@ better done once the reversed routes are being verified too.
       cannot get round now instead of racing every machine to the end,
       and the check has an hour.*
 
-- [ ] **The setup goes on the wire: gearbox and direction.** A race hosted
-      online gives every car the automatic and races the track forward,
-      because neither the per-driver gearbox nor the direction dial is in
-      the race setup the host sends. One flag per car and one for the race,
-      and the same rule for them as everything else on the wire: the
-      protocol document says where they are, and the wire test moves.
-      *Verification: two machines, one manual and one automatic, race and
-      land on the same world hash with the manual driver's gear changes in
-      the replay.*
+- [x] **The setup goes on the wire: gearbox and direction.** A race hosted
+      online used to give every car the automatic and race the track
+      forward, because neither the per-driver gearbox nor the direction was
+      in what the server sends. One byte per player in the JOIN and the
+      roster, one flag byte in the START, documented with the other
+      messages; the server takes `--reversed`, a client `--manual`. Found
+      on the way: a recording never carried the gearbox, so a manual lap
+      re-raced as an automatic and could not be verified, ghosted or
+      watched back - replay format 8 carries it. *Done 2026-09-06.*
+      *Verification: two peers over real sockets, one manual and one
+      automatic, confirm every tick, agree one world, and it is the world
+      one machine builds from the same inputs; the recording of that race
+      re-races to it with the gearbox in its header; a server started
+      forward and again reversed tells every client who took which box and
+      which way round; and an older recording still reads, as automatic.*
+      *Tail: a check with two game processes racing to the flag through one
+      server and comparing the worlds they end in is not there; the claim
+      is proved at the rollback layer.*
 
 - [ ] **The flat moments.** The finish is an event now and three moments
       still pass without punctuation: the green light at the start, a

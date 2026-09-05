@@ -158,7 +158,9 @@ three seconds. "I was slower" becomes "I was slower *there*".
 **Every track goes both ways.** The **direction** dial on the setup screen
 races the track reversed: the same road the other way round, with the
 start line crossed the other way on a loop and a path run from its old
-finish. A reversed track keeps its own records and its own ghost.
+finish. A reversed track keeps its own records and its own ghost. Online
+the server decides: `gearstick_server --reversed` races its track the
+other way round for everybody.
 
 **A checkpoint is a post; the line between them is the way.** Only every
 fourth gate on a track is a checkpoint you have to cross in order — the
@@ -361,7 +363,9 @@ gearstick --server their-address 47800 --name ada
 
 You get a lobby screen showing who has arrived and how many are still missing.
 **Which player you are is the server's decision**, not a matter of who started
-first.
+first. Which gearbox you take is yours: add `--manual` to drive the manual
+box online, or leave it to the gearbox your setup screen gives the first
+driver; everybody else sees you shift.
 
 If your router will not let the other players reach you — which is common, and
 not something you did wrong — add `--relay` and everything goes through the

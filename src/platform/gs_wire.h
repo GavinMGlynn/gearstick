@@ -79,6 +79,16 @@ const uint8_t *gs_wire_public_key(const gs_wire *w);
 gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name,
                         const uint8_t *server_key);
 
+// **Which box this player takes**, said before the server places them: it
+// goes in the JOIN, and the server tells everybody, so every machine builds
+// this car with the gearbox its driver has. Default automatic.
+void gs_wire_drive_manual(gs_wire *w, bool manual);
+
+// **Which way round the race is**, from the server's START: true means every
+// machine reverses the served track before building the race. False until
+// the server has said.
+bool gs_wire_reversed(const gs_wire *w);
+
 void gs_wire_close(gs_wire *w);
 
 // Work the handshake. Call it every frame until `gs_wire_ready`; it is cheap

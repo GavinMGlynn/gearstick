@@ -62,7 +62,7 @@ static void gs_seeds_proto(void) {
     static uint8_t payload[GS_CHUNK_BYTES];
     for (size_t i = 0; i < sizeof payload; i++) payload[i] = (uint8_t)(i * 31u);
 
-    gs_seed("join",        b, gs_proto_join(b, sizeof b, "ada"));
+    gs_seed("join",        b, gs_proto_join(b, sizeof b, "ada", true));
     gs_seed("bye",         b, gs_proto_bye(b, sizeof b));
     gs_seed("ping",        b, gs_proto_ping(b, sizeof b, 0x01020304u));
     gs_seed("pong",        b, gs_proto_pong(b, sizeof b, 0x01020304u));
@@ -73,7 +73,7 @@ static void gs_seeds_proto(void) {
     gs_seed("want_list",   b, gs_proto_want_list(b, sizeof b));
     gs_seed("publish",     b, gs_proto_publish(b, sizeof b, 0xfeedfaceull, "the oval"));
     gs_seed("want_best",   b, gs_proto_want_best(b, sizeof b, 0xfeedfaceull, 7, 3));
-    gs_seed("start",       b, gs_proto_start(b, sizeof b, 0xfeedfaceull, 4, 3, 1));
+    gs_seed("start",       b, gs_proto_start(b, sizeof b, 0xfeedfaceull, 4, 3, 1, true));
     gs_seed("listing",     b, gs_proto_listing(b, sizeof b, 2, 9, 0xfeedfaceull,
                                                "head on", "ada"));
     gs_seed("best",        b, gs_proto_best(b, sizeof b, 0xfeedfaceull, 7, 3,

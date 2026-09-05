@@ -17,6 +17,7 @@ void gs_replay_begin(gs_replay *r, const gs_world *w, const gs_track *t) {
     for (int k = 0; k < GS_HAZ_COUNT; k++) r->meta.loadout[k] = w->loadout[k];
     for (uint8_t i = 0; i < w->car_count; i++) {
         r->meta.vehicle[i]       = w->car[i].vehicle;
+        r->meta.manual[i]        = w->car[i].manual;
         r->meta.start_x[i]       = w->car[i].x;
         r->meta.start_y[i]       = w->car[i].y;
         r->meta.start_heading[i] = w->car[i].heading;
@@ -65,6 +66,7 @@ bool gs_replay_restore(const gs_replay *r, gs_world *w, const gs_track *t) {
     for (uint8_t i = 0; i < r->meta.car_count; i++) {
         gs_world_add_car(w, t, r->meta.vehicle[i], r->meta.start_x[i],
                          r->meta.start_y[i], r->meta.start_heading[i]);
+        gs_world_set_manual(w, i, r->meta.manual[i] != 0);
     }
     return true;
 }
@@ -125,7 +127,9 @@ static uint64_t gs_get_u64(const uint8_t *p) {
 // out by a compiler, it is bytes in an order somebody wrote down.
 #define GS_REPLAY_HEADER_V6 (GS_REPLAY_HEADER_V5 + GS_HAZ_COUNT)
 // Version 7 adds the countdown.
-#define GS_REPLAY_HEADER_BYTES (GS_REPLAY_HEADER_V6 + 4)
+#define GS_REPLAY_HEADER_V7 (GS_REPLAY_HEADER_V6 + 4)
+// Version 8 adds each car's gearbox.
+#define GS_REPLAY_HEADER_BYTES (GS_REPLAY_HEADER_V7 + GS_MAX_CARS)
 
 void gs_replay_set_driver(gs_replay *r, uint8_t car, const char *name) {
     if (car >= GS_MAX_CARS) return;
@@ -183,6 +187,7 @@ size_t gs_replay_serialize(const gs_replay *r, uint8_t *buf, size_t cap) {
     gs_put_u64(p, r->meta.agreed_hash);          p += 8;
     for (int k = 0; k < GS_HAZ_COUNT; k++) *p++ = r->meta.loadout[k];
     gs_put_u32(p, r->meta.green_tick);           p += 4;
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) *p++ = r->meta.manual[i];
 
     for (uint32_t i = 0; i < r->meta.tick_count; i++) {
         for (uint8_t c = 0; c < GS_MAX_CARS; c++) *p++ = r->input[i][c];
@@ -201,7 +206,8 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     uint32_t version = gs_get_u32(p); p += 4;
     if (version < GS_REPLAY_OLDEST || version > GS_REPLAY_VERSION) return false;
 
-    size_t header = version >= 7 ? GS_REPLAY_HEADER_BYTES
+    size_t header = version >= 8 ? GS_REPLAY_HEADER_BYTES
+                  : version >= 7 ? GS_REPLAY_HEADER_V7
                   : version >= 6 ? GS_REPLAY_HEADER_V6
                   : version >= 5 ? GS_REPLAY_HEADER_V5
                   : version >= 4 ? GS_REPLAY_HEADER_V4
@@ -247,6 +253,13 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     }
     r->meta.green_tick = 0;
     if (version >= 7) { r->meta.green_tick = gs_get_u32(p); p += 4; }
+
+    // Every car before version eight had the automatic, so zero is the truth
+    // about an older recording and not a guess.
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) r->meta.manual[i] = 0;
+    if (version >= 8) {
+        for (uint8_t i = 0; i < GS_MAX_CARS; i++) r->meta.manual[i] = *p++;
+    }
 
     if (r->meta.car_count > GS_MAX_CARS) return false;
     if (ticks > GS_REPLAY_MAX_TICKS) return false;

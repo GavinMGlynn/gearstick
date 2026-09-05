@@ -8302,8 +8302,8 @@ own. The setup screen's best lap and the records screen follow the dial.
 a race starts and undone by one rule the moment the screen is not the race,
 so the menu, the editor and a library load never see a reversed track and
 nothing but one flag has to know. Online the track is whatever the server
-serves, so the dial is a local race's; the flag joins the gearbox in the
-"setup on the wire" item.
+serves, and since 2026-09-06 which way round it is raced is the server's
+`--reversed`, carried in the START - see "The setup on the wire".
 
 **Every shipped track ships both ways.** `make_tracks` now refuses a seed
 whose reverse fails any check its forward route passes - validated, every
@@ -8784,6 +8784,56 @@ pressed in the window drops the client for that reason; take the track
 down pressed in the window takes it down - all six on the real binary,
 release and sanitised, and the server suite green with every server
 headless.*
+
+### The setup on the wire: gearbox and direction, 2026-09-06
+
+**A race hosted online has each driver's gearbox and the race's direction
+in it now.** The JOIN a client sends carries one byte after the name - 1
+for the manual, 0 for the automatic - and the lobby the server sends round
+carries that byte for every player, so every machine builds each car with
+the box its driver has. The START carries one byte of flags after the
+mode, and bit 0 says the served track is raced reversed; every machine
+reverses the track it was handed before building the race. The server
+takes `--reversed`; a client takes the manual with `--manual`, or with the
+gearbox its setup screen gives the first driver, which is the one choice
+on that screen that is the player's own rather than the race's. The
+messages are documented where the others are, in the protocol header,
+byte by byte.
+
+**Found on the way: a recording never carried the gearbox.** A manual
+driver's shifts are in the inputs, and a re-race that gave the car the
+automatic ignored every one of them and finished somewhere else - so a
+manual lap could not be verified by a server, driven by a ghost or watched
+back, and this was true of every manual race since the gearbox landed.
+Replay format version 8 carries one byte per car; the recorder takes it
+from the world, the restore applies it, and an older file reads as
+automatic throughout, which is the truth about it. The golden replay is
+older and reads as it did; neither golden moved.
+
+**And a time on the track raced the other way round is verifiable.** A
+reversed track has a hash of its own and the store holds the track one
+way, so a claim naming the reversed hash was a track the server did not
+have. The server rebuilds the track it serves reversed when a claim names
+that hash; a reversed time on any other track is still one it cannot
+check, and says so as before.
+
+**What is not here.** A check with two game processes racing to the flag
+through one server and comparing the worlds they end in; the same claim is
+proved at the rollback layer with two peers in one process, and the game's
+online path is exercised by the front door, the play check and the output
+check as before.
+
+*Verification: two peers over real sockets, one on the manual with a shift
+every second and one on the automatic, confirm every tick with no desync
+and agree a world that is the world one machine builds from the same
+inputs, and the recording of the confirmed inputs - with the box in its
+header - re-races to it; a server started forward and again reversed,
+joined by a manual client and an automatic one, sends every machine a
+roster naming who took which box and a START saying which way round, both
+ways; a manual car's recording survives the file and re-races to the race,
+and the same bytes as a version-seven file read as automatic and land
+somewhere else, which is the fault this fixes. The play checks, the front
+door and the output check are green through the changed join.*
 
 
 ## Known risks

@@ -82,6 +82,12 @@ typedef struct gs_lobby_player {
     uint8_t  slot;
     bool     present;
     bool     ready;
+    // **Which box this player takes**, said in their JOIN and told to
+    // everybody here, so every machine builds the same car for them: a
+    // manual gearbox shifts on the driver's presses and an automatic does
+    // not, and two machines that disagreed about which would disagree about
+    // where the car is from the first straight.
+    bool     manual;
 
     // **And which key that slot belongs to.** The mesh is peer to peer, so
     // nothing the server does protects it; what the server can do is say who
@@ -104,15 +110,21 @@ typedef struct gs_lobby {
 // Every one returns the number of bytes written, or 0 if the buffer is too
 // small. Nothing here can fail in any other way.
 
-size_t gs_proto_join(uint8_t *buf, size_t cap, const char *name);
+// JOIN: the name, then one byte - 1 for the manual gearbox, 0 for the
+// automatic.
+size_t gs_proto_join(uint8_t *buf, size_t cap, const char *name, bool manual);
 size_t gs_proto_bye(uint8_t *buf, size_t cap);
 size_t gs_proto_ping(uint8_t *buf, size_t cap, uint32_t stamp);
 size_t gs_proto_pong(uint8_t *buf, size_t cap, uint32_t stamp);
 size_t gs_proto_full(uint8_t *buf, size_t cap, const char *why);
 size_t gs_proto_welcome(uint8_t *buf, size_t cap, uint8_t slot, const gs_lobby *l);
 size_t gs_proto_lobby(uint8_t *buf, size_t cap, const gs_lobby *l);
+// START: the track's hash, the player count, the laps, the mode, then one
+// byte of flags - bit 0 set means the track is raced reversed, which every
+// machine applies to the track the server serves before building the race.
+#define GS_START_REVERSED 0x01u
 size_t gs_proto_start(uint8_t *buf, size_t cap, uint64_t track_hash,
-                      uint8_t players, uint16_t laps, uint8_t mode);
+                      uint8_t players, uint16_t laps, uint8_t mode, bool reversed);
 size_t gs_proto_want_track(uint8_t *buf, size_t cap, uint64_t track_hash);
 size_t gs_proto_track_chunk(uint8_t *buf, size_t cap, uint64_t track_hash,
                             uint16_t chunk, uint16_t chunks,
@@ -251,14 +263,16 @@ size_t gs_proto_forward(uint8_t *buf, size_t cap, uint8_t from,
 // rather than misread.
 gs_msg gs_proto_kind(const uint8_t *buf, size_t len);
 
-bool gs_proto_read_join(const uint8_t *buf, size_t len, char *name, size_t cap);
+bool gs_proto_read_join(const uint8_t *buf, size_t len, char *name, size_t cap,
+                        bool *manual);
 bool gs_proto_read_stamp(const uint8_t *buf, size_t len, uint32_t *stamp);
 bool gs_proto_read_full(const uint8_t *buf, size_t len, char *why, size_t cap);
 bool gs_proto_read_welcome(const uint8_t *buf, size_t len, uint8_t *slot,
                            gs_lobby *l);
 bool gs_proto_read_lobby(const uint8_t *buf, size_t len, gs_lobby *l);
 bool gs_proto_read_start(const uint8_t *buf, size_t len, uint64_t *track_hash,
-                         uint8_t *players, uint16_t *laps, uint8_t *mode);
+                         uint8_t *players, uint16_t *laps, uint8_t *mode,
+                         bool *reversed);
 bool gs_proto_read_want_track(const uint8_t *buf, size_t len, uint64_t *track_hash);
 bool gs_proto_read_track_chunk(const uint8_t *buf, size_t len, uint64_t *track_hash,
                                uint16_t *chunk, uint16_t *chunks,

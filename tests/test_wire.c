@@ -8,6 +8,7 @@
 // them. This does, over the loopback, which is a real network stack and the
 // only one a test is entitled to assume exists.
 #include "core/gs_net.h"
+#include "core/gs_replay.h"
 #include "platform/gs_wire.h"
 
 #include <SDL3/SDL.h>
@@ -174,6 +175,129 @@ static uint64_t gs_solo(int count, uint32_t ticks) {
         gs_world_step(&w, &gs_t, in);
     }
     return gs_world_hash(&w);
+}
+
+// The scene with the first car on the manual box, and a driver for it that
+// shifts up every second: what a race with one manual and one automatic
+// driver in it is made of.
+static void gs_scene_one_manual(gs_world *w) {
+    gs_scene(w);
+    gs_world_set_manual(w, 0, true);
+}
+
+static gs_input gs_drive_shifting(uint8_t player, uint32_t tick) {
+    gs_input in = gs_drive(player, tick);
+    if (player == 0 && tick > 0 && tick % GS_TICK_HZ == 0) in |= GS_IN_SHIFT_UP;
+    return in;
+}
+
+TEST(two_peers_one_manual_and_one_automatic_land_on_one_world_and_the_recording_says_so) {
+    // **The setup on the wire, at the rollback layer.** Two machines, one
+    // driver on the manual and one on the automatic, race the same race:
+    // both confirm every tick, neither sees a desync, and the world they
+    // agree on is the one a single machine builds from the same inputs. And
+    // a recording made from the confirmed inputs re-races to that world -
+    // which it could not before the recording carried the box, because the
+    // manual driver's shifts were being replayed into an automatic.
+    CHECK(gs_wire_init());
+
+    static gs_wire *w[2];
+    static gs_net n[2];
+    const uint32_t ticks = GS_TICK_HZ * 4;
+
+    CHECK(gs_meet(w, 2, 47826));
+    if (!gs_wire_ready(w[0])) return;
+
+    gs_world start;
+    gs_scene_one_manual(&start);
+    for (int i = 0; i < 2; i++) {
+        gs_net_begin(&n[i], &start, 2, gs_wire_local(w[i]),
+                     gs_test_secret(gs_wire_local(w[i])));
+    }
+
+    // The recording, kept up as ticks confirm - the confirmed window is two
+    // seconds, and the game records the same way.
+    static gs_replay rec;
+    gs_replay_begin(&rec, &start, &gs_t);
+    CHECK(rec.meta.manual[0] == 1);
+    CHECK(rec.meta.manual[1] == 0);
+    uint32_t recorded = 0;
+#define GS_KEEP_UP()                                                          \
+    while (recorded < gs_net_confirmed_tick(&n[0])) {                         \
+        const gs_input *agreed = gs_net_confirmed_input(&n[0], recorded);     \
+        if (agreed == nullptr) break;                                         \
+        CHECK(gs_replay_record(&rec, agreed));                                \
+        recorded++;                                                           \
+    }
+
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        uint8_t buf[GS_WIRE_MTU];
+        size_t got;
+        for (int i = 0; i < 2; i++) {
+            while ((got = gs_wire_recv(w[i], buf, sizeof buf)) > 0) {
+                gs_net_receive(&n[i], &gs_t, buf, got);
+            }
+        }
+        for (int i = 0; i < 2; i++) {
+            gs_net_local_input(&n[i], gs_drive_shifting(gs_wire_local(w[i]), tick));
+            size_t len = gs_net_packet(&n[i], buf, sizeof buf);
+            gs_wire_send(w[i], buf, len);
+            gs_net_step(&n[i], &gs_t);
+        }
+        GS_KEEP_UP();
+    }
+    for (int i = 0; i < 2; i++) gs_net_finish(&n[i]);
+    for (int i = 0; i < 200; i++) {
+        uint8_t buf[GS_WIRE_MTU];
+        size_t got;
+        for (int k = 0; k < 2; k++) {
+            while ((got = gs_wire_recv(w[k], buf, sizeof buf)) > 0) {
+                gs_net_receive(&n[k], &gs_t, buf, got);
+            }
+        }
+        GS_KEEP_UP();
+        if (i < 100) {
+            for (int k = 0; k < 2; k++) {
+                size_t len = gs_net_packet(&n[k], buf, sizeof buf);
+                gs_wire_send(w[k], buf, len);
+            }
+        }
+        SDL_Delay(1);
+    }
+
+    CHECK(n[0].confirmed_tick == ticks);
+    CHECK(n[1].confirmed_tick == ticks);
+    CHECK(!n[0].desynced);
+    CHECK(!n[1].desynced);
+    CHECK(gs_world_hash(&n[0].confirmed) == gs_world_hash(&n[1].confirmed));
+    CHECK(n[0].confirmed.car[0].manual == 1);
+    CHECK(n[0].confirmed.car[0].gear > 1);        // the shifts were taken
+    CHECK(n[0].confirmed.car[1].manual == 0);
+
+    // The same inputs on one machine, from the same start.
+    gs_world solo;
+    gs_scene_one_manual(&solo);
+    for (uint32_t tick = 0; tick < ticks; tick++) {
+        gs_input in[GS_MAX_CARS] = { 0, 0, 0, 0 };
+        for (uint8_t p = 0; p < 2; p++) in[p] = gs_drive_shifting(p, tick);
+        gs_world_step(&solo, &gs_t, in);
+    }
+    CHECK(gs_world_hash(&solo) == gs_world_hash(&n[0].confirmed));
+
+    // And the recording of the confirmed inputs, with the box in the header,
+    // re-races to the world everybody confirmed.
+#undef GS_KEEP_UP
+    CHECK(recorded == ticks);
+    CHECK(rec.meta.tick_count == ticks);
+    static gs_world back;
+    CHECK(gs_replay_restore(&rec, &back, &gs_t));
+    for (uint32_t i = 0; i < rec.meta.tick_count; i++) {
+        gs_world_step(&back, &gs_t, gs_replay_at(&rec, i));
+    }
+    CHECK(gs_world_hash(&back) == gs_world_hash(&n[0].confirmed));
+
+    for (int i = 0; i < 2; i++) gs_wire_close(w[i]);
+    gs_wire_quit();
 }
 
 TEST(two_processes_on_one_machine_race_over_real_sockets) {
@@ -375,6 +499,7 @@ int main(void) {
     printf("gearstick wire tests\n");
 
     run_two_processes_on_one_machine_race_over_real_sockets();
+    run_two_peers_one_manual_and_one_automatic_land_on_one_world_and_the_recording_says_so();
     run_four_machines_mesh_up_and_race_the_same_race();
     run_a_datagram_nobody_sealed_is_not_taken_for_race_traffic();
     run_a_fifth_machine_is_not_let_into_a_four_player_race();

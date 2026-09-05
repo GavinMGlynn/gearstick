@@ -31,7 +31,13 @@
 // Versions four and three are still read, with the agreed hash zero - which
 // means "this recording does not say" and not "this recording agrees with
 // anything", so a claim is checked against it only when it is there.
-#define GS_REPLAY_VERSION   7u
+// **Eight, because a recording carries each driver's gearbox.** A manual
+// driver's shifts are in the inputs, and a re-race that gave the car the
+// automatic ignored every one of them and finished somewhere else - so a
+// manual lap could not be verified, ghosted or watched back. Older
+// recordings read as automatic throughout, which is what every car was
+// before there was a box to choose.
+#define GS_REPLAY_VERSION   8u
 #define GS_REPLAY_OLDEST    3u
 #define GS_REPLAY_MAX_TICKS (GS_TICK_HZ * 60 * 10)   // ten minutes
 
@@ -94,6 +100,10 @@ typedef struct gs_replay_meta {
     // that matter, re-raced by a verifier. Zero in older files, which is
     // what they always meant.
     uint32_t green_tick;
+
+    // **Which box each car had**: 1 for the manual, 0 for the automatic.
+    // Version 8. Zero in older files, which is what every car was.
+    uint8_t  manual[GS_MAX_CARS];
 } gs_replay_meta;
 
 // Fixed capacity and no allocation, because src/core/ owns no allocator. Nearly

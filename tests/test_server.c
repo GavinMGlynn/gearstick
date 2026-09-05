@@ -163,7 +163,7 @@ static void gs_client_send(gs_test_client *c, const uint8_t *buf, size_t n) {
 
 static void gs_client_say_hello(gs_test_client *c, const char *name) {
     uint8_t buf[GS_PROTO_MTU];
-    gs_client_send(c, buf, gs_proto_join(buf, sizeof buf, name));
+    gs_client_send(c, buf, gs_proto_join(buf, sizeof buf, name, false));
 }
 
 // Everything that has arrived. The lobby is kept, because a later broadcast
@@ -255,6 +255,7 @@ static SDL_Process *gs_server = nullptr;
 // A track for the server to hand out, and a store to remember in, when a test
 // wants them.
 static const char *gs_track_arg = nullptr;
+static const char *gs_extra_arg = nullptr;   // one more flag, for a test that wants one
 static const char *gs_store_arg = nullptr;
 
 // Two drivers on different rhythms, so no two players ever change their minds
@@ -320,6 +321,7 @@ static bool gs_server_start_full(const char *port, const char *seconds,
     if (gs_track_arg != nullptr) {
         args[n++] = "--track"; args[n++] = gs_track_arg;
     }
+    if (gs_extra_arg != nullptr) args[n++] = gs_extra_arg;
     args[n++] = "--store";
     args[n++] = gs_store_arg != nullptr ? gs_store_arg : ":memory:";
     args[n++] = "--key";
@@ -651,6 +653,64 @@ TEST(a_server_asked_to_stop_stops) {
     gs_client_close(&c);
 }
 
+TEST(the_lobby_says_which_box_each_driver_takes_and_start_says_which_way_round) {
+    // **The setup on the wire.** A client says in its JOIN which gearbox it
+    // takes; the server tells everybody in the lobby it sends round; and the
+    // START says which way round the race is. Every machine hears the same
+    // three things, which is what lets every machine build the same race.
+    // Both ways round are run, because a flag that is never clear is a flag
+    // nobody has seen cleared.
+    for (int reversed = 0; reversed < 2; reversed++) {
+        gs_extra_arg = reversed ? "--reversed" : nullptr;
+        const char *port = reversed ? "47843" : "47842";
+        const bool up = gs_server_start_for(port, GS_SERVER_LIFETIME, "2");
+        gs_extra_arg = nullptr;
+        if (!up) { gs_failures++; return; }
+        CHECK(gs_wire_init());
+
+        gs_wire *ada = gs_wire_server("127.0.0.1", (uint16_t)(reversed ? 47843 : 47842),
+                                      "ada", gs_test_server_pub());
+        gs_wire *bez = gs_wire_server("127.0.0.1", (uint16_t)(reversed ? 47843 : 47842),
+                                      "bez", gs_test_server_pub());
+        CHECK(ada != nullptr && bez != nullptr);
+        if (ada == nullptr || bez == nullptr) { gs_server_stop(); return; }
+        gs_wire_drive_manual(ada, true);
+
+        bool both = false;
+        for (int k = 0; k < 600 && !both; k++) {
+            gs_wire_poll(ada);
+            gs_wire_poll(bez);
+            both = gs_wire_ready(ada) && gs_wire_ready(bez);
+            SDL_Delay(10);
+        }
+        CHECK(both);
+
+        // Each of them sees, in the roster the server sent, who took which box.
+        gs_wire *each[2] = { ada, bez };
+        for (int i = 0; i < 2; i++) {
+            const gs_lobby *l = gs_wire_lobby(each[i]);
+            CHECK(l != nullptr);
+            if (l == nullptr) continue;
+            int seen = 0;
+            for (int p = 0; p < GS_PROTO_MAX_PLAYERS; p++) {
+                if (!l->player[p].present) continue;
+                if (SDL_strcmp(l->player[p].name, "ada") == 0) { CHECK(l->player[p].manual); seen++; }
+                if (SDL_strcmp(l->player[p].name, "bez") == 0) { CHECK(!l->player[p].manual); seen++; }
+            }
+            CHECK(seen == 2);
+            CHECK(gs_wire_reversed(each[i]) == (reversed != 0));
+        }
+        printf("  SETUP %s: ada manual, bez automatic, on every machine's roster; "
+               "START says %s\n", reversed ? "--reversed" : "forward",
+               reversed ? "reversed" : "forward");
+
+        gs_wire_close(ada);
+        gs_wire_close(bez);
+        gs_wire_quit();
+        gs_server_stop();
+    }
+}
+
 TEST(saying_hello_twice_is_still_one_player) {
     // **Not on a full server.** The obvious place to check this is at the end
     // of the four-player test, and there it proves nothing: with every slot
@@ -736,7 +796,7 @@ TEST(the_server_ignores_datagrams_that_are_not_ours) {
     gs_client_send(&c, junk, sizeof junk);
 
     uint8_t buf[GS_PROTO_MTU];
-    size_t n = gs_proto_join(buf, sizeof buf, "ada");
+    size_t n = gs_proto_join(buf, sizeof buf, "ada", false);
     buf[4] = 99;                       // a version from the future
     gs_client_send(&c, buf, n);
 
@@ -2639,6 +2699,7 @@ int main(void) {
     run_a_server_asked_what_it_takes_says_so_and_stops();
     run_a_server_asked_to_stop_stops();
     run_saying_hello_twice_is_still_one_player();
+    run_the_lobby_says_which_box_each_driver_takes_and_start_says_which_way_round();
     run_a_server_told_to_hold_two_holds_two();
     run_the_server_ignores_datagrams_that_are_not_ours();
     run_the_games_own_client_gets_its_slot_from_the_server();

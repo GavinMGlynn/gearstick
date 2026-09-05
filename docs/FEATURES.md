@@ -431,10 +431,10 @@ file.
   big jump. Each is presentation derived from the simulation, never state in
   it, which is what keeps every replay and every machine agreeing.
 
-- **The setup online: gearbox and direction.** `WANTED`
-  A race hosted online gives everyone the automatic and races forward,
-  because neither choice travels with the race setup. They should - the
-  gearbox per driver, the direction per race.
+- **The setup online: gearbox and direction.** `DONE`
+  Each driver's gearbox and the race's direction travel with the race
+  setup: a client says which box it takes, the server tells everybody, and
+  the server says which way round the track is raced.
 
 - **Watching a race back from any car.** `DONE`
   Replays already re-race exactly; what is missing is choosing whose shoulder

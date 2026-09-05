@@ -109,6 +109,7 @@ typedef struct gs_client {
     uint16_t     port;
     char         text[GS_PROTO_ADDR];
     char         name[GS_PROTO_NAME];
+    bool         manual;       // the box they said they take, in their JOIN
 
     uint64_t joined_ms;
     uint64_t last_seen_ms;
@@ -178,6 +179,7 @@ static struct {
     bool plain;                // no ANSI, for a dumb terminal
     bool tty;                  // stdout is a terminal, so there is a dashboard
     bool headless;             // --headless: no window, whatever the machine has
+    bool reversed;             // --reversed: the track raced the other way round
     bool window_dump;          // --window-dump: print what the window showed, at the end
     const char *window_shot;   // --window-shot FILE: and write its last frame
     gs_srv_log log;            // arrivals and departures, for the window
@@ -234,6 +236,7 @@ static void gs_build_lobby(gs_lobby *l) {
         p->slot = i;
         p->present = c->used;
         if (!c->used) continue;
+        p->manual = c->manual;
 
         SDL_strlcpy(p->name, c->name, sizeof p->name);
         SDL_strlcpy(p->addr, c->text, sizeof p->addr);
@@ -425,7 +428,7 @@ static void gs_drop(int slot, const char *why) {
 }
 
 static void gs_join(NET_Address *addr, uint16_t port, const char *name,
-                    uint64_t now) {
+                    bool manual, uint64_t now) {
     // Already here? Their welcome was lost, or they restarted. Either way they
     // get the answer again rather than a second slot.
     int at = gs_find(addr, port);
@@ -467,6 +470,9 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
         SDL_strlcpy(c->text, NET_GetAddressString(addr), sizeof c->text);
         c->joined_ms = now;
     }
+    // The box they said, fresh or not: a JOIN sent again after a lost
+    // welcome says it again, and the latest word is the one that stands.
+    c->manual = manual;
     // **A name somebody has put a password on is not one you can just type.**
     // Joining under it without proving it lands them under a name of their own
     // instead of being refused outright, because being thrown off a server for
@@ -505,7 +511,7 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
     // message has not arrived yet" by looking at silence, and one that guessed
     // would start racing on whatever it had loaded locally.
     n = gs_proto_start(buf, sizeof buf, gs_srv.track_hash, gs_srv.capacity, 3,
-                       (uint8_t)GS_MODE_RACE);
+                       (uint8_t)GS_MODE_RACE, gs_srv.reversed);
     gs_send(c, buf, n);
 
     if (fresh) {
@@ -713,8 +719,9 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
     switch (kind) {
     case GS_MSG_JOIN: {
         char name[GS_PROTO_NAME];
-        if (gs_proto_read_join(msg, len, name, sizeof name)) {
-            gs_join(addr, port, name, now);
+        bool manual = false;
+        if (gs_proto_read_join(msg, len, name, sizeof name, &manual)) {
+            gs_join(addr, port, name, manual, now);
         }
         break;
     }
@@ -868,9 +875,22 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
                 }
             }
         }
-        if (!gs_store_get_track(gs_srv.store, cl->claim.track, track_bytes,
-                                sizeof track_bytes, &track_len) ||
-            !gs_track_deserialize(&t, track_bytes, track_len)) {
+        bool have = gs_store_get_track(gs_srv.store, cl->claim.track, track_bytes,
+                                       sizeof track_bytes, &track_len) &&
+                    gs_track_deserialize(&t, track_bytes, track_len);
+        // **A time on the track raced the other way round.** A reversed
+        // track has a hash of its own, and the store holds the track one
+        // way. The one this lobby serves is rebuilt reversed when a claim
+        // names its reversed hash, so a race the server itself sent out as
+        // reversed is one it can verify; a reversed time on any other track
+        // is still a track this server does not have.
+        if (!have && gs_srv.track_len > 0 &&
+            gs_track_deserialize(&t, gs_srv.track, gs_srv.track_len) &&
+            gs_track_reversed_hash(&t) == cl->claim.track) {
+            gs_track_reverse(&t);
+            have = true;
+        }
+        if (!have) {
             SDL_Log("%s claimed a time on a track this server does not have",
                     cl->name);
             cl->claimed = false;
@@ -1449,6 +1469,7 @@ static void gs_usage(void) {
     printf("  --players N    how many to allow, 1 to %d (default %d)\n",
            GS_PROTO_MAX_PLAYERS, GS_PROTO_MAX_PLAYERS);
     printf("  --track FILE   the track this lobby races on\n");
+    printf("  --reversed     race it the other way round\n");
     printf("  --store FILE   where to remember drivers, records and tracks\n");
     printf("  --plain        no cursor control, for a dumb terminal.\n");
     printf("                 The dashboard is only drawn to a terminal at "
@@ -1501,6 +1522,8 @@ int main(int argc, char **argv) {
             key_hex = argv[++i];
         } else if (SDL_strcmp(argv[i], "--plain") == 0) {
             gs_srv.plain = true;
+        } else if (SDL_strcmp(argv[i], "--reversed") == 0) {
+            gs_srv.reversed = true;
         } else if (SDL_strcmp(argv[i], "--headless") == 0) {
             gs_srv.headless = true;
         } else if (SDL_strcmp(argv[i], "--window-dump") == 0) {

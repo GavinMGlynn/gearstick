@@ -31,12 +31,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
     static gs_lobby lobby;
 
-    gs_proto_read_join(data, size, name, sizeof name);
+    bool manual = false;
+    gs_proto_read_join(data, size, name, sizeof name, &manual);
     gs_proto_read_stamp(data, size, &u32a);
     gs_proto_read_full(data, size, name, sizeof name);
     gs_proto_read_welcome(data, size, &u8a, &lobby);
     gs_proto_read_lobby(data, size, &lobby);
-    gs_proto_read_start(data, size, &u64a, &u8a, &u16a, &u8b);
+    bool reversed = false;
+    gs_proto_read_start(data, size, &u64a, &u8a, &u16a, &u8b, &reversed);
     gs_proto_read_want_track(data, size, &u64a);
     gs_proto_read_track_chunk(data, size, &u64a, &u16a, &u16b, &chunk_data, &u16c);
     gs_proto_read_proof_chunk(data, size, &u64a, &u16a, &u16b, &chunk_data, &u16c);

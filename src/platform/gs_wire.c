@@ -71,6 +71,8 @@ struct gs_wire {
     // they turn up.
     uint64_t   want_track;
     bool       heard_start;    // the server has said what the race is on
+    bool       reversed;       // ...and which way round, from the same START
+    bool       manual;         // the box this player takes, for the JOIN
     bool       relay;          // everything goes through the server
     gs_wire_best best;         // what the server says stands here
 
@@ -450,6 +452,14 @@ gs_wire *gs_wire_join(const char *host, uint16_t port, const uint8_t *host_key) 
     return w;
 }
 
+void gs_wire_drive_manual(gs_wire *w, bool manual) {
+    if (w != nullptr) w->manual = manual;
+}
+
+bool gs_wire_reversed(const gs_wire *w) {
+    return w != nullptr && w->reversed;
+}
+
 void gs_wire_close(gs_wire *w) {
     if (w == nullptr) return;
 
@@ -721,7 +731,9 @@ static void gs_take_server(gs_wire *w, const uint8_t *buf, size_t len) {
         uint64_t hash = 0;
         uint8_t players = 0, mode = 0;
         uint16_t laps = 0;
-        if (!gs_proto_read_start(buf, len, &hash, &players, &laps, &mode)) break;
+        bool reversed = false;
+        if (!gs_proto_read_start(buf, len, &hash, &players, &laps, &mode, &reversed)) break;
+        w->reversed = reversed;
 
         if (hash != w->want_track) {
             w->want_track = hash;
@@ -1145,7 +1157,7 @@ static void gs_send_handshake(gs_wire *w) {
 
 static void gs_send_join(gs_wire *w) {
     uint8_t buf[GS_PROTO_MTU];
-    gs_to_server(w, buf, gs_proto_join(buf, sizeof buf, w->me));
+    gs_to_server(w, buf, gs_proto_join(buf, sizeof buf, w->me, w->manual));
 }
 
 // **A connection has to keep saying it is there.** The server drops anybody it

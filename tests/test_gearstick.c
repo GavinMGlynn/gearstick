@@ -9317,6 +9317,84 @@ TEST(a_shortcut_is_a_second_road_that_a_driver_may_take_or_leave) {
     CHECK(driven >= 2);
 }
 
+TEST(a_recording_carries_each_drivers_gearbox) {
+    // **A manual driver's replay re-raced as an automatic is a different
+    // race.** The shifts are in the inputs and an automatic ignores them, so
+    // until version eight a manual lap could not be verified, ghosted or
+    // watched back - the re-race finished somewhere else. The recording says
+    // which box each car had; restored, a manual car is manual, and the
+    // re-race lands where the race did. An older file reads as automatic
+    // throughout, which is the truth about it, and the same inputs restored
+    // that way land somewhere else - which is the fault this pins.
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(8), 0);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(11), 0);
+    gs_world_set_manual(&w, 0, true);
+
+    static gs_replay rec;
+    gs_replay_begin(&rec, &w, &t);
+    CHECK(rec.meta.manual[0] == 1);
+    CHECK(rec.meta.manual[1] == 0);
+
+    // Flat out, shifting up every second: an automatic would shift for
+    // itself at its own moments, so the two boxes part company early.
+    for (uint32_t k = 0; k < GS_TICK_HZ * 4; k++) {
+        const bool shift = k % GS_TICK_HZ == 0 && k > 0;
+        gs_input in[GS_MAX_CARS] = {
+            (gs_input)(GS_IN_ACCEL | (shift ? GS_IN_SHIFT_UP : 0)),
+            (gs_input)(GS_IN_ACCEL | (shift ? GS_IN_SHIFT_UP : 0)), 0, 0,
+        };
+        CHECK(gs_replay_record(&rec, in));
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].manual == 1);
+    CHECK(w.car[0].gear > 1);           // the shifts were taken
+    const uint64_t ended = gs_world_hash(&w);
+
+    // Through the file and back, the box comes with it and the re-race lands.
+    static uint8_t bytes[sizeof(gs_replay) + 4096];
+    const size_t n = gs_replay_serialize(&rec, bytes, sizeof bytes);
+    CHECK(n > 0);
+    static gs_replay read;
+    CHECK(gs_replay_deserialize(&read, bytes, n));
+    CHECK(read.meta.manual[0] == 1);
+    CHECK(read.meta.manual[1] == 0);
+    static gs_world again;
+    CHECK(gs_replay_restore(&read, &again, &t));
+    CHECK(again.car[0].manual == 1);
+    CHECK(again.car[1].manual == 0);
+    for (uint32_t i = 0; i < read.meta.tick_count; i++) {
+        gs_world_step(&again, &t, gs_replay_at(&read, i));
+    }
+    CHECK(gs_world_hash(&again) == ended);
+
+    // **The same bytes as a version-seven file**: the gearbox bytes taken
+    // out of the header and the version put back. It reads, every car is an
+    // automatic, and the re-race does not land - which is exactly what every
+    // manual recording did before this.
+    const size_t inputs = (size_t)rec.meta.tick_count * GS_MAX_CARS;
+    const size_t head8 = n - inputs;
+    const size_t head7 = head8 - GS_MAX_CARS;
+    static uint8_t old[sizeof(gs_replay) + 4096];
+    memcpy(old, bytes, head7);
+    memcpy(old + head7, bytes + head8, inputs);
+    old[4] = 7; old[5] = 0; old[6] = 0; old[7] = 0;
+    static gs_replay v7;
+    CHECK(gs_replay_deserialize(&v7, old, head7 + inputs));
+    CHECK(v7.meta.tick_count == rec.meta.tick_count);
+    CHECK(v7.meta.manual[0] == 0);
+    static gs_world older;
+    CHECK(gs_replay_restore(&v7, &older, &t));
+    CHECK(older.car[0].manual == 0);
+    for (uint32_t i = 0; i < v7.meta.tick_count; i++) {
+        gs_world_step(&older, &t, gs_replay_at(&v7, i));
+    }
+    CHECK(gs_world_hash(&older) != ended);
+}
+
 TEST(every_second_car_on_the_grid_takes_the_shortcut) {
     // **The field splits at the post.** Left to the game, the odd grid
     // slots take the cut and the even ones go round - so a race of four
@@ -10508,7 +10586,7 @@ TEST(no_machine_reverses_faster_than_it_drives_forwards) {
 
     // Every machine, every ground, every gravity - stated so that a machine or
     // a surface added later is walked without anybody remembering this test.
-    CHECK(walked == GS_VEH_COUNT * GS_SURF_COUNT *
+    CHECK(walked == (int)GS_VEH_COUNT * (int)GS_SURF_COUNT *
                     (int)(sizeof gravities / sizeof gravities[0]));
 
     // **And it still reverses.** A cap that stopped the car moving would pass
@@ -10800,6 +10878,7 @@ int main(void) {
     run_the_same_day_is_the_same_track_everywhere_and_a_new_day_is_a_new_one();
     run_a_replay_watched_from_any_car_is_the_same_race();
     run_a_shortcut_is_a_second_road_that_a_driver_may_take_or_leave();
+    run_a_recording_carries_each_drivers_gearbox();
     run_every_second_car_on_the_grid_takes_the_shortcut();
     run_a_shortcut_survives_the_file_and_turns_round_with_the_track();
     run_the_spec_line_says_a_shortcut_only_when_the_track_has_one();

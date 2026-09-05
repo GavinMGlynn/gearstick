@@ -90,16 +90,19 @@ static bool gs_expect(const uint8_t *buf, size_t len, gs_msg kind, size_t need) 
 
 // --- the simple ones -------------------------------------------------------
 
-size_t gs_proto_join(uint8_t *buf, size_t cap, const char *name) {
-    if (cap < GS_HEAD + GS_PROTO_NAME) return 0;
+size_t gs_proto_join(uint8_t *buf, size_t cap, const char *name, bool manual) {
+    if (cap < GS_HEAD + GS_PROTO_NAME + 1) return 0;
     size_t n = gs_head(buf, cap, GS_MSG_JOIN);
     n += gs_put_str(buf + n, name, GS_PROTO_NAME);
+    buf[n++] = manual ? 1u : 0u;
     return n;
 }
 
-bool gs_proto_read_join(const uint8_t *buf, size_t len, char *name, size_t cap) {
-    if (!gs_expect(buf, len, GS_MSG_JOIN, GS_HEAD + GS_PROTO_NAME)) return false;
+bool gs_proto_read_join(const uint8_t *buf, size_t len, char *name, size_t cap,
+                        bool *manual) {
+    if (!gs_expect(buf, len, GS_MSG_JOIN, GS_HEAD + GS_PROTO_NAME + 1)) return false;
     gs_get_str(buf + GS_HEAD, GS_PROTO_NAME, name, cap);
+    *manual = buf[GS_HEAD + GS_PROTO_NAME] != 0u;
     return true;
 }
 
@@ -147,7 +150,7 @@ bool gs_proto_read_full(const uint8_t *buf, size_t len, char *why, size_t cap) {
 // --- the roster ------------------------------------------------------------
 
 #define GS_PLAYER_BYTES \
-    (GS_PROTO_NAME + GS_PROTO_ADDR + 2 + 1 + 1 + 1 + GS_NOISE_KEY_BYTES)
+    (GS_PROTO_NAME + GS_PROTO_ADDR + 2 + 1 + 1 + 1 + GS_NOISE_KEY_BYTES + 1)
 #define GS_LOBBY_BYTES  (2 + GS_PROTO_MAX_PLAYERS * GS_PLAYER_BYTES)
 
 static size_t gs_put_lobby(uint8_t *p, const gs_lobby *l) {
@@ -164,6 +167,7 @@ static size_t gs_put_lobby(uint8_t *p, const gs_lobby *l) {
         p[n++] = pl->present ? 1u : 0u;
         p[n++] = pl->ready ? 1u : 0u;
         memcpy(p + n, pl->key, GS_NOISE_KEY_BYTES); n += GS_NOISE_KEY_BYTES;
+        p[n++] = pl->manual ? 1u : 0u;
     }
     return n;
 }
@@ -188,6 +192,7 @@ static bool gs_get_lobby(const uint8_t *p, gs_lobby *l) {
         pl->present = p[n++] != 0u;
         pl->ready = p[n++] != 0u;
         memcpy(pl->key, p + n, GS_NOISE_KEY_BYTES); n += GS_NOISE_KEY_BYTES;
+        pl->manual = p[n++] != 0u;
 
         if (pl->slot >= GS_PROTO_MAX_PLAYERS) return false;
     }
@@ -227,24 +232,27 @@ bool gs_proto_read_lobby(const uint8_t *buf, size_t len, gs_lobby *l) {
 // --- starting a race -------------------------------------------------------
 
 size_t gs_proto_start(uint8_t *buf, size_t cap, uint64_t track_hash,
-                      uint8_t players, uint16_t laps, uint8_t mode) {
-    if (cap < GS_HEAD + 8 + 1 + 2 + 1) return 0;
+                      uint8_t players, uint16_t laps, uint8_t mode, bool reversed) {
+    if (cap < GS_HEAD + 8 + 1 + 2 + 1 + 1) return 0;
     size_t n = gs_head(buf, cap, GS_MSG_START);
     gs_put64(buf + n, track_hash); n += 8;
     buf[n++] = players;
     gs_put16(buf + n, laps); n += 2;
     buf[n++] = mode;
+    buf[n++] = reversed ? (uint8_t)GS_START_REVERSED : 0u;
     return n;
 }
 
 bool gs_proto_read_start(const uint8_t *buf, size_t len, uint64_t *track_hash,
-                         uint8_t *players, uint16_t *laps, uint8_t *mode) {
-    if (!gs_expect(buf, len, GS_MSG_START, GS_HEAD + 12)) return false;
+                         uint8_t *players, uint16_t *laps, uint8_t *mode,
+                         bool *reversed) {
+    if (!gs_expect(buf, len, GS_MSG_START, GS_HEAD + 13)) return false;
     size_t n = GS_HEAD;
     *track_hash = gs_get64(buf + n); n += 8;
     *players = buf[n++];
     *laps = gs_get16(buf + n); n += 2;
-    *mode = buf[n];
+    *mode = buf[n++];
+    *reversed = (buf[n] & GS_START_REVERSED) != 0u;
     return *players > 0 && *players <= GS_PROTO_MAX_PLAYERS;
 }
 
