@@ -334,8 +334,10 @@ TEST(the_default_server_file_names_one_server_or_none) {
         "play.example.org 0 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
         "play.example.org 65536 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
         "play.example.org 47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef extra\n",
-        "play.example.org 47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
-        "other.example.org 47801 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+        // Two lines, which is two servers, which is none. One literal, since
+        // AppleClang reads two adjacent ones in an initialiser as a missing
+        // comma and -Werror agrees with it.
+        "play.example.org 47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nother.example.org 47801 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
         "47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
     };
     int refused = 0;
