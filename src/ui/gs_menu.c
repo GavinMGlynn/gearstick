@@ -456,7 +456,8 @@ static const char *gs_track_label(const gs_menu *m, const gs_track *t) {
     int at = gs_library_find(&m->library, hash);
     const gs_library_entry *e = at >= 0 ? gs_library_at(&m->library, at) : nullptr;
     if (e != nullptr && e->name[0] != '\0') {
-        SDL_strlcpy(label, e->name, sizeof label);
+        SDL_snprintf(label, sizeof label, "%s%s", e->name,
+                     m->setup.reversed ? " (reversed)" : "");
         return label;
     }
 
@@ -1009,16 +1010,30 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
 
         int laps = (int)m->setup.laps;
         gs_field("laps");
-        ImGui_SetNextItemWidth(200.0f);
+        ImGui_SetNextItemWidth(150.0f);
         ImGui_BeginDisabled(!lapped);
         ImGui_SliderInt("##laps", &laps, 1, 20);
         ImGui_EndDisabled();
         m->setup.laps = (uint16_t)laps;
 
+        // **Mirror mode**, on the laps row because a row of its own puts the
+        // panel past the bottom of the smallest window. The same track the
+        // other way round: gates in the opposite order, each turned about,
+        // the ground untouched. Its records are its own.
+        {
+            static const char *const ways[] = { "forward", "reversed" };
+            int way = m->setup.reversed ? 1 : 0;
+            ImGui_SameLine();
+            ImGui_SetNextItemWidth(110.0f);
+            ImGui_ComboChar("##direction", &way, ways, 2);
+            m->setup.reversed = way == 1;
+        }
+
         if (m->setup.mode == (uint8_t)GS_MODE_RACE && !lapped) {
             gs_field("");
             ImGui_TextUnformatted("a path is raced once, end to end.");
         }
+
 
         int players = (int)m->setup.players;
         gs_field("drivers");
@@ -1262,7 +1277,9 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
         // a table that is always empty.
         gs_world probe;
         gs_world_init(&probe, m->setup.gravity);
-        const gs_record *best = gs_records_best_lap(&m->records, gs_track_hash(t),
+        const uint64_t which = m->setup.reversed ? gs_track_reversed_hash(t)
+                                                 : gs_track_hash(t);
+        const gs_record *best = gs_records_best_lap(&m->records, which,
                                                     gs_conditions_hash(&probe));
         if (best != nullptr) {
             char text[32];
@@ -1505,7 +1522,9 @@ static gs_screen gs_records_screen(gs_menu *m, const gs_track *t) {
     uint64_t conditions = gs_conditions_hash(&probe);
 
     const gs_record *rows[16];
-    uint16_t n = gs_records_for(&m->records, gs_track_hash(t), conditions, rows, 16);
+    const uint64_t which = m->setup.reversed ? gs_track_reversed_hash(t)
+                                             : gs_track_hash(t);
+    uint16_t n = gs_records_for(&m->records, which, conditions, rows, 16);
 
     const ImGuiWindowFlags panel =
         gs_centre_window("records", 720.0f,

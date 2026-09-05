@@ -213,6 +213,16 @@ int main(int argc, char **argv) {
         // **And it may not throw one of them off the world.** Raced after the
         // check above because that one is cheaper and most candidates fail it.
         if (!gs_keeps_everybody_on_the_field(&gs_t)) continue;
+        // **And the other way round.** Mirror mode races every shipped track
+        // reversed, so a track ships only if its reverse passes the same
+        // checks its forward route does: a route the validator accepts,
+        // every machine round it from every grid slot, nobody off the field.
+        static gs_track other;
+        other = gs_t;
+        gs_track_reverse(&other);
+        if (gs_track_validate(&other).problem != GS_TRACK_OK) continue;
+        if (gs_finishers_at_earth(&other) < GS_VEH_COUNT) continue;
+        if (!gs_keeps_everybody_on_the_field(&other)) continue;
 
         char why[160];
         gs_spec_line(&spec, why, sizeof why);

@@ -361,7 +361,7 @@ deliberately refused. What is here is the residue: things a neighbour does
 that this game has no answer to, and that survive the test at the top of this
 file.
 
-- **Mirror mode.** `WANTED`
+- **Mirror mode.** `DONE`
   Race any track the other way round. The route is directional — the gates
   face — so reversing it is one dial that doubles what there is to drive and
   makes a track you know into one you do not. Nothing is generated, nothing is
@@ -429,9 +429,10 @@ file.
   big jump. Each is presentation derived from the simulation, never state in
   it, which is what keeps every replay and every machine agreeing.
 
-- **The manual gearbox online.** `WANTED`
-  A race hosted online gives everyone the automatic, because the gearbox
-  choice does not travel with the race setup. It should, per driver.
+- **The setup online: gearbox and direction.** `WANTED`
+  A race hosted online gives everyone the automatic and races forward,
+  because neither choice travels with the race setup. They should - the
+  gearbox per driver, the direction per race.
 
 - **Watching a race back from any car.** `CANDIDATE`
   Replays already re-race exactly; what is missing is choosing whose shoulder

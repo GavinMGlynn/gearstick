@@ -217,7 +217,22 @@ typedef struct gs_app {
     uint64_t    stock[GS_LIBRARY_MAX];
     uint16_t    stock_count;
     bool        stock_listing;    // walking to list them, not to add them
+    // Mirror mode: whether `t` is currently the reversed route. Set for a
+    // race that asked for it and cleared the moment the race is over, so
+    // that outside a race - the menu, the editor, a library load - the
+    // track is always the one the library holds. See gs_face_track.
+    bool t_reversed;
 } gs_app;
+
+// **Turn the track to face the way this race is driven**, or back. The
+// reversal is exact, so applying it and undoing it is the same operation
+// and the flag is the only state. Nothing else in the program is asked to
+// know which way round the track is.
+static void gs_face_track(gs_app *a, bool reversed) {
+    if (a->t_reversed == reversed) return;
+    gs_track_reverse(&a->t);
+    a->t_reversed = reversed;
+}
 
 // The demo track, until the editor exists to make a real one. It is a
 // prototype and it is named as one: a hard-coded track is not content.
@@ -437,6 +452,8 @@ static void gs_start_race(gs_app *a) {
         // paint goes to the renderer rather than into the world, because a
         // colour cannot change where a car ends up and must not be able to.
         const gs_race_setup *set = &a->menu.setup;
+
+        gs_face_track(a, set->reversed);
 
         gs_setup_build(set, &a->t, &a->world);
         for (uint8_t i = 0; i < set->players && i < GS_MAX_CARS; i++) {
@@ -1133,6 +1150,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                                             named_len);
             SDL_free(named_bytes);
             if (named_ok) {
+                a->t_reversed = false;
                 a->t = named;
                 a->menu.chosen = gs_library_find(&a->menu.library,
                                                  gs_track_hash(&a->t));
@@ -1153,6 +1171,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     if (have_track) {
         // already chosen above
     } else if (first != nullptr) {
+        a->t_reversed = false;
         a->t = *first;
         a->menu.chosen = 0;
     } else {
@@ -1262,6 +1281,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
     if (a->start_in_editor) {
         a->edit_session = true;
+        gs_face_track(a, false);
         gs_editor_toggle(&a->editor, &a->view[0]);
     }
     if (a->analyse_at_start) gs_editor_analyse(&a->editor, &a->t);
@@ -1506,6 +1526,7 @@ static bool gs_back_out(gs_app *a, bool may_quit) {
     // machine driving itself - a shot, a session, the showroom - has no front
     // end to back out to and quits.
     if (a->editor.active) {
+        gs_face_track(a, false);
         gs_editor_toggle(&a->editor, &a->view[0]);
         return false;
     }
@@ -1636,6 +1657,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         // somebody would look for it - it is how you get between building the
         // thing and driving it once you are already building.
         if (e->key.key == SDLK_TAB && (a->editor.active || a->edit_session)) {
+            gs_face_track(a, false);
             gs_editor_toggle(&a->editor, &a->view[0]);
             // Leaving the editor drops a car where you were looking. Coming
             // back does nothing at all to the track, which is the other half of
@@ -1651,6 +1673,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
     gs_app *a = (gs_app *)appstate;
+    if (a->t_reversed && a->menu.screen != GS_SCREEN_RACE) gs_face_track(a, false);
 
     // The window manager's placement offset, measured once the window has
     // settled - see win_asked. Read here rather than at creation, because a
@@ -1856,6 +1879,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             // game knows for certain that they are.
             static gs_track served;
             if (gs_wire_track(a->wire, &served)) {
+                a->t_reversed = false;
                 a->t = served;
                 a->music_hash = gs_track_hash(&a->t);
                 gs_music_start(a->music_hash);
@@ -2055,6 +2079,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             gs_input_editor_pad(&a->input, &pad);
             float dt = (float)delta / 1e9f;
             if (gs_editor_pad_input(&a->editor, &a->t, &pad, dt)) {
+                gs_face_track(a, false);
                 gs_editor_toggle(&a->editor, &a->view[0]);
                 gs_start_test_drive(a);
             }

@@ -8287,6 +8287,39 @@ warning stays quiet for a waypoint driven past and fires for a checkpoint.
 The byte audit knows the new field. The guide says what a post means.*
 
 
+### Mirror mode, 2026-09-05
+
+**Any track, the other way round.** A dial on the setup screen - *direction:
+forward / reversed*. Reversing puts the gates in the opposite order and turns
+each half a turn; the ground is untouched. A circuit keeps its start line,
+crossed the other way; a path starts where it used to finish. Reversing
+twice is the track it was, to the hash - and reversed once it is a different
+track, with its own hash, so its records, its ghost and its best lap are its
+own. The setup screen's best lap and the records screen follow the dial.
+
+**The track is always forward outside a race.** The reversal is applied when
+a race starts and undone by one rule the moment the screen is not the race,
+so the menu, the editor and a library load never see a reversed track and
+nothing but one flag has to know. Online the track is whatever the server
+serves, so the dial is a local race's; the flag joins the gearbox in the
+"setup on the wire" item.
+
+**Every shipped track ships both ways.** `make_tracks` now refuses a seed
+whose reverse fails any check its forward route passes - validated, every
+machine round it from every grid slot, nobody off the field. Three of the
+thirty could not be raced backwards - *high shelf*, *long ridge* and *low
+flats*, each with a ramp that is a wall from the other side - and were
+replaced by the next seeds that could: *bright descent*, *broken bend* and
+*quiet crossing*. The set keeps its spread. No golden moved: the world is
+built from a track like any other.
+
+*Verification: twenty-four generated tracks reversed and put back, all to
+the hash, every reversed one accepted by the validator; a reversed circuit
+found completable by the analyser; the shipped set checked on disk both
+ways; and the direction dial walked with every other control on the setup
+screen.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

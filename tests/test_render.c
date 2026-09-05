@@ -3266,6 +3266,10 @@ TEST(the_stock_tracks_ship_and_are_worth_racing) {
         CHECK(issue.problem == GS_TRACK_OK);
         CHECK(t.gate_count >= 2);
         CHECK(t.w >= 24 && t.h >= 12);
+        // **And the other way round**: mirror mode races every shipped track
+        // reversed, so its reverse has to be a route the validator accepts.
+        gs_track_reverse(&t);
+        CHECK(gs_track_validate(&t).problem == GS_TRACK_OK);
 
         // **Flatness is not asked here.** It used to be, over the four tracks
         // this named, and all four are generated ground. Three of the
@@ -3280,7 +3284,7 @@ TEST(the_stock_tracks_ship_and_are_worth_racing) {
     // Walked as many as were found, which is the claim this test is allowed to
     // make and the one a count on its own does not.
     CHECK(checked == walk.count);
-    printf("  STOCK %d track(s) on disk, %d checked, every gate facing its route\n",
+    printf("  STOCK %d track(s) on disk, %d checked, every gate facing its route both ways\n",
            walk.count, checked);
 }
 

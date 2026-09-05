@@ -2891,12 +2891,17 @@ better done once the reversed routes are being verified too.
       shipped set has to contain some of each, the way it already has to
       cover the matrix.*
 
-- [ ] **Mirror mode.** Any track raced the other way round, as one dial on
-      the setup screen. The route is directional, so this is a new track to
-      drive for nearly nothing, with its own record.
-      *Verification: the reversed route passes every check the forward one
-      does - gates faced, finishable by every machine from every grid slot -
-      and a record set backwards is never shown against a forward time.*
+- [x] **Mirror mode.** Any track raced the other way round, as one dial on
+      the setup screen. The gates are put in the opposite order and turned
+      about; the ground is untouched; a reversed track has a hash and
+      records of its own. Every shipped track now has to pass every check
+      reversed as well as forward before it ships. Online the track is the
+      server's, so the dial is a local race's until the setup goes on the
+      wire.
+      *Verification: reversed and put back to the hash on two dozen
+      generated tracks, every reversed route accepted by the validator, a
+      reversed circuit completable, and the shipped set checked both ways
+      on disk.*
 
 - [ ] **Split times, and where you actually lost it.** The gates are already
       sectors. Crossing one shows the difference against your own best for
@@ -2941,11 +2946,12 @@ better done once the reversed routes are being verified too.
       analyser, both finishable, and neither strictly faster than the other
       for every machine.*
 
-- [ ] **The manual gearbox goes on the wire.** A race hosted online gives
-      every car the automatic, because the per-driver gearbox choice is not
-      in the race setup the host sends. One flag per car in the setup
-      message, and the same rule for it as everything else on the wire: the
-      protocol document says where it is, and the wire test moves.
+- [ ] **The setup goes on the wire: gearbox and direction.** A race hosted
+      online gives every car the automatic and races the track forward,
+      because neither the per-driver gearbox nor the direction dial is in
+      the race setup the host sends. One flag per car and one for the race,
+      and the same rule for them as everything else on the wire: the
+      protocol document says where they are, and the wire test moves.
       *Verification: two machines, one manual and one automatic, race and
       land on the same world hash with the manual driver's gear changes in
       the replay.*

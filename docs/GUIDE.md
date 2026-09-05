@@ -127,6 +127,11 @@ shortcut.
 
 ### Things worth knowing
 
+**Every track goes both ways.** The **direction** dial on the setup screen
+races the track reversed: the same road the other way round, with the
+start line crossed the other way on a loop and a path run from its old
+finish. A reversed track keeps its own records and its own ghost.
+
 **A checkpoint is a post; the line between them is the way.** Only every
 fourth gate on a track is a checkpoint you have to cross in order — the
 ones with posts and an arrow, and the dots on the map. The dashed line

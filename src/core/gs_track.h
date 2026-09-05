@@ -234,6 +234,18 @@ uint8_t gs_track_finish_gate(const gs_track *t);
 // and the finish always do whatever the count says.
 bool gs_track_is_checkpoint(const gs_track *t, uint8_t i);
 
+// **The same track, raced the other way round.** Mirror mode. The gates are
+// put in the opposite order and each is turned half a turn, so a car drives
+// through every one of them the way it now travels; the ground is not
+// touched. A circuit keeps its start line - it is the same line, crossed the
+// other way - and a path starts where it used to finish. Reversing twice is
+// the track it was, to the hash.
+//
+// A reversed track has a hash of its own, so its records and ghosts are its
+// own too: a lap backwards is not a lap of the same thing.
+void     gs_track_reverse(gs_track *t);
+uint64_t gs_track_reversed_hash(const gs_track *t);
+
 // Is this track a loop? Then one line does both jobs and the renderer draws one
 // chequered line rather than a plain start and a chequered finish.
 bool gs_track_is_circuit(const gs_track *t);

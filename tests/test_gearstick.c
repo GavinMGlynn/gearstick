@@ -8670,6 +8670,54 @@ TEST(a_generated_track_keeps_one_gate_in_four_as_a_checkpoint_and_its_finish) {
     }
 }
 
+TEST(a_track_reversed_twice_is_the_track_it_was_and_once_is_a_different_one) {
+    // **Mirror mode.** Reversing turns every gate about and puts them in the
+    // opposite order, and nothing else: so reversing again has to give back
+    // the track exactly, to the hash, on a loop and on a path alike - and a
+    // reversed track has to be a different track, because a lap the other
+    // way round has its own records.
+    int loops = 0, paths = 0;
+    for (uint32_t seed = 1; seed <= 24; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+        const uint64_t was = gs_track_hash(&gs_gen_a);
+        const gs_angle facing = gs_gen_a.gate[0].heading;
+        const uint8_t gates = gs_gen_a.gate_count;
+        if (gs_track_is_circuit(&gs_gen_a)) loops++; else paths++;
+
+        gs_track_reverse(&gs_gen_a);
+        CHECK(gs_track_hash(&gs_gen_a) != was);
+        CHECK(gs_track_reversed_hash(&gs_gen_a) == was);
+        CHECK(gs_gen_a.gate_count == gates);
+        // A loop keeps its start line, turned about; a path starts at its
+        // old finish, also turned about.
+        if (gs_track_is_circuit(&gs_gen_a)) {
+            CHECK(gs_gen_a.gate[0].heading == (gs_angle)(facing + 32768u));
+        }
+        // **And it faces the way it is now driven**: the validator, which
+        // refuses a gate turned across its route, is content with every one.
+        CHECK(gs_track_validate(&gs_gen_a).problem == GS_TRACK_OK);
+
+        gs_track_reverse(&gs_gen_a);
+        CHECK(gs_track_hash(&gs_gen_a) == was);
+    }
+    CHECK(loops > 0);
+    CHECK(paths > 0);
+    printf("  MIRROR %d loops and %d paths reversed and put back, all to the hash\n",
+           loops, paths);
+}
+
+TEST(a_reversed_circuit_can_still_be_lapped) {
+    // The generator's ramps have a face and a fall, and a track raced the
+    // other way meets them the other way round. What matters is whether a
+    // car can get round at all, which the analyser answers the way it does
+    // for every track that ships.
+    gs_generate(&gs_gen_a, 7919u * 3u);
+    gs_track_reverse(&gs_gen_a);
+    static gs_analysis look;
+    gs_analyse(&gs_gen_a, gs_analyse_seconds(&gs_gen_a), &look);
+    CHECK(look.completable);
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -10016,6 +10064,8 @@ int main(void) {
     run_a_gate_turned_across_its_route_is_refused_on_a_loop_and_on_a_path();
     run_every_track_the_generator_can_make_has_its_gates_facing_its_route();
     run_a_waypoint_may_be_missed_and_a_checkpoint_may_not();
+    run_a_track_reversed_twice_is_the_track_it_was_and_once_is_a_different_one();
+    run_a_reversed_circuit_can_still_be_lapped();
     run_a_track_says_how_many_gates_make_a_checkpoint_and_an_older_one_says_all_of_them();
     run_a_generated_track_keeps_one_gate_in_four_as_a_checkpoint_and_its_finish();
     run_facing_a_route_leaves_a_track_the_way_it_found_it_when_it_was_already_right();

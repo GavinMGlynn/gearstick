@@ -91,6 +91,10 @@ typedef struct gs_race_setup {
     // a name.
     uint8_t  skill;
 
+    // Mirror mode: the track raced the other way round. A local race's
+    // choice; online the track is whatever the server serves.
+    bool     reversed;
+
     uint8_t  mode;                  // gs_mode
     uint16_t laps;
 

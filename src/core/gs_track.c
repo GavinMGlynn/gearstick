@@ -670,6 +670,32 @@ uint8_t gs_track_finish_gate(const gs_track *t) {
     return (uint8_t)(t->gate_count - 1);
 }
 
+void gs_track_reverse(gs_track *t) {
+    const uint8_t n = t->gate_count;
+    if (n < 2) {
+        for (uint8_t i = 0; i < n; i++) t->gate[i].heading = (gs_angle)(t->gate[i].heading + 32768u);
+        return;
+    }
+    static gs_gate was[GS_TRACK_MAX_GATES];
+    for (uint8_t i = 0; i < n; i++) was[i] = t->gate[i];
+
+    const bool loop = gs_track_is_circuit(t);
+    for (uint8_t i = 0; i < n; i++) {
+        // A loop keeps gate zero where it is and walks the rest backwards
+        // from the end; a path is simply read from the far end.
+        const uint8_t from = (uint8_t)(loop ? (n - i) % n : n - 1 - i);
+        t->gate[i] = was[from];
+        t->gate[i].heading = (gs_angle)(t->gate[i].heading + 32768u);
+    }
+}
+
+uint64_t gs_track_reversed_hash(const gs_track *t) {
+    static gs_track other;
+    other = *t;
+    gs_track_reverse(&other);
+    return gs_track_hash(&other);
+}
+
 bool gs_track_is_checkpoint(const gs_track *t, uint8_t i) {
     if (t->gate_count == 0 || i >= t->gate_count) return false;
     if (t->checkpoint_every <= 1) return true;
