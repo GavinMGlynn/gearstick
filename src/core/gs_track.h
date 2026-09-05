@@ -164,6 +164,8 @@ extern const gs_surface_def gs_surfaces[GS_SURF_COUNT];
 // times further apart - so a shipped track uses a quarter of this; the rest
 // is room for a track built by hand with a gate wherever its author wants one.
 #define GS_TRACK_MAX_GATES 96
+// One bit per gate: which checkpoints a shortcut leaves. See gs_track.
+#define GS_TRACK_SHORTCUT_BYTES (GS_TRACK_MAX_GATES / 8)
 
 // **What kind of route this is, which is the difference between a track that
 // goes somewhere and one that does not.**
@@ -214,6 +216,13 @@ typedef struct gs_track {
     // waypoints that describe the route and may be missed. 1 means every
     // gate counts, which is what every track was before this existed.
     uint8_t checkpoint_every;
+    // **Shortcuts.** Bit k set means a second road leaves checkpoint k
+    // straight for the next checkpoint, narrower and rougher than the main
+    // one - a decision every lap rather than a line to memorise. Nothing
+    // else about the route changes: the gates describe the main way, the
+    // waypoints between two checkpoints may be missed, and a car on the
+    // shortcut simply misses them. All zero on every track from before.
+    uint8_t shortcut[GS_TRACK_SHORTCUT_BYTES];
     uint8_t gate_count;
     gs_gate gate[GS_TRACK_MAX_GATES];    // gate[0] is where a race begins
 } gs_track;
@@ -233,6 +242,14 @@ uint8_t gs_track_finish_gate(const gs_track *t);
 // straight, so a track says how many gates make a checkpoint, and gate zero
 // and the finish always do whatever the count says.
 bool gs_track_is_checkpoint(const gs_track *t, uint8_t i);
+
+// A shortcut leaves gate `i` (a checkpoint) for the next checkpoint.
+bool    gs_track_shortcut_from(const gs_track *t, uint8_t i);
+void    gs_track_set_shortcut(gs_track *t, uint8_t i, bool on);
+bool    gs_track_has_shortcuts(const gs_track *t);
+// The next checkpoint after gate `i`, round a circuit; `i` itself on a
+// path with no checkpoint after it.
+uint8_t gs_track_next_checkpoint(const gs_track *t, uint8_t i);
 
 // **The same track, raced the other way round.** Mirror mode. The gates are
 // put in the opposite order and each is turned half a turn, so a car drives
@@ -537,7 +554,7 @@ uint64_t gs_track_hash_before_route_kind(const gs_track *t);
 // Version 3 carries the route kind. Version 2 files still load: they are read
 // as sprints, which is what every one of them actually was - two gates, one at
 // each end, raced as though it were a loop.
-#define GS_TRACK_VERSION 4u
+#define GS_TRACK_VERSION 5u
 
 // Bytes `gs_track_serialize` will write for this track.
 size_t gs_track_size(const gs_track *t);

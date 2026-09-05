@@ -131,6 +131,19 @@ typedef enum gs_gen_drama {
     GS_DRAMA_COUNT
 } gs_gen_drama;
 
+// **One way round, or a shortcut.** The original's "whichway" offered
+// seven routes; this generator offered one. A shortcut is a second road,
+// narrower and rougher, carved straight between two checkpoints where the
+// main road loops well away from the line between them - a decision every
+// lap rather than a line to memorise. It needs no change to what a route
+// is: the gates describe the main way, and a car on the shortcut misses
+// waypoints it is forgiven for missing.
+typedef enum gs_gen_routes {
+    GS_ROUTES_ONE = 0,
+    GS_ROUTES_SHORTCUT,
+    GS_ROUTES_COUNT
+} gs_gen_routes;
+
 typedef struct gs_track_spec {
     gs_gen_class    kind;
     gs_gen_length   length;
@@ -143,6 +156,7 @@ typedef struct gs_track_spec {
     gs_gen_dress    dress;
     gs_gen_width    width;
     gs_gen_drama    drama;
+    gs_gen_routes   routes;
     gs_surface      base;
 } gs_track_spec;
 
@@ -167,7 +181,11 @@ uint8_t gs_spec_road(const gs_track_spec *spec);
 // The one-line reason this track exists - "a winding epic circuit over rolling
 // ice, small jumps, light pockets" - after the 1985 manual, where every track
 // had a reason somebody could say in one line.
-void gs_spec_line(const gs_track_spec *spec, char *out, size_t cap);
+// With the track it built, when there is one: a shortcut the dial asked
+// for that no pair of checkpoints could hold reads as "one way round",
+// because that is the track. Null when there is no track yet.
+void gs_spec_line(const gs_track_spec *spec, const gs_track *built, char *out,
+                  size_t cap);
 
 // Two words from the seed, the same two every time.
 void gs_generate_name(char *out, size_t cap, uint32_t seed);

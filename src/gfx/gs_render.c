@@ -863,6 +863,30 @@ static void gs_draw_route(SDL_Renderer *ren, const gs_camera *cam,
             gs_ground_mark(ren, cam, t, qx, qy, 0.03f, ink, world_d);
         }
     }
+    // **And the shortcuts**, as sparser dashes in a dimmer ink straight from
+    // the checkpoint they leave to the next - a branch off the way round,
+    // read as an offer rather than the route.
+    static const SDL_FColor faint = { 0.30f, 0.65f, 0.95f, 0.45f };
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        if (!gs_track_shortcut_from(t, i)) continue;
+        const gs_gate *a = &t->gate[i];
+        const gs_gate *b = &t->gate[gs_track_next_checkpoint(t, i)];
+        const float ax0 = gs_to_f(a->x), ay0 = gs_to_f(a->y);
+        const float bx0 = gs_to_f(b->x), by0 = gs_to_f(b->y);
+        const float dx = bx0 - ax0, dy = by0 - ay0;
+        const float len = SDL_sqrtf(dx * dx + dy * dy);
+        if (len < 1.0f) continue;
+        const int dashes = (int)(len / 1.5f);
+        const float px = -dy / len * GS_ROUTE_HALF, py = dx / len * GS_ROUTE_HALF;
+        for (int k = 0; k < dashes; k += 2) {
+            const float s0 = (float)k / (float)dashes, s1 = (float)(k + 1) / (float)dashes;
+            const float x0 = ax0 + dx * s0, y0 = ay0 + dy * s0;
+            const float x1 = ax0 + dx * s1, y1 = ay0 + dy * s1;
+            float qx[4] = { x0 + px, x1 + px, x1 - px, x0 - px };
+            float qy[4] = { y0 + py, y1 + py, y1 - py, y0 - py };
+            gs_ground_mark(ren, cam, t, qx, qy, 0.03f, faint, world_d);
+        }
+    }
 }
 
 static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,

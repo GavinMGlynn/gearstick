@@ -168,7 +168,7 @@ jobs:
   stock_tracks:
     name: The stock tracks and the library that ships them
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
         with: { submodules: recursive }

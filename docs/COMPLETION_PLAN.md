@@ -2959,15 +2959,27 @@ better done once the reversed routes are being verified too.
       the real binary's watch from every car prints one world hash, which
       the play-through check demands.*
 
-- [ ] **Alternate routes through a track.** The original's `whichway`
+- [x] **Alternate routes through a track.** The original's `whichway`
       offered seven; this generates one. A shortcut that is tighter, rougher
-      or a jump you might not clear is a decision every lap. **The largest
-      item here by a wide margin** - it needs a route that can be reached two
-      ways, which is a change to what a route *is* rather than a change to
-      what the generator draws with it.
-      *Verification: a track with two ways round has both driven by the
-      analyser, both finishable, and neither strictly faster than the other
-      for every machine.*
+      or a jump you might not clear is a decision every lap. It was expected
+      to be the largest item here; the checkpoint rule had already made a
+      route a thing with two ways between its posts, so what it needed was a
+      twelfth dial, a second road cut along the chord, one bit on the post
+      it leaves, a driver that takes it, and a line on the map. Every second
+      car on the grid takes it. *Done 2026-09-06.*
+      *Verification: on every seed the suite drives, a car told to take the
+      cut goes through the middle of it and finishes and a car told to leave
+      it stays clear and finishes; a full grid of four raced by the game
+      splits two and two at the post and all four finish; the cut survives
+      the file and reversing the track; and every shipped track with one
+      was driven through it by every machine in both directions. The
+      plan asked that neither route be strictly faster for every machine;
+      that is not asserted, and the status document says why.*
+      *Found on the way: the CI check that re-chooses the shipped set had
+      been cancelled at its twenty-minute timeout on every push since
+      vertical drama. The tool refuses a candidate at the first car that
+      cannot get round now instead of racing every machine to the end,
+      and the check has an hour.*
 
 - [ ] **The setup goes on the wire: gearbox and direction.** A race hosted
       online gives every car the automatic and races the track forward,

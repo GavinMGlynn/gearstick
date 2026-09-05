@@ -257,7 +257,13 @@
 // fighting, so the outer eighteen tiles stay at Earth now - the same shape
 // as every other veto. Only seeds that painted light gravity near a rim
 // build different ground; the fold covers two hundred, so it moves.
-#define GS_SELFTEST_GENERATOR_HASH 0x521dd216393ff34bULL
+// **And once for alternate routes.** A routes dial joined the matrix - one
+// way round, or a shortcut: a second road cut along the chord between two
+// checkpoints, rougher and narrower than the main one - and the gate count
+// is rounded so that a circuit's checkpoints land on the same gates seen
+// from either direction. Every seed draws the new dial, so every seed
+// moves; the world hash above did not, because a track is a track.
+#define GS_SELFTEST_GENERATOR_HASH 0xa2297113357132caULL
 
 // **A race with nobody at the keyboard**, four opponents spread across the
 // skill dial, on a circuit none of them has seen.

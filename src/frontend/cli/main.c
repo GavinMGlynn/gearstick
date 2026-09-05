@@ -852,7 +852,7 @@ static int cmd_generate(int count) {
         if (count <= 12 || !ok) {
             char line[160];
             gs_track_spec spec = gs_generate_spec_for(seed);
-            gs_spec_line(&spec, line, sizeof line);
+            gs_spec_line(&spec, &t, line, sizeof line);
             printf("%-6u %-18s %2ux%-2u %6u %4s  %s\n", seed, name, t.w, t.h,
                    t.gate_count, ok ? "yes" : "NO", line);
         }

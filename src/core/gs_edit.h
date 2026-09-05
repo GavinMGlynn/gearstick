@@ -44,6 +44,8 @@ typedef enum gs_edit_kind {
     // How many gates make a checkpoint. One number for the whole track, so
     // it is an edit of the track rather than of a gate.
     GS_EDIT_CHECKPOINT_EVERY,
+    // A shortcut turned on or off at one checkpoint.
+    GS_EDIT_SHORTCUT,
 
     // **So a test can say it walked all of them.** Two of the seven above had
     // never been called by any test at all - moving a gate and changing whether
@@ -127,6 +129,10 @@ bool gs_edit_route_kind(gs_edit_log *l, gs_track *t, gs_route_kind kind);
 // Every Nth gate is a checkpoint; the rest are waypoints a car may miss. One
 // is what every track was before the dial existed. See gs_track_is_checkpoint.
 bool gs_edit_checkpoint_every(gs_edit_log *l, gs_track *t, uint8_t every);
+
+// A shortcut leaves gate `index` (a checkpoint) for the next checkpoint, or
+// does not. See gs_track_set_shortcut.
+bool gs_edit_shortcut(gs_edit_log *l, gs_track *t, uint8_t index, bool on);
 
 bool gs_edit_can_undo(const gs_edit_log *l);
 bool gs_edit_can_redo(const gs_edit_log *l);

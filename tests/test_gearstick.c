@@ -342,6 +342,8 @@ static bool gs_byte_counts(const gs_track *t, size_t at) {
     // How many gates make a checkpoint changes which lines a lap has to
     // cross, so it is part of what the track is.
     if (at == offsetof(gs_track, checkpoint_every)) return true;
+    if (at >= offsetof(gs_track, shortcut) &&
+        at < offsetof(gs_track, shortcut) + sizeof ((gs_track *)0)->shortcut) return true;
     const size_t corner = offsetof(gs_track, corner);
     const size_t surface = offsetof(gs_track, surface);
     const size_t gravity = offsetof(gs_track, gravity);
@@ -681,7 +683,8 @@ TEST(every_kind_of_edit_can_be_taken_back_and_put_back_again) {
         // Whatever this kind of edit needs to exist before it can happen, laid
         // in directly so it is part of the track rather than part of the
         // history - undo has to come back to *this*, not to an empty track.
-        if (kind == GS_EDIT_GATE_REMOVE || kind == GS_EDIT_GATE_MOVE) {
+        if (kind == GS_EDIT_GATE_REMOVE || kind == GS_EDIT_GATE_MOVE ||
+            kind == GS_EDIT_SHORTCUT) {
             CHECK(gs_track_add_gate(&t, GS_INT(4), GS_INT(4), 0,
                                     GS_INT(2)) >= 0);
             CHECK(gs_track_add_gate(&t, GS_INT(8), GS_INT(4),
@@ -722,6 +725,9 @@ TEST(every_kind_of_edit_can_be_taken_back_and_put_back_again) {
             break;
         case GS_EDIT_CHECKPOINT_EVERY:
             did = gs_edit_checkpoint_every(l, &t, 4);
+            break;
+        case GS_EDIT_SHORTCUT:
+            did = gs_edit_shortcut(l, &t, 0, true);
             break;
         case GS_EDIT_COUNT:
             break;
@@ -8255,7 +8261,7 @@ TEST(a_generated_race_can_actually_be_finished) {
                 {
                        gs_track_spec why_spec = gs_generate_spec_for(seed * 7919u);
                        char why[160];
-                       gs_spec_line(&why_spec, why, sizeof why);
+                       gs_spec_line(&why_spec, &gs_gen_a, why, sizeof why);
                        printf("  STUCK seed %u from slot %u: %d laps, at %.1f,%.1f | %s\n"
                               "        speed %.2f, damage %u, %s, on surface %d, %.1f tiles outside\n",
                        seed, slot, gs_car_laps_done(&gs_gen_a, &w.car[0]),
@@ -9236,6 +9242,208 @@ TEST(a_replay_watched_from_any_car_is_the_same_race) {
     }
     printf("  WATCH %u ticks watched back from two seats, both the race that was run\n",
            (unsigned)rec.meta.tick_count);
+}
+
+// Whether a car ever came within `near` tiles of the middle third of the
+// line from a to b on its way round - the chord a shortcut is cut along.
+static bool gs_drives_the_chord(const gs_track *t, gs_ai_style style, gs_fix ax, gs_fix ay,
+                                gs_fix bx, gs_fix by, gs_fix near, uint32_t *ticks_to_finish) {
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    gs_fix sx, sy; gs_angle f;
+    gs_track_grid(t, 0, &sx, &sy, &f);
+    gs_world_add_car(&w, t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, f);
+    const gs_fix ddx = bx - ax, ddy = by - ay;
+    const gs_fix len = gs_fix_len2(ddx, ddy);
+    const gs_fix ux = gs_fix_div(ddx, len), uy = gs_fix_div(ddy, len);
+    bool came = false;
+    const uint32_t budget = gs_analyse_seconds(t) * (uint32_t)GS_TICK_HZ;
+    for (uint32_t k = 0; k < budget && w.car[0].finish_tick == 0; k++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive_style(&w, t, 0, style), 0, 0, 0 };
+        gs_world_step(&w, t, in);
+        const gs_fix rx = w.car[0].x - ax, ry = w.car[0].y - ay;
+        const gs_fix along = gs_fix_mul(rx, ux) + gs_fix_mul(ry, uy);
+        const gs_fix across = gs_fix_abs(gs_fix_mul(rx, uy) - gs_fix_mul(ry, ux));
+        if (along > len / 3 && along < len * 2 / 3 && across < near) came = true;
+    }
+    if (ticks_to_finish != nullptr) *ticks_to_finish = w.car[0].finish_tick;
+    return came;
+}
+
+TEST(a_shortcut_is_a_second_road_that_a_driver_may_take_or_leave) {
+    // **A decision every lap.** A track drawn with a shortcut has a chord
+    // carved between two checkpoints: rougher ground than the main road,
+    // straight across the loop the road makes. A driver whose style takes
+    // it passes the chord's middle and finishes; one whose style does not
+    // stays on the main road, well away from it, and finishes too. Both
+    // are races that end, which is what lets a track with one ship.
+    int with = 0, driven = 0;
+    for (uint32_t seed = 1; seed <= 16 && driven < 2; seed++) {
+        gs_track_spec spec = gs_generate_spec_for(seed * 7919u);
+        spec.routes = GS_ROUTES_SHORTCUT;
+        if (spec.range == GS_RANGE_SEVERE) spec.range = GS_RANGE_MODERATE;
+        gs_generate_from_spec(&gs_gen_a, seed * 7919u, &spec);
+        if (!gs_track_has_shortcuts(&gs_gen_a)) continue;
+        with++;
+        uint8_t from = 0;
+        for (uint8_t i = 0; i < gs_gen_a.gate_count; i++) {
+            if (gs_track_shortcut_from(&gs_gen_a, i)) { from = i; break; }
+        }
+        const uint8_t to = gs_track_next_checkpoint(&gs_gen_a, from);
+        CHECK(gs_track_is_checkpoint(&gs_gen_a, from));
+        CHECK(to != from);
+        const gs_fix ax = gs_gen_a.gate[from].x, ay = gs_gen_a.gate[from].y;
+        const gs_fix bx = gs_gen_a.gate[to].x, by = gs_gen_a.gate[to].y;
+        const gs_surface mid = gs_track_surface(&gs_gen_a, (ax + bx) / 2, (ay + by) / 2);
+        CHECK(mid == GS_SURF_GRAVEL || mid == GS_SURF_DIRT);
+
+        uint32_t on_the_cut = 0, round_the_road = 0;
+        const bool took = gs_drives_the_chord(&gs_gen_a, gs_ai_shortcut_style(GS_AI_SKILL_DEFAULT),
+                                              ax, ay, bx, by, GS_INT(3), &on_the_cut);
+        const bool left = gs_drives_the_chord(&gs_gen_a, gs_ai_skill_style(GS_AI_SKILL_DEFAULT),
+                                              ax, ay, bx, by, GS_INT(4), &round_the_road);
+        printf("  SHORTCUT seed %u: gates %u to %u; took it in %u ticks (%s), left it in %u (%s)\n",
+               seed, from, to, on_the_cut, took ? "through the middle" : "MISSED IT",
+               round_the_road, left ? "CAME NEAR IT" : "kept away");
+        if (on_the_cut == 0 || round_the_road == 0) continue;   // a seed the gate would refuse
+        CHECK(took);
+        CHECK(!left);
+        driven++;
+    }
+    printf("  SHORTCUT %d of the seeds tried carved one, %d driven both ways\n", with, driven);
+    CHECK(with >= 2);
+    CHECK(driven >= 2);
+}
+
+TEST(every_second_car_on_the_grid_takes_the_shortcut) {
+    // **The field splits at the post.** Left to the game, the odd grid
+    // slots take the cut and the even ones go round - so a race of four
+    // has two of each, a player in slot 0 sees rivals leave the road
+    // beside them, and the ghost, the analyser and the time to beat, all
+    // car 0, drive the main road. Every slot on a full grid is raced and
+    // asked which it did; a slot that does the other is a red tree.
+    gs_track_spec spec = gs_generate_spec_for(7919u);
+    spec.routes = GS_ROUTES_SHORTCUT;
+    if (spec.range == GS_RANGE_SEVERE) spec.range = GS_RANGE_MODERATE;
+    gs_generate_from_spec(&gs_gen_a, 7919u, &spec);
+    CHECK(gs_track_has_shortcuts(&gs_gen_a));
+    uint8_t from = 0;
+    for (uint8_t i = 0; i < gs_gen_a.gate_count; i++) {
+        if (gs_track_shortcut_from(&gs_gen_a, i)) { from = i; break; }
+    }
+    const uint8_t to = gs_track_next_checkpoint(&gs_gen_a, from);
+    const gs_fix ax = gs_gen_a.gate[from].x, ay = gs_gen_a.gate[from].y;
+    const gs_fix ddx = gs_gen_a.gate[to].x - ax, ddy = gs_gen_a.gate[to].y - ay;
+    const gs_fix len = gs_fix_len2(ddx, ddy);
+    const gs_fix ux = gs_fix_div(ddx, len), uy = gs_fix_div(ddy, len);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        gs_fix sx, sy; gs_angle f;
+        gs_track_grid(&gs_gen_a, i, &sx, &sy, &f);
+        gs_world_add_car(&w, &gs_gen_a, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, f);
+    }
+    bool near[GS_MAX_CARS] = { false };
+    const uint32_t budget = gs_analyse_seconds(&gs_gen_a) * (uint32_t)GS_TICK_HZ;
+    for (uint32_t k = 0; k < budget; k++) {
+        gs_input in[GS_MAX_CARS];
+        bool all_done = true;
+        for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+            in[i] = gs_ai_drive(&w, &gs_gen_a, i);
+            if (w.car[i].finish_tick == 0) all_done = false;
+        }
+        if (all_done) break;
+        gs_world_step(&w, &gs_gen_a, in);
+        for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+            const gs_fix rx = w.car[i].x - ax, ry = w.car[i].y - ay;
+            const gs_fix along = gs_fix_mul(rx, ux) + gs_fix_mul(ry, uy);
+            const gs_fix across = gs_fix_abs(gs_fix_mul(rx, uy) - gs_fix_mul(ry, ux));
+            if (along > len / 3 && along < len * 2 / 3 && across < GS_INT(3)) near[i] = true;
+        }
+    }
+    int walked = 0;
+    for (uint8_t i = 0; i < GS_MAX_CARS; i++) {
+        printf("  GRID slot %u %s the cut, finished at %u\n", i,
+               near[i] ? "took" : "left", w.car[i].finish_tick);
+        CHECK(w.car[i].finish_tick != 0);
+        CHECK(near[i] == ((i & 1u) != 0));
+        walked++;
+    }
+    CHECK(walked == GS_MAX_CARS);
+}
+
+TEST(a_shortcut_survives_the_file_and_turns_round_with_the_track) {
+    static gs_track t, back;
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+    gs_generate(&t, 7919u * 6u);
+    t.checkpoint_every = 4;
+    for (uint8_t i = 0; i < t.gate_count; i++) gs_track_set_shortcut(&t, i, false);
+    const uint64_t plain = gs_track_hash(&t);
+    CHECK(!gs_track_has_shortcuts(&t));
+
+    gs_track_set_shortcut(&t, 4, true);
+    CHECK(gs_track_shortcut_from(&t, 4));
+    CHECK(gs_track_has_shortcuts(&t));
+    CHECK(gs_track_hash(&t) != plain);
+
+    size_t n = gs_track_serialize(&t, buf, sizeof buf);
+    CHECK(n > 0);
+    CHECK(gs_track_deserialize(&back, buf, n));
+    CHECK(gs_track_shortcut_from(&back, 4));
+    CHECK(gs_track_hash(&back) == gs_track_hash(&t));
+    gs_track_set_shortcut(&t, 4, false);
+    size_t m = gs_track_serialize(&t, buf, sizeof buf);
+    CHECK(m == n - GS_TRACK_SHORTCUT_BYTES);
+    CHECK(gs_track_hash(&t) == plain);
+
+    gs_track_set_shortcut(&t, 4, true);
+    const uint8_t to = gs_track_next_checkpoint(&t, 4);
+    const uint8_t n_gates = t.gate_count;
+    const bool loop = gs_track_is_circuit(&t);
+    gs_track_reverse(&t);
+    const uint8_t new_to = (uint8_t)(loop ? (n_gates - to) % n_gates : n_gates - 1 - to);
+    const uint8_t new_from = (uint8_t)(loop ? (n_gates - 4) % n_gates : n_gates - 1 - 4);
+    CHECK(gs_track_shortcut_from(&t, new_to));
+    CHECK(gs_track_next_checkpoint(&t, new_to) == new_from);
+    gs_track_reverse(&t);
+    CHECK(gs_track_shortcut_from(&t, 4));
+}
+
+TEST(the_spec_line_says_a_shortcut_only_when_the_track_has_one) {
+    // The routes dial is drawn before the road is laid, and a shortcut
+    // needs a pair of checkpoints with a chord between them that is short
+    // enough, long enough, arrives forwards and stays in the field. Some
+    // draws find none. The line that describes a track describes the
+    // track, not the draw: with the built track in hand it says "one way
+    // round" for a shortcut that did not fit, and "a shortcut" for one
+    // that did. Both cases are found among the first seeds and both are
+    // asserted, so a change that makes one impossible shows here.
+    bool saw_one = false, saw_cut = false;
+    for (uint32_t seed = 1; seed <= 32 && !(saw_one && saw_cut); seed++) {
+        gs_track_spec spec = gs_generate_spec_for(seed * 7919u);
+        spec.routes = GS_ROUTES_SHORTCUT;
+        if (spec.range == GS_RANGE_SEVERE) spec.range = GS_RANGE_MODERATE;
+        gs_generate_from_spec(&gs_gen_a, seed * 7919u, &spec);
+        char line[160], bare[160];
+        gs_spec_line(&spec, &gs_gen_a, line, sizeof line);
+        gs_spec_line(&spec, nullptr, bare, sizeof bare);
+        CHECK(strstr(bare, "| a shortcut") != nullptr);     // the draw, with no track
+        if (gs_track_has_shortcuts(&gs_gen_a)) {
+            CHECK(strstr(line, "| a shortcut") != nullptr);
+            saw_cut = true;
+        } else {
+            CHECK(strstr(line, "| one way round") != nullptr);
+            CHECK(strstr(line, "shortcut") == nullptr);
+            saw_one = true;
+        }
+    }
+    CHECK(saw_one);
+    CHECK(saw_cut);
 }
 
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
@@ -10591,6 +10799,10 @@ int main(void) {
     run_a_manual_on_the_limiter_heats_loses_power_and_cools_when_it_changes_up();
     run_the_same_day_is_the_same_track_everywhere_and_a_new_day_is_a_new_one();
     run_a_replay_watched_from_any_car_is_the_same_race();
+    run_a_shortcut_is_a_second_road_that_a_driver_may_take_or_leave();
+    run_every_second_car_on_the_grid_takes_the_shortcut();
+    run_a_shortcut_survives_the_file_and_turns_round_with_the_track();
+    run_the_spec_line_says_a_shortcut_only_when_the_track_has_one();
     run_a_banked_corner_is_higher_on_the_outside_and_a_pipe_at_both_edges();
     run_a_gap_is_a_trench_after_a_ramp_and_a_crest_falls_away_beyond_it();
     run_every_kind_of_drama_can_still_be_got_round();

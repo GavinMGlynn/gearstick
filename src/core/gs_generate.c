@@ -65,6 +65,7 @@ gs_track_spec gs_generate_spec_for(uint32_t seed) {
     s.width = (gs_gen_width)gs_pick(&r, GS_WIDTH_COUNT);
     s.base = (gs_surface)gs_pick(&r, GS_SURF_COUNT);
     s.drama = (gs_gen_drama)gs_pick(&r, GS_DRAMA_COUNT);
+    s.routes = (gs_gen_routes)gs_pick(&r, GS_ROUTES_COUNT);
 
     // **The vetoes.** Two dials contradicting each other is resolved here,
     // once, so a spec in hand is always a spec that can be built - and
@@ -106,6 +107,11 @@ gs_track_spec gs_generate_spec_for(uint32_t seed) {
     if (s.drama == GS_DRAMA_GAPS && s.width == GS_WIDTH_NARROW) {
         s.width = GS_WIDTH_STANDARD;
     }
+    // A shortcut is cut straight across the field, and across severe ground
+    // that is a wall somewhere along it. The ground gives.
+    if (s.routes == GS_ROUTES_SHORTCUT && s.range == GS_RANGE_SEVERE) {
+        s.range = GS_RANGE_MODERATE;
+    }
     return s;
 }
 
@@ -128,7 +134,8 @@ static size_t gs_say(char *out, size_t cap, size_t n, const char *word) {
     return n;
 }
 
-void gs_spec_line(const gs_track_spec *spec, char *out, size_t cap) {
+void gs_spec_line(const gs_track_spec *spec, const gs_track *built, char *out,
+                  size_t cap) {
     static const char *const kind[GS_CLASS_COUNT] = { "circuit", "path" };
     static const char *const len[GS_LEN_COUNT] = { "standard", "long", "epic" };
     static const char *const curve[GS_CURVE_COUNT] = {
@@ -154,6 +161,9 @@ void gs_spec_line(const gs_track_spec *spec, char *out, size_t cap) {
     };
     static const char *const width[GS_WIDTH_COUNT] = {
         "narrow road", "standard road", "wide road",
+    };
+    static const char *const routes[GS_ROUTES_COUNT] = {
+        "one way round", "a shortcut",
     };
     static const char *const drama[GS_DRAMA_COUNT] = {
         "level road", "banked corners", "bowl corners", "half-pipe road",
@@ -188,6 +198,14 @@ void gs_spec_line(const gs_track_spec *spec, char *out, size_t cap) {
     n = gs_say(out, cap, n, width[spec->width]);
     n = gs_say(out, cap, n, " | ");
     n = gs_say(out, cap, n, drama[spec->drama]);
+    n = gs_say(out, cap, n, " | ");
+    {
+        gs_gen_routes r = spec->routes;
+        if (built != nullptr && r == GS_ROUTES_SHORTCUT && !gs_track_has_shortcuts(built)) {
+            r = GS_ROUTES_ONE;
+        }
+        n = gs_say(out, cap, n, routes[r]);
+    }
     if (cap > 0) out[n < cap ? n : cap - 1] = '\0';
 }
 
@@ -1590,7 +1608,14 @@ static void gs_lay_gates(gs_track *t, gs_rng *r, const gs_route_plan *plan,
     bool loop = plan->loop;
     int want = (int)(plan->total / GS_GATE_EVERY) + (int)gs_pick(r, 3);
     if (want > GS_TRACK_MAX_GATES - 4) want = GS_TRACK_MAX_GATES - 4;
-    if (want < 6) want = 6;
+    if (want < 8) want = 8;
+    // **A count that reverses exactly.** A checkpoint is every fourth gate
+    // by index, and mirror mode re-indexes the gates from the other end -
+    // so unless a loop has a multiple of four and a path one more than a
+    // multiple, the reversed track's posts fall on different gates, and a
+    // shortcut's "from" bit lands on a waypoint. Rounded here, the posts
+    // are the same gates both ways round.
+    want -= (loop ? want : want - 1) % GS_CHECKPOINT_EVERY;
     uint8_t gates = (uint8_t)want;
 
     gs_fix wide = GS_INT(half + 2) + (gs_fix)((int64_t)GS_ONE * gs_pick(r, 2));
@@ -1647,6 +1672,75 @@ static int gs_pitch_pref(const gs_track_spec *s) {
     static const int circuit[GS_CURVE_COUNT] = { 40, 30, 24 };
     static const int path[GS_CURVE_COUNT] = { 32, 26, 21 };
     return s->kind == GS_CLASS_CIRCUIT ? circuit[s->curve] : path[s->curve];
+}
+
+// --- The shortcut -------------------------------------------------------------
+//
+// **A second road between two checkpoints.** Of every pair of consecutive
+// checkpoints, the one whose straight line is shortest against the road
+// between them - the deepest loop the route makes - gets a chord carved
+// across it, narrower than the main road and on gravel, or dirt where the
+// road is gravel already. The start straight is never cut, and neither is a
+// chord that would run out of the field. The bit is set on the checkpoint it
+// leaves; the driver reads it, and so does the map.
+#define GS_SHORTCUT_RATIO  GS_RATIO(55, 100)    // chord no longer than this much of the road
+#define GS_SHORTCUT_LEAST  12                   // and no shorter than this many tiles
+#define GS_SHORTCUT_HALF   2
+
+static void gs_lay_shortcut(gs_track *t, const gs_track_spec *spec,
+                            const gs_route_plan *plan, gs_surface road) {
+    if (spec->routes != GS_ROUTES_SHORTCUT || t->gate_count < 8) return;
+    const uint8_t n = t->gate_count;
+    const gs_fix per_gate = (gs_fix)((int64_t)plan->total / (plan->loop ? n : n - 1));
+
+    int best = -1;
+    gs_fix best_ratio = GS_ONE;
+    for (uint8_t a = 1; a < n; a++) {
+        if (!gs_track_is_checkpoint(t, a)) continue;
+        const uint8_t b = gs_track_next_checkpoint(t, a);
+        if (b == a) continue;
+        const uint32_t gap = (uint32_t)((b + n - a) % n);
+        const gs_fix road_len = (gs_fix)((int64_t)per_gate * gap);
+        const gs_fix chord = gs_fix_len2(t->gate[b].x - t->gate[a].x,
+                                         t->gate[b].y - t->gate[a].y);
+        if (chord < GS_INT(GS_SHORTCUT_LEAST) || road_len <= 0) continue;
+        const gs_fix ratio = gs_fix_div(chord, road_len);
+        if (ratio > GS_SHORTCUT_RATIO || ratio >= best_ratio) continue;
+        // Arrives at the next checkpoint forwards: a chord meeting a gate
+        // from in front is a gate crossed backwards, which does not count,
+        // and the cut would lead nowhere. Leaving is free - the car crossed
+        // the near checkpoint on the main road and turns off after it.
+        {
+            const gs_fix cx = gs_fix_div(t->gate[b].x - t->gate[a].x, chord);
+            const gs_fix cy = gs_fix_div(t->gate[b].y - t->gate[a].y, chord);
+            const gs_fix in_b = gs_fix_mul(cx, gs_cos(t->gate[b].heading)) +
+                                gs_fix_mul(cy, gs_sin(t->gate[b].heading));
+            if (in_b < GS_RATIO(5, 100)) continue;
+        }
+        // In the field, with room: the chord's middle a dozen tiles inside.
+        const gs_fix mx = (t->gate[a].x + t->gate[b].x) / 2;
+        const gs_fix my = (t->gate[a].y + t->gate[b].y) / 2;
+        if (mx < GS_INT(12) || my < GS_INT(12) || mx > GS_INT(t->w) - GS_INT(12) ||
+            my > GS_INT(t->h) - GS_INT(12)) {
+            continue;
+        }
+        best = a;
+        best_ratio = ratio;
+    }
+    if (best < 0) return;
+
+    const uint8_t a = (uint8_t)best, b = gs_track_next_checkpoint(t, a);
+    static gs_route_plan chord;
+    chord.count = 0;
+    chord.loop = false;
+    gs_plan_point(&chord, t->gate[a].x, t->gate[a].y);
+    gs_plan_point(&chord, t->gate[b].x, t->gate[b].y);
+    gs_plan_close(&chord);
+    gs_survey(&chord);
+    gs_carve(t, &chord, road == GS_SURF_GRAVEL ? GS_SURF_DIRT : GS_SURF_GRAVEL,
+             GS_SHORTCUT_HALF, GS_DRAMA_NONE);
+    gs_relax(t);
+    gs_track_set_shortcut(t, a, true);
 }
 
 void gs_generate_from_spec(gs_track *t, uint32_t seed,
@@ -1816,6 +1910,7 @@ void gs_generate_from_spec(gs_track *t, uint32_t seed,
     gs_carve(t, &plan, road, half, spec->drama);
     gs_relax(t);
     gs_lay_gates(t, &r, &plan, half);
+    gs_lay_shortcut(t, spec, &plan, road);
 }
 
 void gs_generate(gs_track *t, uint32_t seed) {

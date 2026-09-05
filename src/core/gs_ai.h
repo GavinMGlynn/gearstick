@@ -60,11 +60,17 @@ typedef struct gs_ai_style {
     // which costs distance on a straight and lines on a jump; narrow is one who
     // keeps it pointed. Too narrow and it hunts, which is why nobody gets zero.
     gs_angle deadband;
+    // **Takes the shortcut** where the track has one: aims at the next
+    // checkpoint instead of the next waypoint from a checkpoint a shortcut
+    // leaves, and drives the chord that was carved for it.
+    bool     shortcut;
 } gs_ai_style;
 
 // What a driver at this setting drives like. Integer arithmetic on the way
 // through, like everything else in here.
 gs_ai_style gs_ai_skill_style(int skill);
+// The same skill, taking every shortcut the track offers.
+gs_ai_style gs_ai_shortcut_style(int skill);
 
 // Just the grip fraction of it, for the places that only want the number.
 gs_fix gs_ai_skill_margin(int skill);

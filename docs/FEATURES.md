@@ -390,13 +390,15 @@ file.
   cannot be made legible at a glance — a hidden number that quietly takes your
   engine away is the opposite of predictable.
 
-- **Alternate routes through a track.** `CANDIDATE`
+- **Alternate routes through a track.** `DONE`
   The original's `whichway` offered "seven different routes" and this game
-  generates exactly one. A shortcut that is tighter, rougher or a jump you
-  might not clear is a decision every lap rather than a line to memorise —
-  which is the same argument the gravity dial wins on. The hard part is not
-  drawing it: it is a route model where a gate can be reached two ways, and
-  that is a real change rather than a tweak.
+  generated exactly one. Now a track may have a shortcut: a second road,
+  narrower and looser, cut straight between two posts where the main road
+  goes round. It is a decision every lap rather than a line to memorise —
+  the same argument the gravity dial wins on — and every second car on the
+  grid takes it, so the field splits at the post. Tracks can be drawn with
+  one, hand-built with one in the editor, and raced either way round with
+  it.
 
 - **A daily track everybody gets.** `DONE`
   A generated track is a seed, and there is a server. One seed a day that

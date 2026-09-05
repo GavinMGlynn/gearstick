@@ -169,6 +169,17 @@ counted against you. Drive past a *post* and the lap will not count until
 you go back for it — the HUD says so. Hand-built tracks count every gate
 unless their author turns the **checkpoint every** dial in the gate panel.
 
+**Some tracks have a shortcut.** A second road, narrower and looser, cut
+straight between two posts where the main road goes the long way round: a
+faint dashed line on the map and on the ground, on dirt or gravel. Take it
+or leave it - both ways cross the same posts, and nothing is counted
+against you either way. It is shorter and it is rough; arrive at road speed
+and you will leave it. Every second car on the grid takes it, so expect
+the field to split at the post. A track with a shortcut says so in its
+description, the reversed track has the same cut the other way, and in the
+editor the **shortcut** box on a checkpoint's row in the gate panel marks
+the cut that leaves it.
+
 
 **The grip circle is real.** A tyre has one budget and cornering and
 accelerating spend the same one. Braking in a straight line then turning is

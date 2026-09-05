@@ -417,6 +417,17 @@ int gs_hud_track_shape(const gs_track *t, ImDrawList *dl, float ox, float oy,
                   oy + (gs_to_f(fin->y) - fx * hw) * scale },
         gs_map_rgba(0.95f, 0.95f, 0.95f, 0.95f), 2.0f);
 
+    // The shortcuts, as a fainter straight line from the checkpoint they
+    // leave to the next: the offer, beside the route.
+    for (uint8_t i = 0; i < t->gate_count; i++) {
+        if (!gs_track_shortcut_from(t, i)) continue;
+        const gs_gate *a = &t->gate[i];
+        const gs_gate *b = &t->gate[gs_track_next_checkpoint(t, i)];
+        ImDrawList_AddLineEx(dl,
+            (ImVec2){ ox + gs_to_f(a->x) * scale, oy + gs_to_f(a->y) * scale },
+            (ImVec2){ ox + gs_to_f(b->x) * scale, oy + gs_to_f(b->y) * scale },
+            gs_map_rgba(0.75f, 0.85f, 0.95f, 0.45f), 1.0f);
+    }
     // Every checkpoint as a dot, small enough that a couple of dozen read as
     // beads on the route rather than as a second line. The waypoints between
     // them are the line itself, and are not marked.

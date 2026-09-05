@@ -21,11 +21,12 @@ crossing the line raises the flags, sends up fireworks and says who won. Times
 are kept and beaten. That sentence was false for most of this project's life
 and it is the reason the summary above it was rewritten.
 
-**The tracks are drawn from a matrix, not a template.** Ten dials per track -
-circuit or path, how long, how it corners, how it straightens, how much air,
-what the ground does and how hard, what the weight is like, what it wears, how
-wide the road is - and the route is *grown* by a self-avoiding walk rather
-than laid from a shape. Thirty ship, every one of them raced by every machine
+**The tracks are drawn from a matrix, not a template.** Twelve dials per
+track - circuit or path, how long, how it corners, how it straightens, how
+much air, what the ground does and how hard, what the weight is like, what it
+wears, how wide the road is, what shape the road has, and whether there is a
+shortcut - and the route is *grown* by a self-avoiding walk rather than laid
+from a shape. Thirty ship, every one of them raced by every machine
 from every grid slot before it is allowed in the box.
 
 **The driving has a character now.** The wheel can out-turn the tyres, so a
@@ -8612,6 +8613,118 @@ recorded, played back the verifier's way and watched back from each seat -
 all three the same world hash and the same winner; and the real binary,
 asked for a session and a watch back from every car, printed one world
 hash from every seat. No golden moved.*
+
+### Alternate routes, 2026-09-06
+
+**A twelfth dial: routes.** *One way round*, or *a shortcut* - a second road
+cut straight along the chord between two consecutive checkpoints where the
+main road goes the long way round. It is two tiles wide against the road's
+three or more, on dirt where the road is gravel and gravel otherwise, and it
+is laid by the same carve and relax as the road, so it sits in the ground
+rather than on it. The generator picks the pair of checkpoints whose chord is
+the smallest fraction of the road between them, and takes none that is over
+fifty-five percent of it, under twelve tiles, arriving at the far post from
+in front - a gate crossed backwards does not count, so a cut like that leads
+nowhere - or whose middle is within a dozen tiles of the field's edge. The
+start straight is never cut. A shortcut on *severe* ground is refused to
+*moderate*, because a straight chord across severe ground is a cliff.
+
+**What a route is now, and why this cost less than the plan feared.** The
+plan called this the largest item by a wide margin: a gate reached two ways
+is a change to what a route is. The checkpoint rule landed the day before
+did most of that work without knowing it: only every fourth gate has to be
+crossed in order and the waypoints between are forgiven, so a second road
+between two checkpoints needs nothing from the simulation's crossing rule at
+all. What it needs is one bit: the checkpoint a shortcut leaves carries it,
+in a bitmap of twelve bytes that is written only when a track has one -
+format version 5 - and folded into the hash only then, so every track ever
+saved keeps its bytes and its hash. Reversing the track moves the bit to the
+far post; the chord is the same chord, driven the other way. The editor
+shows it as a **shortcut** box on each checkpoint's row in the gate panel,
+undoable like every other edit, and the spec line says *a shortcut* only
+when the built track has one - the dial is drawn before the road is laid,
+and a draw that finds no pair of posts to cut between describes itself as
+one way round, because that is the track.
+
+**The driver.** A style flag takes it: from the checkpoint the cut leaves,
+the driver aims at the far checkpoint instead of the next waypoint and
+follows the chord's centreline five tiles ahead of itself. Four things went
+wrong on the way, each found by the suite and each a rule that was right
+for a road and wrong for a cut. The lane that keeps four cars from
+converging on one point put the car in the field beside a two-tile road.
+The rule that takes a car round to approach a gate from behind read the
+chord's angle at the far post as "past the gate" and sent the driver to a
+run-up point four tiles beside the cut for its whole length. The corner
+planner braked for the road's next corner rather than the turn onto the
+chord, and once it planned the right corner it planned it as the wide arc
+three gates allow - twenty tiles of chord make a wide arc - and the car
+swept onto the cut at road speed, forty degrees off its line, and slid
+eight tiles wide on loose ground. Into a shortcut the driver aims at the
+post's centre, and the turn onto it is a two-tile radius whatever the
+geometry says. **Every second car on the grid takes it.** Left to the game,
+the odd grid slots cut and the even ones go round, so a race of four splits
+at the post and comes back together at the next, and which car does which
+is the same in every replay. Car 0 - the ghost, the analyser, the time to
+beat - drives the main road.
+
+**Seen.** A faint dashed line along the chord in the world and on the map,
+beside the route's own dashes, so the cut is a thing you can see and choose.
+**In the shipped set**, `make_tracks` refuses a track whose shortcut cannot
+be driven by every machine in both directions, asks for at least four of
+the thirty to have one, and five of the thirty have one - low drop, low mile, old bowl, grey climb, wide run - with six at small jumps, where the floor is three. **The rare bands are chosen first
+now.** The first regeneration after the dial shipped two tracks with a
+shortcut and two with small jumps: a walk that takes the first thirty
+candidates to pass fills up with the common bands before it reaches the
+rare ones. Capping the common bands did not help - once the caps bound, a
+candidate had to be rare in several ways at once, and two hundred thousand
+seeds held two of those - while nine percent of the seeds that draw a
+shortcut and thirteen of those that draw small jumps pass every gate on
+their own. So the set is chosen in two passes over the same seed order:
+the first takes only candidates that raise an unmet floor on a rare band -
+a shortcut, small jumps, bowls, gaps, crests - and stops when the floors
+are met; the second fills the rest. It is as reproducible as it was.
+
+**And the CI check that re-chooses the set had been timing out since
+vertical drama.** The job that regenerates the thirty and diffs them
+against what is committed had twenty minutes, and the tool took longer
+than that on a runner - it has been cancelled on every push since
+2026-09-05 without the main CI going red, because it is a separate
+workflow. Nearly all of the tool's time was refusals: the gate counted
+finishers across six machines and four slots, so a candidate the
+motorcycle wrecked on in its first minute went on to race the other five
+machines from every slot for the full lap budget - up to a quarter of an
+hour of simulated time each - before it was refused, and nearly every
+candidate is refused. The gate says no at the first car that does not get
+round now, and a car that has crossed no gate for two minutes is taken as
+not going to; the stuck cars in the refused candidates were wrecked and
+circling one gate from their first minute to their last. A refusal costs
+about one race instead of forty, the walk can go to two hundred thousand
+seeds, and the job has an hour; choosing the thirty takes seven minutes here, against twenty-two before, and a walk that once ended at twenty-eight tracks ends at thirty. What was found on the
+way: the shortcut was not why shortcut candidates were refused - the same
+two machines wreck on the same ridges with the chord stripped out - and
+small jumps had been shipping exactly its floor of three by luck.
+
+**The plan's verification, corrected.** It asked that neither route be
+strictly faster than the other for every machine. That is not what is
+asserted, and it should not be: on both seeds the suite drives, a computer
+driving the cut cleanly is faster through it, and a shortcut that were
+slower for everybody would be a line on the map. What keeps it a decision
+is that it is narrow and loose - a car that arrives at road speed leaves
+it - so the cut is a risk, not a penalty, and a player who takes it badly
+loses more than the road would have cost.
+
+*Verification: sixteen seeds forced to draw a shortcut, until two carve
+one and are driven: the shortcut driver passes through the middle of the
+chord and finishes, the road driver stays four tiles clear of it and
+finishes; a full grid of four raced on one of them by the game's own
+driver has slots 1 and 3 through the cut and slots 0 and 2 round the road,
+all four finishing; the bit survives a file round trip, costs the file
+twelve bytes only when set, moves the hash only when set, and after two
+reversals is where it was; the spec line says a shortcut only when the
+track has one, checked on a seed that carved and a seed that could not;
+the editor's shortcut edit is in the kinds walk; the world byte audit
+marks the bitmap. The generator golden moved, as every seed draws the new
+dial; neither world golden did.*
 
 
 ## Known risks

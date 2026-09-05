@@ -592,6 +592,16 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
                 gs_edit_remove_gate(e->log, t, i);
                 break;
             }
+            // **A shortcut from this checkpoint** to the next: a second road
+            // the author cuts themselves, read by the driver and the map.
+            if (gs_track_is_checkpoint(t, i) &&
+                gs_track_next_checkpoint(t, i) != i) {
+                char cut[32];
+                SDL_snprintf(cut, sizeof cut, "shortcut##%u", i);
+                bool on = gs_track_shortcut_from(t, i);
+                ImGui_SameLine();
+                if (ImGui_Checkbox(cut, &on)) gs_edit_shortcut(e->log, t, i, on);
+            }
         }
         ImGui_EndChild();
     } else {

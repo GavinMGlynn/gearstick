@@ -121,19 +121,30 @@ static bool gs_keeps_everybody_on_the_field(const gs_track *t) {
     return true;
 }
 
-// How many vehicles get round this track at Earth gravity, driven by the AI -
-// **every machine, from every slot on the grid.** A grid is staggered back
-// from the line and across it, so the car in the last slot has a different
-// corner to make and different ground to make it on. Opponents start in those
-// slots, so a track that ships has to be drivable from all of them.
-static int gs_finishers_at_earth(const gs_track *t) {
+// **Every machine, from every slot on the grid, gets round** at Earth
+// gravity, driven by the AI. A grid is staggered back from the line and
+// across it, so the car in the last slot has a different corner to make and
+// different ground to make it on. Opponents start in those slots, so a track
+// that ships has to be drivable from all of them.
+//
+// **And it says no at the first car that does not.** This used to count
+// finishers across all six machines and every slot, and a candidate the
+// motorcycle wrecked on in its first minute went on to race the other five
+// machines from four slots each for the full lap budget before it was
+// refused. Nearly every candidate is refused, so that was nearly all of the
+// tool's time - and the CI check that re-chooses the set had been timing out
+// on it since vertical drama. **A car that has crossed no gate for two
+// minutes is not going to**: the stuck cars in the refused candidates were
+// wrecked and circling one gate from the first minute to the last, and the
+// lap budget is up to a quarter of an hour. Both are what refuse a track
+// now, so a refusal costs about one race instead of forty.
+#define GS_STOCK_STUCK_SECONDS 120
+
+static bool gs_everybody_finishes(const gs_track *t, gs_ai_style style) {
     uint32_t seconds = gs_analyse_seconds(t);
-    int n = 0;
 
     for (uint8_t v = 0; v < GS_VEH_COUNT; v++) {
-        bool everywhere = true;
-
-        for (uint8_t slot = 0; slot < GS_MAX_CARS && everywhere; slot++) {
+        for (uint8_t slot = 0; slot < GS_MAX_CARS; slot++) {
             gs_world w;
             gs_world_init(&w, GS_ONE);
 
@@ -143,8 +154,10 @@ static int gs_finishers_at_earth(const gs_track *t) {
             gs_world_add_car(&w, t, v, x, y, heading);
 
             bool round = false;
+            uint8_t last_gate = w.car[0].next_gate;
+            uint32_t since = 0;
             for (uint32_t i = 0; i < GS_TICK_HZ * seconds; i++) {
-                gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, t, 0), 0, 0, 0 };
+                gs_input in[GS_MAX_CARS] = { gs_ai_drive_style(&w, t, 0, style), 0, 0, 0 };
                 gs_world_step(&w, t, in);
                 // **Laps done, not laps counted.** A circuit's first crossing
                 // of its start line is the run-up, three tiles from the grid,
@@ -152,13 +165,28 @@ static int gs_finishers_at_earth(const gs_track *t) {
                 // circuit two seconds in and never raced one. Found the day a
                 // crest stalled a car the gate had sworn could get round.
                 if (gs_car_laps_done(t, &w.car[0]) > 0) { round = true; break; }
+                if (w.car[0].next_gate != last_gate) {
+                    last_gate = w.car[0].next_gate;
+                    since = i;
+                } else if (i - since > GS_TICK_HZ * GS_STOCK_STUCK_SECONDS) {
+                    break;
+                }
             }
-            everywhere = round;
+            if (!round) return false;
         }
-
-        if (everywhere) n++;
     }
-    return n;
+    return true;
+}
+
+static bool gs_everybody_finishes_at_earth(const gs_track *t) {
+    return gs_everybody_finishes(t, gs_ai_skill_style(GS_AI_SKILL_DEFAULT));
+}
+
+// **And the shortcut, if there is one, driven by every machine from every
+// slot as well** - both ways, like everything else that ships.
+static bool gs_shortcut_drivable(const gs_track *t) {
+    if (!gs_track_has_shortcuts(t)) return true;
+    return gs_everybody_finishes(t, gs_ai_shortcut_style(GS_AI_SKILL_DEFAULT));
 }
 
 // **Thirty tracks, spread across the matrix and asserted to be.**
@@ -178,6 +206,19 @@ static int gs_finishers_at_earth(const gs_track *t) {
 // bands fill twenty-four of the thirty and the search keeps going until the
 // rare ones supply the rest.
 #define GS_STOCK_PER_DRAMA 6
+// **The rare bands are chosen first.** A walk that takes the first thirty
+// candidates to pass fills up with the common bands and never reaches the
+// floors on the rare ones: the first regeneration after the routes dial
+// shipped two tracks with a shortcut and two with small jumps, and capping
+// the common bands did not help - once the caps bound, a candidate had to
+// be rare in several ways at once, and two hundred thousand seeds held two.
+// So the set is chosen in two passes over the same seed order: the first
+// takes only candidates that raise an unmet floor on a rare band - a
+// shortcut, small jumps, bowls, gaps, crests - and stops when those floors
+// are met; the second fills the rest. The set is as reproducible as it was.
+#define GS_STOCK_MIN_SHORTCUT 4
+#define GS_STOCK_MIN_JUMPS    3
+#define GS_STOCK_MIN_DRAMA    2
 
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "assets/tracks";
@@ -191,6 +232,7 @@ int main(int argc, char **argv) {
     int curve_total[GS_CURVE_COUNT] = { 0 };
     int jumps_total[GS_JUMPS_COUNT] = { 0 };
     int drama_total[GS_DRAMA_COUNT] = { 0 };
+    int routes_total[GS_ROUTES_COUNT] = { 0 };
 
     // Two seeds can draw the same two-word name, and the same name is the
     // same file path - a silent overwrite, and a library of twenty-nine.
@@ -198,7 +240,15 @@ int main(int argc, char **argv) {
 
     // Seeds in order, so the set is reproducible and adding a dial later does
     // not reshuffle the tracks anybody already has.
+    for (int pass = 0; pass < 2 && written < GS_STOCK_COUNT; pass++) {
     for (uint32_t n = 1; written < GS_STOCK_COUNT && n < 60000; n++) {
+        if (pass == 0 && routes_total[GS_ROUTES_SHORTCUT] >= GS_STOCK_MIN_SHORTCUT &&
+            jumps_total[GS_JUMPS_SMALL] >= GS_STOCK_MIN_JUMPS &&
+            drama_total[GS_DRAMA_BOWLS] >= GS_STOCK_MIN_DRAMA &&
+            drama_total[GS_DRAMA_GAPS] >= GS_STOCK_MIN_DRAMA &&
+            drama_total[GS_DRAMA_CRESTS] >= GS_STOCK_MIN_DRAMA) {
+            break;      // the floors are met; the second pass fills the rest
+        }
         uint32_t seed = n * 7919u;
 
         gs_track_spec spec = gs_generate_spec_for(seed);
@@ -206,6 +256,16 @@ int main(int argc, char **argv) {
         if (by_len[spec.kind][spec.length] >= GS_STOCK_PER_CELL) continue;
         if (by_curve[spec.kind][spec.curve] >= GS_STOCK_PER_CELL) continue;
         if (drama_total[spec.drama] >= GS_STOCK_PER_DRAMA) continue;
+        // The first pass wants only the rare: a spec that can raise none of
+        // the unmet floors is not generated, let alone raced.
+        const bool rare_jumps = spec.jumps == GS_JUMPS_SMALL &&
+                                jumps_total[GS_JUMPS_SMALL] < GS_STOCK_MIN_JUMPS;
+        const bool rare_drama = (spec.drama == GS_DRAMA_BOWLS || spec.drama == GS_DRAMA_GAPS ||
+                                 spec.drama == GS_DRAMA_CRESTS) &&
+                                drama_total[spec.drama] < GS_STOCK_MIN_DRAMA;
+        const bool maybe_cut = spec.routes == GS_ROUTES_SHORTCUT &&
+                               routes_total[GS_ROUTES_SHORTCUT] < GS_STOCK_MIN_SHORTCUT;
+        if (pass == 0 && !rare_jumps && !rare_drama && !maybe_cut) continue;
 
         char name[32];
         gs_generate_name(name, sizeof name, seed);
@@ -216,17 +276,21 @@ int main(int argc, char **argv) {
         if (taken) continue;
 
         gs_generate(&gs_t, seed);
+        // A draw of "a shortcut" that found no pair of posts to cut between
+        // is one way round, and raises no floor.
+        if (pass == 0 && !rare_jumps && !rare_drama && !gs_track_has_shortcuts(&gs_t)) continue;
         if (gs_track_validate(&gs_t).problem != GS_TRACK_OK) continue;
         if (gs_track_race_length(&gs_t) < GS_INT(GS_STOCK_MIN_ROUTE)) continue;
 
         // **Every vehicle, or it does not ship.** A stock track only the
         // sprint car can finish tells a new player their choice of machine
         // was wrong, which is the opposite of what a starting set is for.
-        if (gs_finishers_at_earth(&gs_t) < GS_VEH_COUNT) continue;
+        if (!gs_everybody_finishes_at_earth(&gs_t)) continue;
 
         // **And it may not throw one of them off the world.** Raced after the
         // check above because that one is cheaper and most candidates fail it.
         if (!gs_keeps_everybody_on_the_field(&gs_t)) continue;
+        if (!gs_shortcut_drivable(&gs_t)) continue;
         // **And the other way round.** Mirror mode races every shipped track
         // reversed, so a track ships only if its reverse passes the same
         // checks its forward route does: a route the validator accepts,
@@ -235,11 +299,12 @@ int main(int argc, char **argv) {
         other = gs_t;
         gs_track_reverse(&other);
         if (gs_track_validate(&other).problem != GS_TRACK_OK) continue;
-        if (gs_finishers_at_earth(&other) < GS_VEH_COUNT) continue;
+        if (!gs_everybody_finishes_at_earth(&other)) continue;
         if (!gs_keeps_everybody_on_the_field(&other)) continue;
+        if (!gs_shortcut_drivable(&other)) continue;
 
         char why[160];
-        gs_spec_line(&spec, why, sizeof why);
+        gs_spec_line(&spec, &gs_t, why, sizeof why);
 
         snprintf(used[written], sizeof used[written], "%s", name);
         for (char *c = name; *c != '\0'; c++) {
@@ -255,7 +320,9 @@ int main(int argc, char **argv) {
         curve_total[spec.curve]++;
         jumps_total[spec.jumps]++;
         drama_total[spec.drama]++;
+        routes_total[gs_track_has_shortcuts(&gs_t) ? GS_ROUTES_SHORTCUT : GS_ROUTES_ONE]++;
         written++;
+    }
     }
 
     if (written < GS_STOCK_COUNT) {
@@ -295,17 +362,23 @@ int main(int argc, char **argv) {
     printf("  drama level/banked/bowls/pipes/gaps/crests: %d/%d/%d/%d/%d/%d\n",
            drama_total[0], drama_total[1], drama_total[2], drama_total[3],
            drama_total[4], drama_total[5]);
+    printf("  routes one way/a shortcut: %d/%d\n", routes_total[0], routes_total[1]);
+    if (routes_total[GS_ROUTES_SHORTCUT] < GS_STOCK_MIN_SHORTCUT) {
+        printf("  too few tracks with a shortcut: %d of at least %d\n",
+               routes_total[GS_ROUTES_SHORTCUT], GS_STOCK_MIN_SHORTCUT);
+        spread = false;
+    }
     for (int i = 0; i < GS_DRAMA_COUNT; i++) {
-        if (drama_total[i] < 2) {
-            printf("  too few tracks at drama band %d: %d of at least 2\n",
-                   i, drama_total[i]);
+        if (drama_total[i] < GS_STOCK_MIN_DRAMA) {
+            printf("  too few tracks at drama band %d: %d of at least %d\n",
+                   i, drama_total[i], GS_STOCK_MIN_DRAMA);
             spread = false;
         }
     }
     for (int i = 0; i < GS_JUMPS_COUNT; i++) {
-        if (jumps_total[i] < 3) {
-            printf("  too few tracks at jumps band %d: %d of at least 3\n",
-                   i, jumps_total[i]);
+        if (jumps_total[i] < GS_STOCK_MIN_JUMPS) {
+            printf("  too few tracks at jumps band %d: %d of at least %d\n",
+                   i, jumps_total[i], GS_STOCK_MIN_JUMPS);
             spread = false;
         }
     }

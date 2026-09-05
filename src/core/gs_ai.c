@@ -29,6 +29,13 @@ gs_ai_style gs_ai_skill_style(int skill) {
     // slightly wrong, which is where the lines diverge.
     st.deadband = (gs_angle)(GS_AI_DEADBAND * 2 - (GS_AI_DEADBAND * 3 / 2) *
                              skill / GS_AI_SKILL_STEPS);
+    st.shortcut = false;
+    return st;
+}
+
+gs_ai_style gs_ai_shortcut_style(int skill) {
+    gs_ai_style st = gs_ai_skill_style(skill);
+    st.shortcut = true;
     return st;
 }
 
@@ -37,7 +44,15 @@ gs_fix gs_ai_skill_margin(int skill) {
 }
 
 gs_input gs_ai_drive(const gs_world *w, const gs_track *t, uint8_t car) {
-    return gs_ai_drive_style(w, t, car, gs_ai_skill_style(GS_AI_SKILL_DEFAULT));
+    // **Every second car takes the shortcut.** A cut nobody in the race
+    // ever took would be a line on the map; a grid where the odd slots
+    // take it and the even ones go round is a race where the field splits
+    // at the post and comes back together at the next, and which car does
+    // which is the same in every replay. Car 0 - the ghost, the analyser,
+    // the time to beat - drives the main road.
+    gs_ai_style st = gs_ai_skill_style(GS_AI_SKILL_DEFAULT);
+    st.shortcut = (car & 1u) != 0;
+    return gs_ai_drive_style(w, t, car, st);
 }
 
 gs_input gs_ai_drive_at(const gs_world *w, const gs_track *t, uint8_t car,
@@ -80,6 +95,7 @@ static bool gs_ai_hunted(const gs_world *w, uint8_t car) {
     return false;
 }
 
+
 gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
                            gs_ai_style style) {
     const gs_fix margin = style.margin;
@@ -89,6 +105,32 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
     if (!c->active || c->wrecked) return 0;
 
     const gs_gate *target = &t->gate[c->next_gate % t->gate_count];
+
+    // **The shortcut**, for a driver whose style takes it: from a checkpoint
+    // a shortcut leaves, aim at the next checkpoint rather than the next
+    // waypoint - the chord between them is the shortcut, carved for exactly
+    // this, and every waypoint between is forgiven for being missed.
+    bool on_shortcut = false;
+    bool into_cut = false;          // the next gate is where a shortcut leaves
+    const gs_gate *cut_from = nullptr;
+    if (style.shortcut && t->gate_count > 1) {
+        const uint8_t n = t->gate_count;
+        const uint8_t next = (uint8_t)(c->next_gate % n);
+        if (!gs_track_is_checkpoint(t, next)) {
+            uint8_t from = next;
+            for (uint8_t back = 1; back <= n; back++) {
+                const uint8_t j = (uint8_t)((next + n - back) % n);
+                if (gs_track_is_checkpoint(t, j)) { from = j; break; }
+            }
+            if (gs_track_shortcut_from(t, from)) {
+                target = &t->gate[gs_track_next_checkpoint(t, from)];
+                cut_from = &t->gate[from];
+                on_shortcut = true;
+            }
+        } else if (gs_track_shortcut_from(t, next)) {
+            into_cut = true;
+        }
+    }
 
     gs_fix dx = target->x - c->x;
     gs_fix dy = target->y - c->y;
@@ -113,6 +155,15 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
         // the lip. Where the lane sits more than a third of a tile above the
         // gate's centre, the lane is halved until it does not. A level road
         // never trips this, so nothing changes where nothing was wrong.
+        // **No lane on the shortcut.** It is two tiles wide and aimed at from
+        // its far end; a lane beside a wide checkpoint put the car in the field
+        // beside it, driving the length of the cut on grass.
+        // **Nor into one.** Aimed at a lane beside the checkpoint a
+        // shortcut leaves, a car came at the chord's start from four tiles
+        // to one side and crossed the chord at forty degrees instead of
+        // turning onto it. Aimed at the centre, it turns in where the
+        // chord begins.
+        if (on_shortcut || into_cut) lane = 0;
         const gs_fix sx = -gs_sin(target->heading), sy = gs_cos(target->heading);
         const gs_fix centre_h = gs_track_height(t, target->x, target->y);
         for (int k = 0; k < 3; k++) {
@@ -123,6 +174,34 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
         }
         dx += gs_fix_mul(sx, lane);
         dy += gs_fix_mul(sy, lane);
+    }
+    
+    // **On the shortcut, follow the chord.** Aimed straight at the far
+    // checkpoint, a car that crossed the near one off-centre drove a line
+    // that met the two-tile cut only at its end, and the cut beside it
+    // went unused. Aimed at a point eight tiles further along the chord
+    // from wherever it is, it converges onto the road and stays on it;
+    // in the last stretch it aims at the checkpoint itself.
+    if (on_shortcut && cut_from != nullptr) {
+        const gs_fix ax = cut_from->x, ay = cut_from->y;
+        const gs_fix ddx = target->x - ax, ddy = target->y - ay;
+        const gs_fix len = gs_fix_len2(ddx, ddy);
+        if (len > GS_INT(2)) {
+            const gs_fix ux = gs_fix_div(ddx, len), uy = gs_fix_div(ddy, len);
+            gs_fix along = gs_fix_mul(c->x - ax, ux) + gs_fix_mul(c->y - ay, uy);
+            // Five tiles ahead on the centreline: eight let a car crossing
+            // a hillside drift two tiles down the slope onto the verge
+            // before the aim pulled it back; five pulls harder and does
+            // not hunt.
+            along += GS_INT(5);
+            if (along < len - GS_INT(6)) {
+                dx = ax + gs_fix_mul(ux, along) - c->x;
+                dy = ay + gs_fix_mul(uy, along) - c->y;
+            } else {
+                dx = target->x - c->x;
+                dy = target->y - c->y;
+            }
+        }
     }
 
     // --- Approach a gate from behind it, not from in front.
@@ -145,7 +224,11 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
         gs_fix ahead = gs_fix_mul(c->x - target->x, fx) +
                        gs_fix_mul(c->y - target->y, fy);
 
-        if (ahead > 0) {
+        // Not on a shortcut: the chord meets the far checkpoint at an angle
+        // to its facing, which reads as "past the gate" from here and sent
+        // the car to a run-up point four tiles beside the cut for its whole
+        // length. Arriving along the chord is arriving.
+        if (ahead > 0 && !on_shortcut) {
             // A fixed run-up on the near side, and **not one that grows with the
             // overshoot**: scaling it meant a car thirty-five tiles past a gate
             // aimed twenty-five tiles off the map, and drove there. Four tiles is
@@ -392,6 +475,19 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
     // What matters is the angle the *route* turns through at that gate, which is
     // knowable from a long way back.
     const gs_gate *after = &t->gate[(c->next_gate + 1u) % t->gate_count];
+    // **A shortcut is a corner the gates do not describe.** For a driver
+    // taking it, the way out of the checkpoint it leaves is the chord to the
+    // far checkpoint, and the way out of the far checkpoint is the gate
+    // after that; the corner is planned - and braked for - accordingly.
+    if (style.shortcut && t->gate_count > 1) {
+        const uint8_t n = t->gate_count;
+        const uint8_t here = (uint8_t)(target - t->gate);
+        if (on_shortcut) {
+            after = &t->gate[(here + 1u) % n];
+        } else if (gs_track_is_checkpoint(t, here) && gs_track_shortcut_from(t, here)) {
+            after = &t->gate[gs_track_next_checkpoint(t, here)];
+        }
+    }
 
     gs_angle coming = gs_atan2(dy, dx);
     gs_angle going = gs_atan2(after->y - target->y, after->x - target->x);
@@ -446,6 +542,13 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
                                          gs_fix_mul(sin_half, GS_INT(2)))
                             : 0;
         if (radius < GS_HALF) radius = GS_HALF;
+        // **The turn onto a shortcut is as tight as the shortcut.** The
+        // radius above is the arc three gates allow, and a chord twenty
+        // tiles long makes that arc a wide one; the chord is two tiles
+        // wide, its ground is loose, and a car that swept onto it on the
+        // arc the geometry allowed slid eight tiles wide and drove the
+        // field beside it. The arc is no wider than the cut.
+        if (into_cut && radius > GS_INT(2)) radius = GS_INT(2);
         corner_speed = gs_fix_mul(gs_fix_sqrt(gs_fix_mul(traction, radius)),
                                   margin);
 

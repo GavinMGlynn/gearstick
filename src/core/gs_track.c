@@ -87,6 +87,7 @@ void gs_track_init(gs_track *t, uint8_t w, uint8_t h, gs_surface surface) {
     t->h = h;
     t->gate_count = 0;
     t->checkpoint_every = 1;
+    for (size_t i = 0; i < GS_TRACK_SHORTCUT_BYTES; i++) t->shortcut[i] = 0;
 
     // A fresh track is a path until something says otherwise, which is the
     // safer of the two: a sprint's finish is its last gate, and a track with
@@ -597,6 +598,8 @@ static uint64_t gs_track_hash_of(const gs_track *t, bool with_route) {
     if (t->checkpoint_every > 1) {
         gs_hash_bytes(&h, &t->checkpoint_every, sizeof t->checkpoint_every);
     }
+    // The shortcuts, the same way: only when there are any.
+    if (gs_track_has_shortcuts(t)) gs_hash_bytes(&h, t->shortcut, sizeof t->shortcut);
     gs_hash_bytes(&h, &t->gate_count, sizeof t->gate_count);
     for (uint8_t i = 0; i < t->gate_count; i++) {
         const gs_gate *g = &t->gate[i];
@@ -645,8 +648,11 @@ static uint32_t gs_get_u32(const uint8_t *p) {
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-// magic, version, w, h, gate count, route kind, gates per checkpoint.
-#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1 + 1 + 1 + 1)
+// magic, version, w, h, gate count, route kind, gates per checkpoint, and
+// the shortcut bitmap.
+#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1 + 1 + 1 + 1 + GS_TRACK_SHORTCUT_BYTES)
+// Version 4: no shortcut bitmap.
+#define GS_TRACK_HEADER_BYTES_V4 (4 + 4 + 1 + 1 + 1 + 1 + 1)
 
 // What the headers before were. Version 2 had no route kind; version 3 had
 // no checkpoint stride - every gate was a checkpoint, which is what a stride
@@ -680,6 +686,15 @@ void gs_track_reverse(gs_track *t) {
     for (uint8_t i = 0; i < n; i++) was[i] = t->gate[i];
 
     const bool loop = gs_track_is_circuit(t);
+    // A shortcut from checkpoint a to the next checkpoint b is, the other
+    // way round, a shortcut from b to a: the bit moves to b's new index.
+    uint8_t shortcut[GS_TRACK_SHORTCUT_BYTES] = { 0 };
+    for (uint8_t a = 0; a < n; a++) {
+        if (!gs_track_shortcut_from(t, a)) continue;
+        const uint8_t b = gs_track_next_checkpoint(t, a);
+        const uint8_t nb = (uint8_t)(loop ? (n - b) % n : n - 1 - b);
+        shortcut[nb / 8] |= (uint8_t)(1u << (nb % 8));
+    }
     for (uint8_t i = 0; i < n; i++) {
         // A loop keeps gate zero where it is and walks the rest backwards
         // from the end; a path is simply read from the far end.
@@ -687,6 +702,7 @@ void gs_track_reverse(gs_track *t) {
         t->gate[i] = was[from];
         t->gate[i].heading = (gs_angle)(t->gate[i].heading + 32768u);
     }
+    for (size_t i = 0; i < GS_TRACK_SHORTCUT_BYTES; i++) t->shortcut[i] = shortcut[i];
 }
 
 uint64_t gs_track_reversed_hash(const gs_track *t) {
@@ -694,6 +710,35 @@ uint64_t gs_track_reversed_hash(const gs_track *t) {
     other = *t;
     gs_track_reverse(&other);
     return gs_track_hash(&other);
+}
+
+bool gs_track_shortcut_from(const gs_track *t, uint8_t i) {
+    if (i >= t->gate_count) return false;
+    return (t->shortcut[i / 8] & (uint8_t)(1u << (i % 8))) != 0;
+}
+
+void gs_track_set_shortcut(gs_track *t, uint8_t i, bool on) {
+    if (i >= GS_TRACK_MAX_GATES) return;
+    if (on) t->shortcut[i / 8] |= (uint8_t)(1u << (i % 8));
+    else t->shortcut[i / 8] &= (uint8_t)~(1u << (i % 8));
+}
+
+bool gs_track_has_shortcuts(const gs_track *t) {
+    for (size_t i = 0; i < sizeof t->shortcut; i++) {
+        if (t->shortcut[i] != 0) return true;
+    }
+    return false;
+}
+
+uint8_t gs_track_next_checkpoint(const gs_track *t, uint8_t i) {
+    const uint8_t n = t->gate_count;
+    if (n == 0) return 0;
+    for (uint8_t step = 1; step <= n; step++) {
+        const uint8_t j = (uint8_t)((i + step) % n);
+        if (!gs_track_is_circuit(t) && j <= i) return i;   // a path ends
+        if (gs_track_is_checkpoint(t, j)) return j;
+    }
+    return i;
 }
 
 bool gs_track_is_checkpoint(const gs_track *t, uint8_t i) {
@@ -715,12 +760,15 @@ bool gs_track_is_circuit(const gs_track *t) {
 // still read it. Only a track that uses the stride needs the byte that
 // carries it.
 static uint32_t gs_track_version(const gs_track *t) {
-    return t->checkpoint_every > 1 ? GS_TRACK_VERSION : 3u;
+    if (gs_track_has_shortcuts(t)) return GS_TRACK_VERSION;
+    return t->checkpoint_every > 1 ? 4u : 3u;
 }
 
 static size_t gs_track_header_bytes(const gs_track *t) {
-    return gs_track_version(t) >= 4u ? (size_t)GS_TRACK_HEADER_BYTES
-                                     : (size_t)GS_TRACK_HEADER_BYTES_V3;
+    const uint32_t v = gs_track_version(t);
+    return v >= 5u ? (size_t)GS_TRACK_HEADER_BYTES
+         : v >= 4u ? (size_t)GS_TRACK_HEADER_BYTES_V4
+                   : (size_t)GS_TRACK_HEADER_BYTES_V3;
 }
 
 size_t gs_track_size(const gs_track *t) {
@@ -739,6 +787,9 @@ size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap) {
     *p++ = t->gate_count;
     *p++ = t->route;
     if (gs_track_version(t) >= 4u) *p++ = t->checkpoint_every;
+    if (gs_track_version(t) >= 5u) {
+        for (size_t i = 0; i < GS_TRACK_SHORTCUT_BYTES; i++) *p++ = t->shortcut[i];
+    }
 
     for (uint32_t y = 0; y <= t->h; y++) {
         for (uint32_t x = 0; x <= t->w; x++) {
@@ -778,8 +829,9 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
     // add a byte.
     uint32_t version = gs_get_u32(p);
     p += 4;
-    if (version != GS_TRACK_VERSION && version != 2u && version != 3u) return false;
-    size_t header = version >= 4u   ? GS_TRACK_HEADER_BYTES
+    if (version < 2u || version > GS_TRACK_VERSION) return false;
+    size_t header = version >= 5u   ? GS_TRACK_HEADER_BYTES
+                    : version == 4u ? (size_t)GS_TRACK_HEADER_BYTES_V4
                     : version == 3u ? (size_t)GS_TRACK_HEADER_BYTES_V3
                                     : (size_t)GS_TRACK_HEADER_BYTES_V2;
     if (len < header) return false;
@@ -790,6 +842,10 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
     uint8_t kind = version >= 3u ? *p++ : (uint8_t)GS_ROUTE_SPRINT;
     uint8_t every = version >= 4u ? *p++ : (uint8_t)1;
     if (every == 0) every = 1;
+    uint8_t shortcut[GS_TRACK_SHORTCUT_BYTES] = { 0 };
+    if (version >= 5u) {
+        for (size_t i = 0; i < GS_TRACK_SHORTCUT_BYTES; i++) shortcut[i] = *p++;
+    }
     if (w == 0 || h == 0 || w > GS_TRACK_MAX || h > GS_TRACK_MAX) return false;
     if (gates > GS_TRACK_MAX_GATES) return false;
     if (kind > (uint8_t)GS_ROUTE_CIRCUIT) return false;
@@ -805,6 +861,7 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
     gs_track_init(t, w, h, GS_SURF_PAVEMENT);
     t->route = kind;
     t->checkpoint_every = every;
+    for (size_t i = 0; i < GS_TRACK_SHORTCUT_BYTES; i++) t->shortcut[i] = shortcut[i];
 
     for (uint32_t y = 0; y <= h; y++) {
         for (uint32_t x = 0; x <= w; x++) {
