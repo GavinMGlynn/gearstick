@@ -50,6 +50,71 @@ static float gs_light(gs_fix dzdx, gs_fix dzdy) {
     return SDL_clamp(0.55f + d * 0.45f, 0.40f, 1.15f);
 }
 
+// --- The land beyond the drop -----------------------------------------------
+//
+// **"Better background terrain - instead of flat squares."** Outside a track
+// there is a shoulder a car can come back from, and past that the world falls
+// away. Both were drawn honestly and both are flat, so a track sat in the
+// middle of a featureless plain that stopped a few tiles later - and a world
+// with no horizon reads as a diagram rather than a place.
+//
+// So the land past the drop has hills on it. Three rules make that safe:
+//
+// **Only past the drop.** Inside the track and across the whole shoulder the
+// drawn ground is exactly the ground the simulation has, to the corner - the
+// shelf is deliberately level, a car recovers on it, and today's hover bug was
+// precisely the drawing and the physics disagreeing about it. Nothing here
+// touches a tile a car can stand on.
+//
+// **Drawn, never simulated.** This lives in the renderer and `gs_track_height`
+// is untouched, so not one golden hash moves and no replay changes. It cannot:
+// a car that reaches this ground has gone over the edge and its race is over.
+//
+// **The same hills on every machine.** A function of world position and the
+// track's own hash - so two people in a split screen, and a replay of the same
+// race, see the identical landscape, and adjacent tiles agree about the corner
+// they share exactly the way the track's own tiles do.
+#define GS_SCENERY_FROM  4.0f     // tiles past the shoulder before hills start
+#define GS_SCENERY_RISE  26.0f    // and how far out they reach full height
+
+// The track's hash, taken once when a view begins. See gs_scenery_at.
+static uint64_t gs_scenery_seed = 0;
+
+static float gs_scenery_at(const gs_track *t, float wx, float wy) {
+    const float out = gs_to_f(gs_track_outside(t, (gs_fix)(wx * (float)GS_ONE),
+                                               (gs_fix)(wy * (float)GS_ONE)));
+    const float past = out - (float)GS_RUNOFF_TILES - GS_SCENERY_FROM;
+    if (past <= 0.0f) return 0.0f;
+
+    // Eased in, so the land does not start with a step at the far lip of the
+    // drop - the one place a seam would be visible.
+    float grow = past / GS_SCENERY_RISE;
+    if (grow > 1.0f) grow = 1.0f;
+    grow = grow * grow * (3.0f - 2.0f * grow);
+
+    // Two octaves of crossed sine, the same shape the generator's rolling
+    // ground uses, phased by the track's hash so no two tracks sit in the
+    // same landscape. **Taken once per view, never per corner** - the hash
+    // walks the whole used region of the track, and asking for it four times
+    // a tile would have cost more than everything else the renderer does put
+    // together.
+    const float p1 = (float)(gs_scenery_seed & 0xffffu) * 0.0001f;
+    const float p2 = (float)((gs_scenery_seed >> 16) & 0xffffu) * 0.0001f;
+
+    const float big = SDL_sinf(wx * 0.055f + p1) * SDL_sinf(wy * 0.048f + p2);
+    const float small = SDL_sinf(wx * 0.140f + p2) * SDL_sinf(wy * 0.155f + p1);
+
+    // Hills rather than holes: biased upward, so the land rises out of the
+    // fallen ground instead of digging further into it.
+    const float shape = big * 0.72f + small * 0.28f + 0.55f;
+    return grow * shape * 14.0f;
+}
+
+// How much a tile's colour may wander from its surface's own, either way.
+// Enough to see grain in a field of one material, little enough that nobody
+// mistakes it for a different ground.
+#define GS_GROUND_GRAIN 0.13f
+
 static SDL_FColor gs_tile_colour(const gs_track *t, int32_t tx, int32_t ty,
                                  bool show_gravity, const gs_analysis *heat) {
     gs_fix cx = GS_INT(tx) + GS_HALF;
@@ -64,14 +129,48 @@ static SDL_FColor gs_tile_colour(const gs_track *t, int32_t tx, int32_t ty,
 
     float r = base.r * shade, g = base.g * shade, b = base.b * shade;
 
+    // **Ground that reads as ground.** Every tile of a surface was the exact
+    // same colour, so a field of it came out as one flat slab of plastic with
+    // a road cut into it - "flat squares", and the shading only showed where
+    // there was a slope to catch it. Real ground is not one colour. A few per
+    // cent of variation per tile, from the tile's own coordinates, breaks the
+    // fill into something with grain in it without touching what surface it
+    // is: the palette is unchanged, the surfaces are as far apart as they
+    // ever were, and two machines agree because the noise is a function of
+    // position rather than of anything remembered.
+    {
+        uint32_t n = (uint32_t)(tx * 73856093) ^ (uint32_t)(ty * 19349663);
+        n ^= n >> 13; n *= 0x85ebca6bu; n ^= n >> 16;
+        const float jitter = 1.0f + ((float)(n & 0xffffu) / 65535.0f - 0.5f) *
+                                        GS_GROUND_GRAIN;
+        r *= jitter; g *= jitter; b *= jitter;
+    }
+
     // **Off the track reads as off the track.** The run-off is ground a car can
     // be on and has to be drawn, and it is also not where the racing is - a
     // shoulder rendered at the same weight as the circuit makes a thin ribbon of
     // track in a field of sand, and the eye has to hunt for the part that
     // matters. Darkened rather than recoloured, so it is plainly the same
     // material and plainly not the road.
-    if (gs_track_outside(t, cx, cy) > 0) {
+    const gs_fix outside = gs_track_outside(t, cx, cy);
+    if (outside > 0) {
         r *= 0.55f; g *= 0.55f; b *= 0.55f;
+    }
+
+    // **And the land beyond the drop recedes.** Distance is the one cue an
+    // isometric view cannot give by perspective, so it is given by colour:
+    // the further out, the more the ground washes toward the haze the sky
+    // would be. Without it the hills read as more sand at the same distance
+    // as the shoulder, which is the flat look this was meant to cure.
+    const float far_out = gs_to_f(outside) - (float)GS_RUNOFF_TILES;
+    if (far_out > 0.0f) {
+        float k = far_out / (GS_SCENERY_FROM + GS_SCENERY_RISE + 8.0f);
+        if (k > 1.0f) k = 1.0f;
+        k *= 0.72f;
+        static const float haze[3] = { 0.46f, 0.52f, 0.60f };
+        r += (haze[0] - r) * k;
+        g += (haze[1] - g) * k;
+        b += (haze[2] - b) * k;
     }
 
     if (heat != nullptr) {
@@ -888,7 +987,9 @@ static void gs_draw_tile(SDL_Renderer *ren, const gs_camera *cam,
         gs_fix wx = GS_INT(tx + ox[i]);
         gs_fix wy = GS_INT(ty + oy[i]);
         gs_fix wz = gs_track_height(t, wx, wy);
-        gs_iso_project(cam, gs_to_f(wx), gs_to_f(wy), gs_to_f(wz),
+        const float fx = gs_to_f(wx), fy = gs_to_f(wy);
+        gs_iso_project(cam, fx, fy,
+                       gs_to_f(wz) + gs_scenery_at(t, fx, fy),
                        &p[i].x, &p[i].y);
     }
 
@@ -1747,7 +1848,15 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
     // before the first car is - which used to be what turned blending on.
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
 
-    const int fringe = GS_RUNOFF_TILES + 6;
+    // **Far enough out to see a horizon.** Six tiles past the shoulder showed
+    // the drop beginning and then stopped, so the world ended in mid-air a
+    // few tiles beyond the track. The land now runs out to where the hills
+    // have grown their full height, which is what makes the track sit *in*
+    // somewhere. Everything past the near edge of the view is culled by
+    // gs_tile_in_view, so this costs what is on screen and not what is drawn.
+    const int fringe = GS_RUNOFF_TILES + (int)GS_SCENERY_FROM +
+                       (int)GS_SCENERY_RISE + 8;
+    gs_scenery_seed = gs_track_hash(t);
 
     int diagonals = (int)t->w + (int)t->h - 1 + fringe * 2;
     for (int d = 0; d < diagonals; d++) {

@@ -13,6 +13,7 @@ Each entry carries one of:
 `CORE` — the game is not itself without this ·
 `WANTED` — decided in, not yet scheduled ·
 `CANDIDATE` — a good idea nobody has committed to ·
+`DONE` — built, and ticked in `COMPLETION_PLAN.md` with its verification ·
 `OUT` — deliberately rejected, with the reason, so it does not get re-proposed
 
 ---
@@ -61,7 +62,7 @@ predict what the car will do is out, however impressive it looks.
 - **Three surfaces — pavement, dirt, ice.** `CORE`
   Distinct enough to change the racing line, simple enough to hold in your head.
 
-- **A ground for every world on the dial.** `WANTED`
+- **A ground for every world on the dial.** `DONE`
   The gravity dial already names eight bodies, and eight worlds that all look and
   drive like a car park is a missed opportunity sitting in plain sight. Dust that
   is loose and almost frictionless under a sixth of a gravity, sand that will not
@@ -80,7 +81,7 @@ predict what the car will do is out, however impressive it looks.
 - **Everything unlocked from the first second.** `CORE`
   No progression, no currency, no earning the good car.
 
-- **Automatic and manual transmission.** `WANTED`
+- **Automatic and manual transmission.** `DONE`
   A gearbox as a choice, not a difficulty setting: automatic shifts for you,
   manual gives you the shift as one more thing to be good at. How many forward
   gears a machine has - and its one reverse - is a property of the vehicle,
@@ -105,32 +106,32 @@ predict what the car will do is out, however impressive it looks.
   rollback netcode possible at all — every one of them is downstream of it, so
   it comes first and everything else waits.
 
-- **Rollback netcode for online play.** `WANTED`
+- **Rollback netcode for online play.** `DONE`
   The honest 2026 translation of two people on one couch. The input is eight
   directions and a button, so the state is tiny and rollback is cheap.
 
-- **Track sharing.** `WANTED`
+- **Track sharing.** `DONE`
   A track leaves the room as a short code or a URL. The 50-track floppy was a
   media limitation, not a design choice.
 
-- **Instant test-drive from the editor cursor.** `WANTED`
+- **Instant test-drive from the editor cursor.** `DONE`
   Drop in, drive, snap back to editing. No reload, no mode change worth
   noticing. The original's disk loads were the main thing standing between the
   player and the iteration loop, and removing them is the single biggest
   quality-of-life win available.
 
-- **Continuous dials instead of discrete steps.** `WANTED`
+- **Continuous dials instead of discrete steps.** `DONE`
   The fourteen gravity settings were a 6502 limitation. Make gravity continuous,
   and add air drag, friction scale and a damage multiplier beside it. Keep the
   planet names on the presets — that naming was doing real work, and "Jupiter"
   tells a player more than a number does.
 
 - **Four-player split-screen, with the views merging into one when the cars are
-  close.** `CANDIDATE`
+  close.** `DONE`
   Fits the ethic exactly and the original could not have done it. The merge
   behaviour is the interesting part and also the risky part.
 
-- **A headless mode.** `WANTED`
+- **A headless mode.** `DONE`
   The game runs a track with no window, at whatever speed the machine allows.
   Player-invisible, but it is what lets the editor ask questions about a track
   and lets CI notice that a change to the physics rewrote every existing time.
@@ -139,7 +140,7 @@ predict what the car will do is out, however impressive it looks.
 
 ## New ideas worth building
 
-- **Gravity as a brush, not a setting.** `WANTED`
+- **Gravity as a brush, not a setting.** `DONE`
   The best idea in the pile. Paint gravity onto the track per tile: a low-g
   pocket at the top of a jump, a Jupiter zone that pins you through a banked
   turn, a ramp whose landing sits under different physics from its take-off. It
@@ -147,12 +148,12 @@ predict what the car will do is out, however impressive it looks.
   material you build with, and it is still a dial, still predictable, still
   exploitable.
 
-- **A ghost that re-drives the track while you edit it.** `WANTED`
+- **A ghost that re-drives the track while you edit it.** `DONE`
   A translucent car continuously re-racing the current design in the background.
   Raise a ramp, and two seconds later watch the ghost overshoot the landing.
   Track editing stops being blind construction and becomes a feedback loop.
 
-- **Opponents you can actually race, with their smarts on a dial.** `WANTED`
+- **Opponents you can actually race, with their smarts on a dial.** `DONE`
   There is a driver in here already - it plans a line from the grip it has here
   and now rather than following a baked one, so it re-thinks the corner the
   moment somebody moves the gravity dial. What there is no way to do is *race*
@@ -168,29 +169,29 @@ predict what the car will do is out, however impressive it looks.
   the harder half - the current driver, put on a bare rectangle with two gates,
   laps it twice and then sits in the run-off for as long as you leave it.
 
-- **Surfaces that change over the race.** `CANDIDATE`
+- **Surfaces that change over the race.** `DONE`
   Dirt churns into ruts and loses grip on the line everyone is taking; ice
   polishes into something faster and looser; pavement does not care. Lap five
   stops being lap one, the ideal line moves *during* the race, and running
   second becomes a reason to pick a different line rather than a position to
   suffer.
 
-- **Wreckage that stays.** `CANDIDATE`
+- **Wreckage that stays.** `DONE`
   A destroyed car leaves debris that remains as track geometry for the rest of
   the race. Winning the fight reshapes the course.
 
-- **A track analyser, shown as a heatmap over the editor.** `CANDIDATE`
+- **A track analyser, shown as a heatmap over the editor.** `DONE`
   Sweep the track across gravity values and vehicle choices and report the
   envelope: completable between these two gravities in these six vehicles, that
   third jump impossible below 0.9g, this corner is where the time goes. Nobody
   in 1985 could tell you whether their track was any good.
 
-- **A landing-prediction arc, off by default.** `CANDIDATE`
+- **A landing-prediction arc, off by default.** `DONE`
   A dotted trajectory to the predicted touchdown point while airborne. It reads
   like a modern hand-hold and is the opposite: it makes the physics model
   legible, and legibility is exactly what lets a skilled player exploit it.
 
-- **Tracks identified by their content.** `WANTED`
+- **Tracks identified by their content.** `DONE`
   Two players with the same track have the same track, without a server
   deciding so; editing one cleanly produces a new one. Ghosts and times then
   aggregate by themselves.
@@ -203,27 +204,27 @@ The game is a thing you install and play. This is the layer around it that
 remembers who you are, keeps what you have built, and lets it travel — decided
 in as a direction, and deliberately kept at arm's length from the racing itself.
 
-- **Drivers, not player slots.** `WANTED`
+- **Drivers, not player slots.** `DONE`
   A name, a colour and a favourite machine, remembered between sessions, with a
   history behind it. "Best lap 0:42.1" is a number; "Ada, 0:42.1, baja bug" is
   something to beat. Everything else here hangs off this.
 
-- **Records that mean something.** `WANTED`
+- **Records that mean something.** `DONE`
   Best lap and best race per track — and a record is a time *on a track under
   conditions*, so a lap set at a sixth of gravity is not a lap. Change the
   dials and it is honestly a different table rather than a leaderboard nobody
   can read.
 
-- **Everything remembered between runs.** `WANTED`
+- **Everything remembered between runs.** `DONE`
   Drivers, records, and the tracks you have built. Nothing that took an evening
   to make should live only in the window it was made in.
 
-- **A track library rather than a save file.** `WANTED`
+- **A track library rather than a save file.** `DONE`
   Your tracks are a collection you can browse, not a filename you have to
   remember. Tracks identified by content means the library needs no naming
   authority: the same track from two people is the same entry.
 
-- **Share a track with somebody, or publish it to everybody.** `WANTED`
+- **Share a track with somebody, or publish it to everybody.** `DONE`
   Sharing already works with no server at all — a track is a few hundred
   characters you can paste into a message. Publishing is the other half: put it
   somewhere people can find it, with who made it and what has been done on it.
@@ -241,26 +242,26 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   the simulation is exactly reproducible, and is the strongest argument for
   having built it that way.
 
-- **A recording knows who drove it.** `WANTED`
+- **A recording knows who drove it.** `DONE`
   Re-racing proves a time was driven. It does not prove *you* drove it, and a
   recording that does not name its driver is a thing anybody who obtains one can
   hand in as their own. The driver belongs inside the recording, and the server
   checks it against whoever is submitting.
 
-- **The whole race is checked, not just the winner's lap.** `WANTED`
+- **The whole race is checked, not just the winner's lap.** `DONE`
   Everybody keeps the full input log and the final state hash they all agreed
   on. Re-racing the log has to produce that hash, or one of the machines in that
   race was not running this game. Almost free, for the same reason as everything
   else here.
 
-- **Nobody sees anybody else's inputs before committing their own.** `WANTED`
+- **Nobody sees anybody else's inputs before committing their own.** `DONE`
   Rollback hands every machine the others' inputs for a tick, which means a
   modified one can wait and then decide. Nothing desyncs — everybody simulates
   the dishonest choice faithfully — so the state-hash check that catches a
   changed *simulation* cannot see it. The answer is to commit to a choice before
   anybody else's is visible: send a hash of your inputs, then the inputs.
 
-- **The parsers are fuzzed.** `WANTED`
+- **The parsers are fuzzed.** `DONE`
   Everything the server acts on arrived from somebody who may be hostile. The
   protocol decoder, the reassembler and the deserialisers behind them are the
   most likely place in this program for a memory-safety bug, and well-formed
@@ -274,7 +275,7 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   reviewed, and the parts left out are exactly what a reviewer most needs to see
   were decided rather than missed.
 
-- **A relay for people whose routers will not cooperate.** `WANTED`
+- **A relay for people whose routers will not cooperate.** `DONE`
   Two players who can reach each other should race each other directly, because
   that is the fastest path and the game is about response. A relay exists for
   the people who cannot, and forwards packets without ever simulating anything.
@@ -287,7 +288,7 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   not run them.
 
 - **A track belongs to somebody, and the ones that shipped belong to nobody.**
-  `WANTED`
+  `DONE`
   Whoever built a track can change it, take it down, keep it to themselves, hand
   it to a few named people, or put it up for everybody. The tracks that came with
   the game are outside all of that: nobody can edit or delete them, because a
@@ -296,7 +297,7 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   somebody else's track is a new track with a new identity, so nothing can be
   altered underneath anyone even by accident.
 
-- **Nothing on the wire in the clear.** `CANDIDATE`
+- **Nothing on the wire in the clear.** `DONE`
   Every datagram between a client and the server, and between two players,
   sealed — so what crosses somebody's network is not readable by them and cannot
   be altered on the way. The server's key is its identity, pinned the first time
@@ -317,7 +318,7 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   handles that. This stops the different problem of being watched or interfered
   with in transit — and it is what makes a password possible at all.
 
-- **A profile you can prove is yours.** `CANDIDATE`
+- **A profile you can prove is yours.** `DONE`
   The moment a name owns published work and a place on a leaderboard, it is worth
   taking, and a name typed at a prompt proves nothing. A password at least, and a
   second factor from a phone for anybody who wants one.
@@ -334,6 +335,87 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   nothing in between. Anything a race read from a local database would be a
   thing two machines could disagree about, and disagreeing is the one failure
   this design cannot absorb.
+
+---
+
+## From the neighbours
+
+Everything below came out of comparing this game against the one it descends
+from and against the others in its family — *Stunts* (1990), *Excitebike*
+(1984), *Rock'n'Roll Racing* (1993), *Super Off Road* (1989), *Championship
+Sprint*, *Stunt Car Racer* (1989), *Micro Machines*, *TrackMania* (2003) and
+*Trials*. Most of what those games have, this one already has or has
+deliberately refused. What is here is the residue: things a neighbour does
+that this game has no answer to, and that survive the test at the top of this
+file.
+
+- **Mirror mode.** `WANTED`
+  Race any track the other way round. The route is directional — the gates
+  face — so reversing it is one dial that doubles what there is to drive and
+  makes a track you know into one you do not. Nothing is generated, nothing is
+  unlocked, and the record for a track backwards is its own record. This is
+  the cheapest content in the file by a wide margin.
+
+- **Split times, and where you actually lost it.** `WANTED`
+  The gates are already sectors. Crossing one against your own best says
+  **+0.4** or **−0.2** for that sector, so "I was slower" becomes "I was
+  slower *there*" — which is the difference between knowing you lost and
+  knowing what to practise. *TrackMania* and *Trials* both live on this and it
+  costs a comparison against a ghost that is already recorded.
+
+- **A time to beat on every track.** `CANDIDATE`
+  The analyser already drives every track with every machine before it ships,
+  so a target time is a number the game can work out rather than one somebody
+  has to author. Shown as a target, not a medal to earn: nothing unlocks,
+  nothing is withheld, it is only the difference between a solo lap with a
+  point and a solo lap without one.
+
+- **Overheating.** `CANDIDATE`
+  *Excitebike*'s gauge, and the manual gearbox gives it a reason to exist:
+  sitting on the limiter builds heat, heat costs power, and backing off or
+  changing up spends it. It makes the shift matter for a reason other than
+  acceleration, and it is a dial a player can see filling. Refused if it
+  cannot be made legible at a glance — a hidden number that quietly takes your
+  engine away is the opposite of predictable.
+
+- **Alternate routes through a track.** `CANDIDATE`
+  The original's `whichway` offered "seven different routes" and this game
+  generates exactly one. A shortcut that is tighter, rougher or a jump you
+  might not clear is a decision every lap rather than a line to memorise —
+  which is the same argument the gravity dial wins on. The hard part is not
+  drawing it: it is a route model where a gate can be reached two ways, and
+  that is a real change rather than a tweak.
+
+- **A daily track everybody gets.** `CANDIDATE`
+  A generated track is a seed, and there is a server. One seed a day that
+  everybody races and compares times on costs almost nothing and gives a
+  reason to open the game on a day you had not planned to build anything.
+
+- **Vertical drama the ground can already hold.** `WANTED`
+  The ambition behind wanting loops, without the geometry that makes them
+  impossible here. Banked corners you lean into and can take faster for
+  committing to the high line. Quarter-pipe walls at the edge of a bowl that
+  you ride up and come down off. Half-pipes to cross rim to rim. Gaps with
+  nothing in them, where the question is whether you arrive fast enough.
+  Ridges that drop away on the far side so the landing is the decision.
+  Craters and hollows that hold a car's speed round the inside of them.
+
+  Every one of those is a shape the ground can take today and the generator
+  hardly ever asks for — its terrain dials say how *rough* a track is and not
+  what shape the roughness has. This is where the vertical interest actually
+  lives, and none of it costs a change to how the world is built.
+
+  Two of the neighbours are worth measuring against here rather than copying:
+  *Stunts* got its drama from pieces bolted together, and *Trials* gets all of
+  its from a single plane seen side-on. The lesson from both is that the drama
+  is in **what the ground does under a committed line**, not in how many
+  directions the track can point at once.
+
+- **Watching a race back from any car.** `CANDIDATE`
+  Replays already re-race exactly; what is missing is choosing whose shoulder
+  to watch from. *Stunts* shipped a replay viewer in 1990 and it is half the
+  fun of a crash. Not a free camera — that stays out, below — the same
+  isometric view, following a car you pick.
 
 ---
 
@@ -354,6 +436,20 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
 - **Collisions that punish rather than launch.** `OUT`
   Modern impulse resolution is fine; the tuning is not. A hit should send
   somebody somewhere funny, not quietly cost them two seconds.
+
+- **Loops, corkscrews, bridges and overpasses.** `OUT`
+  *Stunts* had all four and they are the one structural thing this game cannot
+  answer: the ground is a field of heights, one per point, and a bridge needs
+  two. Changing that means giving up the property that makes terrain editing
+  simple to think about and correct by construction — arbitrary elevation
+  joins with no tile set to stitch. Named here so it is a decision on the
+  record rather than a gap somebody rediscovers.
+
+- **Progressive damage that changes the handling.** `OUT`
+  *Stunt Car Racer* did this well and it fails the test at the top of this
+  file: a car that steers differently because of history you cannot see is a
+  car you cannot predict. Damage stays a number that ends your race when it
+  runs out, which you can watch approaching.
 
 - **Shipping the original's tracks or art.** `OUT`
   The 50 stock tracks and the C64 sprites are EA's. They are worth studying —

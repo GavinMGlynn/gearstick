@@ -3972,12 +3972,21 @@ TEST(a_wreck_is_drawn_as_wide_as_the_obstacle_it_actually_is) {
         const uint8_t *bare = &f.px[((GS_H / 2) * GS_W + 4) * 4];
         float gr = bare[0] / 255.0f, gg = bare[1] / 255.0f, gb = bare[2] / 255.0f;
 
+        // **Far enough from the ground to clear its grain.** Every tile of a
+        // surface used to be the identical colour, so a hair's difference from
+        // one sampled pixel meant "not ground" - and the day the ground grew
+        // grain, so that a field of one material reads as ground rather than
+        // as a slab, most of the field was suddenly "not ground" and both
+        // counts drowned in it. The threshold clears the grain's own spread
+        // instead: a shadow and a painted car are far darker and far more
+        // saturated than any tile is from its neighbour, so what is being
+        // counted is unchanged and only the noise floor moved.
         for (int i = 0; i < GS_W * GS_H; i++) {
             const uint8_t *px = &f.px[i * 4];
             float dr = px[0] / 255.0f - gr;
             float dg = px[1] / 255.0f - gg;
             float db = px[2] / 255.0f - gb;
-            if (SDL_sqrtf(dr * dr + dg * dg + db * db) > 0.06f) ink[wrecked]++;
+            if (SDL_sqrtf(dr * dr + dg * dg + db * db) > 0.16f) ink[wrecked]++;
         }
         gs_frame_free(&f);
     }

@@ -2515,9 +2515,17 @@ is left behind at the far end of a long track.
 
 ## What is left, and who has to do it
 
-Three items are open and **none of them can be closed by writing code.** They
-are listed above in the phases they belong to; this is the summary, because a
-plan whose remaining work is invisible at the end is a plan nobody can act on.
+**Everything the game needs in order to be itself is done.** What follows is
+two different kinds of open, and they should not be confused with each other.
+
+**Three items nobody can close by writing code** - listed just below. They are
+the honest end of the original plan.
+
+**Phase 22, at the bottom of this file, is a menu rather than a debt.** It came
+out of comparing this game against its ancestor and its neighbours, and
+nothing in it is required: the game is finished without any of it. It is there
+so that "what next" has an answer that was thought about rather than picked on
+the day.
 
 - **Sound listened to on Windows and macOS** — listed twice, one thing. Everything
   a machine can check is checked: the synthesiser to the sample on every ground
@@ -2530,7 +2538,8 @@ plan whose remaining work is invisible at the end is a plan nobody can act on.
   left is somebody who has **not read `gs_noise.c`** doing that, because the
   person who wrote the document wrote the code and cannot unsee it.
 
-Everything else in this plan is done.
+Everything else in this plan is done, and Phase 22 is a list of things that
+would make it more rather than things that would make it whole.
 
 ## Phase 21 — Where the tests are not
 
@@ -2819,3 +2828,91 @@ are the places a fault could sit unnoticed.
       shifting once per press and visibly slower off the line in the wrong
       gear. Online races still give everyone the automatic - the flag is
       not on the wire yet, and that is named in the status doc.*
+
+## Phase 22 — What the neighbours have
+
+Everything here came out of comparing the game against the one it descends
+from and the others in its family, and each entry is argued for in
+`FEATURES.md` rather than here. Nothing in this phase is required for the
+game to be itself; it is the list of things a player who has met *Stunts*,
+*Excitebike* or *TrackMania* would look for and not find.
+
+**Ordered by what they give back for what they cost.** The first two are
+close to free and change how a track is understood; the rest are real work.
+
+- [ ] **Vertical drama the ground can already hold.** Banked corners,
+      quarter-pipe walls, half-pipes, gaps with nothing in them, ridges that
+      drop away on the far side, craters that hold speed round the inside.
+      The generator's terrain dials say how *rough* a track is and never what
+      shape the roughness has, so none of these are ever asked for - and
+      every one of them is a shape the ground can already take. This is where
+      the vertical interest lives that loops were wanted for, at none of the
+      cost.
+      *Verification: each shape measured on the track it makes - a banked
+      corner is one a car takes faster on the high line than the low, a gap
+      is one that ends the race for a car that arrives too slowly - and the
+      shipped set has to contain some of each, the way it already has to
+      cover the matrix.*
+
+- [ ] **Mirror mode.** Any track raced the other way round, as one dial on
+      the setup screen. The route is directional, so this is a new track to
+      drive for nearly nothing, with its own record.
+      *Verification: the reversed route passes every check the forward one
+      does - gates faced, finishable by every machine from every grid slot -
+      and a record set backwards is never shown against a forward time.*
+
+- [ ] **Split times, and where you actually lost it.** The gates are already
+      sectors. Crossing one shows the difference against your own best for
+      that sector, so a slower lap says *where* it went.
+      *Verification: driven against a recorded ghost, the splits sum to the
+      lap difference, and a sector nobody has driven before shows nothing
+      rather than a wrong number.*
+
+- [ ] **A time to beat on every track.** The analyser already drives every
+      track with every machine before it ships, so the target is computed
+      rather than authored. A target, never a medal: nothing unlocks.
+      *Verification: every shipped track has one, it is beatable by a person
+      on the machine it was set with, and it does not move when the track is
+      loaded again.*
+
+- [ ] **Overheating.** Sitting on the limiter builds heat, heat costs power,
+      backing off spends it - which is what makes a manual gearbox a skill
+      rather than a chore. Refused if it cannot be read at a glance.
+      *Verification: shown on the HUD as it fills; a driver who never holds
+      the limiter never sees it; and the power it costs is measurable rather
+      than felt.*
+
+- [ ] **A daily track everybody gets.** One seed a day, the same for
+      everyone, with times compared through the server that already exists.
+      *Verification: two machines asked on the same day build the identical
+      track, and a day's times are only ever shown against that day's.*
+
+- [ ] **Watching a race back from any car.** Replays already re-race
+      exactly; what is missing is choosing whose shoulder to watch from. The
+      same isometric view, following a car you pick - not a free camera,
+      which stays out.
+      *Verification: a replay watched from each car in turn shows the same
+      race and the same finishing order.*
+
+- [ ] **Alternate routes through a track.** The original's `whichway`
+      offered seven; this generates one. A shortcut that is tighter, rougher
+      or a jump you might not clear is a decision every lap. **The largest
+      item here by a wide margin** - it needs a route that can be reached two
+      ways, which is a change to what a route *is* rather than a change to
+      what the generator draws with it.
+      *Verification: a track with two ways round has both driven by the
+      analyser, both finishable, and neither strictly faster than the other
+      for every machine.*
+
+- [ ] **A central service, entered into deliberately.** Publishing a track
+      to a server and browsing what others built is done; what the feature
+      asks for beyond that is not: accounts that follow you between machines,
+      and leaderboards that are global rather than per server. **This is the
+      one item in the plan that cannot be finished** - it is hosting,
+      moderation and a monthly bill, and the decision to take it on is a
+      different kind of decision from the others here. Listed so that it is
+      a choice on the record rather than something drifted into.
+      *Verification: a time set on one machine is shown, re-raced and
+      verified on another with nothing copied by hand; and a service that is
+      down leaves every local feature - racing, building, sharing by code -
+      exactly as it was.*

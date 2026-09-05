@@ -8146,6 +8146,78 @@ over, and draws the same tick twice to prove the picture is identical, which
 is what makes it safe in a replay and across a network.*
 
 
+### Ground that reads as ground, and a horizon, 2026-09-05
+
+**"I would like to add better background terrain - instead of flat squares."**
+Two things were true and both looked the same from the driver's seat. Every
+tile of a surface was drawn in the identical colour, so a field of one
+material came out as a single flat slab with a road cut into it - the shading
+only showed where there was a slope to catch it, and most ground has none.
+And the world stopped six tiles past the shoulder, so beyond the drop there
+was nothing at all: a track sitting on a plate in mid-air.
+
+**The ground has grain.** A few per cent of variation per tile, from the
+tile's own coordinates, so a field breaks into something with texture in it.
+The palette is untouched and the surfaces are exactly as far apart as they
+were - what changed is that one material no longer paints as one colour.
+
+**And there is land past the drop.** Rolling hills that grow in as the ground
+falls away, washing toward a haze with distance, so there is a horizon to sit
+in front of. Three rules keep it safe: it starts only *past* the run-off, so
+the shoulder a car recovers on is still exactly the ground the simulation has,
+to the corner; it lives in the renderer and never touches `gs_track_height`,
+so no golden hash moves and no replay changes; and it is a function of
+position and the track's own hash, so a split screen and a replay show the
+same landscape and neighbouring tiles agree about the corner they share. It
+cannot be reached: a car that gets there has gone over the edge and its race
+is over.
+
+The track's hash is taken **once per view**, not per corner. It walks the
+whole used region, and asking for it four times a tile would have cost more
+than everything else the renderer does put together.
+
+*Verification: the whole renderer suite, and a frame photographed before and
+after. One test had to be corrected rather than the change: the wreck-width
+check took a single ground pixel as its reference and counted anything unlike
+it, which was sound while a surface was one colour and counted most of the
+field once it was not. Its threshold now clears the grain's own spread, so
+what it counts - shadow and paint, both far darker and far more saturated
+than any tile is from its neighbour - is unchanged.*
+
+
+### The features list and the plan agree again, 2026-09-05
+
+Every entry in `FEATURES.md` was checked against `COMPLETION_PLAN.md`, one
+by one. Twenty-nine features still carried `WANTED` or `CANDIDATE` while
+sitting ticked in the plan with a verification beside them - rollback, the
+library, the opponents, the gravity brush, the merged camera, the fuzzed
+parsers, the relay, all of it - so the menu said "not yet" about most of
+the game. They carry `DONE` now, a tag the file did not have, and the
+legend says what it means.
+
+**What is genuinely open is one phase.** Phase 22 holds everything a
+player who has met *Stunts*, *Excitebike* or *TrackMania* would look for
+and not find, ordered by what it gives back for what it costs: the
+vertical drama the ground can already hold, mirror mode, split times, a
+target time per track, overheating, a daily seed, replay from any car,
+alternate routes, and the central service. The plan's own summary says
+plainly that none of it is needed for the game to be itself.
+
+**One feature had no plan item under any wording:** the central service.
+Publishing and browsing tracks is done; accounts that follow you between
+machines and global leaderboards are not, and are hosting, moderation and
+a monthly bill rather than code. It is in Phase 22 as the one item that
+cannot be finished, so taking it on is a decision on the record.
+
+**Loops, bridges and overpasses are on the record as `OUT`**, with the
+reason: the ground stores one height per point and a bridge needs two.
+Giving that up costs the property that makes terrain editing correct by
+construction, the painter's-order renderer, the pointer-free world state
+and the `memcpy` snapshot - a second engine, not a feature. The ambition
+behind the request lives on as the vertical-drama item above, which the
+ground can hold today.
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
