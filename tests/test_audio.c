@@ -654,6 +654,119 @@ static void gs_music_only(uint64_t seed, float *out, int frames) {
     gs_music_mix(out, frames);
 }
 
+TEST(the_lights_are_heard_lighting_and_going_green) {
+    // **The start went by in silence.** A lamp lighting is a short beep, once
+    // a second down the countdown, and the lights going green a longer,
+    // higher one - noticed from how much was left last time, like everything
+    // the mixer notices. Pinned on samples: the frame after each is louder
+    // than the frame before it, and a tick that is neither is not.
+    gs_world w;
+    gs_scene(&w, GS_SURF_PAVEMENT);
+    gs_world_set_countdown(&w, (uint32_t)GS_TICK_HZ * 3u);
+    gs_settle(&w, &gs_t);
+    const float lx = gs_f(w.car[0].x), ly = gs_f(w.car[0].y);
+
+    // Half a second in: no lamp changed, nothing to hear but the idle.
+    for (int i = 0; i < GS_TICK_HZ / 2; i++) gs_world_step(&w, &gs_t, nullptr);
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    const float idle = gs_peak(gs_buf, FRAMES);
+
+    // A second boundary: a lamp.
+    for (int i = 0; i < GS_TICK_HZ / 2; i++) gs_world_step(&w, &gs_t, nullptr);
+    CHECK(gs_world_countdown(&w) == (uint32_t)GS_TICK_HZ * 2u);
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    const float lamp = gs_peak(gs_buf, FRAMES);
+
+    // And green.
+    for (int i = 0; i < GS_TICK_HZ * 2; i++) gs_world_step(&w, &gs_t, nullptr);
+    CHECK(gs_world_countdown(&w) == 0);
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    const float green = gs_peak(gs_buf, FRAMES);
+
+    printf("  LIGHTS idle %.4f, a lamp %.4f, green %.4f\n", (double)idle,
+           (double)lamp, (double)green);
+    CHECK(lamp > idle * 1.3f);
+    CHECK(green > idle * 1.3f);
+}
+
+TEST(coming_down_from_a_big_jump_thuds_and_a_hop_does_not) {
+    // **A landing was heard only if it hurt**, and then as the same rumble a
+    // collision makes. Coming down from a flight is a thud of its own now,
+    // whether or not it hurt: the mixer sees a car that was in the air for a
+    // big jump's worth and is on the ground. A hop over a bump is not.
+    gs_world w;
+    gs_scene(&w, GS_SURF_PAVEMENT);
+    gs_settle(&w, &gs_t);
+    const float lx = gs_f(w.car[0].x), ly = gs_f(w.car[0].y);
+
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    const float sitting = gs_peak(gs_buf, FRAMES);
+
+    // Up for a second, then down, undamaged.
+    w.car[0].grounded = false;
+    w.car[0].z = GS_INT(1);
+    w.car[0].air_ticks = (uint32_t)GS_TICK_HZ;
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    w.car[0].grounded = true;
+    w.car[0].z = 0;
+    w.car[0].air_ticks = 0;
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    const float thud = gs_peak(gs_buf, FRAMES);
+
+    // Let it die away, then a hop: five ticks up, and down.
+    gs_settle(&w, &gs_t);
+    w.car[0].grounded = false;
+    w.car[0].z = GS_RATIO(1, 10);
+    w.car[0].air_ticks = 5;
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    w.car[0].grounded = true;
+    w.car[0].z = 0;
+    w.car[0].air_ticks = 0;
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    const float hop = gs_peak(gs_buf, FRAMES);
+
+    printf("  LANDING sitting %.4f, down from a jump %.4f, a hop %.4f\n",
+           (double)sitting, (double)thud, (double)hop);
+    CHECK(thud > sitting * 1.5f);
+    CHECK(hop < sitting * 1.2f);
+}
+
+TEST(two_cars_meeting_is_a_clang_over_the_rumble) {
+    // **A collision was the same rumble as a landing that hurt.** Hurt on the
+    // ground - having been on the ground - is a clang now, a tone with an
+    // edge above any engine, on top of the rumble the damage already made;
+    // so it is both louder and brighter than the rumble alone was.
+    gs_world w;
+    gs_scene(&w, GS_SURF_PAVEMENT);
+    gs_world_add_car(&w, &gs_t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(17), GS_INT(8), 0);
+    gs_settle(&w, &gs_t);
+    const float lx = gs_f(w.car[0].x), ly = gs_f(w.car[0].y);
+
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    const float quiet = gs_rms(gs_buf, FRAMES);
+    const int quiet_edges = gs_crossings(gs_buf, FRAMES);
+
+    w.car[0].damage = (uint8_t)(w.car[0].damage + 40u);
+    gs_audio_update(&w, &gs_t, lx, ly);
+    gs_audio_render(gs_buf, FRAMES);
+    const float clang = gs_rms(gs_buf, FRAMES);
+    const int clang_edges = gs_crossings(gs_buf, FRAMES);
+
+    printf("  COLLISION quiet %.4f (%d crossings), a hit %.4f (%d crossings)\n",
+           (double)quiet, quiet_edges, (double)clang, clang_edges);
+    CHECK(clang > quiet * 1.5f);
+    CHECK(clang_edges > quiet_edges);
+}
+
 TEST(a_track_gets_its_own_tune_and_the_same_one_every_time) {
     // **The same seed is the same music, sample for sample.** A tune that came
     // out differently each time would be a tune nobody could describe to
@@ -925,6 +1038,9 @@ int main(void) {
     run_the_music_goes_somewhere_rather_than_repeating_one_bar();
     run_the_music_stops_by_fading_and_can_be_started_again();
     run_the_music_and_the_race_together_still_fit_in_a_speaker();
+    run_the_lights_are_heard_lighting_and_going_green();
+    run_coming_down_from_a_big_jump_thuds_and_a_hop_does_not();
+    run_two_cars_meeting_is_a_clang_over_the_rumble();
 
     // Last, because it opens a real device and starts a callback thread.
     gs_device_test();

@@ -56,6 +56,17 @@ typedef struct gs_view {
     int32_t  split;
     uint32_t split_tick;
 
+    // **The moments.** The tick each car last came down from a big jump and
+    // where it came down; the tick it last hit another car and where they
+    // met. Noted by the frontend as one tick becomes the next, the way a
+    // missed gate is, and kept out of gs_world for the same reason: a puff
+    // of dust is a property of a screen, and nothing here moves a golden
+    // hash. Zero for never.
+    uint32_t landed_tick[GS_MAX_CARS];
+    gs_fix   landed_x[GS_MAX_CARS], landed_y[GS_MAX_CARS];
+    uint32_t bumped_tick[GS_MAX_CARS];
+    gs_fix   bumped_x[GS_MAX_CARS], bumped_y[GS_MAX_CARS];
+
     // The analyser's heatmap, or null for none. Borrowed, not owned: the view
     // paints whatever the editor last worked out and never runs the sweep
     // itself, because a sweep is thirty seconds of simulation and a frame is
@@ -85,6 +96,13 @@ void gs_view_note_split(gs_view *views, uint8_t count, const gs_track *t,
 
 void gs_view_note_missed(gs_view *views, uint8_t count, const gs_track *t,
                          const gs_world *was, const gs_world *now);
+
+// **Note the moments** between two consecutive ticks: a car that was in the
+// air for a big jump's worth and is on the ground now came down here; a car
+// whose damage rose while on the ground, with another car within reach, hit
+// it there. Every view is told, since every view draws every car.
+void gs_view_note_moments(gs_view *views, uint8_t count, const gs_world *was,
+                          const gs_world *now);
 
 // Draw one view of the world. `alpha` in [0,1] interpolates between the
 // previous simulation state and the current one, so motion is smooth at frame

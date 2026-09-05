@@ -90,6 +90,11 @@ static struct {
     // it *is* a collision or a bad landing.
     uint8_t last_damage[GS_MAX_CARS];
     bool    last_grounded[GS_MAX_CARS];
+    // And how long each was in the air, so coming down can be told from a
+    // hop; and how much of the countdown was left, so a lamp lighting and
+    // the lights going green can be heard.
+    uint32_t last_air[GS_MAX_CARS];
+    uint32_t last_left;
     bool    seeded;
 
     gs_event event[GS_AUDIO_EVENTS];
@@ -431,10 +436,12 @@ static void gs_event_voice(gs_hazard_kind kind, bool blast, float *tone,
 
 // Put one in the bank. The quietest slot is taken when they are all busy, so a
 // mine going off is never lost to four slicks being poured.
-static void gs_event_add(gs_hazard_kind kind, bool blast, float x, float y,
-                         float lx, float ly) {
-    float tone = 0.0f, noisy = 0.0f, decay = 0.0f, gain = 0.0f;
-    gs_event_voice(kind, blast, &tone, &noisy, &decay, &gain);
+// **A struck voice at a place**: what everything that happens once sounds
+// like, a hazard going off or a moment in a race. Panned and quietened by
+// where it is against the listener, and taking the quietest slot in the bank
+// only if it is louder than what is there.
+static void gs_strike(float x, float y, float lx, float ly, float tone,
+                      float noisy, float decay, float gain) {
     if (gain <= 0.0f) return;
 
     const float dx = x - lx, dy = y - ly;
@@ -453,6 +460,13 @@ static void gs_event_add(gs_hazard_kind kind, bool blast, float x, float y,
     gs_a.event[at].noisy = noisy;
     gs_a.event[at].decay = decay;
     gs_a.event[at].pan   = SDL_clamp((dx - dy) * 0.06f, -1.0f, 1.0f);
+}
+
+static void gs_event_add(gs_hazard_kind kind, bool blast, float x, float y,
+                         float lx, float ly) {
+    float tone = 0.0f, noisy = 0.0f, decay = 0.0f, gain = 0.0f;
+    gs_event_voice(kind, blast, &tone, &noisy, &decay, &gain);
+    gs_strike(x, y, lx, ly, tone, noisy, decay, gain);
 }
 
 void gs_audio_update(const gs_world *w, const gs_track *t, float lx, float ly) {
@@ -532,8 +546,30 @@ void gs_audio_update(const gs_world *w, const gs_track *t, float lx, float ly) {
             o->hit = SDL_clamp(o->hit + hurt, 0.0f, 1.0f);
             o->hit_phase = 0.0f;
         }
+        // --- **The moments**, noticed the same way. Coming down from a big
+        // jump is a thud - low, mostly noise, gone in a third of a second,
+        // heavier the longer the flight - whether or not it hurt. Hitting
+        // another car is a clang: a tone with an edge, higher than any
+        // engine, over the rumble the damage already made. Told apart by
+        // whether the car was in the air: a landing that hurt is a landing.
+        {
+            const float cx = gs_to_f(c->x), cy = gs_to_f(c->y);
+            if (gs_a.seeded && !gs_a.last_grounded[i] && c->grounded &&
+                gs_a.last_air[i] >= GS_BIG_AIR_TICKS) {
+                const float flight = SDL_clamp((float)gs_a.last_air[i] /
+                                                   (float)GS_TICK_HZ, 0.25f, 1.5f);
+                gs_strike(cx, cy, lx, ly, 55.0f, 0.75f, 0.99985f, 0.7f + flight * 0.5f);
+            }
+            if (gs_a.seeded && c->damage > gs_a.last_damage[i] && c->grounded &&
+                gs_a.last_grounded[i]) {
+                const float hurt = (float)(c->damage - gs_a.last_damage[i]) / 40.0f;
+                gs_strike(cx, cy, lx, ly, 620.0f, 0.35f, 0.99970f,
+                          SDL_clamp(0.35f + hurt * 0.5f, 0.0f, 0.9f));
+            }
+        }
         gs_a.last_damage[i] = c->damage;
         gs_a.last_grounded[i] = c->grounded;
+        gs_a.last_air[i] = c->air_ticks;
 
         // --- Where it is. Distance from the listener, and which side.
         float dx = gs_to_f(c->x) - lx;
@@ -586,6 +622,22 @@ void gs_audio_update(const gs_world *w, const gs_track *t, float lx, float ly) {
     gs_a.last_hazards = w->hazard_count;
     gs_a.burn_want = SDL_clamp(burn, 0.0f, 1.0f) * 0.30f;
 
+    // --- **The lights.** A short beep as each lamp lights - once a second
+    // through the countdown - and a longer, higher one on the tick the lights
+    // go green, at the listener rather than at a place, since the start is
+    // everybody's. Noticed from what was left last time, like everything.
+    {
+        const uint32_t left = gs_world_countdown(w);
+        if (gs_a.seeded && gs_a.last_left > 0) {
+            if (left == 0) {
+                gs_strike(lx, ly, lx, ly, 880.0f, 0.0f, 0.99993f, 0.55f);
+            } else if ((gs_a.last_left - 1u) / (uint32_t)GS_TICK_HZ !=
+                       (left - 1u) / (uint32_t)GS_TICK_HZ) {
+                gs_strike(lx, ly, lx, ly, 440.0f, 0.0f, 0.99960f, 0.40f);
+            }
+        }
+        gs_a.last_left = left;
+    }
     gs_a.seeded = true;
     if (gs_a.lock != nullptr) SDL_UnlockMutex(gs_a.lock);
 }

@@ -325,6 +325,11 @@ uint32_t gs_world_countdown(const gs_world *w);
 // How long the green shows after the start, in ticks.
 #define GS_GREEN_TICKS ((uint32_t)GS_TICK_HZ)
 
+// **What counts as a big jump**, for the drawing and the sound that punctuate
+// coming down from one: a quarter of a second in the air. The simulation
+// never reads this; a hop over a bump is not a moment and a flight is.
+#define GS_BIG_AIR_TICKS ((uint32_t)GS_TICK_HZ / 4u)
+
 // How long the tow truck takes, in ticks - one second of flashing where the
 // car was lost, then it lands at its checkpoint, solid and drivable. Long
 // enough to read as a consequence, short enough not to be a punishment on

@@ -366,6 +366,38 @@ static float gs_party_rand(uint32_t seed) {
     return (float)(seed & 0xffffffu) / (float)0x1000000u;
 }
 
+// --- **The moments.** Three things that passed without punctuation: the
+// lights going green, a collision between cars, and coming down from a big
+// jump. Each is drawing derived from the world - the green from the tick the
+// lights went, the other two from the note the frontend takes as one tick
+// becomes the next (gs_view_note_moments) - and never state in the world, so
+// no golden hash moves and a replay shows every one of them where it was.
+#define GS_FLASH_TICKS ((uint32_t)GS_TICK_HZ / 2u)        // the green burst
+#define GS_DUST_TICKS  ((uint32_t)GS_TICK_HZ / 2u)        // a landing's dust
+#define GS_SPARK_TICKS ((uint32_t)GS_TICK_HZ * 3u / 10u)  // a collision's sparks
+
+// A ring of small quads spreading from a point on the screen: `k` is how far
+// through its life it is, 0 to 1. Spread flattened to the isometric ground,
+// lifted by `rise` as it goes and dropped by `fall` as it ends - dust rises,
+// sparks fall - and faded out over the life. The same arithmetic on every
+// machine, from the same seed.
+static void gs_draw_burst(SDL_Renderer *ren, float px, float py, float k,
+                          float radius, float rise, float fall, int n,
+                          SDL_FColor hue, float size, uint32_t seed) {
+    for (int i = 0; i < n; i++) {
+        const uint32_t s = seed ^ ((uint32_t)(i + 1) * 2654435761u);
+        const float a = ((float)i + gs_party_rand(s) * 0.7f) / (float)n * 6.2831853f;
+        const float r = radius * k * (0.6f + gs_party_rand(s ^ 3u) * 0.6f);
+        const float x = px + SDL_cosf(a) * r;
+        const float y = py + SDL_sinf(a) * r * 0.5f - rise * k + fall * k * k;
+        const float sz = size * (1.0f - k * 0.45f);
+        const SDL_FColor c = { hue.r, hue.g, hue.b, hue.a * (1.0f - k) };
+        const SDL_FPoint q[4] = {
+            { x - sz, y - sz }, { x + sz, y - sz }, { x + sz, y + sz }, { x - sz, y + sz } };
+        gs_quad(ren, q, c);
+    }
+}
+
 // How far into the party this car is, 0 before it finished and past 1 once
 // the celebrating is done. The one number every piece below is drawn from.
 static float gs_party_age(const gs_world *w, const gs_car *c) {
@@ -1823,6 +1855,59 @@ static void gs_draw_hazards(SDL_Renderer *ren, const gs_camera *cam,
     }
 }
 
+// How near another car has to be for a rise in damage to have been it: a car
+// length and a bit, squared, in tiles.
+#define GS_BUMP_REACH2 GS_RATIO(256, 100)
+
+void gs_view_note_moments(gs_view *views, uint8_t count, const gs_world *was,
+                          const gs_world *now) {
+    if (views == nullptr || was == nullptr || now == nullptr) return;
+
+    for (uint8_t i = 0; i < now->car_count && i < GS_MAX_CARS; i++) {
+        const gs_car *before = &was->car[i];
+        const gs_car *after = &now->car[i];
+        if (!after->active) continue;
+
+        // Down from a flight, not a hop: the air ticks are the flight so far,
+        // and the simulation zeroes them on the tick it lands.
+        const bool came_down = !before->grounded && after->grounded &&
+                               before->air_ticks >= GS_BIG_AIR_TICKS;
+
+        // Hurt while on the ground, with somebody close enough to have done
+        // it. A landing that hurt is the other moment, and is told apart by
+        // having been in the air.
+        bool hit_another = false;
+        gs_fix mx = 0, my = 0;
+        if (after->damage > before->damage && before->grounded && after->grounded) {
+            for (uint8_t j = 0; j < now->car_count && j < GS_MAX_CARS; j++) {
+                if (j == i || !now->car[j].active) continue;
+                const gs_fix dx = after->x - now->car[j].x;
+                const gs_fix dy = after->y - now->car[j].y;
+                if (gs_fix_mul(dx, dx) + gs_fix_mul(dy, dy) < GS_BUMP_REACH2) {
+                    hit_another = true;
+                    mx = (after->x + now->car[j].x) / 2;
+                    my = (after->y + now->car[j].y) / 2;
+                    break;
+                }
+            }
+        }
+        if (!came_down && !hit_another) continue;
+
+        for (uint8_t v = 0; v < count; v++) {
+            if (came_down) {
+                views[v].landed_tick[i] = (uint32_t)now->tick;
+                views[v].landed_x[i] = after->x;
+                views[v].landed_y[i] = after->y;
+            }
+            if (hit_another) {
+                views[v].bumped_tick[i] = (uint32_t)now->tick;
+                views[v].bumped_x[i] = mx;
+                views[v].bumped_y[i] = my;
+            }
+        }
+    }
+}
+
 void gs_view_note_split(gs_view *views, uint8_t count, const gs_track *t,
                         const gs_ghost *ghost, const gs_world *was,
                         const gs_world *now) {
@@ -2004,6 +2089,38 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
         }
     }
 
+    // --- **The moments**: dust where a car came down from a big jump, sparks
+    // where two cars met. Where they happened rather than where the car is
+    // now, because the car has gone on and the dust has not.
+    for (uint8_t i = 0; i < now->car_count && i < GS_MAX_CARS; i++) {
+        const uint32_t tick = (uint32_t)now->tick;
+        if (view->landed_tick[i] != 0 && tick >= view->landed_tick[i] &&
+            tick - view->landed_tick[i] < GS_DUST_TICKS) {
+            const float k = (float)(tick - view->landed_tick[i]) / (float)GS_DUST_TICKS;
+            const float wx = gs_to_f(view->landed_x[i]), wy = gs_to_f(view->landed_y[i]);
+            const float wz = gs_to_f(gs_track_height(t, view->landed_x[i], view->landed_y[i]));
+            float px = 0.0f, py = 0.0f;
+            gs_iso_project(&cam, wx, wy, wz, &px, &py);
+            const SDL_FColor dust = { 0.88f, 0.84f, 0.76f, 0.85f };
+            gs_draw_burst(ren, px, py, k, 1.3f * GS_ISO_TILE_W * cam.zoom,
+                          0.35f * GS_ISO_TILE_Z * cam.zoom, 0.0f, 10, dust, 3.4f,
+                          (uint32_t)i * 7919u ^ view->landed_tick[i]);
+        }
+        if (view->bumped_tick[i] != 0 && tick >= view->bumped_tick[i] &&
+            tick - view->bumped_tick[i] < GS_SPARK_TICKS) {
+            const float k = (float)(tick - view->bumped_tick[i]) / (float)GS_SPARK_TICKS;
+            const float wx = gs_to_f(view->bumped_x[i]), wy = gs_to_f(view->bumped_y[i]);
+            const float wz = gs_to_f(gs_track_height(t, view->bumped_x[i], view->bumped_y[i]));
+            float px = 0.0f, py = 0.0f;
+            gs_iso_project(&cam, wx, wy, wz, &px, &py);
+            const SDL_FColor spark = { 1.0f, 0.93f, 0.55f, 1.0f };
+            gs_draw_burst(ren, px - 0.0f, py - 0.35f * GS_ISO_TILE_Z * cam.zoom, k,
+                          1.1f * GS_ISO_TILE_W * cam.zoom, 0.5f * GS_ISO_TILE_Z * cam.zoom,
+                          0.9f * GS_ISO_TILE_Z * cam.zoom, 9, spark, 2.4f,
+                          (uint32_t)i * 104729u ^ view->bumped_tick[i]);
+        }
+    }
+
     // The landing arc last of all, over everything, and only for the driver of
     // this view. Predicted from the settled state rather than the interpolated
     // one: the arc is a question about the simulation, and half way between two
@@ -2056,6 +2173,29 @@ void gs_render_view(SDL_Renderer *ren, const gs_track *t, const gs_world *prev,
             gs_ground_mark_over_everything(ren, &cam, t, head_x, head_y,
                                            0.06f, warn);
         }
+    }
+
+    // --- **The green light.** The tick the lights go is the tick the cars
+    // are let go, and it went by as a colour change on a mast beside the
+    // grid. For half a second from that tick a burst of green goes up out of
+    // the start line - derived from green_tick and the world's tick, so it
+    // is the same on every machine and in every replay of the race.
+    if (t->gate_count > 0 && now->green_tick > 0 && now->tick >= now->green_tick &&
+        now->tick - now->green_tick < GS_FLASH_TICKS) {
+        const float k = (float)(now->tick - now->green_tick) / (float)GS_FLASH_TICKS;
+        const gs_gate *g0 = &t->gate[0];
+        const float gx = gs_to_f(g0->x), gy = gs_to_f(g0->y);
+        const float gz = gs_to_f(gs_track_height(t, g0->x, g0->y));
+        float px = 0.0f, py = 0.0f;
+        gs_iso_project(&cam, gx, gy, gz, &px, &py);
+        const SDL_FColor go = { 0.62f, 1.0f, 0.66f, 1.0f };
+        const SDL_FColor white = { 0.95f, 1.0f, 0.95f, 1.0f };
+        gs_draw_burst(ren, px, py, k, 2.2f * GS_ISO_TILE_W * cam.zoom,
+                      1.4f * GS_ISO_TILE_Z * cam.zoom, 0.0f, 16, go, 3.6f,
+                      0x6f00du ^ now->green_tick);
+        gs_draw_burst(ren, px, py, k * 0.7f, 1.2f * GS_ISO_TILE_W * cam.zoom,
+                      2.0f * GS_ISO_TILE_Z * cam.zoom, 0.0f, 10, white, 2.6f,
+                      0x600du ^ now->green_tick);
     }
 
     // --- **And the party**, over everything, because a win you cannot see is

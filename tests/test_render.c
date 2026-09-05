@@ -112,17 +112,14 @@ static int gs_count_car1(const gs_frame *f) {
     return n;
 }
 
-static gs_frame gs_render_frame(SDL_Renderer *ren, const gs_track *t,
-                                const gs_world *prev, const gs_world *now,
-                                float alpha, const gs_camera *cam) {
-    gs_view view = { 0 };
-    view.cam = *cam;
-    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
-    view.car = 0;
-
+// A frame through a view of the caller's - for what a view carries that a
+// camera does not: the moments it has noted.
+static gs_frame gs_render_frame_through(SDL_Renderer *ren, const gs_track *t,
+                                        const gs_world *prev, const gs_world *now,
+                                        float alpha, const gs_view *view) {
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
-    gs_render_view(ren, t, prev, now, alpha, &view);
+    gs_render_view(ren, t, prev, now, alpha, view);
 
     gs_frame f = { 0 };
     SDL_Surface *raw = SDL_RenderReadPixels(ren, nullptr);
@@ -132,6 +129,26 @@ static gs_frame gs_render_frame(SDL_Renderer *ren, const gs_track *t,
     SDL_DestroySurface(raw);
     if (f.own != nullptr) f.px = (uint8_t *)f.own->pixels;
     return f;
+}
+
+static gs_frame gs_render_frame(SDL_Renderer *ren, const gs_track *t,
+                                const gs_world *prev, const gs_world *now,
+                                float alpha, const gs_camera *cam) {
+    gs_view view = { 0 };
+    view.cam = *cam;
+    view.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    view.car = 0;
+    return gs_render_frame_through(ren, t, prev, now, alpha, &view);
+}
+
+// How many pixels two frames disagree on.
+static int gs_count_diff(const gs_frame *a, const gs_frame *b) {
+    if (a->px == nullptr || b->px == nullptr) return -1;
+    int n = 0;
+    for (int i = 0; i < GS_W * GS_H; i++) {
+        if (SDL_memcmp(&a->px[i * 4], &b->px[i * 4], 4) != 0) n++;
+    }
+    return n;
 }
 
 static int gs_count_car0(const gs_frame *f) {
@@ -1893,6 +1910,207 @@ TEST(winning_is_something_you_can_see_happen) {
         CHECK(SDL_memcmp(once.px, twice.px,
                          (size_t)GS_W * (size_t)GS_H * 4) == 0);
     }
+    gs_frame_free(&once);
+    gs_frame_free(&twice);
+}
+
+TEST(the_lights_going_green_are_a_burst_at_the_line) {
+    // **The green light went by as a colour change on a mast.** For half a
+    // second from the tick the lights go, a burst goes up out of the start
+    // line - derived from green_tick and the world's tick and nothing else,
+    // so nothing is stored, no golden moves, and the same tick is the same
+    // picture on every machine and in every replay.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+    gs_track_add_gate(&t, GS_INT(24), GS_INT(24), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(40), GS_INT(24), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(20), GS_INT(24), 0);
+    gs_world_set_countdown(&w, 360);
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    gs_render_track_camera(&v, &t, &w, &w, 1.0f);
+
+    // The control is the same green lamps with the burst over: the lamps
+    // show green for a second after the lights go and the burst is done in
+    // half of one, so a frame at 100 ticks has the lamps and no burst, and
+    // the only thing the frame at 15 ticks adds is the burst.
+    w.tick = 360 + 100;
+    gs_frame after = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(after.px != nullptr);
+    if (after.px == nullptr) return;
+
+    w.tick = 360 + 15;
+    gs_frame go = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(go.px != nullptr);
+    if (go.px == nullptr) return;
+    const int burst = gs_count_diff(&after, &go);
+    gs_frame_free(&go);
+    printf("  GREEN %d pixels of burst fifteen ticks after the lights go\n", burst);
+    CHECK(burst > 60);
+
+    // And over: ten ticks later than the control is the identical frame,
+    // because nothing in this world moves but the burst.
+    w.tick = 360 + 110;
+    gs_frame later = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(later.px != nullptr);
+    if (later.px != nullptr) CHECK(gs_count_diff(&after, &later) == 0);
+    gs_frame_free(&later);
+    gs_frame_free(&after);
+
+    // The same tick twice is the same frame.
+    w.tick = 360 + 15;
+    gs_frame once = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    gs_frame twice = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(once.px != nullptr && twice.px != nullptr);
+    if (once.px != nullptr && twice.px != nullptr) CHECK(gs_count_diff(&once, &twice) == 0);
+    gs_frame_free(&once);
+    gs_frame_free(&twice);
+}
+
+TEST(coming_down_from_a_big_jump_raises_dust_where_the_car_landed) {
+    // **A landing passed without punctuation.** The frontend notes, from one
+    // tick to the next, a car that was in the air for a big jump's worth and
+    // is down now, and where; the renderer raises dust there for half a
+    // second. In the view and never in the world, like a missed gate. A hop
+    // is not a landing and raises none.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+
+    gs_world was, now;
+    gs_world_init(&was, GS_ONE);
+    gs_world_add_car(&was, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(24), GS_INT(24), 0);
+    was.tick = 500;
+    was.car[0].grounded = false;
+    was.car[0].z = GS_INT(1);
+    was.car[0].air_ticks = 60;
+    now = was;
+    now.tick = 501;
+    now.car[0].grounded = true;
+    now.car[0].z = 0;
+    now.car[0].air_ticks = 0;
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    gs_render_track_camera(&v, &t, &now, &now, 1.0f);
+    gs_view plain = v;
+
+    gs_view_note_moments(&v, 1, &was, &now);
+    CHECK(v.landed_tick[0] == 501);
+    CHECK(v.landed_x[0] == GS_INT(24) && v.landed_y[0] == GS_INT(24));
+    CHECK(v.bumped_tick[0] == 0);
+
+    // A hop: five ticks in the air is not a jump anybody came down from.
+    gs_view hop = plain;
+    was.car[0].air_ticks = 5;
+    gs_view_note_moments(&hop, 1, &was, &now);
+    CHECK(hop.landed_tick[0] == 0);
+
+    now.tick = 504;
+    gs_frame bare = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &plain);
+    gs_frame dusty = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &v);
+    CHECK(bare.px != nullptr && dusty.px != nullptr);
+    if (bare.px == nullptr || dusty.px == nullptr) return;
+    const int dust = gs_count_diff(&bare, &dusty);
+    printf("  DUST %d pixels of it three ticks after landing\n", dust);
+    CHECK(dust > 60);
+    gs_frame_free(&bare);
+    gs_frame_free(&dusty);
+
+    // Gone, once its half second is up.
+    now.tick = 501 + (uint32_t)GS_TICK_HZ;
+    gs_frame later = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &plain);
+    gs_frame settled = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &v);
+    CHECK(later.px != nullptr && settled.px != nullptr);
+    if (later.px != nullptr && settled.px != nullptr) CHECK(gs_count_diff(&later, &settled) == 0);
+    gs_frame_free(&later);
+    gs_frame_free(&settled);
+
+    // The same tick twice is the same frame.
+    now.tick = 504;
+    gs_frame once = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &v);
+    gs_frame twice = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &v);
+    CHECK(once.px != nullptr && twice.px != nullptr);
+    if (once.px != nullptr && twice.px != nullptr) CHECK(gs_count_diff(&once, &twice) == 0);
+    gs_frame_free(&once);
+    gs_frame_free(&twice);
+}
+
+TEST(two_cars_meeting_throw_sparks_where_they_met) {
+    // **A collision passed without punctuation.** A car hurt on the ground
+    // with another car within reach hit it; the frontend notes where they
+    // met and the renderer throws sparks there for a third of a second.
+    // Hurt with nobody near is not a collision - a wall, a mine - and throws
+    // none.
+    static gs_track t;
+    gs_flat_pavement(&t, 48, 48);
+
+    gs_world was, now;
+    gs_world_init(&was, GS_ONE);
+    gs_world_add_car(&was, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(24), GS_INT(24), 0);
+    gs_world_add_car(&was, &t, (uint8_t)GS_VEH_DUNE_BUGGY, GS_INT(25), GS_INT(24), 0);
+    was.tick = 700;
+    was.car[0].damage = 10;
+    was.car[1].damage = 10;
+    now = was;
+    now.tick = 701;
+    now.car[0].damage = 40;
+    now.car[1].damage = 40;
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    gs_render_track_camera(&v, &t, &now, &now, 1.0f);
+    gs_view plain = v;
+
+    gs_view_note_moments(&v, 1, &was, &now);
+    CHECK(v.bumped_tick[0] == 701 && v.bumped_tick[1] == 701);
+    CHECK(v.bumped_x[0] == (GS_INT(24) + GS_INT(25)) / 2);
+    CHECK(v.landed_tick[0] == 0);
+
+    // Hurt alone: the other car ten tiles away is not what did it.
+    gs_view alone = plain;
+    gs_world far_was = was, far_now = now;
+    far_was.car[1].x = GS_INT(35);
+    far_now.car[1].x = GS_INT(35);
+    gs_view_note_moments(&alone, 1, &far_was, &far_now);
+    CHECK(alone.bumped_tick[0] == 0);
+
+    now.tick = 703;
+    gs_frame bare = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &plain);
+    gs_frame sparks = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &v);
+    CHECK(bare.px != nullptr && sparks.px != nullptr);
+    if (bare.px == nullptr || sparks.px == nullptr) return;
+    const int flying = gs_count_diff(&bare, &sparks);
+    printf("  SPARKS %d pixels of them two ticks after the hit\n", flying);
+    CHECK(flying > 40);
+    gs_frame_free(&bare);
+    gs_frame_free(&sparks);
+
+    // Out, once their moment is up.
+    now.tick = 701 + (uint32_t)GS_TICK_HZ;
+    gs_frame later = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &plain);
+    gs_frame settled = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &v);
+    CHECK(later.px != nullptr && settled.px != nullptr);
+    if (later.px != nullptr && settled.px != nullptr) CHECK(gs_count_diff(&later, &settled) == 0);
+    gs_frame_free(&later);
+    gs_frame_free(&settled);
+
+    now.tick = 703;
+    gs_frame once = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &v);
+    gs_frame twice = gs_render_frame_through(ren, &t, &now, &now, 1.0f, &v);
+    CHECK(once.px != nullptr && twice.px != nullptr);
+    if (once.px != nullptr && twice.px != nullptr) CHECK(gs_count_diff(&once, &twice) == 0);
     gs_frame_free(&once);
     gs_frame_free(&twice);
 }
@@ -12806,6 +13024,9 @@ int main(void) {
     run_every_driver_can_see_their_own_car_on_ground_that_is_not_at_height_zero(ren);
     run_a_car_in_the_air_climbs_its_own_screen_rather_than_leaving_it(ren);
     run_a_car_down_a_drop_does_not_take_the_camera_off_the_other_one(ren);
+    run_the_lights_going_green_are_a_burst_at_the_line(ren);
+    run_coming_down_from_a_big_jump_raises_dust_where_the_car_landed(ren);
+    run_two_cars_meeting_throw_sparks_where_they_met(ren);
 
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);

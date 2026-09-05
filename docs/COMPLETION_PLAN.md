@@ -3000,13 +3000,19 @@ better done once the reversed routes are being verified too.
       server and comparing the worlds they end in is not there; the claim
       is proved at the rollback layer.*
 
-- [ ] **The flat moments.** The finish is an event now and three moments
-      still pass without punctuation: the green light at the start, a
+- [x] **The flat moments.** The finish is an event and three moments
+      passed without punctuation: the green light at the start, a
       collision between cars, and landing a big jump. Each is drawing and
-      sound derived from the world, never state in it - the same rule the
-      finish celebration keeps - so none moves a golden hash.
-      *Verification: pixels and samples counted before and against each
-      moment, and the same tick drawn twice giving the same frame.*
+      sound now - a burst at the line with a beep per lamp and a tone at
+      green; sparks and a clang where two cars met; dust and a thud where
+      a car came down from a flight - derived from the world, never state
+      in it, so no golden hash moved. *Done 2026-09-06.*
+      *Verification: pixels counted against each moment - the burst against
+      the same lamps with it over, the dust and the sparks against a frame
+      that noted nothing, each gone when its moment is up, and the same
+      tick drawn twice the same frame; samples peaking above the idle after
+      a lamp, after green, after a landing and after a collision, with a hop
+      and a hit alone noted as nothing.*
 
 - [ ] **The central server. Decided: one centralised server, not a mesh.**
       Publishing a track to a server and browsing what others built is done,

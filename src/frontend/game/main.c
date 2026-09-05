@@ -485,6 +485,7 @@ static bool gs_watch_step(gs_app *a) {
     a->prev = a->world;
     gs_world_step(&a->world, &a->t, in);
     gs_view_note_missed(a->view, GS_MAX_CARS, &a->t, &a->prev, &a->world);
+    gs_view_note_moments(a->view, GS_MAX_CARS, &a->prev, &a->world);
     return true;
 }
 
@@ -2149,6 +2150,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             gs_world seen = a->world;
             a->world = *gs_net_world(&a->net);
             gs_view_note_missed(a->view, GS_MAX_CARS, &a->t, &seen, &a->world);
+            gs_view_note_moments(a->view, GS_MAX_CARS, &seen, &a->world);
             gs_view_note_split(a->view, GS_MAX_CARS, &a->t,
                                a->show_ghost ? &a->ghost : nullptr, &seen, &a->world);
         }
@@ -2180,6 +2182,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         gs_replay_record(&a->recording, in);
         gs_world_step(&a->world, &a->t, in);
         gs_view_note_missed(a->view, GS_MAX_CARS, &a->t, &a->prev, &a->world);
+        gs_view_note_moments(a->view, GS_MAX_CARS, &a->prev, &a->world);
 
         // Lockstep, one tick for one tick. The ghost is a race, not a
         // playback, so it has to be stepped by the same clock as everything

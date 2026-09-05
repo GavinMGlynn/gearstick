@@ -425,11 +425,13 @@ file.
   is in **what the ground does under a committed line**, not in how many
   directions the track can point at once.
 
-- **The flat moments.** `CANDIDATE`
-  Crossing the line is a moment now - flags, fireworks, a banner - and three
-  others still pass without one: the green light, a collision, and landing a
-  big jump. Each is presentation derived from the simulation, never state in
-  it, which is what keeps every replay and every machine agreeing.
+- **The flat moments.** `DONE`
+  Crossing the line is a moment - flags, fireworks, a banner - and so are
+  the three that passed without one: the lights going green are a burst at
+  the line with a tone, a collision is sparks and a clang, and coming down
+  from a big jump is dust and a thud. Each is presentation derived from the
+  simulation, never state in it, which is what keeps every replay and every
+  machine agreeing.
 
 - **The setup online: gearbox and direction.** `DONE`
   Each driver's gearbox and the race's direction travel with the race

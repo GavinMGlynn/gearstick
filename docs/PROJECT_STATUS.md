@@ -8835,6 +8835,61 @@ and the same bytes as a version-seven file read as automatic and land
 somewhere else, which is the fault this fixes. The play checks, the front
 door and the output check are green through the changed join.*
 
+### The flat moments, 2026-09-06
+
+**Three moments that passed without punctuation have some.** The finish
+became an event on 2026-09-04; the green light, a collision between cars
+and coming down from a big jump still went by as a lamp changing colour, a
+number rising on a damage bar and a car simply being on the ground again.
+Each is drawing and sound now, and each is derived from the world rather
+than kept in it - the same rule the celebration keeps, and for the same
+reason: nothing added to `gs_world`, no golden hash moved, and every
+machine watching the race, or a replay of it, sees and hears the same
+moment at the same tick because it is doing the same arithmetic.
+
+- **The green light** is a burst of green and white that goes up out of the
+  start line for half a second from the tick the lights go, derived from
+  the world's `green_tick` and its tick and nothing else. Heard as a short
+  beep as each lamp lights, once a second down the countdown, and a longer,
+  higher tone on the tick the lights go green - noticed by the mixer from
+  how much of the countdown was left last time, the way it notices an
+  impact from damage rising.
+- **A collision** throws sparks where the two cars met, for a third of a
+  second, and is heard as a clang - a tone with an edge above any engine -
+  over the rumble the damage already made. A car hurt while on the ground,
+  with another car within a car length and a bit, hit it; hurt alone, at a
+  wall or a mine, is not a collision and throws none.
+- **Coming down from a big jump** raises dust where the car came down, for
+  half a second, and is heard as a thud, low and mostly noise and heavier
+  the longer the flight - whether or not it hurt. A big jump is a quarter
+  of a second in the air, a constant the simulation never reads; a hop over
+  a bump is not a landing and raises nothing.
+
+**The last two are noted, not stored.** A landing and a collision are facts
+about two consecutive ticks - in the air then on the ground, hurt while on
+the ground with somebody close - and a frame drawn from one world cannot
+see them. The frontend notes them as one tick becomes the next, in the
+same place and the same way it notes a missed gate: `gs_view_note_moments`
+writes the tick and the place into every view, and the renderer draws from
+the view. That is presentation state, kept out of the world for the reason
+the missed-gate flag was. A replay watched back is stepped through the
+same notes, so the dust is where it was.
+
+*Verification: on pixels - a frame fifteen ticks after the lights go
+differs from the same green lamps with the burst over by the burst, and
+ten ticks past that the frames are identical; a landing noted from an
+airborne tick to a grounded one raises dust that a frame with no note has
+not, gone after its half second, and a five-tick hop notes nothing; two
+cars hurt within reach note a collision at their midpoint, sparks show for
+their third of a second and not after, and hurt with the other car ten
+tiles away notes nothing; and every one of them drawn twice at the same
+tick is the same frame. On samples - the frame after a lamp lights and the
+frame after the lights go green each peak above the idle before them;
+coming down from a second in the air peaks above sitting still and a hop
+does not; a collision is louder than the rumble alone and crosses zero
+more often, which is the edge. Release and sanitised; neither golden
+moved.*
+
 
 ## Known risks
 

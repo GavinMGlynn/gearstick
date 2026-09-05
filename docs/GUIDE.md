@@ -162,6 +162,12 @@ finish. A reversed track keeps its own records and its own ghost. Online
 the server decides: `gearstick_server --reversed` races its track the
 other way round for everybody.
 
+**The moments you can see and hear.** The lights beep as they come on and
+sound a longer note as they go green, with a burst at the line; two cars
+meeting throw sparks and clang; coming down from a big jump raises dust and
+thuds. None of it is in the race itself - it is drawn and played from what
+the race did - so a replay shows every one of them where it happened.
+
 **A checkpoint is a post; the line between them is the way.** Only every
 fourth gate on a track is a checkpoint you have to cross in order — the
 ones with posts and an arrow, and the dots on the map. The dashed line
