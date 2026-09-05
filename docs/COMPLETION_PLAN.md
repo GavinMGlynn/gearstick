@@ -2941,6 +2941,23 @@ better done once the reversed routes are being verified too.
       analyser, both finishable, and neither strictly faster than the other
       for every machine.*
 
+- [ ] **The manual gearbox goes on the wire.** A race hosted online gives
+      every car the automatic, because the per-driver gearbox choice is not
+      in the race setup the host sends. One flag per car in the setup
+      message, and the same rule for it as everything else on the wire: the
+      protocol document says where it is, and the wire test moves.
+      *Verification: two machines, one manual and one automatic, race and
+      land on the same world hash with the manual driver's gear changes in
+      the replay.*
+
+- [ ] **The flat moments.** The finish is an event now and three moments
+      still pass without punctuation: the green light at the start, a
+      collision between cars, and landing a big jump. Each is drawing and
+      sound derived from the world, never state in it - the same rule the
+      finish celebration keeps - so none moves a golden hash.
+      *Verification: pixels and samples counted before and against each
+      moment, and the same tick drawn twice giving the same frame.*
+
 - [ ] **The central server. Decided: one centralised server, not a mesh.**
       Publishing a track to a server and browsing what others built is done,
       and so are profiles with passwords and records re-raced before they
@@ -2955,6 +2972,16 @@ better done once the reversed routes are being verified too.
       What is left is not code so much as a place: a hosted instance, an
       address the game points at by default (today a player types one), and
       the running of it - **which cannot be finished, only kept up**.
+
+      - [ ] **A window on the server.** It draws its live view in a terminal
+            and is happy with no screen, and both stay true; on a machine
+            with a display it opens a window as well, showing the same
+            facts - who is here, from where, how long, what is flowing - and
+            a log of arrivals and departures a terminal scrolls away, with
+            room for what an operator does next: drop a client, take a track
+            down. *Verification: the window and the terminal report the same
+            numbers from the same race; with no display the server runs
+            exactly as it did; the output test still reads its terminal.*
       *Verification: a time set on one machine is shown, re-raced and
       verified on another with nothing copied by hand; and a service that is
       down leaves every local feature - racing, building, sharing by code -

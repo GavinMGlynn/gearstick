@@ -242,6 +242,10 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   discovery, relays between players' own servers and any kind of federation
   are `OUT`: a mesh is a second protocol to specify, secure and debug, for a
   game whose whole cheating defence is one place that re-races every time.
+  **And the server gets a window.** It has drawn its live view in a terminal
+  and run on machines with no screen, and it keeps doing both; where there
+  is a display it shows the same facts in a window, with a log the terminal
+  scrolls away and the operator's controls beside it.
 
 - **Times verified by re-racing them.** `CORE`
   A submitted time comes with the inputs that produced it, and a server can
@@ -418,6 +422,16 @@ file.
   its from a single plane seen side-on. The lesson from both is that the drama
   is in **what the ground does under a committed line**, not in how many
   directions the track can point at once.
+
+- **The flat moments.** `CANDIDATE`
+  Crossing the line is a moment now - flags, fireworks, a banner - and three
+  others still pass without one: the green light, a collision, and landing a
+  big jump. Each is presentation derived from the simulation, never state in
+  it, which is what keeps every replay and every machine agreeing.
+
+- **The manual gearbox online.** `WANTED`
+  A race hosted online gives everyone the automatic, because the gearbox
+  choice does not travel with the race setup. It should, per driver.
 
 - **Watching a race back from any car.** `CANDIDATE`
   Replays already re-race exactly; what is missing is choosing whose shoulder
