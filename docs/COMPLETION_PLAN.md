@@ -1051,7 +1051,7 @@ review, and it fails it for good reasons.
       the bottom of a screen that was already the tightest fit in the game. The
       detail panel stands down while the question is up — it describes the track
       the question already names — and that is what made it fit.
-- [ ] **The transport has a written specification.** Message formats, the state
+- [x] **The transport has a written specification.** Message formats, the state
       machine, the key schedule, the message limit before a rekey, and the
       properties claimed **and explicitly not claimed**. A design nobody wrote
       down cannot be reviewed, and the parts left out are what a reviewer most
@@ -1068,11 +1068,17 @@ review, and it fails it for good reasons.
       The byte sizes it quotes are pinned by a test, so the document cannot
       drift from the code without something going red. What is missing is
       somebody implementing a client from it who has not seen `gs_noise.c`.
-      **How this will be closed:** a fresh agent given the document and
-      nothing else - no source, no tests - writes a client from it and runs
-      a handshake against the real server. If it completes, the document
-      was enough; if it stalls, where it stalled is what the document is
-      missing. Scheduled between items 3 and 4 above.
+      **Closed, 2026-09-05.** A fresh agent given the document and nothing
+      else - no source, no tests, no other document - wrote a client from
+      it and completed the handshake against the real server on the first
+      attempt: message one built from §3-§5 with no iteration, message two
+      authenticated, a sealed message accepted, and §6.2's replay rules
+      confirmed black-box. Its verdict: "handshake completed from the
+      document alone." It also found what the document lacked, and the
+      document has it now: the printed key's encoding, the inner envelope
+      and a `JOIN`'s layout, what "address" and "live" mean, the silence
+      timeout and the server's two-second ping, the give-up time, and one
+      thing it had wrong - "more than 64 behind" is refused at 64, not 65.
       **The check that can be automated now runs rather than skipping**: on
       2026-08-27 the `noiseprotocol` package was installed, and
       `gearstick_transport_document` writes a client from the document alone,

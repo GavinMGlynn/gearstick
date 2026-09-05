@@ -23,7 +23,9 @@ RFC 7693.
 
 **IK rather than NK or XX.** The client already knows the server's static public
 key — it is given out of band, printed by the server at startup and passed to
-the client with `--server-key`. One round trip then buys server authentication,
+the client with `--server-key`. **The printed form is the raw 32-byte X25519
+public key as 64 lowercase hex characters**, on the line that begins `key`,
+and `--server-key` takes the same 64 characters. One round trip then buys server authentication,
 client authentication, and a client identity that a passive observer cannot
 read, because the client's static key travels encrypted inside the first
 message.
@@ -66,7 +68,18 @@ Only two types ever appear on the wire once this transport is in use:
 
 Every other message type in the protocol — join, lobby, track chunks, results,
 proofs, records — is a **plaintext payload carried inside a `SEALED`
-datagram**, and is refused if it arrives any other way. A client that would read
+datagram**, and is refused if it arrives any other way. **The plaintext begins
+with the same six-byte envelope again** — magic, version, and the protocol
+message's own type — followed by that message's body; the outer type is
+`SEALED` and the inner type says what was sealed. The bodies are the
+protocol's business and outside this document, with one exception worth
+stating because a client that can only prove the transport still needs one
+message the server acts on: `JOIN` is inner type `3` and its body is a
+16-byte driver name, NUL-padded; a joined client is answered with the lobby
+roster (inner type `20`) and thereafter receives a `PING` (inner type `5`)
+from the server every two seconds and a fresh roster whenever it changes -
+**unsolicited traffic a client must expect**, and not mistake for the reply
+to whatever it last sent. A client that would read
 an unsealed protocol message is one that anybody on the path can talk to by
 pretending the tunnel failed.
 
@@ -142,11 +155,18 @@ and a subsequent message on it is refused. A client that wants to try again
 starts a whole new handshake with a fresh ephemeral key.
 
 **A handshake from an address that already has a live client is refused by the
-server.** Message one is replayable — anybody who captured one can send it
-again, and the responder cannot tell, because telling would need a session and
-there is no session yet. Accepting it would install a tunnel whose keys the real
-client does not hold, and knock a racing player off with a recorded packet. A
-client that genuinely restarted waits out the silence timeout first.
+server.** An *address* is an IP address and UDP port together; a *live* client
+is one that has **joined** — sent a `JOIN` and been given a slot — and has not
+fallen silent. Message one is replayable — anybody who captured one can send
+it again, and the responder cannot tell, because telling would need a session
+and there is no session yet. Accepting it would install a tunnel whose keys
+the real client does not hold, and knock a racing player off with a recorded
+packet. A session that has completed the handshake but not joined is not yet
+live, and a fresh message one from its address **does** replace it: nothing
+has been built on it that a replay could knock down. A client that genuinely
+restarted waits out the **silence timeout, fifteen seconds** by default
+(`--timeout` on the server), after which a client that has sent nothing is
+dropped.
 
 ---
 
@@ -181,6 +201,12 @@ Four rules that are easy to get wrong and matter:
 
 The initiator repeats message one until message two arrives or it gives up;
 retransmission is the only recovery, because there is nothing to acknowledge.
+The reference client gives up after **twenty seconds**; the interval between
+repeats is the client's choice and a second or two is sensible. A message two
+whose tag does not verify is dropped without reply, and the initiator keeps
+waiting for one that does. Any client static key is accepted: nothing about
+the handshake requires the key to be registered first - proving a *name* is
+§9's business and happens after the tunnel is up.
 
 ## 5. The key schedule
 
@@ -231,9 +257,12 @@ exactly, so no repacking is needed.
 
 Noise's transport phase assumes messages arrive in order. UDP does not.
 
-The receiver keeps the highest counter it has accepted and a 64-bit mask of the
-64 counters below it. A datagram is refused if its counter is already marked, or
-if it is more than 64 behind the highest.
+The receiver keeps the highest counter it has accepted and a 64-bit mask
+covering it and the **63** counters below it. A datagram is refused if its
+counter is already marked, or if it is **64 or more** behind the highest: a
+counter exactly 64 behind is refused, 63 behind is accepted. (This was
+written as "more than 64 behind" and read by an implementer as allowing 64;
+the mask is 64 bits wide and one of them is the highest itself.)
 
 **Out of order is not the same thing as replayed.** A rule of "must be greater
 than the last one accepted" cannot tell them apart: it throws away the

@@ -280,7 +280,7 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   input is the only thing they have ever been given.
 
 - **A written specification for the transport, and a written threat model.**
-  `WANTED`
+  `DONE`
   What is defended, from whom, what is deliberately not defended, and enough
   detail that somebody who has not read the code could write a client. Both are
   deliverables in their own right: a design nobody wrote down cannot be

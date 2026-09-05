@@ -8481,6 +8481,36 @@ generator reads a dial past its last band as level, so a spec that misses
 one can never build a track from garbage.
 
 
+### The transport document, read by somebody who had not seen the code, 2026-09-05
+
+The one item the plan said could not be closed by whoever wrote the code:
+`docs/TRANSPORT.md` needed a reader who had never seen `gs_noise.c` to build
+a client from it. A fresh agent was given the document and nothing else -
+forbidden the source, the tests, the tools and every other document - and
+told to write a client and complete a handshake against the real server.
+
+**"Handshake completed from the document alone."** Message one was built
+from §3-§5 with no iteration; the server's 54-byte reply authenticated on
+the first attempt; a sealed message was accepted and the lobby roster came
+back with the client's own port and key in it; and §6.2's replay window
+was confirmed black-box - replay dropped, out of order accepted, corrupted
+tag dropped with state intact, oversize dropped. Everything the document
+said about the Noise construction itself was correct as written.
+
+**And it found what the document had not said**, which is the other half
+of why a reader was needed: the printed key's encoding; the inner envelope
+and any layout at all for a message the server acts on; what "address" and
+"live client" mean; the silence timeout named without a value; the
+server's unsolicited two-second ping to a joined client, which a naive
+request-reply client mistakes for its answer; the retransmit give-up; and
+one statement that was wrong - "refused if more than 64 behind" is
+refused at 64, because the mask is 64 bits and one of them is the highest
+counter itself. The document says all of it now, exactly as the code
+behaves. The client it wrote is kept as `tools/transport_reader_client.py`,
+a second implementation of the handshake by somebody who never saw the
+first.
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
