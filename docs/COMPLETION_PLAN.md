@@ -1068,6 +1068,11 @@ review, and it fails it for good reasons.
       The byte sizes it quotes are pinned by a test, so the document cannot
       drift from the code without something going red. What is missing is
       somebody implementing a client from it who has not seen `gs_noise.c`.
+      **How this will be closed:** a fresh agent given the document and
+      nothing else - no source, no tests - writes a client from it and runs
+      a handshake against the real server. If it completes, the document
+      was enough; if it stalls, where it stalled is what the document is
+      missing. Scheduled between items 3 and 4 above.
       **The check that can be automated now runs rather than skipping**: on
       2026-08-27 the `noiseprotocol` package was installed, and
       `gearstick_transport_document` writes a client from the document alone,
@@ -2850,8 +2855,27 @@ from and the others in its family, and each entry is argued for in
 game to be itself; it is the list of things a player who has met *Stunts*,
 *Excitebike* or *TrackMania* would look for and not find.
 
-**Ordered by what they give back for what they cost.** The first two are
-close to free and change how a track is understood; the rest are real work.
+**Ordered by what they give back for what they cost**, and that order is
+the order they will be built in, each landing as its own commit with its
+tests. Sizes are honest guesses: *small* is a session, *medium* a few,
+*large* is a change to what something is rather than what it does.
+
+| # | Item | Size | What it actually involves |
+| --- | --- | --- | --- |
+| 1 | Vertical drama | medium–large | New generator shapes, each measured; the set regenerated |
+| 2 | Mirror mode | small | Reverse the gates, flip their headings; a dial on setup; its own records fall out of the hash |
+| 3 | Split times | small–medium | The tick at each checkpoint kept in a ghost; the HUD shows ± at each post |
+| 4 | A time to beat | small | The analyser already races every track; keep its best and show it |
+| 5 | Overheating | medium | Heat in the car state - which moves the world goldens - a gauge, and power lost |
+| 6 | A daily track | small | Date to seed; times compared through the server |
+| 7 | Replay from any car | small–medium | Choosing the car in the replay viewer; nothing in the simulation |
+| 8 | Alternate routes | large | A route that can be reached two ways is a change to what a route is |
+| 9 | The central server | decided, then hosting | One hosted instance the game points at by default; see the item |
+
+Mirror mode goes first in practice - it is the smallest item with the
+largest payoff, since reversing a route doubles what there is to drive -
+and vertical drama follows it, because it changes the shipped set and is
+better done once the reversed routes are being verified too.
 
 - [ ] **Vertical drama the ground can already hold.** Banked corners,
       quarter-pipe walls, half-pipes, gaps with nothing in them, ridges that
@@ -2917,14 +2941,20 @@ close to free and change how a track is understood; the rest are real work.
       analyser, both finishable, and neither strictly faster than the other
       for every machine.*
 
-- [ ] **A central service, entered into deliberately.** Publishing a track
-      to a server and browsing what others built is done; what the feature
-      asks for beyond that is not: accounts that follow you between machines,
-      and leaderboards that are global rather than per server. **This is the
-      one item in the plan that cannot be finished** - it is hosting,
-      moderation and a monthly bill, and the decision to take it on is a
-      different kind of decision from the others here. Listed so that it is
-      a choice on the record rather than something drifted into.
+- [ ] **The central server. Decided: one centralised server, not a mesh.**
+      Publishing a track to a server and browsing what others built is done,
+      and so are profiles with passwords and records re-raced before they
+      count. What the feature asks for beyond that - accounts that follow
+      you between machines and leaderboards that are global - follows from
+      there being *one* server: a profile signed in there is the same profile
+      on every machine, and its records are global because there is one place
+      they live. Peer-to-peer discovery, relays between players' own servers
+      and any federation are out: a second protocol to specify and secure,
+      for a game whose whole defence against cheating is one place that
+      re-races every time.
+      What is left is not code so much as a place: a hosted instance, an
+      address the game points at by default (today a player types one), and
+      the running of it - **which cannot be finished, only kept up**.
       *Verification: a time set on one machine is shown, re-raced and
       verified on another with nothing copied by hand; and a service that is
       down leaves every local feature - racing, building, sharing by code -

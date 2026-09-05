@@ -229,11 +229,19 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   characters you can paste into a message. Publishing is the other half: put it
   somewhere people can find it, with who made it and what has been done on it.
 
-- **A central service for the things a single machine cannot do.** `CANDIDATE`
+- **A central service for the things a single machine cannot do.** `WANTED`
   Accounts that follow you between machines, a browsable library of what
   everybody has built, and global leaderboards. This is the one part of the
   project that cannot be "finished" — it is hosting, moderation and cost, and
   it should be entered into deliberately rather than drifted into.
+  **Decided: one central track server, not a mesh.** The server that exists
+  — a meeting point with a library, profiles and re-raced records — becomes
+  *the* server: one hosted instance the game points at by default, so a
+  profile signed in there is the same profile on every machine and its
+  records are global because there is one place they live. Peer-to-peer
+  discovery, relays between players' own servers and any kind of federation
+  are `OUT`: a mesh is a second protocol to specify, secure and debug, for a
+  game whose whole cheating defence is one place that re-races every time.
 
 - **Times verified by re-racing them.** `CORE`
   A submitted time comes with the inputs that produced it, and a server can
