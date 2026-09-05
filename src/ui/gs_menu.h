@@ -138,6 +138,18 @@ typedef struct gs_menu {
 
     gs_race_setup setup;
 
+    // **The time to beat** for the track, direction, gravity and skill on
+
+    // the setup screen, and the key they make - recomputed only when the
+
+    // key changes, which is a few milliseconds of headless driving.
+
+    uint64_t      target_key;
+
+    uint32_t      target_lap;
+
+    uint8_t       target_vehicle;
+
     gs_result_row result[GS_MAX_CARS];
     uint8_t       result_count;
 
@@ -479,5 +491,9 @@ size_t gs_menu_size(const gs_menu *m);
 
 size_t gs_menu_save(const gs_menu *m, uint8_t *buf, size_t cap);
 bool   gs_menu_load(gs_menu *m, const uint8_t *buf, size_t len);
+
+// The target lap the setup screen last showed, in ticks, and the machine
+// that set it - 0 when there was none. For a test.
+uint32_t gs_menu_target_lap(const gs_menu *m, uint8_t *vehicle);
 
 #endif // GS_MENU_H

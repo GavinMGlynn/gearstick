@@ -375,7 +375,7 @@ file.
   knowing what to practise. *TrackMania* and *Trials* both live on this and it
   costs a comparison against a ghost that is already recorded.
 
-- **A time to beat on every track.** `CANDIDATE`
+- **A time to beat on every track.** `DONE`
   The analyser already drives every track with every machine before it ships,
   so a target time is a number the game can work out rather than one somebody
   has to author. Shown as a target, not a medal to earn: nothing unlocks,

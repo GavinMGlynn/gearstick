@@ -136,6 +136,11 @@ and a car that arrives short drives out of it slowly; *crests that drop
 away* fall away on the far side, so the landing is the decision. A *level
 road* is what every track used to be.
 
+**A time to beat.** The setup screen shows the computer's best lap on the
+chosen track at the skill you have set, and the machine it did it in. It
+is worked out on the spot, so every track has one, both ways round. A
+target, not a medal: nothing is locked behind it.
+
 **The split at every checkpoint.** With a ghost on the track - your last
 run, or a loaded one - each post you cross shows how far ahead or behind
 it you are: `-0.42` in green is ahead, `+1.03` in red is behind. It stays

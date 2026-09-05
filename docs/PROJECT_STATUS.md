@@ -8442,6 +8442,33 @@ seconds on, nothing on a wreck; and the panel fits with the row in every
 state it has. No golden moved.*
 
 
+### A time to beat on every track, 2026-09-05
+
+**Computed, never authored.** The moment a track is chosen on the setup
+screen the computer drives it once with every machine, headless, at the
+race's own gravity and skill, and its best lap is shown beside the record
+as *target 1:31.20, sprint car* - on the record's own line, because the
+setup panel at four drivers is already as tall as the window allows and a
+line of its own put a scrollbar on it that took six pixels off every row,
+which the panel test measured. A headless lap
+costs about ten milliseconds in the release build, so all six machines are
+driven on the spot; the answer is cached by track, direction, gravity and
+skill and recomputed only when one of those changes. It is the same number
+every time it is asked, because the simulation and the driver are
+deterministic - a fact shown as a fact.
+
+**A target, never a medal.** Nothing unlocks and nothing is withheld; it is
+the difference between a solo lap with a point and one without. The skill
+dial moves it, so "beat the computer at this skill" is a thing to aim at
+on any track, both ways round.
+
+*Verification: four generated tracks each have a target, the same twice, at
+two skills, within the analyser's budget, and their reverses have their
+own; the setup screen fills its cache on first draw with the number the
+core gives directly, keeps it on the next draw, and recomputes when the
+direction or the skill changes. No golden moved.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

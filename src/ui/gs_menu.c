@@ -1,4 +1,5 @@
 #include "ui/gs_menu.h"
+#include "core/gs_target.h"
 
 #include "dcimgui.h"
 #include "gfx/gs_render.h"
@@ -1281,14 +1282,45 @@ static gs_screen gs_setup_screen(gs_menu *m, const gs_track *t) {
                                                  : gs_track_hash(t);
         const gs_record *best = gs_records_best_lap(&m->records, which,
                                                     gs_conditions_hash(&probe));
+
+        // **And the time to beat**, on the same line as the record - the
+        // panel at four drivers is already as tall as the window allows, and
+        // a line of its own put a scrollbar on it that took six pixels off
+        // every row. The computer's best lap here, at this gravity and this
+        // skill, with the machine it did it in: worked out rather than
+        // authored, a few milliseconds of headless driving the first time
+        // this track is looked at under these dials and cached by them
+        // after. A target, never a medal.
+        const uint64_t key = which ^ (gs_conditions_hash(&probe) * 0x9e3779b97f4a7c15ULL) ^
+                             ((uint64_t)m->setup.skill << 56);
+        if (m->target_key != key) {
+            m->target_key = key;
+            m->target_lap = gs_target_lap(t, m->setup.gravity, (int)m->setup.skill,
+                                          &m->target_vehicle);
+        }
+        char target[48];
+        if (m->target_lap != 0) {
+            char when[32];
+            gs_time_text(when, sizeof when, m->target_lap);
+            SDL_snprintf(target, sizeof target, "target %s, %s", when,
+                         gs_vehicle(m->target_vehicle)->name);
+        } else {
+            SDL_strlcpy(target, "no target: the computer cannot get round", sizeof target);
+        }
+
         if (best != nullptr) {
             char text[32];
             gs_time_text(text, sizeof text, best->lap);
             ImGui_Text("%s   %s, %s", text, best->who, gs_vehicle(best->vehicle)->name);
+            ImGui_SameLine();
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
+            ImGui_Text("   %s", target);
+            ImGui_PopStyleColor();
         } else {
             ImGui_PushStyleColorImVec4(ImGuiCol_Text,
                                        ImGui_GetStyle()->Colors[ImGuiCol_TextDisabled]);
-            ImGui_TextUnformatted("Nobody has been round this one at this gravity.");
+            ImGui_Text("no record yet   %s", target);
             ImGui_PopStyleColor();
         }
 
@@ -2572,4 +2604,9 @@ const char *gs_screen_name(gs_screen s) {
     case GS_SCREEN_COUNT:    break;      // not a screen; not nameable
     }
     return "?";
+}
+
+uint32_t gs_menu_target_lap(const gs_menu *m, uint8_t *vehicle) {
+    if (vehicle != nullptr) *vehicle = m->target_vehicle;
+    return m->target_lap;
 }

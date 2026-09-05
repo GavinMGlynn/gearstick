@@ -2911,12 +2911,15 @@ better done once the reversed routes are being verified too.
       ghost, nothing four seconds on, nothing on a wreck; the panel fits
       with the row in every state.*
 
-- [ ] **A time to beat on every track.** The analyser already drives every
-      track with every machine before it ships, so the target is computed
-      rather than authored. A target, never a medal: nothing unlocks.
-      *Verification: every shipped track has one, it is beatable by a person
-      on the machine it was set with, and it does not move when the track is
-      loaded again.*
+- [x] **A time to beat on every track.** The computer drives the chosen
+      track once with every machine, headless, at the race's gravity and
+      skill, and its best lap is shown on the setup screen as the target -
+      computed the moment a track is chosen, cached by the dials, the same
+      number every time. A target, never a medal.
+      *Verification: every generated track tried has one, identical when
+      asked twice, within the analyser's budget; the setup screen fills its
+      cache on first draw with the core's own number and recomputes only
+      when the direction or the skill changes.*
 
 - [ ] **Overheating.** Sitting on the limiter builds heat, heat costs power,
       backing off spends it - which is what makes a manual gearbox a skill

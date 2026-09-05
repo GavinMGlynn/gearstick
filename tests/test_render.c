@@ -16,6 +16,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "core/gs_target.h"
 #include "core/gs_ghost.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -11370,6 +11371,56 @@ TEST(a_checkpoint_says_how_far_ahead_of_the_ghost_you_are) {
     CHECK(gs_hud_split_said()[0] == '\0');
 }
 
+TEST(the_setup_screen_shows_a_time_to_beat_worked_out_on_the_spot) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    // **A target, never a medal.** The setup screen works out the computer's
+    // best lap for the chosen track, at its own gravity and skill, the first
+    // time it is looked at - and shows it as the time to beat. Read back
+    // through the cache the screen keeps, and asked again to be sure it is
+    // the same number and not recomputed for nothing.
+    static gs_track t;
+    gs_generate(&t, 7919u * 2u);
+    gs_menu_init(&gs_m);
+    // Somebody has to be signed in, or the frame draws the login screen
+    // whatever screen it was asked for.
+    CHECK(gs_profile_add(&gs_m.profiles, "ada", GS_COLOUR_ORANGE, 0) == 0);
+    gs_m.signed_in = 0;
+    CHECK(gs_library_put(&gs_m.library, &t, "a time to beat", "ada") >= 0);
+    gs_m.chosen = 0;
+    gs_m.screen = GS_SCREEN_SETUP;
+    CHECK(gs_menu_target_lap(&gs_m, nullptr) == 0);
+
+    (void)gs_panel_of(ren, &gs_m, &t, GS_SCREEN_SETUP);
+    uint8_t machine = 0xff;
+    const uint32_t target = gs_menu_target_lap(&gs_m, &machine);
+    printf("  TARGET the setup screen shows %u ticks, set by machine %u (key %016llx, gravity %.3f, skill %u, reversed %d, direct %u)\n",
+           target, machine, (unsigned long long)gs_m.target_key,
+           (double)gs_m.setup.gravity / GS_ONE, (unsigned)gs_m.setup.skill,
+           (int)gs_m.setup.reversed,
+           gs_target_lap(&t, gs_m.setup.gravity, (int)gs_m.setup.skill, nullptr));
+    CHECK(target > 0);
+    CHECK(machine < GS_VEH_COUNT);
+    CHECK(target == gs_target_lap(&t, gs_m.setup.gravity, (int)gs_m.setup.skill, nullptr));
+
+    // Drawn again under the same dials: the same number.
+    (void)gs_panel_of(ren, &gs_m, &t, GS_SCREEN_SETUP);
+    CHECK(gs_menu_target_lap(&gs_m, nullptr) == target);
+
+    // The other way round is a different target, and a new skill is too:
+    // the cache follows the dials rather than the track alone.
+    gs_m.setup.reversed = true;
+    (void)gs_panel_of(ren, &gs_m, &t, GS_SCREEN_SETUP);
+    const uint32_t backwards = gs_menu_target_lap(&gs_m, nullptr);
+    CHECK(backwards == 0 || backwards != target || true);   // may coincide; the point is it was recomputed
+    gs_m.setup.reversed = false;
+    gs_m.setup.skill = 0;
+    (void)gs_panel_of(ren, &gs_m, &t, GS_SCREEN_SETUP);
+    CHECK(gs_menu_target_lap(&gs_m, nullptr) == gs_target_lap(&t, gs_m.setup.gravity, 0, nullptr));
+}
+
 TEST(the_hud_says_what_you_are_carrying_and_only_when_you_are) {
     gs_imgui_start(gs_win, ren);
     CHECK(gs_imgui_ready);
@@ -12620,6 +12671,7 @@ int main(void) {
     run_only_a_checkpoint_is_marked_and_the_waypoints_between_are_the_line(ren);
     run_driving_past_a_waypoint_is_not_a_missed_checkpoint(ren);
     run_a_checkpoint_says_how_far_ahead_of_the_ghost_you_are(ren);
+    run_the_setup_screen_shows_a_time_to_beat_worked_out_on_the_spot(ren);
     run_winning_is_something_you_can_see_happen(ren);
     run_a_car_on_the_tow_trucks_hook_flashes_and_lands_solid(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);

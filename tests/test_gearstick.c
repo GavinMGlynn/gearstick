@@ -22,6 +22,7 @@
 #include "core/gs_parts.h"
 #include "core/gs_generate.h"
 #include "core/gs_generate.h"
+#include "core/gs_target.h"
 #include "core/gs_ghost.h"
 #include "core/gs_library.h"
 #include "core/gs_blake2s.h"
@@ -9028,6 +9029,36 @@ TEST(a_ghost_knows_the_tick_it_crossed_each_gate) {
     printf("  SPLITS %d gates, the ghost's tick at each equal to the run's\n", crossings);
 }
 
+TEST(every_track_has_a_time_to_beat_and_it_is_the_same_twice) {
+    // **A target, computed rather than authored.** The computer drives the
+    // track with every machine, headless, and its best lap is the time to
+    // beat. It has to exist for every track that ships, be the same number
+    // every time it is asked - it is shown as a fact, and a fact that
+    // wanders is a lie - and be a lap the analyser's budget allows. Skill is
+    // not claimed to order it: a cautious driver slides less and is quicker
+    // on some tracks, which is the driver's business and not the target's.
+    int had = 0;
+    for (uint32_t seed = 1; seed <= 4; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+        uint8_t machine = 0xff;
+        const uint32_t target = gs_target_lap(&gs_gen_a, GS_ONE, GS_AI_SKILL_DEFAULT, &machine);
+        if (target == 0) continue;
+        had++;
+        CHECK(machine < GS_VEH_COUNT);
+        CHECK(target < gs_analyse_seconds(&gs_gen_a) * (uint32_t)GS_TICK_HZ);
+        CHECK(gs_target_lap(&gs_gen_a, GS_ONE, GS_AI_SKILL_DEFAULT, nullptr) == target);
+
+        const uint32_t cautious = gs_target_lap(&gs_gen_a, GS_ONE, 0, nullptr);
+        CHECK(gs_target_lap(&gs_gen_a, GS_ONE, 0, nullptr) == cautious);
+
+        // The other way round is its own track and its own target.
+        gs_track_reverse(&gs_gen_a);
+        CHECK(gs_target_lap(&gs_gen_a, GS_ONE, GS_AI_SKILL_DEFAULT, nullptr) > 0);
+    }
+    printf("  TARGET %d of 4 generated tracks have a time to beat, each the same twice\n", had);
+    CHECK(had >= 3);
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -10377,6 +10408,7 @@ int main(void) {
     run_a_track_reversed_twice_is_the_track_it_was_and_once_is_a_different_one();
     run_a_reversed_circuit_can_still_be_lapped();
     run_a_ghost_knows_the_tick_it_crossed_each_gate();
+    run_every_track_has_a_time_to_beat_and_it_is_the_same_twice();
     run_a_banked_corner_is_higher_on_the_outside_and_a_pipe_at_both_edges();
     run_a_gap_is_a_trench_after_a_ramp_and_a_crest_falls_away_beyond_it();
     run_every_kind_of_drama_can_still_be_got_round();

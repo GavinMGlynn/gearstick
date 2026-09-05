@@ -87,6 +87,7 @@ add_library(gearstick_sim STATIC
     src/core/gs_ai.c
     src/core/gs_blake2s.c
     src/core/gs_analyse.c
+    src/core/gs_target.c
     src/core/gs_generate.c
     src/core/gs_ghost.c
     src/core/gs_library.c
