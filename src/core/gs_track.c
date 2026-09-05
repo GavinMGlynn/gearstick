@@ -86,6 +86,7 @@ void gs_track_init(gs_track *t, uint8_t w, uint8_t h, gs_surface surface) {
     t->w = w;
     t->h = h;
     t->gate_count = 0;
+    t->checkpoint_every = 1;
 
     // A fresh track is a path until something says otherwise, which is the
     // safer of the two: a sprint's finish is its last gate, and a track with
@@ -590,6 +591,12 @@ static uint64_t gs_track_hash_of(const gs_track *t, bool with_route) {
     // sprint you drive from the first gate to the last and stop. A best lap on
     // one is not a time you can put beside a best lap on the other.
     if (with_route) gs_hash_bytes(&h, &t->route, sizeof t->route);
+    // Folded in only when it is not the default, the way the route kind is
+    // only folded in when asked: a track from before this existed keeps the
+    // hash it had, and with it every record and share code keyed on it.
+    if (t->checkpoint_every > 1) {
+        gs_hash_bytes(&h, &t->checkpoint_every, sizeof t->checkpoint_every);
+    }
     gs_hash_bytes(&h, &t->gate_count, sizeof t->gate_count);
     for (uint8_t i = 0; i < t->gate_count; i++) {
         const gs_gate *g = &t->gate[i];
@@ -638,12 +645,14 @@ static uint32_t gs_get_u32(const uint8_t *p) {
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-// magic, version, width, height, gate count.
-// magic, version, w, h, gate count, route kind.
-#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1 + 1 + 1)
+// magic, version, w, h, gate count, route kind, gates per checkpoint.
+#define GS_TRACK_HEADER_BYTES (4 + 4 + 1 + 1 + 1 + 1 + 1)
 
-// What a version 2 header was, before the route kind was in it.
+// What the headers before were. Version 2 had no route kind; version 3 had
+// no checkpoint stride - every gate was a checkpoint, which is what a stride
+// of one means, so a version 3 track reads as exactly the track it was.
 #define GS_TRACK_HEADER_BYTES_V2 (4 + 4 + 1 + 1 + 1)
+#define GS_TRACK_HEADER_BYTES_V3 (4 + 4 + 1 + 1 + 1 + 1)
 
 // x, y, half width, heading.
 #define GS_GATE_BYTES (4 + 4 + 4 + 2)
@@ -661,12 +670,35 @@ uint8_t gs_track_finish_gate(const gs_track *t) {
     return (uint8_t)(t->gate_count - 1);
 }
 
+bool gs_track_is_checkpoint(const gs_track *t, uint8_t i) {
+    if (t->gate_count == 0 || i >= t->gate_count) return false;
+    if (t->checkpoint_every <= 1) return true;
+    if (i == 0 || i == gs_track_finish_gate(t)) return true;
+    return (i % t->checkpoint_every) == 0;
+}
+
 bool gs_track_is_circuit(const gs_track *t) {
     return t->route == (uint8_t)GS_ROUTE_CIRCUIT;
 }
 
+// **Written in the oldest version that can hold it.** A track that keeps
+// every gate a checkpoint - which is every track from before the stride
+// existed, and every hand-built one that never touched the dial - is written
+// as the version 3 file it always was: byte for byte the same, so its share
+// code does not change, and a client from the release before this one can
+// still read it. Only a track that uses the stride needs the byte that
+// carries it.
+static uint32_t gs_track_version(const gs_track *t) {
+    return t->checkpoint_every > 1 ? GS_TRACK_VERSION : 3u;
+}
+
+static size_t gs_track_header_bytes(const gs_track *t) {
+    return gs_track_version(t) >= 4u ? (size_t)GS_TRACK_HEADER_BYTES
+                                     : (size_t)GS_TRACK_HEADER_BYTES_V3;
+}
+
 size_t gs_track_size(const gs_track *t) {
-    return GS_TRACK_HEADER_BYTES + gs_track_payload(t);
+    return gs_track_header_bytes(t) + gs_track_payload(t);
 }
 
 size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap) {
@@ -675,11 +707,12 @@ size_t gs_track_serialize(const gs_track *t, uint8_t *buf, size_t cap) {
 
     uint8_t *p = buf;
     gs_put_u32(p, GS_TRACK_MAGIC);   p += 4;
-    gs_put_u32(p, GS_TRACK_VERSION); p += 4;
+    gs_put_u32(p, gs_track_version(t)); p += 4;
     *p++ = t->w;
     *p++ = t->h;
     *p++ = t->gate_count;
     *p++ = t->route;
+    if (gs_track_version(t) >= 4u) *p++ = t->checkpoint_every;
 
     for (uint32_t y = 0; y <= t->h; y++) {
         for (uint32_t x = 0; x <= t->w; x++) {
@@ -719,15 +752,18 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
     // add a byte.
     uint32_t version = gs_get_u32(p);
     p += 4;
-    if (version != GS_TRACK_VERSION && version != 2u) return false;
-    size_t header = version >= 3u ? GS_TRACK_HEADER_BYTES
-                                  : (size_t)GS_TRACK_HEADER_BYTES_V2;
+    if (version != GS_TRACK_VERSION && version != 2u && version != 3u) return false;
+    size_t header = version >= 4u   ? GS_TRACK_HEADER_BYTES
+                    : version == 3u ? (size_t)GS_TRACK_HEADER_BYTES_V3
+                                    : (size_t)GS_TRACK_HEADER_BYTES_V2;
     if (len < header) return false;
 
     uint8_t w = *p++;
     uint8_t h = *p++;
     uint8_t gates = *p++;
     uint8_t kind = version >= 3u ? *p++ : (uint8_t)GS_ROUTE_SPRINT;
+    uint8_t every = version >= 4u ? *p++ : (uint8_t)1;
+    if (every == 0) every = 1;
     if (w == 0 || h == 0 || w > GS_TRACK_MAX || h > GS_TRACK_MAX) return false;
     if (gates > GS_TRACK_MAX_GATES) return false;
     if (kind > (uint8_t)GS_ROUTE_CIRCUIT) return false;
@@ -742,6 +778,7 @@ bool gs_track_deserialize(gs_track *t, const uint8_t *buf, size_t len) {
 
     gs_track_init(t, w, h, GS_SURF_PAVEMENT);
     t->route = kind;
+    t->checkpoint_every = every;
 
     for (uint32_t y = 0; y <= h; y++) {
         for (uint32_t x = 0; x <= w; x++) {

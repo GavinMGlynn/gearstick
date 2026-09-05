@@ -8176,6 +8176,13 @@ The track's hash is taken **once per view**, not per corner. It walks the
 whole used region, and asking for it four times a tile would have cost more
 than everything else the renderer does put together.
 
+**And one defect in it, found a day later by the debug build.** The grain's
+hash multiplied a signed tile coordinate, and a tile west or north of the
+world has a negative one: signed overflow, undefined behaviour, which the
+optimised build happened to survive and the sanitiser flagged the moment
+the debug renderer suite drew a fringe. It is unsigned throughout now -
+modular arithmetic is what a hash wants - and the picture is unchanged.
+
 *Verification: the whole renderer suite, and a frame photographed before and
 after. One test had to be corrected rather than the change: the wreck-width
 check took a single ground pixel as its reference and counted anything unlike
@@ -8216,6 +8223,68 @@ construction, the painter's-order renderer, the pointer-free world state
 and the `memcpy` snapshot - a second engine, not a feature. The ambition
 behind the request lives on as the vertical-drama item above, which the
 ground can hold today.
+
+
+### Checkpoints four times further apart, and what a gate is for, 2026-09-05
+
+**"The current tracks have very close together checkpoints. Let's make them
+four times apart."** They were a dozen tiles apart, every one with a post at
+each end and an arrow on the ground, and down a straight that read as a
+fence.
+
+**The obvious change was wrong, and measurably.** Spacing the gates
+themselves to forty-eight tiles was tried first: thirteen of the first
+thirty seeds failed validation, the shipped set's measured length fell from
+649–1,297 tiles to 631–1,176, and the analyser's time budget shrank below
+what the road takes. All for one reason: the gate list was quietly doing
+four jobs. The driver steers by the next gate. The validator reads the route
+from them. The line on the ground and the shape on the map are a curve
+fitted through them. The length is measured along that curve. A dozen tiles
+is what it takes to describe a winding road, and none of those four jobs
+wanted fewer.
+
+**So the description stays dense and the checkpoints thin out.** A track
+now carries one number, `checkpoint_every`: every Nth gate is a checkpoint a
+car must cross in order, and the rest are waypoints that describe the way.
+Gate zero and the finish are always checkpoints. The generator writes four.
+Every track from before - and every hand-built one that never touches the
+dial - has a stride of one, which is exactly what it was: every gate counts.
+
+What each part does with it:
+
+- **The simulation forgives a missed waypoint.** On a crossing it walks from
+  the gate the car was expecting towards the next checkpoint and takes the
+  first gate crossed; a checkpoint ends the walk, so driving past one still
+  stops every later crossing counting. On a stride-one track this looks at
+  exactly the gate it always did, and **neither world golden moved.**
+- **The renderer marks only checkpoints** - post, arrow, dot on the map. The
+  route line runs along every gate as before. The "missed checkpoint"
+  warning fires only for a checkpoint.
+- **The driver, the validator, the route line and the length measure are
+  untouched**, and see every gate.
+- **The editor has the dial** - "checkpoint every", in the gate panel, one
+  undo per step, through the edit log like the loop/path toggle.
+
+**The file format is version 4, written only when needed.** A track whose
+stride is one is written as the version 3 file it always was, byte for
+byte: its share code does not change and a beta3 client still reads it.
+The stride is folded into the track hash only when it is not one, so no
+existing record or share code is orphaned. The generator golden moved -
+every generated track now carries the stride - and the track and world
+goldens did not.
+
+The shipped set and the server store were regenerated with the same seeds:
+same thirty tracks, same names, gates a dozen apart, posts four dozen.
+
+*Verification: a car driven down eight gates with two set beside the road -
+it is forgiven the waypoint and stopped by the checkpoint, and stopped by
+the waypoint too once every gate counts; a version 3 file built by hand from
+the version 4 bytes reads back with a stride of one and the hash it always
+had; every generated track has a quarter of its gates as checkpoints with
+the finish among them; a generated track drawn with its stride and drawn
+with every gate marked has a quarter of the arrow pixels; and the missed
+warning stays quiet for a waypoint driven past and fires for a checkpoint.
+The byte audit knows the new field. The guide says what a post means.*
 
 
 ## Known risks

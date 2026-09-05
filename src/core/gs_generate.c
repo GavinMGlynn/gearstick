@@ -1288,15 +1288,28 @@ static void gs_relax(gs_track *t) {
 }
 
 // The gates, laid on the same centreline the road was cut along, each facing
-// the way a car is travelling when it arrives. One every dozen tiles or so:
-// close enough together that the gates describe the route rather than merely
-// marking it, and **always wider than the road** - a gate narrower than the
-// road it crosses is a checkpoint a car can pass beside, and gates count in
-// order, so one missed gate is a finish line that does nothing.
+// the way a car is travelling when it arrives. One every dozen tiles: close
+// enough together that the gates describe the route rather than merely
+// marking it - which is what the driver steers by, the validator reads, the
+// route line is drawn along and the length is measured through. And
+// **always wider than the road** - a gate narrower than the road it crosses
+// is a checkpoint a car can pass beside.
+//
+// **But only every fourth one is a checkpoint.** All of them were, and a
+// player saw a fence of posts down every straight and asked for them four
+// times further apart. Spacing the gates themselves out broke all four jobs
+// above at once - a third of the seeds failed validation, the drawn route
+// cut the corners, the measured length fell by a tenth - because the gates
+// were doing the describing. So the description stays dense and the
+// *checkpoints* thin out: the in-between gates are waypoints the driver
+// follows and a player may miss without penalty. See gs_track_is_checkpoint.
+#define GS_GATE_EVERY        GS_INT(12)
+#define GS_CHECKPOINT_EVERY  4
+
 static void gs_lay_gates(gs_track *t, gs_rng *r, const gs_route_plan *plan,
                          int half) {
     bool loop = plan->loop;
-    int want = (int)(plan->total / GS_INT(12)) + (int)gs_pick(r, 3);
+    int want = (int)(plan->total / GS_GATE_EVERY) + (int)gs_pick(r, 3);
     if (want > GS_TRACK_MAX_GATES - 4) want = GS_TRACK_MAX_GATES - 4;
     if (want < 6) want = 6;
     uint8_t gates = (uint8_t)want;
@@ -1333,6 +1346,7 @@ static void gs_lay_gates(gs_track *t, gs_rng *r, const gs_route_plan *plan,
     }
 
     t->route = loop ? (uint8_t)GS_ROUTE_CIRCUIT : (uint8_t)GS_ROUTE_SPRINT;
+    t->checkpoint_every = GS_CHECKPOINT_EVERY;
 }
 
 // --- the whole track --------------------------------------------------------

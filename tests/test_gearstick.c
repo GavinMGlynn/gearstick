@@ -338,6 +338,9 @@ static void gs_make_edits(gs_edit_log *l, gs_track *t, uint32_t n) {
 // Is this byte one the hash is meant to read? The used region and nothing else:
 // a track's identity is what is on it, not what the arrays have room for.
 static bool gs_byte_counts(const gs_track *t, size_t at) {
+    // How many gates make a checkpoint changes which lines a lap has to
+    // cross, so it is part of what the track is.
+    if (at == offsetof(gs_track, checkpoint_every)) return true;
     const size_t corner = offsetof(gs_track, corner);
     const size_t surface = offsetof(gs_track, surface);
     const size_t gravity = offsetof(gs_track, gravity);
@@ -714,6 +717,9 @@ TEST(every_kind_of_edit_can_be_taken_back_and_put_back_again) {
             break;
         case GS_EDIT_ROUTE_KIND:
             did = gs_edit_route_kind(l, &t, GS_ROUTE_CIRCUIT);
+            break;
+        case GS_EDIT_CHECKPOINT_EVERY:
+            did = gs_edit_checkpoint_every(l, &t, 4);
             break;
         case GS_EDIT_COUNT:
             break;
@@ -8562,6 +8568,108 @@ TEST(moon_gravity_never_shares_ground_with_big_jumps) {
     CHECK(lightest <= GS_RATIO(50, 100));
 }
 
+// Eight gates down a straight, every fourth a checkpoint - so gates 0, 4 and
+// the finish at 7 must be crossed, and 1, 2, 3, 5, 6 merely describe the way.
+// Two of them are set beside the road rather than across it, so a car driving
+// straight passes them by: gate 1, which a driver may miss, and gate 4, which
+// a driver may not.
+static void gs_eight_gates_two_beside_the_road(gs_track *t, uint8_t every) {
+    gs_track_init(t, 64, 16, GS_SURF_PAVEMENT);
+    for (int i = 0; i < 8; i++) {
+        const bool beside = i == 1 || i == 4;
+        gs_track_add_gate(t, GS_INT(4 + i * 6), beside ? GS_INT(2) : GS_INT(8),
+                          0, GS_INT(2));
+    }
+    t->route = (uint8_t)GS_ROUTE_SPRINT;
+    t->checkpoint_every = every;
+}
+
+static uint8_t gs_drive_the_straight(const gs_track *t) {
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(1), GS_INT(8), 0);
+    for (int i = 0; i < GS_TICK_HZ * 30 && w.car[0].x < GS_INT(52); i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, t, in);
+    }
+    CHECK(w.car[0].x >= GS_INT(52));
+    return w.car[0].next_gate;
+}
+
+TEST(a_waypoint_may_be_missed_and_a_checkpoint_may_not) {
+    // **A player asked for the checkpoints four times further apart.** The
+    // gates stay a dozen tiles apart because they describe the route - the
+    // driver steers by them and the line is drawn along them - and only every
+    // fourth is a line a car has to cross. Missing a waypoint is forgiven at
+    // the next gate the car does cross; missing a checkpoint is what it
+    // always was, and stops every later crossing counting.
+    static gs_track t;
+    gs_eight_gates_two_beside_the_road(&t, 4);
+
+    static const bool is_cp[8] = { true, false, false, false, true, false, false, true };
+    for (uint8_t i = 0; i < 8; i++) CHECK(gs_track_is_checkpoint(&t, i) == is_cp[i]);
+
+    // Crossed 0, drove past 1, crossed 2 and 3 - so 1 is forgiven and the car
+    // is expecting 4. Drove past 4, a checkpoint: 5, 6 and the finish do not
+    // count, and it is still expecting 4 at the far end.
+    CHECK(gs_drive_the_straight(&t) == 4);
+
+    // **And with every gate a checkpoint - which is every track that came
+    // before this - driving past gate 1 is where the counting stops.**
+    gs_eight_gates_two_beside_the_road(&t, 1);
+    for (uint8_t i = 0; i < 8; i++) CHECK(gs_track_is_checkpoint(&t, i));
+    CHECK(gs_drive_the_straight(&t) == 1);
+}
+
+TEST(a_track_says_how_many_gates_make_a_checkpoint_and_an_older_one_says_all_of_them) {
+    static gs_track t, back;
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+    gs_eight_gates_two_beside_the_road(&t, 4);
+
+    // Round trip: the stride survives the file, and so does the identity.
+    size_t n = gs_track_serialize(&t, buf, sizeof buf);
+    CHECK(n > 0);
+    CHECK(gs_track_deserialize(&back, buf, n));
+    CHECK(back.checkpoint_every == 4);
+    CHECK(gs_track_hash(&back) == gs_track_hash(&t));
+
+    // **A version 3 file is the same track with every gate a checkpoint.**
+    // Built from the version 4 bytes by hand: the version word set back to 3
+    // and the stride byte cut out of the header. Nothing else differs.
+    static uint8_t old[sizeof buf];
+    memcpy(old, buf, 8);
+    old[4] = 3; old[5] = 0; old[6] = 0; old[7] = 0;
+    memcpy(old + 8, buf + 8, 4);            // w, h, gates, route kind
+    memcpy(old + 12, buf + 13, n - 13);     // everything after the stride
+    CHECK(gs_track_deserialize(&back, old, n - 1));
+    CHECK(back.checkpoint_every == 1);
+
+    // **And its hash is the hash it always had.** The stride is folded in only
+    // when it is not the default, so every record and share code keyed on a
+    // track from before this existed still names that track.
+    static gs_track plain;
+    gs_eight_gates_two_beside_the_road(&plain, 1);
+    CHECK(gs_track_hash(&back) == gs_track_hash(&plain));
+    CHECK(gs_track_hash(&plain) != gs_track_hash(&t));
+}
+
+TEST(a_generated_track_keeps_one_gate_in_four_as_a_checkpoint_and_its_finish) {
+    for (uint32_t seed = 1; seed <= 24; seed++) {
+        gs_generate(&gs_gen_a, seed * 7919u);
+        CHECK(gs_gen_a.checkpoint_every == 4);
+
+        int checkpoints = 0;
+        for (uint8_t i = 0; i < gs_gen_a.gate_count; i++) {
+            if (gs_track_is_checkpoint(&gs_gen_a, i)) checkpoints++;
+        }
+        // A quarter of the gates, and the finish whatever its index.
+        CHECK(gs_track_is_checkpoint(&gs_gen_a, 0));
+        CHECK(gs_track_is_checkpoint(&gs_gen_a, gs_track_finish_gate(&gs_gen_a)));
+        CHECK(checkpoints >= gs_gen_a.gate_count / 4);
+        CHECK(checkpoints <= gs_gen_a.gate_count / 4 + 2);
+    }
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -9907,6 +10015,9 @@ int main(void) {
     run_a_track_that_came_with_the_game_is_not_yours_to_change();
     run_a_gate_turned_across_its_route_is_refused_on_a_loop_and_on_a_path();
     run_every_track_the_generator_can_make_has_its_gates_facing_its_route();
+    run_a_waypoint_may_be_missed_and_a_checkpoint_may_not();
+    run_a_track_says_how_many_gates_make_a_checkpoint_and_an_older_one_says_all_of_them();
+    run_a_generated_track_keeps_one_gate_in_four_as_a_checkpoint_and_its_finish();
     run_facing_a_route_leaves_a_track_the_way_it_found_it_when_it_was_already_right();
     run_a_shipped_track_that_is_withdrawn_goes_and_nothing_else_does();
     run_withdrawing_half_a_library_leaves_exactly_the_other_half();

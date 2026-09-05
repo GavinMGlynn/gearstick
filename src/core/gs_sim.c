@@ -1016,11 +1016,26 @@ void gs_world_step(gs_world *w, const gs_track *t, const gs_input *in) {
             gs_car *c = &w->car[i];
             if (!c->active) continue;
 
-            const gs_gate *g = &t->gate[c->next_gate % t->gate_count];
-            if (!gs_gate_crossed(g, was[i].x, was[i].y, c->x, c->y)) continue;
-
-            uint8_t crossed = c->next_gate;
-            c->next_gate = (uint8_t)((c->next_gate + 1) % t->gate_count);
+            // **A waypoint may be missed; a checkpoint may not.** Walk from
+            // the gate the car is expecting towards the next checkpoint: the
+            // first gate this step crossed is the one taken, and any
+            // waypoint before it is forgiven. A checkpoint ends the walk, so
+            // driving past one still stops every later crossing counting -
+            // which is what makes it a checkpoint. On a track where every
+            // gate is one, this looks at exactly the gate it always did.
+            const uint8_t n = t->gate_count;
+            uint8_t crossed = n;
+            for (uint8_t step = 0; step < n; step++) {
+                const uint8_t j = (uint8_t)((c->next_gate + step) % n);
+                if (gs_gate_crossed(&t->gate[j], was[i].x, was[i].y, c->x,
+                                    c->y)) {
+                    crossed = j;
+                    break;
+                }
+                if (gs_track_is_checkpoint(t, j)) break;
+            }
+            if (crossed == n) continue;
+            c->next_gate = (uint8_t)((crossed + 1) % n);
 
             // **Which gate ends a lap depends on what kind of route this is**,
             // and getting that wrong is what made the shipped tracks

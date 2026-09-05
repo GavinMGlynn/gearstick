@@ -41,6 +41,9 @@ typedef enum gs_edit_kind {
     // Whether the track is a loop or a path, which decides which gate ends a
     // lap. A change to what the track *is*, so it belongs in the history.
     GS_EDIT_ROUTE_KIND,
+    // How many gates make a checkpoint. One number for the whole track, so
+    // it is an edit of the track rather than of a gate.
+    GS_EDIT_CHECKPOINT_EVERY,
 
     // **So a test can say it walked all of them.** Two of the seven above had
     // never been called by any test at all - moving a gate and changing whether
@@ -120,6 +123,10 @@ bool gs_edit_move_gate(gs_edit_log *l, gs_track *t, uint8_t from, uint8_t to);
 // ends a lap and how the lines are drawn, so it is a change to the track like
 // any other and not a setting beside it.
 bool gs_edit_route_kind(gs_edit_log *l, gs_track *t, gs_route_kind kind);
+
+// Every Nth gate is a checkpoint; the rest are waypoints a car may miss. One
+// is what every track was before the dial existed. See gs_track_is_checkpoint.
+bool gs_edit_checkpoint_every(gs_edit_log *l, gs_track *t, uint8_t every);
 
 bool gs_edit_can_undo(const gs_edit_log *l);
 bool gs_edit_can_redo(const gs_edit_log *l);

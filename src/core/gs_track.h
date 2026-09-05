@@ -157,13 +157,12 @@ extern const gs_surface_def gs_surfaces[GS_SURF_COUNT];
 // also the more predictable of the two: the order is authored rather than
 // inferred from a shape.
 // **How many checkpoints a route may have.** Thirty-two was plenty for a route
-// fifty tiles long and is not for one of eight hundred: a gate every ninety
-// tiles is a route with nothing on it between checkpoints, and it is also too
-// coarse for anything to tell which way the route goes from the gates alone.
-// Ninety-six costs a kilobyte and a half in a track that is already a hundred
-// and fifty, and one every dozen tiles is close enough together that the gates
-// describe the route - which is what both the validator and the driver read
-// them as.
+// fifty tiles long and is not for one of eight hundred. Ninety-six costs a
+// kilobyte and a half in a track that is already a hundred and fifty. The
+// generator lays one every four dozen tiles - it was one a dozen, which read
+// as a fence of posts down every straight, and a player asked for them four
+// times further apart - so a shipped track uses a quarter of this; the rest
+// is room for a track built by hand with a gate wherever its author wants one.
 #define GS_TRACK_MAX_GATES 96
 
 // **What kind of route this is, which is the difference between a track that
@@ -211,6 +210,10 @@ typedef struct gs_track {
     uint8_t gravity[GS_TRACK_TILES];     // multiples of 1/GS_GRAVITY_UNIT
 
     uint8_t route;                       // gs_route_kind
+    // Every Nth gate is a checkpoint a car must cross in order; the rest are
+    // waypoints that describe the route and may be missed. 1 means every
+    // gate counts, which is what every track was before this existed.
+    uint8_t checkpoint_every;
     uint8_t gate_count;
     gs_gate gate[GS_TRACK_MAX_GATES];    // gate[0] is where a race begins
 } gs_track;
@@ -219,6 +222,17 @@ typedef struct gs_track {
 // circuit, because a loop's start line is its finish line; the last gate on a
 // sprint, because a path's finish is at the far end of it.
 uint8_t gs_track_finish_gate(const gs_track *t);
+
+// **Whether gate `i` is one a car has to cross, or one it is merely shown.**
+//
+// A route is described by its gates - the driver steers by them, the length
+// is measured through them, the line on the ground is drawn along them - and
+// describing a winding road takes one every dozen tiles. A *checkpoint* is a
+// different thing: a line a player must cross in order, or the lap does not
+// count. Asking every gate to be both made a fence of posts down every
+// straight, so a track says how many gates make a checkpoint, and gate zero
+// and the finish always do whatever the count says.
+bool gs_track_is_checkpoint(const gs_track *t, uint8_t i);
 
 // Is this track a loop? Then one line does both jobs and the renderer draws one
 // chequered line rather than a plain start and a chequered finish.
@@ -511,7 +525,7 @@ uint64_t gs_track_hash_before_route_kind(const gs_track *t);
 // Version 3 carries the route kind. Version 2 files still load: they are read
 // as sprints, which is what every one of them actually was - two gates, one at
 // each end, raced as though it were a loop.
-#define GS_TRACK_VERSION 3u
+#define GS_TRACK_VERSION 4u
 
 // Bytes `gs_track_serialize` will write for this track.
 size_t gs_track_size(const gs_track *t);

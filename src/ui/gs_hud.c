@@ -395,9 +395,11 @@ int gs_hud_track_shape(const gs_track *t, ImDrawList *dl, float ox, float oy,
                   oy + (gs_to_f(fin->y) - fx * hw) * scale },
         gs_map_rgba(0.95f, 0.95f, 0.95f, 0.95f), 2.0f);
 
-    // Every gate as a dot, small enough that ninety of them read as beads on
-    // the route rather than as a second line.
+    // Every checkpoint as a dot, small enough that a couple of dozen read as
+    // beads on the route rather than as a second line. The waypoints between
+    // them are the line itself, and are not marked.
     for (uint8_t i = 0; i < t->gate_count; i++) {
+        if (!gs_track_is_checkpoint(t, i)) continue;
         const gs_gate *g = &t->gate[i];
         ImDrawList_AddCircleFilled(dl,
             (ImVec2){ ox + gs_to_f(g->x) * scale, oy + gs_to_f(g->y) * scale },

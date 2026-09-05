@@ -1712,6 +1712,112 @@ static int gs_count_bright(const gs_frame *f) {
     return n;
 }
 
+// The arrow every checkpoint wears on the ground, which is the one mark that
+// is drawn once per checkpoint and nowhere else.
+static int gs_count_arrow_yellow(const gs_frame *f) {
+    if (f->px == nullptr) return -1;
+    int n = 0;
+    for (int y = 0; y < GS_H; y++) {
+        for (int x = 0; x < GS_W; x++) {
+            const uint8_t *px = &f->px[((size_t)y * (size_t)GS_W + (size_t)x) * 4];
+            if (px[0] > 200 && px[1] > 170 && px[2] < 110) n++;
+        }
+    }
+    return n;
+}
+
+TEST(only_a_checkpoint_is_marked_and_the_waypoints_between_are_the_line) {
+    // **"The checkpoints are very close together."** They were: every gate
+    // wore a post and an arrow, and the gates are a dozen tiles apart because
+    // that is what it takes to describe a road. Now only every fourth is a
+    // checkpoint, and only a checkpoint is marked. The same generated track
+    // drawn twice - once as it ships, once with every gate a checkpoint -
+    // and the one that ships has a quarter of the arrows.
+    static gs_track t;
+    gs_generate(&t, 7919u);
+    CHECK(t.checkpoint_every == 4);
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_fix sx, sy;
+    gs_angle facing;
+    gs_track_grid(&t, 0, &sx, &sy, &facing);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, sx, sy, facing);
+
+    gs_view v = { 0 };
+    v.car = 0;
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    gs_render_track_camera(&v, &t, &w, &w, 1.0f);
+    // Pulled back far enough to see a good stretch of route.
+    v.cam.zoom = 0.25f;
+
+    gs_frame thinned = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(thinned.px != nullptr);
+    if (thinned.px == nullptr) return;
+    const int few = gs_count_arrow_yellow(&thinned);
+    gs_frame_free(&thinned);
+
+    t.checkpoint_every = 1;
+    gs_frame dense = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(dense.px != nullptr);
+    if (dense.px == nullptr) return;
+    const int many = gs_count_arrow_yellow(&dense);
+    gs_frame_free(&dense);
+
+    // **The start line wears a big arrow of its own**, the same in every
+    // frame, so the counts are compared against a frame where only the start
+    // and the finish are checkpoints - which leaves that arrow and almost
+    // nothing else - rather than against zero.
+    t.checkpoint_every = t.gate_count;
+    gs_frame bare = gs_render_frame(ren, &t, &w, &w, 1.0f, &v.cam);
+    CHECK(bare.px != nullptr);
+    if (bare.px == nullptr) return;
+    const int base = gs_count_arrow_yellow(&bare);
+    gs_frame_free(&bare);
+
+    printf("  CHECKPOINTS %d arrow pixels with one gate in four marked, %d with every gate, %d with only the ends\n",
+           few, many, base);
+    CHECK(few > base);
+    CHECK(many - base > (few - base) * 3);
+}
+
+TEST(driving_past_a_waypoint_is_not_a_missed_checkpoint) {
+    (void)ren;
+    // The HUD's warning is computed from the gate a car was expecting and
+    // the step it took. A waypoint driven past is forgiven by the simulation
+    // at the next gate, so the warning must not fire for it - and must still
+    // fire for a checkpoint, which is what makes the warning mean something.
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+    for (int i = 0; i < 8; i++) {
+        gs_track_add_gate(&t, GS_INT(4 + i * 6), GS_INT(2), 0, GS_INT(2));
+    }
+    t.route = (uint8_t)GS_ROUTE_SPRINT;
+    t.checkpoint_every = 4;
+
+    gs_world was, now;
+    gs_world_init(&was, GS_ONE);
+    gs_world_add_car(&was, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(1), GS_INT(8), 0);
+    now = was;
+
+    gs_view views[1];
+    SDL_memset(views, 0, sizeof views);
+    views[0].car = 0;
+
+    // Expecting gate 1, a waypoint, and stepping clean past it beside the road.
+    was.car[0].next_gate = 1; now.car[0].next_gate = 1;
+    was.car[0].x = GS_INT(8);  now.car[0].x = GS_INT(12);
+    gs_view_note_missed(views, 1, &t, &was, &now);
+    CHECK(!views[0].missed);
+
+    // Expecting gate 4, a checkpoint, and the same step past it.
+    was.car[0].next_gate = 4; now.car[0].next_gate = 4;
+    was.car[0].x = GS_INT(26); now.car[0].x = GS_INT(30);
+    gs_view_note_missed(views, 1, &t, &was, &now);
+    CHECK(views[0].missed);
+}
+
 TEST(winning_is_something_you_can_see_happen) {
     // **"It is not obvious that you have won the race."** Crossing the line
     // moved a number on a panel of numbers and nothing else. Now it is an
@@ -12402,6 +12508,8 @@ int main(void) {
     run_the_second_pad_drives_the_second_car(ren);
     run_each_half_of_a_split_screen_shows_its_own_car(ren);
     run_four_players_get_four_views_that_tile_the_window_without_overlapping(ren);
+    run_only_a_checkpoint_is_marked_and_the_waypoints_between_are_the_line(ren);
+    run_driving_past_a_waypoint_is_not_a_missed_checkpoint(ren);
     run_winning_is_something_you_can_see_happen(ren);
     run_a_car_on_the_tow_trucks_hook_flashes_and_lands_solid(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);

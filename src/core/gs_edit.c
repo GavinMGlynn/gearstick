@@ -47,6 +47,7 @@ static int16_t gs_edit_read(const gs_track *t, gs_edit_kind kind, uint8_t x, uin
     case GS_EDIT_GATE_REMOVE:
     case GS_EDIT_GATE_MOVE:
     case GS_EDIT_ROUTE_KIND:
+    case GS_EDIT_CHECKPOINT_EVERY:
     case GS_EDIT_COUNT:
         break;      // the route is not a tile; see gs_edit_route
     }
@@ -68,6 +69,7 @@ static void gs_edit_write(gs_track *t, gs_edit_kind kind, uint8_t x, uint8_t y, 
     case GS_EDIT_GATE_REMOVE:
     case GS_EDIT_GATE_MOVE:
     case GS_EDIT_ROUTE_KIND:
+    case GS_EDIT_CHECKPOINT_EVERY:
     case GS_EDIT_COUNT:
         break;      // the route is not a tile; see gs_edit_route
     }
@@ -240,6 +242,23 @@ bool gs_edit_route_kind(gs_edit_log *l, gs_track *t, gs_route_kind kind) {
 }
 
 // Undoing one entry, whichever kind it is.
+bool gs_edit_checkpoint_every(gs_edit_log *l, gs_track *t, uint8_t every) {
+    if (every == 0) every = 1;
+    if (t->checkpoint_every == every) return true;
+    if (l->cursor >= l->cap) return false;
+    if (!l->open) l->group++;
+    gs_edit *e = &l->ops[l->cursor];
+    *e = (gs_edit){ 0 };
+    e->group = l->group;
+    e->kind = (uint8_t)GS_EDIT_CHECKPOINT_EVERY;
+    e->before = (int16_t)t->checkpoint_every;
+    e->after = (int16_t)every;
+    l->cursor++;
+    l->count = l->cursor;
+    t->checkpoint_every = every;
+    return true;
+}
+
 static void gs_edit_reverse(gs_track *t, const gs_edit *e) {
     // Named one by one rather than defaulted: a kind of edit added later must
     // say how it is taken back, and a `default` here would have it silently
@@ -253,6 +272,7 @@ static void gs_edit_reverse(gs_track *t, const gs_edit *e) {
         gs_gate_insert(t, (uint8_t)e->before, &e->gate);
         break;
     case GS_EDIT_ROUTE_KIND: t->route = (uint8_t)e->before; break;
+    case GS_EDIT_CHECKPOINT_EVERY: t->checkpoint_every = (uint8_t)e->before; break;
     case GS_EDIT_CORNER:
     case GS_EDIT_SURFACE:
     case GS_EDIT_GRAVITY:
@@ -271,6 +291,7 @@ static void gs_edit_forward(gs_track *t, const gs_edit *e) {
         gs_gate_insert(t, e->index, &e->gate);
         break;
     case GS_EDIT_ROUTE_KIND: t->route = (uint8_t)e->after; break;
+    case GS_EDIT_CHECKPOINT_EVERY: t->checkpoint_every = (uint8_t)e->after; break;
     case GS_EDIT_CORNER:
     case GS_EDIT_SURFACE:
     case GS_EDIT_GRAVITY:

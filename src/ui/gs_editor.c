@@ -486,6 +486,7 @@ static float gs_label_column(void) {
     static const char *labels[] = {
         "gravity (x Earth)", "air drag", "friction", "damage",
         "radius", "step (tiles)", "surface", "heading (deg)", "half width",
+        "checkpoint every",
     };
     float widest = 0.0f;
     for (size_t i = 0; i < sizeof labels / sizeof labels[0]; i++) {
@@ -561,6 +562,17 @@ static void gs_editor_palette(gs_editor *e, gs_track *t) {
         // round, in the order they were placed.
         ImGui_SliderFloat("heading (deg)", &e->gate_heading, 0.0f, 359.0f);
         ImGui_SliderFloat("half width", &e->gate_width, 0.5f, 8.0f);
+
+        // **How many gates make a checkpoint.** Gates describe the route -
+        // the driver steers by them and the line is drawn along them - and a
+        // checkpoint is a line a car must cross in order. One number for the
+        // whole track, changed a step at a time so each step is one undo.
+        int every = t->checkpoint_every;
+        if (ImGui_InputInt("checkpoint every", &every)) {
+            if (every < 1) every = 1;
+            if (every > 8) every = 8;
+            gs_edit_checkpoint_every(e->log, t, (uint8_t)every);
+        }
         ImGui_Text("click to place gate %u", t->gate_count);
 
         // **The route scrolls inside a box of its own.** A track can have any

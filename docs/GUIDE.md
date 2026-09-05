@@ -127,6 +127,16 @@ shortcut.
 
 ### Things worth knowing
 
+**A checkpoint is a post; the line between them is the way.** Only every
+fourth gate on a track is a checkpoint you have to cross in order — the
+ones with posts and an arrow, and the dots on the map. The dashed line
+between them is the route the computer drives and the rest of the track's
+gates describe it; you can cut across it or run wide of it and nothing is
+counted against you. Drive past a *post* and the lap will not count until
+you go back for it — the HUD says so. Hand-built tracks count every gate
+unless their author turns the **checkpoint every** dial in the gate panel.
+
+
 **The grip circle is real.** A tyre has one budget and cornering and
 accelerating spend the same one. Braking in a straight line then turning is
 faster than doing both at once, and that is a physical fact here rather than a

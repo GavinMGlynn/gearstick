@@ -139,7 +139,11 @@ static SDL_FColor gs_tile_colour(const gs_track *t, int32_t tx, int32_t ty,
     // ever were, and two machines agree because the noise is a function of
     // position rather than of anything remembered.
     {
-        uint32_t n = (uint32_t)(tx * 73856093) ^ (uint32_t)(ty * 19349663);
+        // Unsigned throughout: a tile west or north of the world has a
+        // negative coordinate, and a signed multiply of one overflowed -
+        // undefined behaviour the optimised build happened to survive and
+        // the sanitiser did not. Modular arithmetic is what a hash wants.
+        uint32_t n = (uint32_t)tx * 73856093u ^ (uint32_t)ty * 19349663u;
         n ^= n >> 13; n *= 0x85ebca6bu; n ^= n >> 16;
         const float jitter = 1.0f + ((float)(n & 0xffffu) / 65535.0f - 0.5f) *
                                         GS_GROUND_GRAIN;
@@ -762,20 +766,28 @@ static void gs_flag_feet(const gs_gate *g, float out[2][2]) {
 // line for the start would be inventing a distinction the track does not have.
 // A path has two lines and they are a long way apart: a plain white one where
 // you begin and a chequered one where you arrive.
+//
+// **And a gate that only describes the route is not drawn as a gate at all.**
+// The route line runs along it and the driver steers by it, but there is no
+// post and no arrow: a player asked for the checkpoints four times further
+// apart, and the checkpoints are what a player sees. See
+// gs_track_is_checkpoint.
 typedef enum gs_gate_role {
-    GS_GATE_WAYPOINT = 0,  // through here, on the way
+    GS_GATE_WAYPOINT = 0,  // through here, on the way: a checkpoint, posted
     GS_GATE_START,         // a sprint's beginning
     GS_GATE_FINISH,        // a sprint's end
-    GS_GATE_BOTH           // a circuit's start and finish, one line
+    GS_GATE_BOTH,          // a circuit's start and finish, one line
+    GS_GATE_ROUTE          // describes the way and asks nothing: unmarked
 } gs_gate_role;
 
 static gs_gate_role gs_gate_role_of(const gs_track *t, uint8_t i) {
     if (gs_track_is_circuit(t)) {
-        return i == 0 ? GS_GATE_BOTH : GS_GATE_WAYPOINT;
+        if (i == 0) return GS_GATE_BOTH;
+    } else {
+        if (i == 0) return GS_GATE_START;
+        if (i == t->gate_count - 1) return GS_GATE_FINISH;
     }
-    if (i == 0) return GS_GATE_START;
-    if (i == t->gate_count - 1) return GS_GATE_FINISH;
-    return GS_GATE_WAYPOINT;
+    return gs_track_is_checkpoint(t, i) ? GS_GATE_WAYPOINT : GS_GATE_ROUTE;
 }
 
 static bool gs_gate_is_chequered(gs_gate_role role) {
@@ -855,6 +867,7 @@ static void gs_draw_route(SDL_Renderer *ren, const gs_camera *cam,
 static void gs_draw_gate(SDL_Renderer *ren, const gs_camera *cam,
                          const gs_track *t, const gs_gate *g,
                          gs_gate_role role, int world_d) {
+    if (role == GS_GATE_ROUTE) return;
     float gx = gs_to_f(g->x), gy = gs_to_f(g->y);
     float hw = gs_to_f(g->half_width);
 
@@ -1798,9 +1811,13 @@ void gs_view_note_missed(gs_view *views, uint8_t count, const gs_track *t,
         // Took the gate it owed: whatever it had missed is put right.
         const bool took_one = after->next_gate != before->next_gate;
 
-        const gs_gate *g = &t->gate[before->next_gate % t->gate_count];
+        // Only a checkpoint can be missed. A waypoint driven past is forgiven
+        // by the simulation at the next gate the car does cross, and a
+        // warning about it would be a warning about nothing.
+        const uint8_t expecting = (uint8_t)(before->next_gate % t->gate_count);
+        const gs_gate *g = &t->gate[expecting];
         const bool drove_past =
-            !took_one &&
+            !took_one && gs_track_is_checkpoint(t, expecting) &&
             gs_gate_missed(g, before->x, before->y, after->x, after->y);
 
         if (!took_one && !drove_past) continue;

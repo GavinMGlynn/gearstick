@@ -2816,6 +2816,19 @@ are the places a fault could sit unnoticed.
       gives the identical frame - so a replay shows what happened. No golden
       hash moved: it is drawing, not simulation.*
 
+- [x] **Checkpoints four times further apart.** Every gate used to be a
+      checkpoint, a dozen tiles from the last, and a straight read as a
+      fence of posts. Spacing the gates out broke the driver, the validator,
+      the drawn route and the length measure at once, because the gates
+      describe the road. So a track says how many gates make a checkpoint:
+      the generator writes four, the editor has the dial, everything before
+      counts every gate as it always did. Only checkpoints are marked; a
+      missed waypoint is forgiven at the next gate.
+      *Verification: driven past a waypoint and forgiven, past a checkpoint
+      and stopped; an old file reads as it always did with the hash it had;
+      a shipped track drawn both ways has a quarter of the marks. The
+      generator golden moved; the track and world goldens did not.*
+
 - [x] **Automatic and manual transmission.** Every machine has a forward
       gear count of its own - two for the rover, six for the sprint car -
       and one reverse. The box is picked per driver on the setup screen.

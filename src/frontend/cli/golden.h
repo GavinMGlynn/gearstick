@@ -257,7 +257,7 @@
 // fighting, so the outer eighteen tiles stay at Earth now - the same shape
 // as every other veto. Only seeds that painted light gravity near a rim
 // build different ground; the fold covers two hundred, so it moves.
-#define GS_SELFTEST_GENERATOR_HASH 0x5d7ebf04f81664e4ULL
+#define GS_SELFTEST_GENERATOR_HASH 0x42916536606c3c9aULL
 
 // **A race with nobody at the keyboard**, four opponents spread across the
 // skill dial, on a circuit none of them has seen.
