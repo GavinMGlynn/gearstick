@@ -2586,14 +2586,37 @@ TEST(the_guide_tells_people_to_press_the_keys_the_game_listens_for) {
           SDL_SCANCODE_RIGHT, SDL_SCANCODE_D },
         { "| drop a weapon | Right Shift | Left Shift |", GS_ACT_FIRE,
           SDL_SCANCODE_RSHIFT, SDL_SCANCODE_LSHIFT },
+        { "| shift up | X | E |",                 GS_ACT_SHIFT_UP,
+          SDL_SCANCODE_X, SDL_SCANCODE_E },
+        { "| shift down | Z | C |",               GS_ACT_SHIFT_DOWN,
+          SDL_SCANCODE_Z, SDL_SCANCODE_C },
+        { "| tow back to the last checkpoint | Backspace | Q |",
+          GS_ACT_RESCUE, SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_Q },
     };
+
+    // **Every action, not the five this list happened to know about.** The
+    // table used to name five rows and stop, so the day the gearbox and the
+    // tow truck were added the guide silently stopped describing three of the
+    // game's controls and nothing said so. Counted against GS_ACT_COUNT here:
+    // an action added without a row in the guide fails this by arithmetic.
+    CHECK(SDL_arraysize(rows) == (size_t)GS_ACT_COUNT);
+    bool named[GS_ACT_COUNT] = { false };
 
     for (size_t i = 0; i < SDL_arraysize(rows); i++) {
         // The guide says this row...
+        if (SDL_strstr(doc, rows[i].row) == nullptr) {
+            printf("  GUIDE missing row: %s\n", rows[i].row);
+        }
         CHECK(SDL_strstr(doc, rows[i].row) != nullptr);
         // ...and the game agrees.
         CHECK(b.key[0][rows[i].action] == rows[i].one);
         CHECK(b.key[1][rows[i].action] == rows[i].two);
+        named[rows[i].action] = true;
+    }
+    for (int a = 0; a < GS_ACT_COUNT; a++) {
+        if (!named[a]) printf("  GUIDE says nothing about %s\n",
+                              gs_action_name((gs_action)a));
+        CHECK(named[a]);
     }
 
     // The guide says players three and four have no keyboard controls. If that

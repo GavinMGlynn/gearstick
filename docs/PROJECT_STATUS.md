@@ -12,32 +12,49 @@ terrain works".
 
 ---
 
-## The honest summary, 2026-08-19
+## The honest summary, 2026-09-05
 
-**There is still no game.** No lap counting, no finish, no opponent, no
-collision between cars, no hazard, no sound, no menu, and no way to win or
-lose. What there is now is a construction set and a simulation to drive in it.
+**There is a game, and it is a race you can win.** Sign in, pick a track from
+thirty, choose a machine and a gearbox, put up to four people on the grid with
+the rest driven by the game, and race. Laps count, the flag falls, and
+crossing the line raises the flags, sends up fireworks and says who won. Times
+are kept and beaten. That sentence was false for most of this project's life
+and it is the reason the summary above it was rewritten.
+
+**The tracks are drawn from a matrix, not a template.** Ten dials per track -
+circuit or path, how long, how it corners, how it straightens, how much air,
+what the ground does and how hard, what the weight is like, what it wears, how
+wide the road is - and the route is *grown* by a self-avoiding walk rather
+than laid from a shape. Thirty ship, every one of them raced by every machine
+from every grid slot before it is allowed in the box.
+
+**The driving has a character now.** The wheel can out-turn the tyres, so a
+corner taken too fast is a slide that scrubs speed rather than a slow arc on
+rails; the brake works mid-corner; and a gearbox you can drive badly is
+offered beside the automatic that drives itself.
 
 **The editor works.** Tab switches between building and driving with nothing
 loaded in between. You can raise and lower ground, paint surface and gravity,
 place a route of gates, undo any of it, save it, reload it and drive it — with
 a mouse or with a pad alone. A ghost re-races the design in the background as
-you change it.
+you change it, and the analyser says which machines can get round.
 
-**What there is, is a simulation that works and can prove it.** A car drives,
-slides, climbs, launches off any shape that falls away fast enough, flies a
-ballistic arc, and takes damage proportional to how badly it met the ground.
-Gravity is a per-tile field you can paint. A race records as one byte per car
-per tick and re-races to the same state, to the bit, on every compiler and
-optimisation level tried. There is a window, a split screen and an isometric
-renderer that draws the ground as shaded geometry, with a shadow under each car.
+**And the simulation can still prove itself.** A race records as one byte per
+car per tick and re-races to the same state, to the bit, on every compiler and
+optimisation level tried. Gravity is a per-tile field you can paint. Four
+golden hashes pin the physics, the driver, the generator and a full replay;
+each has moved only deliberately, with a note beside it saying why.
 
-Twenty-six tests and a golden-replay tripwire, all green, on four platforms.
-CI builds and tests on Ubuntu, Rocky, Windows and macOS arm64, and all four land
-on the same state hash — so "the simulation is deterministic across machines" is
-now a measured fact rather than a design intention. Packages build on all three
-target platforms and are checked by unpacking them somewhere else and running
-what is inside.
+Twenty-one test binaries and a golden-replay tripwire, all green, on four
+platforms. CI builds and tests on Ubuntu, Rocky, Windows and macOS arm64, and
+all four land on the same state hash — so "the simulation is deterministic
+across machines" is a measured fact rather than a design intention. Packages
+build on all three target platforms and are checked by unpacking them
+somewhere else, on a machine with no toolchain, and running what is inside.
+
+**What is still missing**, first as always: no sound on Windows or macOS
+verified by a person, online races give every car the automatic gearbox, and
+`docs/TRANSPORT.md` has never been read by anybody but its author.
 
 ---
 

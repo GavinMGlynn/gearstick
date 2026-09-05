@@ -77,6 +77,9 @@ one copy.
 | steer left | Left | A |
 | steer right | Right | D |
 | drop a weapon | Right Shift | Left Shift |
+| shift up | X | E |
+| shift down | Z | C |
+| tow back to the last checkpoint | Backspace | Q |
 
 **Players three and four need a gamepad**, or a rebind — there is no sensible
 third and fourth set of keys on one keyboard, so there is not a bad one either.
@@ -95,6 +98,32 @@ Other keys, any time:
 | **J** | show where a jump is going to put you down |
 | **M** | music on or off |
 | **F5** / **F9** | save the last run as a ghost file / load one |
+
+### The gearbox
+
+Pick **auto** or **manual** on the race setup screen, in the column beside the
+machine. Each vehicle has its own number of forward gears — the lunar rover
+has two, the sprint car and the motorcycle six — and one reverse.
+`gearstick_cli vehicles` prints the whole table.
+
+**Automatic** drives the way the game always has: it is a smooth engine and
+you never think about it. The gear on the HUD is what a manual driver would
+be in, so you can learn the ladder by watching it.
+
+**Manual** hands you the shift. Each gear pulls hardest at the bottom of its
+range and runs out at the top — that ceiling is the limiter, and sitting on it
+means you should have changed up. Below a gear's range the engine bogs, so
+pulling away in fourth barely moves and pulling away in first launches. The
+HUD shows the gear you are in with an **M** beside it, **R** when you are
+going backwards and **N** while the lights are still red.
+
+### Getting unstuck
+
+**Backspace** calls the tow truck. The car flashes where it is for a second,
+then reappears at the last checkpoint you crossed, facing the right way and
+standing still. It costs you the time and nothing else — the leg you were on
+still has to be driven, so there is nothing to be gained by using it as a
+shortcut.
 
 ### Things worth knowing
 
