@@ -544,7 +544,10 @@ if(GEARSTICK_TESTS)
     set(GS_TEST_SANDBOX
         "XDG_DATA_HOME=${GS_TEST_HOME};HOME=${GS_TEST_HOME};APPDATA=${GS_TEST_HOME};GEARSTICK_PREF_DIR=${GS_TEST_HOME}/prefs")
 
-    set_tests_properties(gearstick PROPERTIES TIMEOUT 120
+    # Three minutes: the sanitised debug build takes two for this suite now
+    # that it measures every shape the generator can cut, and a limit a slow
+    # runner sits on top of is a red tree for no reason.
+    set_tests_properties(gearstick PROPERTIES TIMEOUT 180
                          ENVIRONMENT "${GS_TEST_SANDBOX}")
 
     # The renderer's own tests, which need a window system and therefore link

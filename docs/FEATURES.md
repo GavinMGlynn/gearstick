@@ -403,7 +403,7 @@ file.
   everybody races and compares times on costs almost nothing and gives a
   reason to open the game on a day you had not planned to build anything.
 
-- **Vertical drama the ground can already hold.** `WANTED`
+- **Vertical drama the ground can already hold.** `DONE`
   The ambition behind wanting loops, without the geometry that makes them
   impossible here. Banked corners you lean into and can take faster for
   committing to the high line. Quarter-pipe walls at the edge of a bowl that

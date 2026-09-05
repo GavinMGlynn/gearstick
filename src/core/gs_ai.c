@@ -101,12 +101,28 @@ gs_input gs_ai_drive_style(const gs_world *w, const gs_track *t, uint8_t car,
     // line, by the same slot order, and kept inside the gate's own width so
     // a lane is never a missed crossing.
     {
-        const gs_fix lane = gs_fix_mul(
+        gs_fix lane = gs_fix_mul(
             target->half_width,
             (gs_fix)(((int64_t)(2 * car + 1) - GS_MAX_CARS) * GS_ONE /
                      (GS_MAX_CARS + 1)));
-        dx -= gs_fix_mul(gs_sin(target->heading), lane);
-        dy += gs_fix_mul(gs_cos(target->heading), lane);
+
+        // **A driver takes the low line.** On a road with a shape across it
+        // - a half-pipe's walls, a banked corner - a lane out near the edge
+        // is up the slope, and a car held there fights the slope all the way
+        // round and slides further up it in every corner, until it leaves
+        // the lip. Where the lane sits more than a third of a tile above the
+        // gate's centre, the lane is halved until it does not. A level road
+        // never trips this, so nothing changes where nothing was wrong.
+        const gs_fix sx = -gs_sin(target->heading), sy = gs_cos(target->heading);
+        const gs_fix centre_h = gs_track_height(t, target->x, target->y);
+        for (int k = 0; k < 3; k++) {
+            const gs_fix lx = target->x + gs_fix_mul(sx, lane);
+            const gs_fix ly = target->y + gs_fix_mul(sy, lane);
+            if (gs_track_height(t, lx, ly) - centre_h <= GS_RATIO(30, 100)) break;
+            lane /= 2;
+        }
+        dx += gs_fix_mul(sx, lane);
+        dy += gs_fix_mul(sy, lane);
     }
 
     // --- Approach a gate from behind it, not from in front.

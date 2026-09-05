@@ -2877,19 +2877,16 @@ largest payoff, since reversing a route doubles what there is to drive -
 and vertical drama follows it, because it changes the shipped set and is
 better done once the reversed routes are being verified too.
 
-- [ ] **Vertical drama the ground can already hold.** Banked corners,
-      quarter-pipe walls, half-pipes, gaps with nothing in them, ridges that
-      drop away on the far side, craters that hold speed round the inside.
-      The generator's terrain dials say how *rough* a track is and never what
-      shape the roughness has, so none of these are ever asked for - and
-      every one of them is a shape the ground can already take. This is where
-      the vertical interest lives that loops were wanted for, at none of the
-      cost.
-      *Verification: each shape measured on the track it makes - a banked
-      corner is one a car takes faster on the high line than the low, a gap
-      is one that ends the race for a car that arrives too slowly - and the
-      shipped set has to contain some of each, the way it already has to
-      cover the matrix.*
+- [x] **Vertical drama the ground can already hold.** An eleventh dial,
+      *drama* - level, banked corners, bowl corners, half-pipe road, gaps to
+      clear, crests that drop away - drawn like every other and said in the
+      spec line. The road is cut with a cross-section and a profile of its
+      own from a survey of the route; nothing outside the road and its
+      verge changes. A gap brings the ramp that makes it jumpable.
+      *Verification: each shape measured against the level build of the
+      same seed; every band got round by the analyser; a banked ring holds
+      a car a quarter longer than a flat one; every band drawn across six
+      hundred specs and the shipped set.*
 
 - [x] **Mirror mode.** Any track raced the other way round, as one dial on
       the setup screen. The gates are put in the opposite order and turned

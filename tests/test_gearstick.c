@@ -8250,10 +8250,20 @@ TEST(a_generated_race_can_actually_be_finished) {
             }
 
             if (w.car[0].finish_tick == 0) {
-                printf("  STUCK seed %u from slot %u: %d laps, at %.1f,%.1f\n",
+                {
+                       gs_track_spec why_spec = gs_generate_spec_for(seed * 7919u);
+                       char why[160];
+                       gs_spec_line(&why_spec, why, sizeof why);
+                       printf("  STUCK seed %u from slot %u: %d laps, at %.1f,%.1f | %s\n"
+                              "        speed %.2f, damage %u, %s, on surface %d, %.1f tiles outside\n",
                        seed, slot, gs_car_laps_done(&gs_gen_a, &w.car[0]),
                        (double)w.car[0].x / 65536.0,
-                       (double)w.car[0].y / 65536.0);
+                       (double)w.car[0].y / 65536.0, why,
+                              (double)gs_car_speed(&w.car[0]) / GS_ONE, (unsigned)w.car[0].damage,
+                              w.car[0].wrecked ? "wrecked" : "driving",
+                              (int)gs_track_surface(&gs_gen_a, w.car[0].x, w.car[0].y),
+                              (double)gs_track_outside(&gs_gen_a, w.car[0].x, w.car[0].y) / GS_ONE);
+                       }
             }
             CHECK(w.car[0].finish_tick != 0);
             CHECK(gs_car_laps_done(&gs_gen_a, &w.car[0]) >= 1);
@@ -8382,6 +8392,7 @@ TEST(every_band_of_every_dial_is_drawn_and_every_veto_holds) {
     int dress[GS_DRESS_COUNT] = { 0 };
     int width[GS_WIDTH_COUNT] = { 0 };
     int base[GS_SURF_COUNT] = { 0 };
+    int drama[GS_DRAMA_COUNT] = { 0 };
 
     for (uint32_t seed = 1; seed <= 600; seed++) {
         gs_track_spec sp = gs_generate_spec_for(seed);
@@ -8396,6 +8407,9 @@ TEST(every_band_of_every_dial_is_drawn_and_every_veto_holds) {
         dress[sp.dress]++;
         width[sp.width]++;
         base[sp.base]++;
+        drama[sp.drama]++;
+        CHECK(!(sp.drama == GS_DRAMA_GAPS && sp.jumps != GS_JUMPS_BIG));
+        CHECK(!(sp.drama == GS_DRAMA_GAPS && sp.width == GS_WIDTH_NARROW));
 
         // The vetoes, as invariants over everything the drawer can say.
         CHECK(!(sp.relief == GS_RELIEF_FLAT && sp.range != GS_RANGE_SUBTLE));
@@ -8414,6 +8428,7 @@ TEST(every_band_of_every_dial_is_drawn_and_every_veto_holds) {
     for (int i = 0; i < GS_GRAV_COUNT; i++) CHECK(gravity[i] > 0);
     for (int i = 0; i < GS_DRESS_COUNT; i++) CHECK(dress[i] > 0);
     for (int i = 0; i < GS_WIDTH_COUNT; i++) CHECK(width[i] > 0);
+    for (int i = 0; i < GS_DRAMA_COUNT; i++) CHECK(drama[i] > 0);
     for (int i = 0; i < GS_SURF_COUNT; i++) CHECK(base[i] > 0);
 
     printf("  MATRIX 600 seeds: %d/%d circuits/paths, every band of every "
@@ -8716,6 +8731,252 @@ TEST(a_reversed_circuit_can_still_be_lapped) {
     static gs_analysis look;
     gs_analyse(&gs_gen_a, gs_analyse_seconds(&gs_gen_a), &look);
     CHECK(look.completable);
+}
+
+// The road's height a little either side of a gate's centre, and at it:
+// the cross-section of the road where the route crosses the gate.
+static void gs_road_section(const gs_track *t, const gs_gate *g, gs_fix inset,
+                            gs_fix *left, gs_fix *centre, gs_fix *right) {
+    const gs_fix fx = gs_cos(g->heading), fy = gs_sin(g->heading);
+    const gs_fix sx = -fy, sy = fx;
+    const gs_fix off = g->half_width - inset;
+    *left = gs_track_height(t, g->x + gs_fix_mul(sx, off), g->y + gs_fix_mul(sy, off));
+    *right = gs_track_height(t, g->x - gs_fix_mul(sx, off), g->y - gs_fix_mul(sy, off));
+    *centre = gs_track_height(t, g->x, g->y);
+}
+
+// How sharply the route turns at gate `i`: the heading change from the gate
+// before to the gate after, the short way round.
+static int32_t gs_gate_turn(const gs_track *t, uint8_t i) {
+    const uint8_t n = t->gate_count;
+    const gs_gate *a = &t->gate[(i + n - 1u) % n];
+    const gs_gate *c = &t->gate[(i + 1u) % n];
+    return (int16_t)(gs_angle)(c->heading - a->heading);
+}
+
+// The same seed built twice, once with the drama asked for and once level,
+// so that whatever differs between them is the drama and nothing else.
+static gs_track gs_gen_level;
+
+static void gs_build_pair_of(uint32_t seed, gs_gen_drama drama, bool brief) {
+    gs_track_spec spec = gs_generate_spec_for(seed);
+    if (drama == GS_DRAMA_GAPS) spec.jumps = GS_JUMPS_BIG;
+    if (brief) {
+        // The shortest, easiest route the matrix makes: the question is
+        // whether the drama can be got round, not how long that takes, and
+        // an epic technical circuit through the analyser six times over is
+        // most of a minute the debug build does not have.
+        spec.length = GS_LEN_STANDARD;
+        spec.curve = GS_CURVE_FLOWING;
+    }
+    spec.drama = drama;
+    gs_generate_from_spec(&gs_gen_a, seed, &spec);
+    spec.drama = GS_DRAMA_NONE;
+    gs_generate_from_spec(&gs_gen_level, seed, &spec);
+}
+
+static void gs_build_pair(uint32_t seed, gs_gen_drama drama) {
+    gs_build_pair_of(seed, drama, false);
+}
+
+TEST(a_banked_corner_is_higher_on_the_outside_and_a_pipe_at_both_edges) {
+    // **Vertical drama, measured on the track it makes.** Built against the
+    // level build of the same seed, at the sharpest gate of the route: a
+    // banked corner stands higher on its outside than on its inside, by
+    // more than the level build does; a bowl does the same and is lower at
+    // the centre than the level road; a half-pipe stands higher at both
+    // edges than at its centre, at a straight gate.
+    int banked = 0, bowls = 0, pipes = 0;
+    for (uint32_t seed = 1; seed <= 4; seed++) {
+        const uint32_t s = seed * 7919u;
+
+        gs_build_pair(s, GS_DRAMA_BANKED);
+        uint8_t sharpest = 0;
+        int32_t most = 0;
+        // Past the run-up, where the drama fades in so a standing grid has
+        // level ground under it: gates are a dozen tiles apart, so from the
+        // sixth on.
+        for (uint8_t i = 6; i + 1 < gs_gen_a.gate_count; i++) {
+            const int32_t turn = gs_gate_turn(&gs_gen_a, i);
+            const int32_t mag = turn < 0 ? -turn : turn;
+            if (mag > most) { most = mag; sharpest = i; }
+        }
+        if (most < (int32_t)GS_DEG(25)) continue;     // a route with no corner to bank
+        const gs_gate *g = &gs_gen_a.gate[sharpest];
+        gs_fix l, c, r, l0, c0, r0;
+        gs_road_section(&gs_gen_a, g, GS_ONE, &l, &c, &r);
+        gs_road_section(&gs_gen_level, g, GS_ONE, &l0, &c0, &r0);
+        // Whichever side is the outside, the banked build tilts that way by
+        // more than the level build does.
+        const gs_fix tilt = (l - r) - (l0 - r0);
+        const gs_fix tilt_mag = tilt < 0 ? -tilt : tilt;
+        CHECK(tilt_mag > GS_RATIO(40, 100));
+        banked++;
+
+        gs_build_pair(s, GS_DRAMA_BOWLS);
+        gs_road_section(&gs_gen_a, g, GS_ONE, &l, &c, &r);
+        const gs_fix tilt_b = (l - r) - (l0 - r0);
+        CHECK((tilt_b < 0 ? -tilt_b : tilt_b) > GS_RATIO(40, 100));
+        CHECK(c < c0 - GS_RATIO(40, 100));
+        bowls++;
+
+        gs_build_pair(s, GS_DRAMA_PIPES);
+        uint8_t straightest = 0;
+        int32_t least = 65536;
+        for (uint8_t i = 6; i + 1 < gs_gen_a.gate_count; i++) {
+            const int32_t turn = gs_gate_turn(&gs_gen_a, i);
+            const int32_t mag = turn < 0 ? -turn : turn;
+            if (mag < least) { least = mag; straightest = i; }
+        }
+        const gs_gate *sg = &gs_gen_a.gate[straightest];
+        // Half a tile in from the edge: a pipe's edge slope is the same on
+        // every width, so its height is not, and a narrow road's is modest.
+        gs_road_section(&gs_gen_a, sg, GS_HALF, &l, &c, &r);
+        gs_road_section(&gs_gen_level, sg, GS_HALF, &l0, &c0, &r0);
+        CHECK((l - c) - (l0 - c0) > GS_RATIO(25, 100));
+        CHECK((r - c) - (r0 - c0) > GS_RATIO(25, 100));
+        pipes++;
+    }
+    printf("  DRAMA %d banked, %d bowls, %d pipes measured against the level road\n",
+           banked, bowls, pipes);
+    CHECK(banked >= 3 && bowls >= 3 && pipes >= 3);
+}
+
+TEST(a_gap_is_a_trench_after_a_ramp_and_a_crest_falls_away_beyond_it) {
+    // Walked along the route between gates rather than at them, because a
+    // gate every dozen tiles can miss an eight-tile trench: the lowest the
+    // drama build dips below the level build is a gap, and a crest is a rise
+    // with a drop within a few tiles after it.
+    int gaps = 0, crests = 0;
+    for (uint32_t seed = 1; seed <= 4; seed++) {
+        const uint32_t s = seed * 7919u;
+
+        gs_build_pair(s, GS_DRAMA_GAPS);
+        gs_fix deepest = 0;
+        const uint8_t legs = gs_track_route_legs(&gs_gen_a);
+        for (uint8_t leg = 0; leg < legs; leg++) {
+            for (int k = 0; k < 16; k++) {
+                gs_fix x, y;
+                gs_track_route_point(&gs_gen_a, leg, GS_ONE * k / 16, &x, &y);
+                const gs_fix dip = gs_track_height(&gs_gen_a, x, y) -
+                                   gs_track_height(&gs_gen_level, x, y);
+                if (dip < deepest) deepest = dip;
+            }
+        }
+        if (deepest < -GS_RATIO(80, 100)) gaps++;   // a tile on severe ground
+
+        gs_build_pair(s, GS_DRAMA_CRESTS);
+        bool found = false;
+        for (uint8_t leg = 0; leg < legs && !found; leg++) {
+            for (int k = 0; k < 16 && !found; k++) {
+                gs_fix x, y;
+                gs_track_route_point(&gs_gen_a, leg, GS_ONE * k / 16, &x, &y);
+                const gs_fix rise = gs_track_height(&gs_gen_a, x, y) -
+                                    gs_track_height(&gs_gen_level, x, y);
+                // Seven tenths: a crest on severe ground stands a tile high
+                // and the route is sampled every three quarters of a tile,
+                // so the peak itself is not always where a sample lands.
+                if (rise < GS_RATIO(70, 100)) continue;
+                for (int m = 1; m <= 12 && !found; m++) {
+                    const int kk = k + m;
+                    const uint8_t lg = (uint8_t)((leg + kk / 16) % legs);
+                    gs_fix x2, y2;
+                    gs_track_route_point(&gs_gen_a, lg, GS_ONE * (kk % 16) / 16, &x2, &y2);
+                    const gs_fix fall = gs_track_height(&gs_gen_a, x2, y2) -
+                                        gs_track_height(&gs_gen_level, x2, y2);
+                    if (fall < -GS_RATIO(40, 100)) found = true;
+                }
+            }
+        }
+        if (found) crests++;
+    }
+    printf("  DRAMA %d of 4 seeds dug a gap, %d of 4 raised a crest that falls away\n",
+           gaps, crests);
+    CHECK(gaps >= 3);
+    CHECK(crests >= 3);
+}
+
+TEST(every_kind_of_drama_can_still_be_got_round) {
+    // One seed per band through the analyser, which is the same question
+    // every shipped track has to answer: can anybody get round it?
+    for (int d = 0; d < GS_DRAMA_COUNT; d++) {
+        gs_build_pair_of(7919u * 5u, (gs_gen_drama)d, true);
+        static gs_analysis look;
+        gs_analyse(&gs_gen_a, gs_analyse_seconds(&gs_gen_a), &look);
+        if (!look.completable) printf("  DRAMA band %d cannot be got round\n", d);
+        CHECK(look.completable);
+    }
+}
+
+// A ring of road, radius fourteen, on a flat field - and the same ring with
+// its outside raised. The banked one should hold a car the flat one lets go.
+static void gs_ring_road(gs_track *t, bool banked) {
+    gs_track_init(t, 48, 48, GS_SURF_DIRT);
+    const int cx = 24, cy = 24;
+    for (int y = 0; y <= 48; y++) {
+        for (int x = 0; x <= 48; x++) {
+            const int dx = x - cx, dy = y - cy;
+            const int d2 = dx * dx + dy * dy;
+            int r = 0;
+            while ((r + 1) * (r + 1) <= d2) r++;
+            if (banked) {
+                // A smooth cone, from the exact distance: a bank built from
+                // whole-tile rings is a staircase, and a car at speed over
+                // a staircase is airborne for half of it and steering for
+                // none of that.
+                const gs_fix exact = gs_fix_len2(GS_INT(dx), GS_INT(dy));
+                gs_track_set_corner(t, (uint8_t)x, (uint8_t)y,
+                                    gs_fix_div(exact - GS_INT(14), GS_INT(6)));
+            }
+            if (x < 48 && y < 48 && r >= 8 && r <= 20) {
+                gs_track_set_surface(t, (uint8_t)x, (uint8_t)y, GS_SURF_PAVEMENT);
+            }
+        }
+    }
+}
+
+// A car already at speed, tangent to the ring at its east point, held at
+// full lock for a second and a half with no throttle: how far from the
+// ring's centre it ends up. The tighter it turns, the closer.
+static gs_fix gs_radius_after_a_turn(const gs_track *t, gs_input turn, gs_fix speed) {
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    const gs_angle facing = 49152u;                     // along -y
+    gs_world_add_car(&w, t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(38), GS_INT(24), facing);
+    gs_car *c = &w.car[0];
+    c->vx = gs_fix_mul(speed, gs_cos(facing));
+    c->vy = gs_fix_mul(speed, gs_sin(facing));
+    c->gear = gs_gear_auto(&gs_vehicles[GS_VEH_STOCK_CAR], speed);
+    for (uint32_t i = 0; i < GS_TICK_HZ * 3 / 2; i++) {
+        gs_input in[GS_MAX_CARS] = { turn, 0, 0, 0 };
+        gs_world_step(&w, t, in);
+        CHECK(gs_track_surface(t, c->x, c->y) == GS_SURF_PAVEMENT);   // on the ring throughout
+    }
+    return gs_fix_len2(c->x - GS_INT(24), c->y - GS_INT(24));
+}
+
+TEST(a_banked_ring_turns_a_car_tighter_than_the_flat_ring_does) {
+    // **Banking is a physical fact here, not a look - at the limit.** The
+    // slope pulls: gravity is applied along the ground's gradient as a
+    // vector, sideways included. Below the limit the tyres cancel a sideways
+    // push, which is what tyres do; at full lock the grip is spent and the
+    // push is what is left, so a car turns tighter on a bank and ends the
+    // same second and a half closer to the middle. Gravity at this scale is
+    // a couple of tiles a second per second, so the difference is a fraction
+    // of a tile - modest over a second, decisive over a corner. Which way is
+    // inward is found on the flat ring rather than assumed.
+    static gs_track flat, banked;
+    gs_ring_road(&flat, false);
+    gs_ring_road(&banked, true);
+    const gs_fix speed = GS_INT(6);
+    const gs_fix left = gs_radius_after_a_turn(&flat, GS_IN_LEFT, speed);
+    const gs_fix right = gs_radius_after_a_turn(&flat, GS_IN_RIGHT, speed);
+    const gs_input inward = left < right ? GS_IN_LEFT : GS_IN_RIGHT;
+    const gs_fix on_flat = left < right ? left : right;
+    const gs_fix on_bank = gs_radius_after_a_turn(&banked, inward, speed);
+    printf("  BANK radius after a second and a half at full lock: %.2f flat, %.2f banked\n",
+           (double)on_flat / GS_ONE, (double)on_bank / GS_ONE);
+    CHECK(on_bank < on_flat - GS_RATIO(15, 100));
 }
 
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
@@ -10066,6 +10327,10 @@ int main(void) {
     run_a_waypoint_may_be_missed_and_a_checkpoint_may_not();
     run_a_track_reversed_twice_is_the_track_it_was_and_once_is_a_different_one();
     run_a_reversed_circuit_can_still_be_lapped();
+    run_a_banked_corner_is_higher_on_the_outside_and_a_pipe_at_both_edges();
+    run_a_gap_is_a_trench_after_a_ramp_and_a_crest_falls_away_beyond_it();
+    run_every_kind_of_drama_can_still_be_got_round();
+    run_a_banked_ring_turns_a_car_tighter_than_the_flat_ring_does();
     run_a_track_says_how_many_gates_make_a_checkpoint_and_an_older_one_says_all_of_them();
     run_a_generated_track_keeps_one_gate_in_four_as_a_checkpoint_and_its_finish();
     run_facing_a_route_leaves_a_track_the_way_it_found_it_when_it_was_already_right();

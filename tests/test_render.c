@@ -2944,9 +2944,7 @@ TEST(a_store_with_tracks_in_it_is_saved_whole) {
     CHECK(assets != nullptr);
     if (assets == nullptr) return;
 
-    static const char *const shipped[] = {
-        "low-bend", "grey-mile", "far-drop", "grey-bowl",
-    };
+    static const char *const shipped[] = { "low-bend", "broken-bowl", "far-drop", "grey-bowl" };
 
     static gs_track t;
     for (int i = 0; i < GS_LIBRARY_MAX; i++) {

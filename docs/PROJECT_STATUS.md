@@ -8320,6 +8320,100 @@ ways; and the direction dial walked with every other control on the setup
 screen.*
 
 
+### Vertical drama the ground can already hold, 2026-09-05
+
+**An eleventh dial: drama.** The matrix said how *rough* a track was and
+never what shape the roughness had, so the road was a level ribbon cut
+through whatever the field did. The road has a shape of its own now, drawn
+like every other dial - *level, banked, bowls, pipes, gaps, crests* - and
+said in the spec line beside the rest.
+
+- **Banked** - through every corner the outside rises, as far as the corner
+  is sharp: nine tenths of a tile at the edge of a full corner.
+- **Bowls** - banked harder, and hollowed: a corner is a dish a tile deep
+  you drop into and climb out of.
+- **Pipes** - the road's edges curl up into quarter-pipe walls, the whole
+  way round. The wall is a *slope*, not a height - a fifth of a tile per
+  tile at the edge whatever the road's width - and it keeps rising a tile
+  past the road's edge before the verge takes over, so a car that slides up
+  it climbs, slows and rolls back rather than leaving a lip.
+- **Gaps** - a trench after every ramp, a tile and a half deep and six to
+  nine tiles across, both walls ramped over ten tiles: a car that leaves
+  the ramp at speed flies it, one that arrives slowly dips through and
+  climbs out, slowly. A gap is a thing you jump, so *gaps* brings *big
+  jumps* with it, and widens a narrow road to standard, because a car
+  leaving a ramp with any drift lands beside a three-tile road and on an
+  ice field never gets back - the two vetoes. The near wall was a cliff at
+  first, and a cliff is a wall from the other side: no gap track could be
+  raced reversed, and the set could not be built.
+- **Crests** - a ridge every hundred tiles or so, a tile and a fifth up,
+  falling half a tile below the road on the far side over six tiles, so the
+  landing is the decision. Gentler than first cut, because from the other
+  side the fall is a climb, and a crest that was a wall reversed could not
+  ship both ways.
+
+**How it is cut.** The route is surveyed once - where each of its two
+thousand samples is, and how hard the road turns there, signed - and the
+carve that used to level the road now gives it a cross-section from that
+survey (banked, bowls, pipes: a profile across the road, blended out over
+the verge from the road's edge) and a lift along its length (bowls, gaps,
+crests). Nothing outside the road and its verge changes. It is the same
+field of heights the world always was; the generator had simply never
+asked for any of this.
+
+**Banking is a physical fact, not a look - at the limit.** Gravity is
+applied along the ground's gradient as a vector, sideways included; below
+the limit the tyres cancel a sideways push, which is what tyres do, and at
+full lock the grip is spent and the push is what is left. A car at full
+lock on a hand-built ring ends a second and a half four tenths of a tile
+closer to the centre when the ring is banked. Gravity at this scale is two
+and a half tiles a second per second, which is why the push is modest over
+a second and decisive over a corner.
+
+**And the driver takes the low line.** Where its lane sits more than a
+third of a tile above the gate's centre - a pipe's wall, a bank's outside -
+the lane is halved until it does not. Before this, a car held out on a
+pipe's wall slid further up it in every corner until it left the lip and
+wrecked itself on the landing, and one seed's half-pipe road was a race
+nobody in the outer slots could finish. A level road never trips the rule,
+and the opponents golden did not move.
+
+**And the shipping gate had been lying about circuits.** `make_tracks`
+races every machine from every grid slot before a track ships and asked
+whether the car's lap count was above zero - the raw count, which on a
+circuit includes the first crossing of the start line, three tiles from
+the grid. Every circuit passed that check two seconds in, and half the
+shipped set had never actually been raced by it. The renderer suite's own
+opponents test, which runs in race mode, is what caught it: a crest laid
+over a ramp on a basin's slope made a face the driver stalled on, on a
+track the gate had sworn was fine. The gate asks for laps *done* now,
+crests keep two dozen tiles clear of every ramp and stand two thirds as
+high on severe ground, and the set was regenerated through the real gate.
+
+**Three more things were wrong on the way and each is on the record.** A fixed
+pipe height was a wall on a narrow road; the drama applied through the
+run-up put a grid of standing cars on a slope and a hollow in the first
+corner, so it now fades in over the dozen tiles after the run-up; and the
+first banked-ring test built its bank from whole-tile rings - a staircase
+a fast car is airborne over, and not steering while it is.
+
+The generator golden moved - every seed now draws the dial - and the
+shipped set was regenerated through the real gate, its spread asserted
+across the drama bands as well: six level, six banked, three bowls, six
+half-pipe, six gaps, three crests. No band may take more than six of the
+thirty, because the gate rejects the hard bands far more often than the
+easy ones and a search that stopped at thirty never reached them.
+
+*Verification: each shape measured against the level build of the same
+seed - a banked corner higher on its outside at the sharpest gate, a bowl
+lower at the centre too, a half-pipe higher at both edges at the
+straightest gate, a gap a trench more than a tile deep somewhere along the
+route, a crest a rise with a drop within a few tiles after it; one seed
+per band through the analyser; the banked ring held a car a quarter longer
+than the flat one; every band drawn in six hundred specs and the gaps veto
+held; the shipped set covering every band.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

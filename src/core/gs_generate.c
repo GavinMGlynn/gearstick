@@ -62,6 +62,7 @@ gs_track_spec gs_generate_spec_for(uint32_t seed) {
     s.dress = (gs_gen_dress)gs_pick(&r, GS_DRESS_COUNT);
     s.width = (gs_gen_width)gs_pick(&r, GS_WIDTH_COUNT);
     s.base = (gs_surface)gs_pick(&r, GS_SURF_COUNT);
+    s.drama = (gs_gen_drama)gs_pick(&r, GS_DRAMA_COUNT);
 
     // **The vetoes.** Two dials contradicting each other is resolved here,
     // once, so a spec in hand is always a spec that can be built - and
@@ -91,6 +92,18 @@ gs_track_spec gs_generate_spec_for(uint32_t seed) {
     // applied where gravity is painted, as a floor of three quarters, so the
     // gravity dial itself stays honest here.
 
+    // A gap is a thing you jump, so gaps bring the ramps that make them
+    // jumpable. The jumps dial gives.
+    if (s.drama == GS_DRAMA_GAPS && s.jumps != GS_JUMPS_BIG) {
+        s.jumps = GS_JUMPS_BIG;
+    }
+    // And a gap on a narrow road is a lottery: a car leaving the ramp with
+    // any drift at all lands beside a three-tile road rather than on it,
+    // and on an ice field it never gets back. The road gives, as it does
+    // for ice under technical corners.
+    if (s.drama == GS_DRAMA_GAPS && s.width == GS_WIDTH_NARROW) {
+        s.width = GS_WIDTH_STANDARD;
+    }
     return s;
 }
 
@@ -140,6 +153,10 @@ void gs_spec_line(const gs_track_spec *spec, char *out, size_t cap) {
     static const char *const width[GS_WIDTH_COUNT] = {
         "narrow road", "standard road", "wide road",
     };
+    static const char *const drama[GS_DRAMA_COUNT] = {
+        "level road", "banked corners", "bowl corners", "half-pipe road",
+        "gaps to clear", "crests that drop away",
+    };
     static const char *const ground[GS_SURF_COUNT] = {
         "pavement", "dirt", "ice", "sand", "gravel", "rock", "dust", "slush",
         "grass",
@@ -167,6 +184,8 @@ void gs_spec_line(const gs_track_spec *spec, char *out, size_t cap) {
     n = gs_say(out, cap, n, dress[spec->dress]);
     n = gs_say(out, cap, n, " | ");
     n = gs_say(out, cap, n, width[spec->width]);
+    n = gs_say(out, cap, n, " | ");
+    n = gs_say(out, cap, n, drama[spec->drama]);
     if (cap > 0) out[n < cap ? n : cap - 1] = '\0';
 }
 
@@ -964,8 +983,16 @@ static void gs_stamp_hill(gs_track *t, gs_fix cx, gs_fix cy, int radius,
 // opening stretch.
 #define GS_GEN_RUNUP 45
 
+// Where the ramps went, in tiles along the route, and how big each was. The
+// gaps are dug after them, so they have to be remembered.
+#define GS_GEN_JUMP_MAX 64
+static int32_t gs_jump_site[GS_GEN_JUMP_MAX];
+static int32_t gs_jump_radius[GS_GEN_JUMP_MAX];
+static int     gs_jump_count;
+
 static void gs_lay_jumps(gs_track *t, gs_rng *r, const gs_track_spec *spec,
                          const gs_route_plan *plan) {
+    gs_jump_count = 0;
     if (spec->jumps == GS_JUMPS_NONE) return;
 
     bool big = spec->jumps == GS_JUMPS_BIG;
@@ -1001,7 +1028,238 @@ static void gs_lay_jumps(gs_track *t, gs_rng *r, const gs_track_spec *spec,
         gs_fix cx, cy;
         gs_route_at(plan, along, &cx, &cy);
         gs_stamp_hill(t, cx, cy, radius, height);
+        if (gs_jump_count < GS_GEN_JUMP_MAX) {
+            gs_jump_site[gs_jump_count] = at;
+            gs_jump_radius[gs_jump_count] = radius;
+            gs_jump_count++;
+        }
     }
+}
+
+// --- Vertical drama -----------------------------------------------------------
+//
+// **The road's own shape**, over and above the field's. The carve below cuts
+// a level road at the route's height; these give it a cross-section - banked
+// through corners, curled up at the edges - and a profile along its length -
+// hollows in the corners, trenches after the ramps, crests that fall away.
+// All of it is a field of heights, which is what the world already is; the
+// generator simply never asked for any of it.
+
+// The route surveyed once: where each sample is, how hard the road turns
+// there - signed, GS_ONE at a full corner - and a lift to add to the road's
+// height at that sample.
+static gs_fix gs_sx[GS_GEN_SAMPLES], gs_sy[GS_GEN_SAMPLES];
+static gs_fix gs_turn[GS_GEN_SAMPLES];
+static gs_fix gs_lift[GS_GEN_SAMPLES];
+// How much of the drama applies at each sample: none through the run-up,
+// where a grid of standing cars needs level ground under it and a car with
+// no speed has nothing to climb with, fading to all of it a dozen tiles on.
+static gs_fix gs_gain[GS_GEN_SAMPLES];
+
+// How far the road tilts across its width at a full-strength corner, in tiles
+// from the centreline to the edge; the hollow a bowl corner drops into; the
+// height the edge of a half-pipe reaches; how deep a gap is and how far its
+// far wall is ramped - two tiles over eight, which a car can climb from a
+// standstill, because a car that fell short is standing still; how high a
+// crest stands and how far it falls beyond.
+#define GS_BANK        GS_RATIO(90, 100)
+#define GS_BANK_BOWL   GS_RATIO(90, 100)
+#define GS_BOWL_DEPTH  GS_RATIO(120, 100)
+// A half-pipe's edge is a slope, not a height: a fifth of a tile per tile
+// at the very edge whatever the road's width. A fixed height was a wall on
+// a narrow road and a car sat against it for the whole race; three tenths
+// was a launch ramp on a wide one, and a car sliding up it in a corner left
+// the lip and wrecked itself on the landing.
+#define GS_PIPE_K      GS_RATIO(10, 100)
+#define GS_GAP_DEPTH   GS_RATIO(150, 100)
+#define GS_GAP_WALL    10
+// A crest stands a tile and a fifth and falls half a tile below the road
+// beyond it, over six tiles: from the other side that is a climb of under
+// three tenths a tile, which any car manages from a standstill. It stood
+// higher and fell harder at first, and reversed it was a wall a slow car
+// stopped at, so almost no crest track could ship both ways.
+#define GS_CREST_RISE  GS_RATIO(120, 100)
+#define GS_CREST_DROP  GS_RATIO(50, 100)
+
+static gs_fix gs_sample_along(const gs_route_plan *plan, uint16_t i) {
+    return plan->loop ? (gs_fix)(((int64_t)i * 65536) / GS_GEN_SAMPLES)
+                      : (gs_fix)(((int64_t)i * GS_ONE) / (GS_GEN_SAMPLES - 1));
+}
+
+// A sample index a few steps away: round a loop, or pinned to a path's ends.
+static uint16_t gs_sample_near(const gs_route_plan *plan, int32_t i) {
+    if (plan->loop) {
+        i %= GS_GEN_SAMPLES;
+        if (i < 0) i += GS_GEN_SAMPLES;
+        return (uint16_t)i;
+    }
+    if (i < 0) i = 0;
+    if (i >= GS_GEN_SAMPLES) i = GS_GEN_SAMPLES - 1;
+    return (uint16_t)i;
+}
+
+static int32_t gs_samples_per_tile(const gs_route_plan *plan) {
+    int32_t tiles = (int32_t)(plan->total / GS_ONE);
+    if (tiles < 1) tiles = 1;
+    int32_t per = GS_GEN_SAMPLES / tiles;
+    return per < 1 ? 1 : per;
+}
+
+static void gs_survey(const gs_route_plan *plan) {
+    const int32_t per_tile = gs_samples_per_tile(plan);
+    for (uint16_t i = 0; i < GS_GEN_SAMPLES; i++) {
+        gs_route_at(plan, gs_sample_along(plan, i), &gs_sx[i], &gs_sy[i]);
+        gs_lift[i] = 0;
+        const int32_t tile = (int32_t)i / per_tile;
+        int32_t in = tile - GS_GEN_RUNUP;
+        if (in < 0) in = 0;
+        if (in > 12) in = 12;
+        gs_gain[i] = (gs_fix)(((int64_t)in * GS_ONE) / 12);
+    }
+    // How hard the road turns: the change of direction over eight tiles
+    // either side, with forty degrees of it counting as a full corner.
+    const int32_t span = 8 * gs_samples_per_tile(plan);
+    for (int32_t i = 0; i < GS_GEN_SAMPLES; i++) {
+        const uint16_t a = gs_sample_near(plan, i - span);
+        const uint16_t b = (uint16_t)i;
+        const uint16_t c = gs_sample_near(plan, i + span);
+        const gs_angle in = gs_atan2(gs_sy[b] - gs_sy[a], gs_sx[b] - gs_sx[a]);
+        const gs_angle out = gs_atan2(gs_sy[c] - gs_sy[b], gs_sx[c] - gs_sx[b]);
+        const int16_t turn = (int16_t)(gs_angle)(out - in);
+        int64_t k = ((int64_t)turn * GS_ONE) / (int64_t)GS_DEG(40);
+        if (k > GS_ONE) k = GS_ONE;
+        if (k < -GS_ONE) k = -GS_ONE;
+        gs_turn[i] = (gs_fix)k;
+    }
+}
+
+// A lift over a run of tiles, blended linearly from `from` at the start to
+// `to` at the end; the route measured in tiles from the start.
+static void gs_lift_run(const gs_route_plan *plan, int32_t tile0, int32_t tile1,
+                        gs_fix from, gs_fix to) {
+    const int32_t per = gs_samples_per_tile(plan);
+    const int32_t s0 = tile0 * per, s1 = tile1 * per;
+    if (s1 <= s0) return;
+    for (int32_t si = s0; si < s1; si++) {
+        if (si < 0 || si >= GS_GEN_SAMPLES) continue;
+        const gs_fix k = (gs_fix)(((int64_t)(si - s0) * GS_ONE) / (s1 - s0));
+        gs_lift[si] += from + gs_fix_mul(to - from, k);
+    }
+}
+
+static void gs_lay_lift(gs_rng *r, const gs_track_spec *spec,
+                        const gs_route_plan *plan) {
+    const int32_t route = (int32_t)(plan->total / GS_ONE);
+    const int32_t tail = plan->loop ? 0 : 25;
+
+    switch (spec->drama) {
+    case GS_DRAMA_BOWLS:
+        // A hollow through every corner, as deep as the corner is sharp.
+        for (uint16_t i = 0; i < GS_GEN_SAMPLES; i++) {
+            const gs_fix mag = gs_turn[i] < 0 ? -gs_turn[i] : gs_turn[i];
+            gs_lift[i] -= gs_fix_mul(gs_fix_mul(GS_BOWL_DEPTH, mag), gs_gain[i]);
+        }
+        break;
+
+    case GS_DRAMA_GAPS:
+        // After every ramp, a trench: two tiles down, nothing for a few
+        // tiles, and up again - **both walls ramped**, eight tiles each. A
+        // car that leaves the ramp at speed flies the whole thing; one that
+        // arrives slowly dips through it and climbs out, slowly, which is the
+        // price. The near wall was a cliff at first - a lip to leave - and a
+        // cliff is a wall from the other side: no gap track could be raced
+        // reversed, and the set could not be built.
+        // A tile and a half deep, and a tile on severe ground - the same
+        // discount the ramps and the crests take, because the trench's wall
+        // stacks on whatever the field is doing, and a wall climbing out of
+        // a hollow on a hillside stopped a car dead at the bottom of it.
+        const gs_fix depth = spec->range == GS_RANGE_SEVERE
+                                 ? (gs_fix)((int64_t)GS_GAP_DEPTH * 2 / 3)
+                                 : GS_GAP_DEPTH;
+        for (int j = 0; j < gs_jump_count; j++) {
+            const int32_t lip = gs_jump_site[j] + gs_jump_radius[j] + 1;
+            const int32_t span = 6 + (int32_t)gs_pick(r, 4);
+            if (lip + GS_GAP_WALL + span + GS_GAP_WALL > route - tail) continue;
+            gs_lift_run(plan, lip, lip + GS_GAP_WALL, 0, -depth);
+            gs_lift_run(plan, lip + GS_GAP_WALL, lip + GS_GAP_WALL + span, -depth, -depth);
+            gs_lift_run(plan, lip + GS_GAP_WALL + span,
+                        lip + GS_GAP_WALL + span + GS_GAP_WALL, -depth, 0);
+        }
+        break;
+
+    case GS_DRAMA_CRESTS: {
+        // A ridge every hundred tiles or so: a rise you cannot see over,
+        // and ground that falls away on the far side, so the landing is
+        // the decision.
+        // **Never on a ramp, and less on severe ground.** A crest laid over a
+        // big jump's hill, on a basin's slope, made a face near the wall
+        // limit that a car arrived at slowly and stalled on. A crest keeps
+        // two dozen tiles clear of every ramp, and on severe relief stands
+        // two thirds as high - the same discount the ramps take.
+        const int32_t spacing = 110 + (int32_t)gs_pick(r, 31);
+        const gs_fix rise = spec->range == GS_RANGE_SEVERE
+                                ? (gs_fix)((int64_t)GS_CREST_RISE * 2 / 3)
+                                : GS_CREST_RISE;
+        for (int32_t c = GS_GEN_RUNUP + spacing / 2; c + 14 < route - tail;
+             c += spacing) {
+            int32_t at = c + (int32_t)gs_pick(r, 11) - 5;
+            // Moved thirty tiles on, then thirty back, before being given
+            // up: a track with big jumps every hundred and fifty tiles would
+            // otherwise lose most of its crests to them.
+            static const int32_t shift[] = { 0, 30, -30 };
+            bool placed = false;
+            for (size_t k = 0; k < sizeof shift / sizeof shift[0] && !placed; k++) {
+                const int32_t try_at = at + shift[k];
+                if (try_at - 10 < GS_GEN_RUNUP || try_at + 16 >= route - tail) continue;
+                bool on_a_ramp = false;
+                for (int j = 0; j < gs_jump_count && !on_a_ramp; j++) {
+                    const int32_t gap = try_at - gs_jump_site[j];
+                    on_a_ramp = gap > -24 && gap < 24;
+                }
+                if (!on_a_ramp) { at = try_at; placed = true; }
+            }
+            if (!placed) continue;
+            gs_lift_run(plan, at - 10, at, 0, rise);
+            gs_lift_run(plan, at, at + 6, rise, -GS_CREST_DROP);
+            gs_lift_run(plan, at + 6, at + 16, -GS_CREST_DROP, 0);
+        }
+        break;
+    }
+
+    case GS_DRAMA_NONE:
+    case GS_DRAMA_BANKED:
+    case GS_DRAMA_PIPES:
+    case GS_DRAMA_COUNT:
+        break;
+    }
+}
+
+// The road's cross-section at sample `i`: how much higher than the centreline
+// the road is at `lat` tiles to the side, where the sign of `lat` says which
+// side - positive is the side the survey's turn is positive towards.
+static gs_fix gs_profile(gs_gen_drama drama, uint16_t i, int32_t lat, int half) {
+    switch (drama) {
+    case GS_DRAMA_BANKED:
+    case GS_DRAMA_BOWLS: {
+        // The outside of the turn rises. A turn that is positive bends
+        // towards the positive side, so the outside is the negative one.
+        const gs_fix k = gs_turn[i];
+        const gs_fix mag = k < 0 ? -k : k;
+        const int32_t outer = k > 0 ? -1 : 1;
+        const gs_fix bank = drama == GS_DRAMA_BOWLS ? GS_BANK_BOWL : GS_BANK;
+        return (gs_fix)(((int64_t)gs_fix_mul(bank, mag) * (lat * outer)) / half);
+    }
+    case GS_DRAMA_PIPES:
+        // A parabola: level in the middle, curling up to the edges, its
+        // edge slope the same on every width of road.
+        return (gs_fix)(((int64_t)GS_PIPE_K * lat * lat) / half);
+    case GS_DRAMA_NONE:
+    case GS_DRAMA_GAPS:
+    case GS_DRAMA_CRESTS:
+    case GS_DRAMA_COUNT:
+        break;
+    }
+    return 0;
 }
 
 static void gs_lay_gravity(gs_track *t, gs_rng *r, const gs_track_spec *spec,
@@ -1173,21 +1431,18 @@ static void gs_lay_dress(gs_track *t, gs_rng *r, const gs_track_spec *spec,
 // the second applies it. What comes out does not depend on which end the route
 // was walked from.
 static void gs_carve(gs_track *t, const gs_route_plan *plan, gs_surface road,
-                     int half) {
+                     int half, gs_gen_drama drama) {
     const int32_t reach = half + GS_GEN_VERGE;
 
-    static int32_t near2[GS_TRACK_CORNERS];
-    static gs_fix  level[GS_TRACK_CORNERS];
+    static int32_t  near2[GS_TRACK_CORNERS];
+    static uint16_t near_i[GS_TRACK_CORNERS];
+    static gs_fix   level[GS_TRACK_CORNERS];
     for (size_t i = 0; i < GS_TRACK_CORNERS; i++) near2[i] = INT32_MAX;
 
     for (uint16_t i = 0; i < GS_GEN_SAMPLES; i++) {
-        gs_fix along = plan->loop
-            ? (gs_fix)(((int64_t)i * 65536) / GS_GEN_SAMPLES)
-            : (gs_fix)(((int64_t)i * GS_ONE) / (GS_GEN_SAMPLES - 1));
-
-        gs_fix px = 0, py = 0;
-        gs_route_at(plan, along, &px, &py);
-        gs_fix here = gs_track_height(t, px, py);
+        const gs_fix px = gs_sx[i], py = gs_sy[i];
+        // The field's height here, plus whatever the drama lifts or digs.
+        gs_fix here = gs_track_height(t, px, py) + gs_lift[i];
 
         int32_t cx = gs_fix_floor(px), cy = gs_fix_floor(py);
         for (int32_t dy = -reach; dy <= reach + 1; dy++) {
@@ -1204,6 +1459,7 @@ static void gs_carve(gs_track *t, const gs_route_plan *plan, gs_surface road,
                 size_t at = (size_t)y * GS_CORNER_STRIDE + (size_t)x;
                 if (d2 >= near2[at]) continue;
                 near2[at] = d2;
+                near_i[at] = i;
                 level[at] = here;
             }
         }
@@ -1219,15 +1475,36 @@ static void gs_carve(gs_track *t, const gs_route_plan *plan, gs_surface road,
             int32_t d = 0;
             while ((d + 1) * (d + 1) <= near2[at]) d++;
 
+            // Which side of the road this corner is on: the sign of the
+            // cross product of the route's direction here and the offset
+            // from it, which is the same handedness the survey's turn uses.
+            const uint16_t i = near_i[at];
+            const uint16_t ia = gs_sample_near(plan, (int32_t)i - 2);
+            const uint16_t ib = gs_sample_near(plan, (int32_t)i + 2);
+            const gs_fix tx = gs_sx[ib] - gs_sx[ia], ty = gs_sy[ib] - gs_sy[ia];
+            const gs_fix ox = GS_INT(x) - gs_sx[i], oy = GS_INT(y) - gs_sy[i];
+            const int64_t cross = (int64_t)tx * oy - (int64_t)ty * ox;
+            const int32_t side = cross > 0 ? 1 : -1;
+            // **A half-pipe keeps rising past the road's edge.** Every other
+            // profile stops at the edge and the verge blends it back to the
+            // field; a pipe that did the same had a crest at its lip, and a
+            // car riding the wall in a corner launched off it into the
+            // field. A tile further up, a car climbs, slows and rolls back
+            // onto the road - which is what a quarter-pipe is for.
+            const int32_t hold = drama == GS_DRAMA_PIPES ? half + 1 : half;
+            const int32_t lat = side * (d <= hold ? d : hold);
+            const gs_fix road_h =
+                level[at] + gs_fix_mul(gs_profile(drama, i, lat, half), gs_gain[i]);
+
             gs_fix was = gs_track_corner_at(t, (uint8_t)x, (uint8_t)y);
             gs_fix want;
-            if (d <= half) {
-                want = level[at];
+            if (d <= hold) {
+                want = road_h;
             } else {
                 // Out across the verge, back to whatever the ground was.
-                gs_fix k = (gs_fix)(((int64_t)(d - half) * GS_ONE) /
-                                    GS_GEN_VERGE);
-                want = level[at] + gs_fix_mul(was - level[at], k);
+                gs_fix k = (gs_fix)(((int64_t)(d - hold) * GS_ONE) /
+                                    (reach - hold));
+                want = road_h + gs_fix_mul(was - road_h, k);
             }
             gs_track_set_corner(t, (uint8_t)x, (uint8_t)y, want);
 
@@ -1511,6 +1788,8 @@ void gs_generate_from_spec(gs_track *t, uint32_t seed,
     gs_plan_from_walk(&walk, &r, spec, pitch, ox, oy, jmax, loop, &plan);
 
     gs_lay_jumps(t, &r, spec, &plan);
+    gs_survey(&plan);
+    gs_lay_lift(&r, spec, &plan);
     gs_lay_dress(t, &r, spec, &plan);
     gs_lay_gravity(t, &r, spec, &plan);
 
@@ -1527,7 +1806,7 @@ void gs_generate_from_spec(gs_track *t, uint32_t seed,
                                               : GS_SURF_PAVEMENT;
     }
 
-    gs_carve(t, &plan, road, half);
+    gs_carve(t, &plan, road, half, spec->drama);
     gs_relax(t);
     gs_lay_gates(t, &r, &plan, half);
 }

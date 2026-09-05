@@ -127,6 +127,15 @@ shortcut.
 
 ### Things worth knowing
 
+**The road has a shape of its own.** The track list says which: *banked
+corners* stand higher on the outside, and the high line is faster once you
+are sliding; *bowl corners* are banked and hollowed, so you drop in and
+climb out; a *half-pipe road* curls up at both edges and a car that slides
+up the wall rolls back down; *gaps to clear* dig a trench after every ramp,
+and a car that arrives short drives out of it slowly; *crests that drop
+away* fall away on the far side, so the landing is the decision. A *level
+road* is what every track used to be.
+
 **Every track goes both ways.** The **direction** dial on the setup screen
 races the track reversed: the same road the other way round, with the
 start line crossed the other way on a loop and a path run from its old

@@ -117,6 +117,20 @@ typedef enum gs_gen_width {
 // One track, as its dials. Every field is one of the enums above plus the base
 // surface, and gs_generate_spec_for is the only place a spec is drawn - the
 // vetoes live there, so a spec in hand is always a spec that can be built.
+// **Vertical drama the ground can already hold.** What shape the road takes
+// in its own cross-section and along its own length, over and above the
+// relief of the field it is cut through. None of these need the world to be
+// anything but a field of heights; the generator simply never asked for them.
+typedef enum gs_gen_drama {
+    GS_DRAMA_NONE = 0,   // a level road
+    GS_DRAMA_BANKED,     // corners banked, the outside raised, harder corners more
+    GS_DRAMA_BOWLS,      // banked and hollowed: a corner is a dish you drop into
+    GS_DRAMA_PIPES,      // the road's edges curve up into quarter-pipe walls
+    GS_DRAMA_GAPS,       // a trench after every ramp, with a wall to climb if short
+    GS_DRAMA_CRESTS,     // ridges that drop away on the far side
+    GS_DRAMA_COUNT
+} gs_gen_drama;
+
 typedef struct gs_track_spec {
     gs_gen_class    kind;
     gs_gen_length   length;
@@ -128,6 +142,7 @@ typedef struct gs_track_spec {
     gs_gen_gravity  gravity;
     gs_gen_dress    dress;
     gs_gen_width    width;
+    gs_gen_drama    drama;
     gs_surface      base;
 } gs_track_spec;
 

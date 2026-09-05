@@ -146,7 +146,12 @@ static int gs_finishers_at_earth(const gs_track *t) {
             for (uint32_t i = 0; i < GS_TICK_HZ * seconds; i++) {
                 gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, t, 0), 0, 0, 0 };
                 gs_world_step(&w, t, in);
-                if (w.car[0].laps > 0) { round = true; break; }
+                // **Laps done, not laps counted.** A circuit's first crossing
+                // of its start line is the run-up, three tiles from the grid,
+                // and the raw count includes it - so this check passed every
+                // circuit two seconds in and never raced one. Found the day a
+                // crest stalled a car the gate had sworn could get round.
+                if (gs_car_laps_done(t, &w.car[0]) > 0) { round = true; break; }
             }
             everywhere = round;
         }
@@ -166,6 +171,13 @@ static int gs_finishers_at_earth(const gs_track *t) {
 #define GS_STOCK_COUNT 30
 #define GS_STOCK_PER_CLASS 15
 #define GS_STOCK_PER_CELL 6
+// **No drama band takes more than its share.** The gate that races every
+// candidate rejects the hard bands - bowls, gaps, crests - far more often
+// than a level road, so a search that stops at thirty fills up with level
+// and half-pipe roads first and never reaches them. Capped at six, the easy
+// bands fill twenty-four of the thirty and the search keeps going until the
+// rare ones supply the rest.
+#define GS_STOCK_PER_DRAMA 6
 
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "assets/tracks";
@@ -178,6 +190,7 @@ int main(int argc, char **argv) {
     int len_total[GS_LEN_COUNT] = { 0 };
     int curve_total[GS_CURVE_COUNT] = { 0 };
     int jumps_total[GS_JUMPS_COUNT] = { 0 };
+    int drama_total[GS_DRAMA_COUNT] = { 0 };
 
     // Two seeds can draw the same two-word name, and the same name is the
     // same file path - a silent overwrite, and a library of twenty-nine.
@@ -192,6 +205,7 @@ int main(int argc, char **argv) {
         if (by_class[spec.kind] >= GS_STOCK_PER_CLASS) continue;
         if (by_len[spec.kind][spec.length] >= GS_STOCK_PER_CELL) continue;
         if (by_curve[spec.kind][spec.curve] >= GS_STOCK_PER_CELL) continue;
+        if (drama_total[spec.drama] >= GS_STOCK_PER_DRAMA) continue;
 
         char name[32];
         gs_generate_name(name, sizeof name, seed);
@@ -240,6 +254,7 @@ int main(int argc, char **argv) {
         len_total[spec.length]++;
         curve_total[spec.curve]++;
         jumps_total[spec.jumps]++;
+        drama_total[spec.drama]++;
         written++;
     }
 
@@ -274,6 +289,16 @@ int main(int argc, char **argv) {
         if (curve_total[i] < 6) {
             printf("  too few tracks at curve band %d: %d of at least 6\n",
                    i, curve_total[i]);
+            spread = false;
+        }
+    }
+    printf("  drama level/banked/bowls/pipes/gaps/crests: %d/%d/%d/%d/%d/%d\n",
+           drama_total[0], drama_total[1], drama_total[2], drama_total[3],
+           drama_total[4], drama_total[5]);
+    for (int i = 0; i < GS_DRAMA_COUNT; i++) {
+        if (drama_total[i] < 2) {
+            printf("  too few tracks at drama band %d: %d of at least 2\n",
+                   i, drama_total[i]);
             spread = false;
         }
     }
