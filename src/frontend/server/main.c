@@ -10,6 +10,7 @@
 // It runs headless. SDL is initialised with no subsystems at all - SDL_net
 // needs SDL, not a display - so this is something you can leave running on a
 // machine with no screen, which is what a server is.
+#include "core/gs_generate.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
 #include "net/gs_carrier.h"
@@ -770,6 +771,28 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
         static gs_track t;
         static uint8_t track_bytes[GS_CARRIER_MAX_BYTES];
         size_t track_len = 0;
+        // **A time on today's track is a time on a track this server can
+        // build for itself.** The daily is made from the date, the same on
+        // every machine, so a server that was never sent it generates today's
+        // and yesterday's, and if the hash matches, keeps it as if it had
+        // been published - and the time is then re-raced like any other.
+        if (!gs_store_has_track(gs_srv.store, cl->claim.track)) {
+            static gs_track daily;
+            const uint64_t days = (uint64_t)gs_now() / 86400u;
+            if (days >= GS_DAILY_EPOCH_DAY &&
+                gs_daily_track_for_hash(&daily, (uint32_t)(days - GS_DAILY_EPOCH_DAY),
+                                        cl->claim.track)) {
+                const size_t daily_len = gs_track_serialize(&daily, track_bytes, sizeof track_bytes);
+                if (daily_len > 0 &&
+                    gs_store_put_track(gs_srv.store, cl->claim.track, "today's track",
+                                       "the calendar", track_bytes, daily_len)) {
+                    gs_store_publish(gs_srv.store, cl->claim.track, "today's track",
+                                     "the calendar");
+                    SDL_Log("%s claimed a time on today's track; built it from the date",
+                            cl->name);
+                }
+            }
+        }
         if (!gs_store_get_track(gs_srv.store, cl->claim.track, track_bytes,
                                 sizeof track_bytes, &track_len) ||
             !gs_track_deserialize(&t, track_bytes, track_len)) {

@@ -2938,10 +2938,15 @@ better done once the reversed routes are being verified too.
       off the line than a cold one, an automatic never heating, and the
       readout drawn at the heat it is given.*
 
-- [ ] **A daily track everybody gets.** One seed a day, the same for
-      everyone, with times compared through the server that already exists.
-      *Verification: two machines asked on the same day build the identical
-      track, and a day's times are only ever shown against that day's.*
+- [x] **A daily track everybody gets.** One seed a day from the UTC date,
+      the first attempt that passes the shipped set's gate, so every machine
+      builds the identical track and none is a dud. It sits in the library
+      by "the calendar"; its records are its own because its hash is; and a
+      server handed a time on it builds it from the date rather than being
+      sent it.
+      *Verification: four days each the same twice and different from the
+      last, each validated, long enough and with a target; today's and
+      yesterday's recognised from the hash alone and older ones refused.*
 
 - [ ] **Watching a race back from any car.** Replays already re-race
       exactly; what is missing is choosing whose shoulder to watch from. The

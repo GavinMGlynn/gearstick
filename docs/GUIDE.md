@@ -139,6 +139,11 @@ and a car that arrives short drives out of it slowly; *crests that drop
 away* fall away on the far side, so the landing is the decision. A *level
 road* is what every track used to be.
 
+**Today's track.** The library has one entry by *the calendar*: the day's
+track, built from the date and the same on every machine, so everyone who
+opens the game today is on it. Its records are its own, and a server you
+send a time to knows it without being sent it.
+
 **A time to beat.** The setup screen shows the computer's best lap on the
 chosen track at the skill you have set, and the machine it did it in. It
 is worked out on the spot, so every track has one, both ways round. A

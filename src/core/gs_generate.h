@@ -172,4 +172,20 @@ void gs_spec_line(const gs_track_spec *spec, char *out, size_t cap);
 // Two words from the seed, the same two every time.
 void gs_generate_name(char *out, size_t cap, uint32_t seed);
 
+// **Today's track.** One seed a day, the same for everyone, so a track
+// nobody built is a track everybody is on. A day is counted in UTC days
+// since the first of January 2026, so two machines in two time zones agree
+// on it for all but the hours around midnight. The seed is the first of a
+// day's attempts whose track validates, is long enough to ship, and can be
+// got round by the computer both ways - the same gate the shipped set
+// passes, so that a day is never a dud - and every machine walks the same
+// attempts in the same order and lands on the same one.
+#define GS_DAILY_EPOCH_DAY 20454u          // 2026-01-01, in days since 1970
+#define GS_DAILY_ATTEMPTS  24u
+uint32_t gs_daily_seed(uint32_t day, uint32_t attempt);
+bool     gs_daily_track(gs_track *t, uint32_t day, uint32_t *seed);
+// The daily for `day` or the day before, if `hash` is one of them: how a
+// server that was never sent today's track recognises a time set on it.
+bool     gs_daily_track_for_hash(gs_track *t, uint32_t day, uint64_t hash);
+
 #endif // GS_GENERATE_H

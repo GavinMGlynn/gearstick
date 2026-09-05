@@ -18,6 +18,8 @@
 // is climbable, and the gates are laid on the centreline facing the way a car
 // arrives.
 #include "core/gs_generate.h"
+#include "core/gs_ai.h"
+#include "core/gs_target.h"
 
 #include "core/gs_sim.h"
 
@@ -1849,4 +1851,48 @@ void gs_generate_name(char *out, size_t cap, uint32_t seed) {
     n = gs_say(out, cap, n, " ");
     n = gs_say(out, cap, n, b);
     if (cap > 0) out[n < cap ? n : cap - 1] = '\0';
+}
+
+// --- Today's track -----------------------------------------------------------
+
+uint32_t gs_daily_seed(uint32_t day, uint32_t attempt) {
+    // A small integer mix - the point is only that consecutive days and
+    // attempts land far apart, and that every machine does the same sums.
+    uint32_t h = day * 0x9E3779B1u ^ (attempt + 1u) * 0x85EBCA77u;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    h *= 0x297A2D39u;
+    h ^= h >> 15;
+    return h | 1u;
+}
+
+static bool gs_daily_fit(const gs_track *t) {
+    if (gs_track_validate(t).problem != GS_TRACK_OK) return false;
+    if (gs_track_race_length(t) < GS_INT(GS_STOCK_MIN_ROUTE)) return false;
+    if (gs_target_lap(t, GS_ONE, GS_AI_SKILL_DEFAULT, nullptr) == 0) return false;
+    static gs_track back;
+    back = *t;
+    gs_track_reverse(&back);
+    if (gs_track_validate(&back).problem != GS_TRACK_OK) return false;
+    return gs_target_lap(&back, GS_ONE, GS_AI_SKILL_DEFAULT, nullptr) != 0;
+}
+
+bool gs_daily_track(gs_track *t, uint32_t day, uint32_t *seed) {
+    for (uint32_t attempt = 0; attempt < GS_DAILY_ATTEMPTS; attempt++) {
+        const uint32_t s = gs_daily_seed(day, attempt);
+        gs_generate(t, s);
+        if (!gs_daily_fit(t)) continue;
+        if (seed != nullptr) *seed = s;
+        return true;
+    }
+    return false;
+}
+
+bool gs_daily_track_for_hash(gs_track *t, uint32_t day, uint64_t hash) {
+    for (uint32_t back = 0; back < 2u && back <= day; back++) {
+        if (!gs_daily_track(t, day - back, nullptr)) continue;
+        if (gs_track_hash(t) == hash) return true;
+    }
+    return false;
 }

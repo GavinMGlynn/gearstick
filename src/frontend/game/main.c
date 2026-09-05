@@ -13,6 +13,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include "core/gs_generate.h"
 #include "core/gs_clock.h"
 #include "core/gs_sim.h"
 #include "core/gs_track.h"
@@ -331,6 +332,32 @@ static void gs_load_stock_tracks(gs_app *a) {
 //
 // Withdrawing first and adding second, because the two have to happen in that
 // order for a library near its limit - see gs_take_track.
+// **Today's track, in the library beside the ones that ship.** Built from the
+// date, the same on every machine, and put in as a builtin by "the calendar"
+// so the tracks screen, the records, the target, the direction dial and the
+// server all treat it as any other track. Yesterday's, if the library was
+// saved with it in, is retired by the stock sync before this runs, because
+// it is not a track the game ships.
+static void gs_add_daily_track(gs_app *a) {
+    SDL_Time now = 0;
+    if (!SDL_GetCurrentTime(&now)) return;
+    const uint64_t days = (uint64_t)(now / 1000000000) / 86400u;
+    if (days < GS_DAILY_EPOCH_DAY) return;
+    const uint32_t day = (uint32_t)(days - GS_DAILY_EPOCH_DAY);
+    static gs_track daily;
+    uint32_t seed = 0;
+    if (!gs_daily_track(&daily, day, &seed)) {
+        SDL_Log("today's track: no seed fit within %u attempts", (unsigned)GS_DAILY_ATTEMPTS);
+        return;
+    }
+    char born[32], name[GS_LIBRARY_NAME];
+    gs_generate_name(born, sizeof born, seed);
+    SDL_snprintf(name, sizeof name, "today - %s", born);
+    if (gs_library_put_builtin(&a->menu.library, &daily, name, "the calendar") >= 0) {
+        SDL_Log("today's track: day %u is %s (seed %u)", (unsigned)day, born, (unsigned)seed);
+    }
+}
+
 static void gs_sync_stock_tracks(gs_app *a) {
     a->stock_count = 0;
     a->stock_listing = true;
@@ -1133,6 +1160,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     // library already held as well - which is put back over the top of this
     // when the store is read, and is why the shipped set is synced again there.
     gs_sync_stock_tracks(a);
+    gs_add_daily_track(a);
 
     // **A track asked for by name wins over the library's first**, and says so
     // if it cannot be read rather than quietly racing something else. For

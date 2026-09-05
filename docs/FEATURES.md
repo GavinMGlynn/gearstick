@@ -398,7 +398,7 @@ file.
   drawing it: it is a route model where a gate can be reached two ways, and
   that is a real change rather than a tweak.
 
-- **A daily track everybody gets.** `CANDIDATE`
+- **A daily track everybody gets.** `DONE`
   A generated track is a seed, and there is a server. One seed a day that
   everybody races and compares times on costs almost nothing and gives a
   reason to open the game on a day you had not planned to build anything.

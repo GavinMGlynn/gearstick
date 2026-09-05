@@ -9144,6 +9144,44 @@ TEST(a_manual_on_the_limiter_heats_loses_power_and_cools_when_it_changes_up) {
     }
 }
 
+TEST(the_same_day_is_the_same_track_everywhere_and_a_new_day_is_a_new_one) {
+    // **One seed a day, the same for everyone.** Asked twice for a day, the
+    // same track to the hash; asked for the next day, a different one; and
+    // every day's track passes the gate the shipped set passes - validated,
+    // long enough, got round by the computer both ways - so a day is never
+    // a dud. And a server handed a time on a track it never had can tell
+    // today's and yesterday's daily from the hash alone, and nothing else.
+    static gs_track a, b;
+    int days = 0;
+    uint64_t last = 0;
+    // Four days: each costs a dozen headless laps to gate, and the debug
+    // build's suite is sized in seconds.
+    for (uint32_t day = 200; day < 204; day++) {
+        uint32_t seed = 0, again = 0;
+        CHECK(gs_daily_track(&a, day, &seed));
+        CHECK(gs_daily_track(&b, day, &again));
+        CHECK(seed == again);
+        CHECK(gs_track_hash(&a) == gs_track_hash(&b));
+        CHECK(gs_track_hash(&a) != last);
+        last = gs_track_hash(&a);
+        CHECK(gs_track_validate(&a).problem == GS_TRACK_OK);
+        CHECK(gs_track_race_length(&a) >= GS_INT(GS_STOCK_MIN_ROUTE));
+        CHECK(gs_target_lap(&a, GS_ONE, GS_AI_SKILL_DEFAULT, nullptr) > 0);
+        days++;
+    }
+    printf("  DAILY %d days built, each the same twice and none the same as the last\n", days);
+
+    static gs_track today, yesterday, older, found;
+    CHECK(gs_daily_track(&today, 300, nullptr));
+    CHECK(gs_daily_track(&yesterday, 299, nullptr));
+    CHECK(gs_daily_track(&older, 298, nullptr));
+    CHECK(gs_daily_track_for_hash(&found, 300, gs_track_hash(&today)));
+    CHECK(gs_track_hash(&found) == gs_track_hash(&today));
+    CHECK(gs_daily_track_for_hash(&found, 300, gs_track_hash(&yesterday)));
+    CHECK(!gs_daily_track_for_hash(&found, 300, gs_track_hash(&older)));
+    CHECK(!gs_daily_track_for_hash(&found, 300, 0x1234567890abcdefULL));
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -10495,6 +10533,7 @@ int main(void) {
     run_a_ghost_knows_the_tick_it_crossed_each_gate();
     run_every_track_has_a_time_to_beat_and_it_is_the_same_twice();
     run_a_manual_on_the_limiter_heats_loses_power_and_cools_when_it_changes_up();
+    run_the_same_day_is_the_same_track_everywhere_and_a_new_day_is_a_new_one();
     run_a_banked_corner_is_higher_on_the_outside_and_a_pipe_at_both_edges();
     run_a_gap_is_a_trench_after_a_ramp_and_a_crest_falls_away_beyond_it();
     run_every_kind_of_drama_can_still_be_got_round();

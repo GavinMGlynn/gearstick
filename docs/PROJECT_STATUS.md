@@ -8545,6 +8545,35 @@ none on an automatic whatever its bytes say; and the car byte audit knows
 the field.*
 
 
+### A daily track everybody gets, 2026-09-05
+
+**One seed a day, the same for everyone.** A day is counted in UTC days
+since the first of January 2026; its seed is mixed from the day number and
+an attempt number, and the day's track is the first attempt whose track
+validates, is long enough to ship, and can be got round by the computer
+both ways - the gate the shipped set passes, so a day is never a dud. Every
+machine walks the same attempts in the same order and lands on the same
+one, the same track to the hash. It sits in the library at startup as a
+builtin by "the calendar", named *today - <its name>*, so the tracks
+screen, the records, the target, the direction dial and the server treat
+it as any other track; yesterday's is retired by the stock sync at the
+next start, because it is not a track the game ships.
+
+**A day's times only ever compare with that day's** because records are
+keyed by the track's hash and each day is a different track. **And the
+server needs nothing sent to it**: a time claimed on a track it does not
+have is checked against today's and yesterday's daily, built from the
+date, and if the hash matches the server keeps the track as if it had been
+published and re-races the time like any other.
+
+*Verification: four consecutive days each built twice to the same hash,
+each different from the day before, each validated, long enough and with a
+target; today's and yesterday's daily recognised from the hash alone and
+the day before's and a random hash refused. The game's startup log names
+the day's track. The server's call is a few lines around a core function
+that is tested; the lines themselves are not, which is said here.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,
