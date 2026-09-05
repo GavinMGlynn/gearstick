@@ -8726,6 +8726,65 @@ the editor's shortcut edit is in the kinds walk; the world byte audit
 marks the bitmap. The generator golden moved, as every seed draws the new
 dial; neither world golden did.*
 
+### A window on the server, 2026-09-06
+
+**On a machine with a display the server opens a window as well.** The
+terminal view and the log are exactly as they were - a dashboard when
+stdout is a terminal, a line a minute when it is not - and where there is a
+screen, a window shows the same facts beside them: who is here, from where,
+their ping and traffic, the totals, the store, the track; a list of
+arrivals and departures that the terminal scrolls away under its dashboard;
+a **drop** button beside each client and a **take the track down** button
+beside the track. Closing the window stops the server, and it says so on
+its last line. `--headless` keeps the window shut on a machine that has a
+screen; a machine with none is the usual server and not an error - SDL says
+there is no display, the server says once that there is no window, and
+carries on. Drawn with the same Dear ImGui and the same look as the game's
+front end, thirty frames a second on a loop that otherwise sleeps a
+millisecond at a time.
+
+**The window and the terminal cannot disagree.** Neither reads the server's
+state: one `gs_gather` builds a set of facts from it and both views draw
+from that, and the log of arrivals and departures is the same line the
+server logs, kept. The output check holds the two views to it on real
+output rather than believing the construction: a run on a pty with SDL's
+dummy video driver - a window nobody can see, which is still a window the
+code draws into - and `--window-dump`, which prints every line the window
+showed in its last frame after the terminal's last dashboard, both drawn
+from one gather. Every line of the dashboard must be among the window's
+lines, spacing aside. And from the same race: the game joins the server
+through the lobby as a client, so the table has a driver on it and the log
+has an arrival in both views.
+
+**The operator's controls are pressed, through the buttons.** Nobody can
+click a window drawn by the dummy driver, and a flag that dropped a client
+directly would test the flag. The window keeps every control it draws
+through the same Dear ImGui item hooks the game's own walk uses, and
+`--window-press LABEL` delivers a press to that control's id the first
+frame it is drawn - the button's own path, the ask it raises, and the drop
+or the take-down that answers it. The check presses **drop** with a client
+joined and reads "left: dropped by the operator" back; it presses **take
+the track down** and reads "taken down" back. Taking a track down stops it
+being served and withdraws it from the list where the store allows; a
+track that shipped with the game stays listed, since taking one of those
+down is not an operator's to do. `--window-shot FILE` writes the window's
+last frame as a BMP, the way the game's `--shot` does, which is how the
+picture of it was taken.
+
+**What did not change.** The twenty-six server tests spawn their servers
+`--headless`, as does the output check's original pair, so what they pin
+is what they pinned. With a video driver that does not exist the server
+says so once and runs as it did, which the check runs and reads.
+
+*Verification: the output check - a server nobody reads keeps serving; a
+terminal gets a repainting dashboard; the window shows every line of the
+terminal's last dashboard from one gather, the client's row and its
+arrival; with no display the server says so once and runs as it did; drop
+pressed in the window drops the client for that reason; take the track
+down pressed in the window takes it down - all six on the real binary,
+release and sanitised, and the server suite green with every server
+headless.*
+
 
 ## Known risks
 

@@ -313,6 +313,7 @@ static bool gs_server_start_full(const char *port, const char *seconds,
     args[n++] = exe;
     args[n++] = "--port";     args[n++] = port;
     args[n++] = "--plain";
+    args[n++] = "--headless";   // twenty-six servers, and no window for any of them
     args[n++] = "--seconds";  args[n++] = seconds;
     args[n++] = "--players";  args[n++] = players;
     args[n++] = "--timeout";  args[n++] = timeout;
@@ -579,6 +580,7 @@ TEST(a_server_asked_what_it_takes_says_so_and_stops) {
         // is a list that goes stale, so this is the test that notices.
         static const char *const flags[] = {
             "--port", "--players", "--seconds", "--store", "--plain",
+            "--headless",
         };
         for (size_t i = 0; i < SDL_arraysize(flags); i++) {
             if (SDL_strstr(said, flags[i]) == nullptr) {

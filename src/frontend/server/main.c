@@ -22,11 +22,13 @@
 #include <sodium.h>
 #include "net/gs_verify.h"
 #include "platform/gs_paths.h"
+#include "window.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
 
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +56,9 @@ static uint32_t gs_timeout_ms = GS_TIMEOUT_MS;
 // How often the view is redrawn. Four times a second is fast enough to feel
 // live and slow enough that a terminal over ssh is not the bottleneck.
 #define GS_DRAW_MS 250
+// And the window, when there is one: thirty frames a second is a window that
+// answers the mouse, on a loop that otherwise sleeps a millisecond at a time.
+#define GS_FRAME_MS 33
 
 // And how often a server whose output is not a terminal says it is still here.
 // A minute apart, so an hour of running is sixty short lines rather than
@@ -172,6 +177,10 @@ static struct {
     bool quit;
     bool plain;                // no ANSI, for a dumb terminal
     bool tty;                  // stdout is a terminal, so there is a dashboard
+    bool headless;             // --headless: no window, whatever the machine has
+    bool window_dump;          // --window-dump: print what the window showed, at the end
+    const char *window_shot;   // --window-shot FILE: and write its last frame
+    gs_srv_log log;            // arrivals and departures, for the window
 
     // Uploads in progress, one per client, and the track this lobby races on. **The server hands it out**, so
     // everybody races the same ground - which is the one thing rollback cannot
@@ -391,11 +400,25 @@ static void gs_broadcast_lobby(void) {
     }
 }
 
+// **Said, and kept.** A line for the log, and for the window's list of
+// arrivals and departures - which is the same line, so the two cannot
+// disagree about what happened.
+static void gs_note(const char *fmt, ...) SDL_PRINTF_VARARG_FUNC(1);
+static void gs_note(const char *fmt, ...) {
+    char line[GS_SRV_LOG_WIDTH];
+    va_list ap;
+    va_start(ap, fmt);
+    (void)SDL_vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    SDL_Log("%s", line);
+    gs_srv_log_add(&gs_srv.log, line);
+}
+
 static void gs_drop(int slot, const char *why) {
     gs_client *c = &gs_srv.client[slot];
     if (!c->used) return;
 
-    SDL_Log("player %d (%s) left: %s", slot, c->name, why);
+    gs_note("player %d (%s) left: %s", slot, c->name, why);
     if (c->addr != nullptr) NET_UnrefAddress(c->addr);
     SDL_zerop(c);
     gs_broadcast_lobby();
@@ -486,7 +509,7 @@ static void gs_join(NET_Address *addr, uint16_t port, const char *name,
     gs_send(c, buf, n);
 
     if (fresh) {
-        SDL_Log("player %d (%s) joined from %s:%u", at, c->name, c->text, port);
+        gs_note("player %d (%s) joined from %s:%u", at, c->name, c->text, port);
         if (gs_srv.store != nullptr) {
             gs_store_put_driver(gs_srv.store, c->name, 0, 0);
         }
@@ -541,9 +564,58 @@ static void gs_heartbeat(uint64_t now) {
             gs_srv.total_in, gs_srv.total_out);
 }
 
-static void gs_draw(uint64_t now) {
-    uint64_t up = (now - gs_srv.started_ms) / 1000u;
+// **One set of facts for both views.** The terminal and the window draw
+// from this and nothing else, so a number on one is the number on the
+// other; the output check reads both back and holds them to it.
+static void gs_gather(gs_srv_facts *f, uint64_t now) {
+    SDL_zerop(f);
+    f->port = gs_srv.port;
+    f->up_s = (now - gs_srv.started_ms) / 1000u;
+    f->here = gs_present();
+    f->capacity = gs_srv.capacity;
+    f->peak = gs_srv.peak;
+    f->refused = gs_srv.refused;
+    f->total_in = gs_srv.total_in;
+    f->total_out = gs_srv.total_out;
+    f->relayed = gs_srv.relayed;
+    gs_bytes_text(f->in_bytes, sizeof f->in_bytes, gs_srv.total_in_bytes);
+    gs_bytes_text(f->out_bytes, sizeof f->out_bytes, gs_srv.total_out_bytes);
+    if (gs_srv.store != nullptr) {
+        f->store = true;
+        f->drivers = gs_store_driver_count(gs_srv.store);
+        f->records = gs_store_record_count(gs_srv.store);
+        f->tracks = gs_store_track_count(gs_srv.store);
+        f->results = gs_srv.results;
+        f->kept = gs_srv.kept;
+        f->rejected = gs_srv.rejected;
+    }
+    if (gs_srv.track_len > 0) {
+        f->track = true;
+        f->track_hash = gs_srv.track_hash;
+        f->track_len = gs_srv.track_len;
+        f->chunks_sent = gs_srv.chunks_sent;
+    }
+    if (f->up_s > 0) {
+        f->in_rate = (double)gs_srv.total_in / (double)f->up_s;
+        f->out_rate = (double)gs_srv.total_out / (double)f->up_s;
+    }
+    for (int i = 0; i < GS_PROTO_MAX_PLAYERS; i++) {
+        const gs_client *c = &gs_srv.client[i];
+        gs_srv_row *r = &f->row[i];
+        if (!c->used) continue;
+        r->used = true;
+        SDL_strlcpy(r->name, c->name, sizeof r->name);
+        SDL_snprintf(r->from, sizeof r->from, "%s:%u", c->text, c->port);
+        if (c->ping_known) SDL_snprintf(r->ping, sizeof r->ping, "%ums", c->ping_ms);
+        else SDL_strlcpy(r->ping, "-", sizeof r->ping);
+        r->in = c->in;
+        r->out = c->out;
+        // Silence is the thing worth seeing before it becomes a disconnection.
+        r->quiet = (now - c->last_seen_ms) / 1000u >= 3u;
+    }
+}
 
+static void gs_draw_facts(const gs_srv_facts *f) {
     if (!gs_srv.plain) {
         // Home and clear-to-end rather than a full clear: a full clear makes
         // the whole view flicker, and this one redraws four times a second.
@@ -551,70 +623,73 @@ static void gs_draw(uint64_t now) {
     }
 
     printf("  gearstick server            port %u        up %llu:%02llu:%02llu\n",
-           gs_srv.port, (unsigned long long)(up / 3600u),
-           (unsigned long long)((up / 60u) % 60u), (unsigned long long)(up % 60u));
+           f->port, (unsigned long long)(f->up_s / 3600u),
+           (unsigned long long)((f->up_s / 60u) % 60u), (unsigned long long)(f->up_s % 60u));
     printf("  ------------------------------------------------------------------\n");
     printf("  %-3s %-16s %-22s %6s %8s %8s\n",
            "", "driver", "from", "ping", "in", "out");
 
     for (int i = 0; i < GS_PROTO_MAX_PLAYERS; i++) {
-        const gs_client *c = &gs_srv.client[i];
-        if (i >= gs_srv.capacity) continue;
+        const gs_srv_row *r = &f->row[i];
+        if (i >= f->capacity) continue;
 
-        if (!c->used) {
+        if (!r->used) {
             printf("  %-3d %-16s %-22s %6s %8s %8s\n", i, "-", "", "", "", "");
             continue;
         }
-
-        char from[24];
-        SDL_snprintf(from, sizeof from, "%s:%u", c->text, c->port);
-
-        char ping[8];
-        if (c->ping_known) SDL_snprintf(ping, sizeof ping, "%ums", c->ping_ms);
-        else SDL_strlcpy(ping, "-", sizeof ping);
-
-        // Silence is the thing worth seeing before it becomes a disconnection.
-        uint64_t idle = (now - c->last_seen_ms) / 1000u;
         printf("  %-3d %-16s %-22s %6s %8u %8u%s\n",
-               i, c->name, from, ping, c->in, c->out,
-               idle >= 3u ? "  quiet" : "");
+               i, r->name, r->from, r->ping, r->in, r->out,
+               r->quiet ? "  quiet" : "");
     }
-
-    char in_b[24], out_b[24];
-    gs_bytes_text(in_b, sizeof in_b, gs_srv.total_in_bytes);
-    gs_bytes_text(out_b, sizeof out_b, gs_srv.total_out_bytes);
 
     printf("  ------------------------------------------------------------------\n");
     printf("  %u of %u here, peak %u        refused %u\n",
-           gs_present(), gs_srv.capacity, gs_srv.peak, gs_srv.refused);
+           f->here, f->capacity, f->peak, f->refused);
     printf("  datagrams  in %u (%s)   out %u (%s)   relayed %u\n",
-           gs_srv.total_in, in_b, gs_srv.total_out, out_b, gs_srv.relayed);
+           f->total_in, f->in_bytes, f->total_out, f->out_bytes, f->relayed);
 
-    if (gs_srv.store != nullptr) {
+    if (f->store) {
         printf("  remembered %d driver(s), %d record(s), %d track(s)"
                "   results %u, kept %u\n",
-               gs_store_driver_count(gs_srv.store),
-               gs_store_record_count(gs_srv.store),
-               gs_store_track_count(gs_srv.store), gs_srv.results, gs_srv.kept);
-        if (gs_srv.rejected > 0) {
+               f->drivers, f->records, f->tracks, f->results, f->kept);
+        if (f->rejected > 0) {
             printf("  rejected   %u time(s) that the replay did not produce\n",
-                   gs_srv.rejected);
+                   f->rejected);
         }
     }
 
-    if (gs_srv.track_len > 0) {
+    if (f->track) {
         printf("  track      %016llx, %zu bytes, %u chunks sent\n",
-               (unsigned long long)gs_srv.track_hash, gs_srv.track_len,
-               gs_srv.chunks_sent);
+               (unsigned long long)f->track_hash, f->track_len, f->chunks_sent);
     }
 
-    if (up > 0) {
-        printf("  rate       %.1f in/s   %.1f out/s\n",
-               (double)gs_srv.total_in / (double)up,
-               (double)gs_srv.total_out / (double)up);
+    if (f->up_s > 0) {
+        printf("  rate       %.1f in/s   %.1f out/s\n", f->in_rate, f->out_rate);
     }
     printf("\n  ctrl-c to stop\n");
     fflush(stdout);
+}
+
+static void gs_draw(uint64_t now) {
+    gs_srv_facts f;
+    gs_gather(&f, now);
+    gs_draw_facts(&f);
+}
+
+// **The track, taken down.** It stops being served - a client that asks for
+// it from now on is told there is none - and it is withdrawn from the list
+// as well where the store allows. A track that shipped with the game stays
+// listed, since taking one of those down is not an operator's to do; it is
+// still not served by this lobby.
+static void gs_take_down(void) {
+    if (gs_srv.track_len == 0) return;
+    const uint64_t hash = gs_srv.track_hash;
+    const bool withdrawn = gs_srv.store != nullptr &&
+                           gs_store_withdraw(gs_srv.store, hash, "");
+    gs_srv.track_len = 0;
+    gs_srv.track_hash = 0;
+    gs_note("track %016llx taken down%s", (unsigned long long)hash,
+            withdrawn ? ", and withdrawn from the list" : "");
 }
 
 // --- one datagram -----------------------------------------------------------
@@ -1379,6 +1454,7 @@ static void gs_usage(void) {
     printf("                 The dashboard is only drawn to a terminal at "
            "all; anything\n");
     printf("                 else - a pipe, a file - gets the log instead.\n");
+    printf("  --headless     no window, even on a machine with a display\n");
     printf("  --timeout N    drop a client after N ms of silence (default %u)\n",
            GS_TIMEOUT_MS);
     printf("  --key HEX      this server's 32-byte secret, as 64 hex "
@@ -1386,6 +1462,10 @@ static void gs_usage(void) {
     printf("                 Otherwise it is read from the store, or minted "
            "once and kept.\n");
     printf("  --seconds N    stop after N seconds, for tests\n");
+    printf("  --window-dump  and then print what the window showed, for tests\n");
+    printf("  --window-shot FILE  and then write the window's last frame as a BMP\n");
+    printf("  --window-press LABEL  press this button in the window the first time it\n"
+           "                 is drawn, for tests\n");
     printf("  --help\n");
 }
 
@@ -1421,6 +1501,14 @@ int main(int argc, char **argv) {
             key_hex = argv[++i];
         } else if (SDL_strcmp(argv[i], "--plain") == 0) {
             gs_srv.plain = true;
+        } else if (SDL_strcmp(argv[i], "--headless") == 0) {
+            gs_srv.headless = true;
+        } else if (SDL_strcmp(argv[i], "--window-dump") == 0) {
+            gs_srv.window_dump = true;
+        } else if (SDL_strcmp(argv[i], "--window-shot") == 0 && i + 1 < argc) {
+            gs_srv.window_shot = argv[++i];
+        } else if (SDL_strcmp(argv[i], "--window-press") == 0 && i + 1 < argc) {
+            gs_window_press(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--timeout") == 0 && i + 1 < argc) {
             gs_timeout_ms = (uint32_t)SDL_atoi(argv[++i]);
         } else if (SDL_strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
@@ -1567,7 +1655,23 @@ int main(int argc, char **argv) {
                 "a line a minute says the server is still here");
     }
 
+    // **A window as well, where there is a screen.** The terminal view and
+    // the log stay exactly as they are; a machine with a display gets the
+    // same facts in a window, with a list of who came and went and a button
+    // beside each row. No display is the usual case for a server and is not
+    // an error - it is said once, and that is all.
+    if (!gs_srv.headless) {
+        char icon_path[1024];
+        gs_asset_path(icon_path, sizeof icon_path, "icon.png");
+        if (gs_window_open(icon_path)) {
+            SDL_Log("a window is open as well; closing it stops the server");
+        } else {
+            SDL_Log("no display, so no window - the terminal is the view");
+        }
+    }
+
     uint64_t last_draw = 0;
+    uint64_t last_frame = 0;
     while (!gs_srv.quit) {
         uint64_t now = SDL_GetTicks();
 
@@ -1615,6 +1719,24 @@ int main(int argc, char **argv) {
             last_draw = now;
         }
 
+        // The window: its events every time round, a frame thirty times a
+        // second, and whatever the operator pressed acted on here, where
+        // the clients and the store are.
+        if (gs_window_is_open()) {
+            if (!gs_window_pump()) {
+                gs_note("the window was closed: stopping");
+                gs_srv.quit = true;
+            } else if (now - last_frame >= GS_FRAME_MS) {
+                gs_srv_facts f;
+                gs_srv_ask ask;
+                gs_gather(&f, now);
+                gs_window_draw(&f, &gs_srv.log, &ask, false);
+                if (ask.drop_slot >= 0) gs_drop(ask.drop_slot, "dropped by the operator");
+                if (ask.take_down) gs_take_down();
+                last_frame = now;
+            }
+        }
+
         if (seconds > 0 && (now - gs_srv.started_ms) / 1000u >= seconds) break;
 
         // A relayed race is one datagram per player per tick at 120 Hz coming
@@ -1623,6 +1745,21 @@ int main(int argc, char **argv) {
         // dropped; one keeps the queue short without spinning a core.
         SDL_Delay(1);
     }
+
+    // For the test that reads the window: one last frame of both views from
+    // one set of facts, and the window's lines printed after the terminal's.
+    if ((gs_srv.window_dump || gs_srv.window_shot != nullptr) && gs_window_is_open()) {
+        gs_srv_facts f;
+        gs_srv_ask ask;
+        gs_gather(&f, SDL_GetTicks());
+        if (gs_srv.tty) gs_draw_facts(&f);
+        gs_window_draw(&f, &gs_srv.log, &ask, gs_srv.window_dump);
+        if (gs_srv.window_dump) gs_window_dump_print();
+        if (gs_srv.window_shot != nullptr && !gs_window_shot(gs_srv.window_shot)) {
+            SDL_Log("could not write %s: %s", gs_srv.window_shot, SDL_GetError());
+        }
+    }
+    gs_window_close();
 
     printf("\nstopping\n");
     gs_store_close(gs_srv.store);

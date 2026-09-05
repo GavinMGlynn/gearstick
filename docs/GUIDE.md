@@ -337,6 +337,13 @@ gearstick_server --port 47800 --players 4 --track mine.gstrack
 It remembers who has played, what they have driven and the records they have
 set, in `gearstick.db` beside it — `--store` puts that somewhere else.
 
+**On a machine with a screen it opens a window too**, with the same facts as
+the terminal - who is here, from where, how far away, what is flowing - a
+list of who came and went, a **drop** button beside each player and one that
+takes the track down. Closing the window stops the server. A machine with no
+screen runs it exactly as before, and `--headless` keeps the window shut on
+one that has.
+
 **Times sent to a server are checked by re-racing them.** Your inputs go with
 your time, the server replays them, and the time counts only if those inputs
 produce it. So a record on a server is one somebody actually drove — and the

@@ -466,15 +466,18 @@ gs_add_sqlite()
 
 add_executable(gearstick_server
     src/frontend/server/main.c
+    # A window on the server, where there is a screen - drawn with the same
+    # Dear ImGui and the same look as the game's front end.
+    src/frontend/server/window.c
+    src/ui/gs_style.c
     src/net/gs_auth.c
     src/net/gs_noise.c
     src/net/gs_proto.c
     src/net/gs_carrier.c
     src/net/gs_store.c
     src/net/gs_verify.c
-    # Where the shipped library is. The server has no window and no art, but it
-    # does ship a database of tracks, and finding it is the same problem the
-    # game already solved.
+    # Where the shipped library is, and the icon: the server ships a database
+    # of tracks, and finding it is the same problem the game already solved.
     src/platform/gs_paths.c)
 # The carrier rebuilds a track, so the server needs the track format - and with
 # it the simulation, which it will need anyway the day it verifies a lap time.
@@ -484,7 +487,7 @@ target_include_directories(gearstick_server PRIVATE src)
 target_compile_definitions(gearstick_server PRIVATE
     GS_SOURCE_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 target_link_libraries(gearstick_server PRIVATE ${GS_SDL} ${GS_SDL_NET}
-    gearstick_sim gearstick_sqlite gearstick_sodium)
+    ${GS_SDL_IMAGE} gearstick_ui gearstick_sim gearstick_sqlite gearstick_sodium)
 gs_configure(gearstick_server)
 set_target_properties(gearstick_server PROPERTIES C_VISIBILITY_PRESET hidden)
 
@@ -744,12 +747,15 @@ if(GEARSTICK_TESTS)
     # answers nothing. Windows pipes hold four kilobytes, about a second of it,
     # which is why the front door check above failed there and nowhere else.
     if(Python3_FOUND AND GEARSTICK_SERVER)
+        # And the window on the server, held against the dashboard from the
+        # same race - which takes the game, to be the client that joins.
         add_test(NAME gearstick_server_output
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/tools/server_output_check.py
-                         $<TARGET_FILE:gearstick_server>)
+                         $<TARGET_FILE:gearstick_server>
+                         $<TARGET_FILE:gearstick>)
         set_tests_properties(gearstick_server_output PROPERTIES
-                             TIMEOUT 120 SKIP_RETURN_CODE 77)
+                             TIMEOUT 400 SKIP_RETURN_CODE 77)
     endif()
 
     if(Python3_FOUND)

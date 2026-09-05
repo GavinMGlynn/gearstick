@@ -3018,12 +3018,17 @@ better done once the reversed routes are being verified too.
       down leaves every local feature - racing, building, sharing by code -
       exactly as it was.*
 
-- [ ] **A window on the server.** It draws its live view in a terminal and
+- [x] **A window on the server.** It draws its live view in a terminal and
       is happy with no screen, and both stay true; on a machine with a
       display it opens a window as well, showing the same facts - who is
       here, from where, how long, what is flowing - and a log of arrivals
-      and departures a terminal scrolls away, with room for what an operator
-      does next: drop a client, take a track down.
-      *Verification: the window and the terminal report the same numbers
-      from the same race; with no display the server runs exactly as it
-      did; the output test still reads its terminal.*
+      and departures a terminal scrolls away, with a drop button beside
+      each client and one that takes the track down. `--headless` keeps it
+      shut. *Done 2026-09-06.*
+      *Verification: the window shows every line of the terminal's last
+      dashboard, drawn from one gathering of the facts, with a real client
+      joined through the lobby so both have its row and its arrival; with
+      no display the server says so once and runs exactly as it did; the
+      output test still reads its terminal; and the two buttons, pressed
+      through the window's own controls, drop the client and take the
+      track down.*
