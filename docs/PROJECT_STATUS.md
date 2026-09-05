@@ -8469,6 +8469,18 @@ core gives directly, keeps it on the next draw, and recomputes when the
 direction or the skill changes. No golden moved.*
 
 
+### CI red on two platforms: an uninitialised dial, 2026-09-05
+
+The vertical-drama commit turned macOS and Windows red while Linux stayed
+green, on two band tests that compare generated tracks. A platform-only
+failure in integer code is always the same thing: the test's hand-built
+spec set every dial but the new one, so `drama` was whatever the stack
+held - zero under GCC, something else under MSVC and AppleClang - and the
+tracks grew crests and gaps at random. The spec sets it now, and the
+generator reads a dial past its last band as level, so a spec that misses
+one can never build a track from garbage.
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

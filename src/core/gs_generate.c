@@ -1649,6 +1649,11 @@ static int gs_pitch_pref(const gs_track_spec *s) {
 
 void gs_generate_from_spec(gs_track *t, uint32_t seed,
                            const gs_track_spec *spec) {
+    // A dial past its last band is a spec built by hand that missed one -
+    // read as level, so it cannot build a track from garbage.
+    gs_track_spec safe = *spec;
+    if ((unsigned)safe.drama >= (unsigned)GS_DRAMA_COUNT) safe.drama = GS_DRAMA_NONE;
+    spec = &safe;
     // Its own stream, distinct from the one the spec was drawn from, so the
     // spec's draws and the ground's draws never shift each other.
     gs_rng r = { (seed != 0 ? seed : 0x9e3779b9u) ^ 0x51ed2701u };

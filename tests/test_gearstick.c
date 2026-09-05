@@ -8301,6 +8301,13 @@ static gs_track_spec gs_benign_spec(void) {
     s.gravity = GS_GRAV_EARTH;
     s.dress = GS_DRESS_PLAIN;
     s.width = GS_WIDTH_STANDARD;
+    // **Every dial, or the spec is whatever the stack held.** The drama dial
+    // was added and this was not: on GCC the stack happened to hold zero and
+    // the tests passed, on MSVC and AppleClang it held something else, the
+    // tracks grew crests and gaps at random, and two band tests failed on
+    // two platforms and nowhere else - which is what a platform-only failure
+    // in integer code always is.
+    s.drama = GS_DRAMA_NONE;
     s.base = GS_SURF_PAVEMENT;
     return s;
 }
