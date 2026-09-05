@@ -10,6 +10,7 @@
 #include "core/gs_net.h"
 #include "core/gs_replay.h"
 #include "platform/gs_wire.h"
+#include "platform/gs_default.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
@@ -300,6 +301,58 @@ TEST(two_peers_one_manual_and_one_automatic_land_on_one_world_and_the_recording_
     gs_wire_quit();
 }
 
+TEST(the_default_server_file_names_one_server_or_none) {
+    // **An address nobody has to type.** server.txt is one line - host, port,
+    // sixty-four hex characters of key - after any blank lines and comments.
+    // Every way it can be wrong is a file that names no server, and the game
+    // then says so rather than joining whatever it half-said: a missing key,
+    // a short key, a key with a letter in it that is not hex, a port of zero
+    // or past the top, a second line, and nothing at all.
+    gs_default_server d;
+    const char *key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789ABCDEF";
+    char text[512];
+
+    SDL_snprintf(text, sizeof text,
+                 "# the one everybody meets at\n\n  play.example.org 47800 %s  \n", key);
+    CHECK(gs_default_server_parse(text, &d));
+    CHECK(SDL_strcmp(d.host, "play.example.org") == 0);
+    CHECK(d.port == 47800);
+    CHECK(d.key[0] == 0x01 && d.key[1] == 0x23 && d.key[31] == 0xef);
+
+    // No newline at the end, and no comments: still one server.
+    SDL_snprintf(text, sizeof text, "10.0.0.7 1 %s", key);
+    CHECK(gs_default_server_parse(text, &d));
+    CHECK(d.port == 1 && SDL_strcmp(d.host, "10.0.0.7") == 0);
+
+    // And every way of naming none.
+    static const char *const wrong[] = {
+        "",
+        "# nothing but a comment\n",
+        "play.example.org 47800\n",
+        "play.example.org 47800 0123456789abcdef\n",
+        "play.example.org 47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg\n",
+        "play.example.org 0 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+        "play.example.org 65536 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+        "play.example.org 47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef extra\n",
+        "play.example.org 47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+        "other.example.org 47801 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+        "47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+    };
+    int refused = 0;
+    for (size_t i = 0; i < SDL_arraysize(wrong); i++) {
+        if (!gs_default_server_parse(wrong[i], &d)) refused++;
+        else printf("  DEFAULT wrongly took: %s", wrong[i]);
+    }
+    CHECK(refused == (int)SDL_arraysize(wrong));
+
+    // The shipped file names none today - there is no hosted instance - and
+    // loading finds none, saying which files it looked in.
+    char why[1024];
+    const bool any = gs_default_server_load(&d, why, sizeof why);
+    printf("  DEFAULT %s%s\n", any ? "a default server: " : "", why);
+    CHECK(!any || d.port != 0);
+}
+
 TEST(two_processes_on_one_machine_race_over_real_sockets) {
     CHECK(gs_wire_init());
 
@@ -498,6 +551,7 @@ int main(void) {
     gs_sandbox();
     printf("gearstick wire tests\n");
 
+    run_the_default_server_file_names_one_server_or_none();
     run_two_processes_on_one_machine_race_over_real_sockets();
     run_two_peers_one_manual_and_one_automatic_land_on_one_world_and_the_recording_says_so();
     run_four_machines_mesh_up_and_race_the_same_race();

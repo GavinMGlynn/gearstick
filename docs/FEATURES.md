@@ -246,6 +246,9 @@ in as a direction, and deliberately kept at arm's length from the racing itself.
   and run on machines with no screen, and it keeps doing both; where there
   is a display it shows the same facts in a window, with a log the terminal
   scrolls away and the operator's controls beside it.
+  **And an address that ships.** The game points at the server everybody
+  meets at from one file, and joins it with nothing typed; the day there is
+  a hosted instance its address goes in that file.
 
 - **Times verified by re-racing them.** `CORE`
   A submitted time comes with the inputs that produced it, and a server can

@@ -142,12 +142,27 @@ class Reader:
         return False
 
 
-def run_client(game, port, key, screen, env, seconds):
-    """Run a client on `screen` and say whether it ended up racing."""
+def run_client(game, port, key, screen, env, seconds, online=False):
+    """Run a client on `screen` and say whether it ended up racing.
+
+    With `online`, the client is given no address at all: the server's host,
+    port and key are written to a server.txt in the client's own preference
+    directory and the client is started with --online, which is the whole of
+    joining the server everybody meets at. Both spellings are checked, one
+    per half, because the second is a file being read and the first is not."""
+    args = [game, "--name", "tester", "--screen", screen]
+    env = dict(env)
+    if online:
+        pref = tempfile.mkdtemp(prefix="gearstick-pref-")
+        with open(os.path.join(pref, "server.txt"), "w") as f:
+            f.write("# written by the front door check\n")
+            f.write(f"127.0.0.1 {port} {key}\n")
+        env["GEARSTICK_PREF_DIR"] = pref
+        args += ["--online"]
+    else:
+        args += ["--server", "127.0.0.1", str(port), "--server-key", key]
     proc = subprocess.Popen(
-        [game, "--server", "127.0.0.1", str(port), "--server-key", key,
-         "--name", "tester", "--screen", screen],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, env=env)
 
     reader = Reader(proc.stdout)
@@ -229,10 +244,12 @@ def main():
              "the menu did not start a race, correct"),
             # And one in the lobby is - because "the menu did not race" would
             # pass just as well if nothing ever raced at all.
+            # Joined by --online and a server.txt rather than an address on
+            # the command line: the file being read is the thing checked.
             ("lobby", LOBBY_TIMEOUT_SECONDS, True,
-             "a client waiting in the lobby never got into the race - so the "
-             "check above proves nothing",
-             "the lobby did start a race, correct"),
+             "a client waiting in the lobby, joined through server.txt, never "
+             "got into the race - so the check above proves nothing",
+             "the lobby did start a race, joined through server.txt, correct"),
         ]
 
         for screen, seconds, want_racing, wrong, right in halves:
@@ -246,7 +263,7 @@ def main():
 
                 began = time.monotonic()
                 racing, log = run_client(game_bin, port, key, screen, env,
-                                         seconds)
+                                         seconds, online=want_racing)
                 took = time.monotonic() - began
 
                 # **What it built, when it did race.** A grid that is not the

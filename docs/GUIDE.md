@@ -345,6 +345,9 @@ gearstick_server --port 47800 --players 4 --track mine.gstrack
 It remembers who has played, what they have driven and the records they have
 set, in `gearstick.db` beside it — `--store` puts that somewhere else.
 
+To run one that stays up - on a machine of your own or in a container - see
+`deploy/README.md`: a systemd unit, a Dockerfile and the four commands.
+
 **On a machine with a screen it opens a window too**, with the same facts as
 the terminal - who is here, from where, how far away, what is flowing - a
 list of who came and went, a **drop** button beside each player and one that
@@ -366,6 +369,12 @@ Then everybody else meets there:
 ```sh
 gearstick --server their-address 47800 --name ada
 ```
+
+**Or at the server everybody meets at**, with nothing to type: `gearstick
+--online` joins the server named in `server.txt` - the one that shipped with
+the game, or one in your own preference directory, which wins. One line:
+host, port and the key the server printed when it started. The file that
+ships names none yet, and says so.
 
 You get a lobby screen showing who has arrived and how many are still missing.
 **Which player you are is the server's decision**, not a matter of who started

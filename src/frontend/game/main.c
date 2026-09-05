@@ -22,6 +22,7 @@
 #include <SDL3_image/SDL_image.h>
 
 #include "platform/gs_paths.h"
+#include "platform/gs_default.h"
 #include "audio/gs_audio.h"
 #include "audio/gs_music.h"
 #include "platform/gs_winmem.h"
@@ -994,6 +995,25 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                 argv[i + 1][1] == '\0') {
                 a->online_players = (uint8_t)SDL_atoi(argv[++i]);
             }
+        } else if (SDL_strcmp(argv[i], "--online") == 0) {
+            // **The server everybody meets at**, with nothing to type: its
+            // host, port and key come from server.txt - the player's own,
+            // or the one that shipped. See platform/gs_default.h.
+            static gs_default_server def;
+            char why[1024];
+            if (!gs_default_server_load(&def, why, sizeof why)) {
+                SDL_Log("--online: %s", why);
+                SDL_Log("put the server's host, port and key on one line of that file, "
+                        "or give them with --server HOST PORT --server-key HEX");
+                return SDL_APP_FAILURE;
+            }
+            SDL_Log("--online: the default server is %s:%u, %s", def.host,
+                    (unsigned)def.port, why);
+            a->online = true;
+            a->server_host = def.host;
+            a->port = def.port;
+            SDL_memcpy(a->server_key, def.key, GS_NOISE_KEY_BYTES);
+            a->has_server_key = true;
         } else if (SDL_strcmp(argv[i], "--server") == 0 && i + 2 < argc) {
             // Meet everybody at a server rather than at each other. Which
             // player you are is then the server's decision.
@@ -1126,6 +1146,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             SDL_Log("  --ghost-out F   with --shot: write the captured run as a ghost");
             SDL_Log("  --host PORT [N]   wait for N players in total (2-4, default 2)");
             SDL_Log("  --join HOST PORT  join somebody who is waiting");
+            SDL_Log("  --online        meet everybody at the default server, from server.txt");
             SDL_Log("  --server HOST PORT  meet everybody at a server");
             SDL_Log("  --server-key HEX    the public key of the server or "
                     "host being joined, which it prints when it starts");

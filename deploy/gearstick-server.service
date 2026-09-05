@@ -1,0 +1,25 @@
+# The gearstick central server, as a systemd unit. See deploy/README.md.
+[Unit]
+Description=gearstick server - the lobby, the track library and the records
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Headless on purpose: this machine has no screen, and the dashboard is for a
+# terminal. The log gets a line a minute and every arrival and departure.
+ExecStart=/usr/local/bin/gearstick_server --headless --port 47800 --players 4 \
+    --store /var/lib/gearstick/gearstick.db
+WorkingDirectory=/var/lib/gearstick
+Restart=on-failure
+RestartSec=5
+# Its own user, its own directory, and nothing else on the machine.
+DynamicUser=yes
+StateDirectory=gearstick
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -8900,6 +8900,37 @@ does not; a collision is louder than the rumble alone and crosses zero
 more often, which is the edge. Release and sanitised; neither golden
 moved.*
 
+### The central server: everything but the place, 2026-09-06
+
+**The game points at a default server now, and the shipped default names
+none.** `server.txt` is one line - host, port, the sixty-four hex characters
+of the server's key - after any comments; the one that ships lives in the
+assets beside the tracks, and one in the player's own preference directory
+wins over it. `gearstick --online` joins whatever it names with nothing to
+type, and with nothing named it says which two files it looked in and how to
+fill one. Every way the file can be wrong - no key, a short key, a letter
+that is not hex, a port of zero or past the top, a second line, nothing at
+all - names no server rather than half of one.
+
+**And the running of it is written down.** `deploy/` holds a systemd unit
+that runs the server headless on its own user with its store under
+`/var/lib/gearstick`, a two-stage Dockerfile that builds the server from
+this tree and runs it the same way, and the four commands each takes. The
+key to copy into `server.txt` is the line the server logs when it starts.
+
+**What is left is the place, and only the place.** A machine, a name to
+reach it by, and somebody keeping it up - which the plan has said from the
+start cannot be finished, only kept up. The day it exists, its line goes
+into the shipped `server.txt`, and the item's own verification is a race
+between two machines through it. The shipped file says so in as many words.
+
+*Verification: the file parser takes a well-formed line with comments and
+blanks around it and refuses ten wrong ones, each named; the front door's
+lobby half joins its server through a `server.txt` in the client's own
+preference directory with `--online` and gets into the race, while its
+title half still joins by address, so both spellings are proved; and
+`--online` with the shipped file, which names none, says so and stops.*
+
 
 ## Known risks
 

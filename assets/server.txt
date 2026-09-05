@@ -1,0 +1,14 @@
+# The server the game points at by default - the one everybody meets at.
+#
+# One line: the host, the port, and the 64 hex characters of the server's
+# public key, which it prints when it starts. For example:
+#
+#   play.example.org 47800 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+#
+# Then `gearstick --online` joins it. A server.txt in your own preference
+# directory - beside your drivers and records - takes precedence over this
+# one, so you can point at a friend's server without touching what was
+# installed.
+#
+# No server is named here yet: there is no hosted instance. The day there is,
+# its address goes on the line below and ships with the game.

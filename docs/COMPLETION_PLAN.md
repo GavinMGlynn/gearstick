@@ -2544,13 +2544,13 @@ the game to be itself, and all of it is in.
   left is a person with speakers on a Windows machine and a person with speakers
   on a Mac, each saying it sounds right.
 - **The central server, hosted** — the decision is made (one server, not a
-  mesh), the server has its window, the setup travels with the race, and a
-  time set on one machine is re-raced and verified on the server. What is
-  left is a place: a machine to run it on, a name to reach it by, and the
-  running of it, which cannot be finished, only kept up. The game points at
-  no address by default until there is one; the day there is, the default is
-  one constant and the verification in the item below is a race between two
-  machines through it.
+  mesh), the server has its window, the setup travels with the race, a time
+  set on one machine is re-raced and verified on the server, the game joins
+  the server named in `server.txt` with `--online`, and `deploy/` says how
+  to run one. What is left is a place: a machine to run it on, a name to
+  reach it by, and the running of it, which cannot be finished, only kept
+  up. The day there is one, its line goes in the shipped `server.txt`, and
+  the item's verification is a race between two machines through it.
 
 Everything else in this plan is done.
 
@@ -3027,13 +3027,23 @@ better done once the reversed routes are being verified too.
       and any federation are out: a second protocol to specify and secure,
       for a game whose whole defence against cheating is one place that
       re-races every time.
-      What is left is not code so much as a place: a hosted instance, an
-      address the game points at by default (today a player types one), and
-      the running of it - **which cannot be finished, only kept up**.
-      *Verification: a time set on one machine is shown, re-raced and
-      verified on another with nothing copied by hand; and a service that is
-      down leaves every local feature - racing, building, sharing by code -
-      exactly as it was.*
+      **Everything that is code is done, 2026-09-06.** The game points at a
+      default server from `server.txt` - the shipped one, or the player's
+      own - and `gearstick --online` joins it with nothing typed; the
+      running of it is a systemd unit, a Dockerfile and four commands in
+      `deploy/`; the server has its window, the setup travels with the race,
+      and a time set on one machine is re-raced and verified on the server
+      and shown to another. What is left is a place: a machine, a name to
+      reach it by, and somebody keeping it up - **which cannot be finished,
+      only kept up**. The shipped `server.txt` names no server until there
+      is one.
+      *Verification, so far: the front door joins through `server.txt` with
+      `--online` and gets into the race; a record set by one client is seen
+      by another through a real server; the file parser refuses every wrong
+      line. The day there is a host: a time set on one machine is shown,
+      re-raced and verified on another with nothing copied by hand, through
+      the address that ships; and a service that is down leaves every local
+      feature exactly as it was.*
 
 - [x] **A window on the server.** It draws its live view in a terminal and
       is happy with no screen, and both stay true; on a machine with a
