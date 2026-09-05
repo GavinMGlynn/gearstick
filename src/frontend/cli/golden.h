@@ -131,7 +131,7 @@
 // was. What moved the number is three new fields on every car: which gear it
 // is in, whether its box is manual, and the shift buttons held. A manual
 // gearbox changes how a car drives, but no car in this race has one.
-#define GS_SELFTEST_WORLD_HASH 0x17613037cf7bffa6ULL
+#define GS_SELFTEST_WORLD_HASH 0x418d2dbbc32cccc6ULL
 
 // The track generator, folded over its first two hundred seeds.
 //
@@ -309,6 +309,6 @@
 // same sentence: one more number on every car.
 // And with the gearbox, the same way and for the same sentence: three new
 // fields per car, every opponent on the automatic the AI has always driven.
-#define GS_OPPONENTS_WORLD_HASH 0x19e4d0a05c8e04ebULL
+#define GS_OPPONENTS_WORLD_HASH 0x0e71d93f20ced6ebULL
 
 #endif // GS_GOLDEN_H

@@ -11421,6 +11421,48 @@ TEST(the_setup_screen_shows_a_time_to_beat_worked_out_on_the_spot) {
     CHECK(gs_menu_target_lap(&gs_m, nullptr) == gs_target_lap(&t, gs_m.setup.gravity, 0, nullptr));
 }
 
+TEST(the_gear_readout_warms_with_the_engine_and_only_on_a_manual) {
+    gs_imgui_start(gs_win, ren);
+    CHECK(gs_imgui_ready);
+    if (!gs_imgui_ready) return;
+
+    // **Legible at a glance, or refused.** Overheating is shown on the gear
+    // readout - white cold, red boiling - so it costs no row on a panel
+    // whose tallest state is at the edge of what fits. Read back as the
+    // heat the readout was drawn at: none cold, all boiling, and none at
+    // all on an automatic whatever its bytes say.
+    static gs_track t;
+    gs_flat_pavement(&t, 24, 12);
+    static gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(6), GS_INT(6), 0);
+    gs_world_set_manual(&w, 0, true);
+    gs_view v = { 0 };
+    v.car = 0;
+    v.rect = (SDL_Rect){ 0, 0, GS_W, GS_H };
+    v.cam.zoom = GS_ISO_DEFAULT_ZOOM;
+    gs_render_track_camera(&v, &t, &w, &w, 1.0f);
+
+    w.car[0].heat = 0;
+    gs_hud_frame_only(ren, &t, &w, &v);
+    CHECK(gs_hud_heat_shown() == 0.0f);
+
+    w.car[0].heat = (uint16_t)GS_HEAT_MAX;
+    gs_hud_frame_only(ren, &t, &w, &v);
+    printf("  HEAT the gear readout drew at %.2f of boiling\n", (double)gs_hud_heat_shown());
+    CHECK(gs_hud_heat_shown() > 0.99f);
+
+    w.car[0].heat = (uint16_t)(GS_HEAT_MAX / 2);
+    gs_hud_frame_only(ren, &t, &w, &v);
+    CHECK(gs_hud_heat_shown() > 0.45f && gs_hud_heat_shown() < 0.55f);
+
+    gs_world_set_manual(&w, 0, false);
+    w.car[0].heat = (uint16_t)GS_HEAT_MAX;
+    gs_hud_frame_only(ren, &t, &w, &v);
+    CHECK(gs_hud_heat_shown() == 0.0f);
+}
+
 TEST(the_hud_says_what_you_are_carrying_and_only_when_you_are) {
     gs_imgui_start(gs_win, ren);
     CHECK(gs_imgui_ready);
@@ -12672,6 +12714,7 @@ int main(void) {
     run_driving_past_a_waypoint_is_not_a_missed_checkpoint(ren);
     run_a_checkpoint_says_how_far_ahead_of_the_ghost_you_are(ren);
     run_the_setup_screen_shows_a_time_to_beat_worked_out_on_the_spot(ren);
+    run_the_gear_readout_warms_with_the_engine_and_only_on_a_manual(ren);
     run_winning_is_something_you_can_see_happen(ren);
     run_a_car_on_the_tow_trucks_hook_flashes_and_lands_solid(ren);
     run_each_of_four_views_shows_its_own_car_and_costs_no_more_than_one_full_one(ren);

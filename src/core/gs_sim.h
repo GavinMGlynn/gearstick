@@ -148,6 +148,11 @@ typedef struct gs_car {
     uint8_t  gear;
     uint8_t  manual;
     uint8_t  shift_held;
+    // **Heat**, 0 to GS_HEAT_MAX. A manual gearbox held near its gear's
+    // ceiling at full throttle builds it, it costs power, and backing off
+    // or changing up sheds it. An automatic never has any - it changes up
+    // before the limiter - so for an automatic this is always zero.
+    uint16_t heat;
 
     // How long since the wheels last touched. The renderer wants it for the
     // shadow, and the landing-prediction arc will want it later.
@@ -286,6 +291,17 @@ gs_fix gs_gear_force(const gs_vehicle_def *v, uint8_t gear, gs_fix vlong);
 // a car at a speed sounds like has to be able to ask the same question the
 // simulation answers.
 uint8_t gs_gear_auto(const gs_vehicle_def *v, gs_fix vlong);
+
+// Boiling. Heat is a sixteen-bit fraction of this.
+#define GS_HEAT_MAX 65535u
+// How near a gear's ceiling counts as sitting on the limiter, as a fraction.
+#define GS_HEAT_LIMITER GS_RATIO(90, 100)
+// From cold to boiling in three seconds on the limiter; from boiling to cold
+// in six seconds off it, or three with the throttle closed.
+#define GS_HEAT_RISE  (GS_HEAT_MAX / (3u * GS_TICK_HZ))
+#define GS_HEAT_COOL  (GS_HEAT_MAX / (6u * GS_TICK_HZ))
+// At boiling, half the power is gone.
+gs_fix gs_heat_power(gs_fix pull, uint16_t heat);
 
 // How long is left, in ticks, or zero once it has gone green.
 uint32_t gs_world_countdown(const gs_world *w);

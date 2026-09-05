@@ -382,7 +382,7 @@ file.
   nothing is withheld, it is only the difference between a solo lap with a
   point and a solo lap without one.
 
-- **Overheating.** `CANDIDATE`
+- **Overheating.** `DONE`
   *Excitebike*'s gauge, and the manual gearbox gives it a reason to exist:
   sitting on the limiter builds heat, heat costs power, and backing off or
   changing up spends it. It makes the shift matter for a reason other than

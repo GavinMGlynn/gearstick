@@ -8511,6 +8511,40 @@ a second implementation of the handshake by somebody who never saw the
 first.
 
 
+### Overheating, 2026-09-05
+
+**Sitting on the limiter builds heat, heat costs power, backing off or
+changing up spends it** - which is what makes a manual gearbox a skill
+rather than a chore. A manual held at full throttle within a tenth of its
+gear's ceiling boils in three seconds; off the limiter it cools in six, and
+in three with the throttle closed; at boiling half the power is gone. The
+automatic changes up before the limiter and never heats: its physics are
+exactly what they were.
+
+**Legible at a glance, or refused - so it is on the gear readout.** White
+cold, amber as it builds, red at the limiter. A gauge of its own would have
+been a row, and the panel's tallest state is already at the edge of what
+fits; the readout a manual driver is already watching is where the heat
+belongs.
+
+**Both world goldens moved, deliberately.** A car has a new field and the
+byte audit holds that every byte of a car that is not padding is hashed;
+hashing heat only for a manual - which would have kept every automatic
+replay valid - left two bytes per automatic unhashed and the audit refused
+it. `GS_SELFTEST_WORLD_HASH` is `0x418d2dbbc32cccc6` and
+`GS_OPPONENTS_WORLD_HASH` is `0x0e71d93f20ced6eb`; every ghost and replay
+recorded before this is a race nobody can re-race, which is what those
+numbers are for. The track and generator goldens did not move.
+
+*Verification: a manual held in first at full throttle boils inside six
+seconds; cooling starts the tick after it changes up and two seconds of
+coasting halve it; from rest, a boiling car covers less ground in a second
+than a cold one; an automatic driven flat out for eight seconds never
+heats; the gear readout draws at the heat it is given, half at half and
+none on an automatic whatever its bytes say; and the car byte audit knows
+the field.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

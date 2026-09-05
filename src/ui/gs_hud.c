@@ -221,6 +221,8 @@ static void gs_hud_way_out(bool online) {
 // What the split row last said, for a test to read back - the same
 // arrangement as gs_hud_carrying.
 static char gs_hud_split_text[16];
+// How hot the gear readout was drawn, 0 cold to 1 boiling. For a test.
+static float gs_hud_heat_drawn;
 
 // How long a split stays on the panel after the checkpoint it is about.
 #define GS_HUD_SPLIT_TICKS (GS_TICK_HZ * 3u)
@@ -819,7 +821,16 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
                 SDL_snprintf(gear, sizeof gear, "%u", (unsigned)c->gear);
             }
             ImGui_Spacing();
+            // **The gear readout warms with the engine.** White cold, amber
+            // when it is building, red at the limiter - legible at a glance
+            // and costing no row, on a panel whose tallest state is already
+            // at the edge of what fits.
+            gs_hud_heat_drawn = c->manual ? (float)c->heat / (float)GS_HEAT_MAX : 0.0f;
+            const float hot = gs_hud_heat_drawn;
+            ImGui_PushStyleColorImVec4(ImGuiCol_Text,
+                                       (ImVec4){ 1.0f, 1.0f - 0.55f * hot, 1.0f - 0.9f * hot, 1.0f });
             gs_hud_stat(c->manual ? "gear  M" : "gear", gear, GS_HUD_SMALL);
+            ImGui_PopStyleColor();
         }
 
         // --- How fast it is going, and then what is left of it.
@@ -932,6 +943,7 @@ void gs_hud_draw(const gs_world *w, const gs_track *t, const gs_view *v,
 
 const char *gs_hud_carrying(void) { return gs_hud_carried; }
 const char *gs_hud_split_said(void) { return gs_hud_split_text; }
+float gs_hud_heat_shown(void) { return gs_hud_heat_drawn; }
 
 float gs_hud_overflow(void) { return gs_hud_hidden; }
 float gs_hud_spare(void) { return gs_hud_room; }

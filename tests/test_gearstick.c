@@ -470,6 +470,7 @@ TEST(a_race_is_identified_by_everything_that_decides_it) {
         sizeof any->grounded, sizeof any->wrecked, sizeof any->active,
         sizeof any->air_ticks, sizeof any->drop_cooldown, sizeof any->tow_ticks,
         sizeof any->gear, sizeof any->manual, sizeof any->shift_held,
+        sizeof any->heat,
         sizeof any->next_gate,
         sizeof any->laps, sizeof any->finish_tick, sizeof any->lap_start,
         sizeof any->best_lap,
@@ -9066,6 +9067,83 @@ TEST(every_track_has_a_time_to_beat_and_it_is_the_same_twice) {
     CHECK(had >= 3);
 }
 
+TEST(a_manual_on_the_limiter_heats_loses_power_and_cools_when_it_changes_up) {
+    // **Sitting on the limiter builds heat, heat costs power, changing up
+    // spends it** - which is what makes the shift matter for a reason other
+    // than acceleration. Measured, each claim, on a long straight; and the
+    // automatic, which changes up before the limiter, never heats at all.
+    static gs_track t;
+    gs_track_init(&t, 200, 20, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+
+    // Held in first at full throttle: boiling inside six seconds.
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
+    gs_world_set_manual(&w, 0, true);
+    for (int i = 0; i < GS_TICK_HZ * 6; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    const uint16_t boiling = w.car[0].heat;
+    printf("  HEAT %u of %u after six seconds in first\n", boiling, GS_HEAT_MAX);
+    CHECK(boiling > GS_HEAT_MAX * 9 / 10);
+    CHECK(w.car[0].gear == 1);
+
+    // Change up and keep the throttle open: off the limiter, it cools.
+    {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL | GS_IN_SHIFT_UP, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].gear == 2);
+    // Off the limiter the moment it is in second - whose ceiling is twice
+    // first's - so cooling starts on the very next tick even with the
+    // throttle wide open. (Held open long enough it climbs to second's
+    // ceiling and heats again, which is the point of the gauge.)
+    {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].heat < boiling);
+    // And backing off spends it fastest: three seconds from boiling to cold
+    // with the throttle closed, so two seconds of coasting is past half way.
+    for (int i = 0; i < GS_TICK_HZ * 2; i++) {
+        gs_input in[GS_MAX_CARS] = { 0, 0, 0, 0 };
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.car[0].heat < boiling / 2);
+
+    // Heat costs power: from rest in first, a second of throttle gets a
+    // boiling car less far than a cold one.
+    gs_fix reached[2] = { 0, 0 };
+    for (int hot = 0; hot < 2; hot++) {
+        gs_world r;
+        gs_world_init(&r, GS_ONE);
+        gs_world_add_car(&r, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
+        gs_world_set_manual(&r, 0, true);
+        for (int i = 0; i < GS_TICK_HZ; i++) {
+            r.car[0].heat = hot ? (uint16_t)GS_HEAT_MAX : 0u;     // held there
+            gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+            gs_world_step(&r, &t, in);
+        }
+        reached[hot] = r.car[0].x;
+    }
+    printf("  HEAT a cold car reaches %.2f in a second, a boiling one %.2f\n",
+           (double)reached[0] / GS_ONE, (double)reached[1] / GS_ONE);
+    CHECK(reached[1] < reached[0]);
+
+    // And an automatic never heats.
+    gs_world a;
+    gs_world_init(&a, GS_ONE);
+    gs_world_add_car(&a, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(10), 0);
+    for (int i = 0; i < GS_TICK_HZ * 8; i++) {
+        gs_input in[GS_MAX_CARS] = { GS_IN_ACCEL, 0, 0, 0 };
+        gs_world_step(&a, &t, in);
+        CHECK(a.car[0].heat == 0);
+    }
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -10416,6 +10494,7 @@ int main(void) {
     run_a_reversed_circuit_can_still_be_lapped();
     run_a_ghost_knows_the_tick_it_crossed_each_gate();
     run_every_track_has_a_time_to_beat_and_it_is_the_same_twice();
+    run_a_manual_on_the_limiter_heats_loses_power_and_cools_when_it_changes_up();
     run_a_banked_corner_is_higher_on_the_outside_and_a_pipe_at_both_edges();
     run_a_gap_is_a_trench_after_a_ramp_and_a_crest_falls_away_beyond_it();
     run_every_kind_of_drama_can_still_be_got_round();

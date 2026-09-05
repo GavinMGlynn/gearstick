@@ -2927,12 +2927,16 @@ better done once the reversed routes are being verified too.
       cache on first draw with the core's own number and recomputes only
       when the direction or the skill changes.*
 
-- [ ] **Overheating.** Sitting on the limiter builds heat, heat costs power,
-      backing off spends it - which is what makes a manual gearbox a skill
-      rather than a chore. Refused if it cannot be read at a glance.
-      *Verification: shown on the HUD as it fills; a driver who never holds
-      the limiter never sees it; and the power it costs is measurable rather
-      than felt.*
+- [x] **Overheating.** A manual held on its gear's limiter at full throttle
+      boils in three seconds, loses up to half its power, and cools when it
+      backs off or changes up; an automatic never heats. Shown on the gear
+      readout, white to red, because a gauge of its own would have been a
+      row the panel cannot afford. Both world goldens moved, on purpose: a
+      car has a new byte and every byte is hashed.
+      *Verification: boiling measured in first, cooling the tick after an
+      upshift and halved by two seconds of coasting, a boiling car slower
+      off the line than a cold one, an automatic never heating, and the
+      readout drawn at the heat it is given.*
 
 - [ ] **A daily track everybody gets.** One seed a day, the same for
       everyone, with times compared through the server that already exists.

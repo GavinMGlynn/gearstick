@@ -117,6 +117,11 @@ gs_fix gs_gear_force(const gs_vehicle_def *v, uint8_t gear, gs_fix vlong) {
 
 // The automatic: the strongest gear right now, lowest on a tie so pulling
 // away is always in first.
+gs_fix gs_heat_power(gs_fix pull, uint16_t heat) {
+    // Linear: nothing lost cold, half lost boiling.
+    return pull - (gs_fix)(((int64_t)pull * heat) / (2 * 65536));
+}
+
 uint8_t gs_gear_auto(const gs_vehicle_def *v, gs_fix vlong) {
     const uint8_t G = v->gears < 1 ? 1 : v->gears;
     uint8_t best = 1;
@@ -502,6 +507,50 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
             c->gear = gs_gear_auto(v, vlong);
         }
 
+        // --- Heat. **Sitting on the limiter builds it; backing off or
+
+        // changing up spends it.** A manual held at full throttle within a
+
+        // tenth of its gear's ceiling boils in three seconds; off the
+
+        // limiter it cools in six, and in three with the throttle closed.
+
+        // An automatic changes up before the limiter and never heats, so
+
+        // its physics are exactly what they were.
+
+        if (c->manual != 0) {
+
+            const uint8_t G = v->gears < 1 ? 1 : v->gears;
+
+            const gs_fix ceiling = (gs_fix)(((int64_t)v->top * c->gear) / G);
+
+            const bool on_limiter = (in & GS_IN_ACCEL) != 0 && c->grounded &&
+
+                                    vlong >= gs_fix_mul(ceiling, GS_HEAT_LIMITER);
+
+            if (on_limiter) {
+
+                c->heat = (uint16_t)(c->heat + GS_HEAT_RISE > GS_HEAT_MAX
+
+                                         ? GS_HEAT_MAX : c->heat + GS_HEAT_RISE);
+
+            } else {
+
+                const uint32_t cool = (in & GS_IN_ACCEL) != 0 ? GS_HEAT_COOL : 2u * GS_HEAT_COOL;
+
+                c->heat = (uint16_t)(c->heat > cool ? c->heat - cool : 0u);
+
+            }
+
+        } else {
+
+            c->heat = 0;
+
+        }
+
+
+
         gs_fix accel = 0;
         if ((in & GS_IN_ACCEL) != 0) {
             // **The automatic is the continuous engine the game always had.**
@@ -513,7 +562,7 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
             // with the limiter and the bog a driver can fall into.
             gs_fix pull;
             if (c->manual != 0) {
-                pull = gs_gear_force(v, c->gear, vlong);
+                pull = gs_heat_power(gs_gear_force(v, c->gear, vlong), c->heat);
             } else {
                 gs_fix headroom = GS_ONE - gs_fix_div(vlong, v->top);
                 if (headroom < 0) headroom = 0;
@@ -1341,6 +1390,10 @@ uint64_t gs_world_hash(const gs_world *w) {
         gs_hash_u64(&h, c->gear);
         gs_hash_u64(&h, c->manual);
         gs_hash_u64(&h, c->shift_held);
+        // Hashed like every other byte of a car, which is what the byte
+        // audit holds it to. Both world goldens moved for this: a car has a
+        // new field, even though an automatic never has any heat in it.
+        gs_hash_u64(&h, c->heat);
         gs_hash_u64(&h, c->next_gate);
         gs_hash_u64(&h, c->laps);
         gs_hash_u64(&h, c->finish_tick);

@@ -110,7 +110,10 @@ has two, the sprint car and the motorcycle six — and one reverse.
 you never think about it. The gear on the HUD is what a manual driver would
 be in, so you can learn the ladder by watching it.
 
-**Manual** hands you the shift. Each gear pulls hardest at the bottom of its
+**Manual** hands you the shift - and the heat. Sit on a gear's limiter at
+full throttle and the engine boils in three seconds and loses up to half
+its power; change up or back off and it cools. The gear readout goes from
+white to red as it builds, which is your cue. Each gear pulls hardest at the bottom of its
 range and runs out at the top — that ceiling is the limiter, and sitting on it
 means you should have changed up. Below a gear's range the engine bogs, so
 pulling away in fourth barely moves and pulling away in first launches. The

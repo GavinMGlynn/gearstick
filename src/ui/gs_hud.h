@@ -74,4 +74,7 @@ const char *gs_hud_carrying(void);
 // drawn. For a test.
 const char *gs_hud_split_said(void);
 
+// How hot the gear readout was last drawn, 0 cold to 1 boiling. For a test.
+float gs_hud_heat_shown(void);
+
 #endif // GS_HUD_H
