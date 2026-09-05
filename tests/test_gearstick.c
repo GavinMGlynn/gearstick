@@ -9182,6 +9182,62 @@ TEST(the_same_day_is_the_same_track_everywhere_and_a_new_day_is_a_new_one) {
     CHECK(!gs_daily_track_for_hash(&found, 300, 0x1234567890abcdefULL));
 }
 
+TEST(a_replay_watched_from_any_car_is_the_same_race) {
+    // **The viewer is not an input.** Watching a race back is the recording
+    // restored and stepped with its own inputs, with a view bound to a car;
+    // the view is drawing and the simulation never sees it. So a race
+    // watched from any seat ends in the world the verifier's playback ends
+    // in, tick for tick, and the finishing order is the recording's.
+    static gs_track t;
+    gs_generate(&t, 7919u * 4u);
+    static gs_replay rec;
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    for (uint8_t slot = 0; slot < 2; slot++) {
+        gs_fix x, y; gs_angle f;
+        gs_track_grid_of(&t, slot, 2, &x, &y, &f);
+        gs_world_add_car(&w, &t, slot == 0 ? (uint8_t)GS_VEH_STOCK_CAR
+                                           : (uint8_t)GS_VEH_SPRINT_CAR, x, y, f);
+    }
+    // **With a countdown**, as a race has. A recording never used to carry
+    // it, so every restore started green at once and applied inputs that
+    // were meant to be held - and this test, without one, would not have
+    // known.
+    gs_world_set_countdown(&w, 120);
+    gs_replay_begin(&rec, &w, &t);
+    CHECK(rec.meta.green_tick == 120);
+    // For as long as the analyser would give the track: a lap of a generated
+    // track is minutes, and a recording holds ten of them.
+    const uint32_t budget = gs_analyse_seconds(&t) * (uint32_t)GS_TICK_HZ;
+    for (uint32_t k = 0; k < budget && k < GS_REPLAY_MAX_TICKS && !w.over; k++) {
+        gs_input in[GS_MAX_CARS] = { gs_ai_drive(&w, &t, 0), gs_ai_drive(&w, &t, 1), 0, 0 };
+        CHECK(gs_replay_record(&rec, in));
+        gs_world_step(&w, &t, in);
+    }
+    CHECK(w.over);
+    const uint64_t raced = gs_world_hash(&w);
+
+    // The verifier's playback, and then the viewer's way: restored and
+    // stepped, once for each seat.
+    static gs_world back;
+    CHECK(gs_replay_playback(&rec, &t, &back));
+    CHECK(gs_world_hash(&back) == raced);
+    for (uint8_t seat = 0; seat < 2; seat++) {
+        static gs_world watch;
+        CHECK(gs_replay_restore(&rec, &watch, &t));
+        for (uint32_t k = 0; k < rec.meta.tick_count; k++) {
+            gs_world_step(&watch, &t, gs_replay_at(&rec, k));
+        }
+        CHECK(gs_world_hash(&watch) == raced);
+        CHECK(watch.winner == w.winner);
+        CHECK(watch.over);
+    }
+    printf("  WATCH %u ticks watched back from two seats, both the race that was run\n",
+           (unsigned)rec.meta.tick_count);
+}
+
 TEST(every_gate_is_wider_than_the_road_it_crosses) {
     // **"I drove across the finish line and the game did not recognise it."**
     //
@@ -10534,6 +10590,7 @@ int main(void) {
     run_every_track_has_a_time_to_beat_and_it_is_the_same_twice();
     run_a_manual_on_the_limiter_heats_loses_power_and_cools_when_it_changes_up();
     run_the_same_day_is_the_same_track_everywhere_and_a_new_day_is_a_new_one();
+    run_a_replay_watched_from_any_car_is_the_same_race();
     run_a_banked_corner_is_higher_on_the_outside_and_a_pipe_at_both_edges();
     run_a_gap_is_a_trench_after_a_ramp_and_a_crest_falls_away_beyond_it();
     run_every_kind_of_drama_can_still_be_got_round();

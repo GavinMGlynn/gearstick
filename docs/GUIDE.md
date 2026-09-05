@@ -98,6 +98,7 @@ Other keys, any time:
 | **J** | show where a jump is going to put you down |
 | **M** | music on or off |
 | **F5** / **F9** | save the last run as a ghost file / load one |
+| **W** | on the results screen: watch the race back. **1** to **4** pick the car to follow, **R** restarts it, **Escape** leaves it |
 
 ### The gearbox
 

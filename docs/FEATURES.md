@@ -434,7 +434,7 @@ file.
   because neither choice travels with the race setup. They should - the
   gearbox per driver, the direction per race.
 
-- **Watching a race back from any car.** `CANDIDATE`
+- **Watching a race back from any car.** `DONE`
   Replays already re-race exactly; what is missing is choosing whose shoulder
   to watch from. *Stunts* shipped a replay viewer in 1990 and it is half the
   fun of a crash. Not a free camera — that stays out, below — the same

@@ -31,7 +31,7 @@
 // Versions four and three are still read, with the agreed hash zero - which
 // means "this recording does not say" and not "this recording agrees with
 // anything", so a claim is checked against it only when it is there.
-#define GS_REPLAY_VERSION   6u
+#define GS_REPLAY_VERSION   7u
 #define GS_REPLAY_OLDEST    3u
 #define GS_REPLAY_MAX_TICKS (GS_TICK_HZ * 60 * 10)   // ten minutes
 
@@ -87,6 +87,13 @@ typedef struct gs_replay_meta {
     // Version six. A recording made before them reads as all zero, which is a
     // race with the weapons off, which is exactly what those races were.
     uint8_t  loadout[GS_HAZ_COUNT];
+    // **The countdown.** The tick the lights went green, before which every
+    // input was held. Version 7: a recording never carried it, so every
+    // restore started green at once and applied inputs that were meant to
+    // be held - a race with a countdown could not be watched back or, for
+    // that matter, re-raced by a verifier. Zero in older files, which is
+    // what they always meant.
+    uint32_t green_tick;
 } gs_replay_meta;
 
 // Fixed capacity and no allocation, because src/core/ owns no allocator. Nearly

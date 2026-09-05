@@ -2948,12 +2948,16 @@ better done once the reversed routes are being verified too.
       last, each validated, long enough and with a target; today's and
       yesterday's recognised from the hash alone and older ones refused.*
 
-- [ ] **Watching a race back from any car.** Replays already re-race
-      exactly; what is missing is choosing whose shoulder to watch from. The
-      same isometric view, following a car you pick - not a free camera,
-      which stays out.
-      *Verification: a replay watched from each car in turn shows the same
-      race and the same finishing order.*
+- [x] **Watching a race back from any car.** W on the results screen
+      replays the race just run with one view following a car of your
+      choosing - 1 to 4 pick it, R restarts, Escape leaves. The same
+      isometric view, not a free camera. The viewer is drawing and never an
+      input, so the race and its finishing order are the recording's from
+      every seat. The session's race is recorded now, which it was not.
+      *Verification: a recorded race played back the verifier's way and
+      watched from each seat ends in the same world with the same winner;
+      the real binary's watch from every car prints one world hash, which
+      the play-through check demands.*
 
 - [ ] **Alternate routes through a track.** The original's `whichway`
       offered seven; this generates one. A shortcut that is tighter, rougher

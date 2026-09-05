@@ -223,6 +223,15 @@ typedef struct gs_app {
     // that outside a race - the menu, the editor, a library load - the
     // track is always the one the library holds. See gs_face_track.
     bool t_reversed;
+    // **Watching a race back.** The recording is re-raced from the start
+    // and one view follows a car of the watcher's choosing; the simulation
+    // is the recording's, so which car is watched changes nothing about the
+    // race. Inputs come from the recording and nothing is recorded.
+    bool     watching;
+    uint32_t watch_tick;
+    uint8_t  watch_car;
+    bool     watch_check;         // --watch-check: race, then watch from every car, print the hashes
+    bool     ghost_was_shown;     // to put the ghost back afterwards
 } gs_app;
 
 // **Turn the track to face the way this race is driven**, or back. The
@@ -418,6 +427,83 @@ static void gs_start_test_drive(gs_app *a) {
         gs_render_track_camera(&a->view[i], &a->t, &a->prev, &a->world, 1.0f);
     }
     gs_layout(a);
+}
+
+// **Watch the race back from a car.** The world is restored from the
+// recording exactly as the verifier restores it, the track turned to face
+// the way it was raced, one full-window view bound to the car, and the
+// recording's inputs played into the step loop instead of the keyboard's.
+// Nothing about the race can differ by who is watched: the view is not an
+// input to the simulation.
+static void gs_face_track(gs_app *a, bool reversed);
+static bool gs_start_watching(gs_app *a, uint8_t car) {
+    if (a->recording.meta.tick_count == 0 || a->online) return false;
+    gs_face_track(a, a->menu.setup.reversed);
+    if (!gs_replay_restore(&a->recording, &a->world, &a->t)) return false;
+    a->prev = a->world;
+    a->watching = true;
+    a->watch_tick = 0;
+    a->watch_car = (uint8_t)(a->world.car_count > 0 ? car % a->world.car_count : 0);
+    a->ghost_was_shown = a->show_ghost;
+    a->show_ghost = false;
+    a->views = 1;
+    a->view[0] = (gs_view){ 0 };
+    a->view[0].car = a->watch_car;
+    a->view[0].cam.zoom = a->zoom > 0.0f ? a->zoom : GS_ISO_DEFAULT_ZOOM;
+    a->view[0].show_gravity = a->overlay;
+    a->view[0].show_arc = a->arc;
+    gs_render_track_camera(&a->view[0], &a->t, &a->prev, &a->world, 1.0f);
+    a->menu.screen = GS_SCREEN_RACE;
+    return true;
+}
+
+static void gs_watch_car(gs_app *a, uint8_t car) {
+    if (!a->watching || car >= a->world.car_count) return;
+    a->watch_car = car;
+    a->view[0].car = car;
+    a->view[0].missed = false;
+    a->view[0].split_known = false;
+    gs_render_track_camera(&a->view[0], &a->t, &a->prev, &a->world, 1.0f);
+}
+
+static void gs_stop_watching(gs_app *a) {
+    if (!a->watching) return;
+    a->watching = false;
+    a->show_ghost = a->ghost_was_shown;
+    a->menu.screen = GS_SCREEN_RESULTS;
+}
+
+// One tick of the watch: the recording's inputs into the world. False once
+// the recording has run out.
+static bool gs_watch_step(gs_app *a) {
+    if (a->watch_tick >= a->recording.meta.tick_count) return false;
+    gs_input in[GS_MAX_CARS];
+    SDL_memcpy(in, gs_replay_at(&a->recording, a->watch_tick), sizeof in);
+    a->watch_tick++;
+    a->last_input = in[a->view[0].car < GS_MAX_CARS ? a->view[0].car : 0];
+    a->prev = a->world;
+    gs_world_step(&a->world, &a->t, in);
+    gs_view_note_missed(a->view, GS_MAX_CARS, &a->t, &a->prev, &a->world);
+    return true;
+}
+
+// --watch-check: the race just run, watched back from every car in turn,
+// each watch printing the world it ended in. Same hash from every seat, or
+// the viewer is changing the race.
+static void gs_watch_check(gs_app *a) {
+    const uint8_t cars = a->world.car_count;
+    for (uint8_t car = 0; car < cars; car++) {
+        if (!gs_start_watching(a, car)) {
+            SDL_Log("watch: could not start from car %u", (unsigned)car);
+            return;
+        }
+        while (gs_watch_step(a)) {}
+        SDL_Log("watch: from car %u, %u ticks, winner %u, over %s, laps to win %u, hash %016llx",
+                (unsigned)car, (unsigned)a->watch_tick, (unsigned)a->world.winner,
+                a->world.over ? "yes" : "no", (unsigned)a->world.laps_to_win,
+                (unsigned long long)gs_world_hash(&a->world));
+        gs_stop_watching(a);
+    }
 }
 
 static void gs_start_race(gs_app *a) {
@@ -962,6 +1048,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             a->autodrive = true;
         } else if (SDL_strcmp(argv[i], "--keep") == 0) {
             a->keep = true;
+        } else if (SDL_strcmp(argv[i], "--watch-check") == 0) {
+            // A session, then the race watched back from every car with the
+            // world each watch ended in printed: the viewer proved not to
+            // change the race, from the real binary.
+            a->session = true;
+            a->watch_check = true;
         } else if (SDL_strcmp(argv[i], "--session") == 0) {
             // A whole session with nobody at the keyboard: the grid from the
             // setup screen, a race driven by the AI, and the results table it
@@ -1644,6 +1736,18 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *e) {
         }
         break;
     case SDL_EVENT_KEY_DOWN:
+        // **Watching a race back.** W on the results screen starts it from car
+        // one; 1 to 4 pick the car; R restarts it; Escape leaves it.
+        if (a->watching) {
+            if (e->key.key == SDLK_ESCAPE) { gs_stop_watching(a); break; }
+            if (e->key.key == SDLK_R) { gs_start_watching(a, a->watch_car); break; }
+            if (e->key.key >= SDLK_1 && e->key.key <= SDLK_4) {
+                gs_watch_car(a, (uint8_t)(e->key.key - SDLK_1));
+                break;
+            }
+        } else if (e->key.key == SDLK_W && a->menu.screen == GS_SCREEN_RESULTS && !a->online) {
+            if (gs_start_watching(a, 0)) break;
+        }
         // **Typing is not a shortcut.** Dear ImGui says when a text field has
         // the keyboard, and while it does the game's hotkeys stay out of the
         // way. Without this, typing a driver called "gavin" toggles the ghost
@@ -1760,14 +1864,21 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                 in[i] = gs_ai_drive(&a->world, &a->t, i);
             }
             a->prev = a->world;
+            // Recorded, as a race at the keyboard is: a session's race used
+            // to leave no recording at all, so there was nothing to watch
+            // back and no ghost of it either.
+            gs_replay_record(&a->recording, in);
             gs_world_step(&a->world, &a->t, in);
         }
 
         a->race_settled = true;
         gs_menu_finish(&a->menu, &a->world, &a->t);   // and it shows the results
         gs_store_save(a);
-        SDL_Log("session: %u laps, winner %u, over %s",
-                a->menu.setup.laps, a->world.winner, a->world.over ? "yes" : "no");
+        SDL_Log("session: %u laps, winner %u, over %s, hash %016llx, recorded %u ticks",
+                a->menu.setup.laps, a->world.winner, a->world.over ? "yes" : "no",
+                (unsigned long long)gs_world_hash(&a->world),
+                (unsigned)a->recording.meta.tick_count);
+        if (a->watch_check) gs_watch_check(a);
     }
 
     if (a->shot_path != nullptr) {
@@ -2024,6 +2135,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
     for (uint32_t i = 0; i < steps; i++) {
         gs_input in[GS_MAX_CARS];
+        if (a->watching) {
+            if (!gs_watch_step(a)) { gs_stop_watching(a); break; }
+            continue;
+        }
         gs_input_poll(&a->input, in, a->world.car_count);
 
         // **The cars nobody is driving are driven.** Offline only: online, the

@@ -12,6 +12,7 @@ void gs_replay_begin(gs_replay *r, const gs_world *w, const gs_track *t) {
     r->meta.damage_scale   = w->damage_scale;
     r->meta.mode           = w->mode;
     r->meta.laps_to_win    = w->laps_to_win;
+    r->meta.green_tick     = w->green_tick;
     r->meta.car_count      = w->car_count;
     for (int k = 0; k < GS_HAZ_COUNT; k++) r->meta.loadout[k] = w->loadout[k];
     for (uint8_t i = 0; i < w->car_count; i++) {
@@ -51,6 +52,9 @@ bool gs_replay_restore(const gs_replay *r, gs_world *w, const gs_track *t) {
     w->damage_scale   = r->meta.damage_scale;
     w->mode           = r->meta.mode;
     w->laps_to_win    = r->meta.laps_to_win;
+    // The lights as they were: held until the recorded green tick, which on
+    // a fresh world at tick zero is a countdown of exactly that length.
+    gs_world_set_countdown(w, r->meta.green_tick);
 
     // **Armed before anybody is placed**, because that is what puts the ammo on
     // a car: gs_world_add_car takes the race's loadout as it goes on the grid.
@@ -119,7 +123,9 @@ static uint64_t gs_get_u64(const uint8_t *p) {
 // And version six appends what the race armed everybody with. Same rule, and
 // the reason it keeps being possible to add one: nothing here is a struct laid
 // out by a compiler, it is bytes in an order somebody wrote down.
-#define GS_REPLAY_HEADER_BYTES (GS_REPLAY_HEADER_V5 + GS_HAZ_COUNT)
+#define GS_REPLAY_HEADER_V6 (GS_REPLAY_HEADER_V5 + GS_HAZ_COUNT)
+// Version 7 adds the countdown.
+#define GS_REPLAY_HEADER_BYTES (GS_REPLAY_HEADER_V6 + 4)
 
 void gs_replay_set_driver(gs_replay *r, uint8_t car, const char *name) {
     if (car >= GS_MAX_CARS) return;
@@ -176,6 +182,7 @@ size_t gs_replay_serialize(const gs_replay *r, uint8_t *buf, size_t cap) {
     // Version five: the ending everybody agreed on.
     gs_put_u64(p, r->meta.agreed_hash);          p += 8;
     for (int k = 0; k < GS_HAZ_COUNT; k++) *p++ = r->meta.loadout[k];
+    gs_put_u32(p, r->meta.green_tick);           p += 4;
 
     for (uint32_t i = 0; i < r->meta.tick_count; i++) {
         for (uint8_t c = 0; c < GS_MAX_CARS; c++) *p++ = r->input[i][c];
@@ -194,7 +201,8 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     uint32_t version = gs_get_u32(p); p += 4;
     if (version < GS_REPLAY_OLDEST || version > GS_REPLAY_VERSION) return false;
 
-    size_t header = version >= 6 ? GS_REPLAY_HEADER_BYTES
+    size_t header = version >= 7 ? GS_REPLAY_HEADER_BYTES
+                  : version >= 6 ? GS_REPLAY_HEADER_V6
                   : version >= 5 ? GS_REPLAY_HEADER_V5
                   : version >= 4 ? GS_REPLAY_HEADER_V4
                                  : GS_REPLAY_HEADER_V3;
@@ -237,6 +245,8 @@ bool gs_replay_deserialize(gs_replay *r, const uint8_t *buf, size_t len) {
     if (version >= 6) {
         for (int k = 0; k < GS_HAZ_COUNT; k++) r->meta.loadout[k] = *p++;
     }
+    r->meta.green_tick = 0;
+    if (version >= 7) { r->meta.green_tick = gs_get_u32(p); p += 4; }
 
     if (r->meta.car_count > GS_MAX_CARS) return false;
     if (ticks > GS_REPLAY_MAX_TICKS) return false;

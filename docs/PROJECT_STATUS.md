@@ -8574,6 +8574,46 @@ the day's track. The server's call is a few lines around a core function
 that is tested; the lines themselves are not, which is said here.*
 
 
+### Watching a race back from any car, 2026-09-05
+
+**W on the results screen.** The recording of the race just run is
+restored exactly as the verifier restores it - the track turned to face the
+way it was raced - and played into the step loop in place of the keyboard,
+with one full-window view following a car: **1** to **4** pick the car,
+**R** restarts it, **Escape** returns to the results. Nothing is recorded
+while watching, and the ghost is put away and brought back after.
+
+**The viewer is not an input.** The view is drawing; the simulation never
+sees it. So a race watched from any seat ends in the world the verifier's
+playback ends in, tick for tick, with the finishing order the recording
+had - which is what makes it safe to offer at all. Same isometric view as
+racing; a free camera stays out, as the features list says.
+
+**And a recording carries its countdown now, which it never did.** The
+first watch back of a real race ended in a different world from the race:
+every restore started green at once and applied inputs that had been held
+for the three seconds of the lights, so the whole race was out of phase
+from its first tick and the watched cars never finished. The replay format
+is version 7 with the green tick in its header - older files read as
+zero, which is what they always meant - and the recorder keeps it, the
+restore applies it, and the core test of the viewer races with a countdown
+so it would have known. This is the verifier's restore too: a race with a
+countdown could not have been re-raced by a server before this.
+
+**And the session's race is recorded now.** It was not: the self-driving
+session the play-through check runs stepped the world directly and left no
+recording, so there was nothing to watch back and no ghost of it either.
+`--watch-check` runs a session and then watches it back from every car,
+printing the world each watch ended in; the play-through check runs it and
+refuses a set of hashes that is not one hash.
+
+*Verification: two computer cars raced to the flag on a generated track,
+recorded, played back the verifier's way and watched back from each seat -
+all three the same world hash and the same winner; and the real binary,
+asked for a session and a watch back from every car, printed one world
+hash from every seat. No golden moved.*
+
+
 ## Known risks
 
 - **The feel is unproven.** The physics is correct against its own closed form,

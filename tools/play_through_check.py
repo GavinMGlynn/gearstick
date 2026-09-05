@@ -105,7 +105,8 @@ def main():
             print(f"play_through_check: {screen} opens")
 
         # --- a race, driven by the machine, kept ---------------------------
-        text = run(game, ["--session", "--autodrive", "--trace", "--keep"],
+        text = run(game, ["--session", "--autodrive", "--trace", "--keep",
+                          "--watch-check"],
                    RACE_SECONDS, store)
         rows = traces(text)
         if "session:" not in text:
@@ -113,6 +114,16 @@ def main():
                         text)
         if not rows or rows[-1].get("screen") != "results":
             return fail("the race did not end on the results screen", text)
+        # **Watched back from every seat, the same race.** The viewer plays the
+        # recording into the simulation with one view following a car; the
+        # world every watch ends in has to be the same world, or the viewer is
+        # an input to the race.
+        watched = [l for l in text.splitlines() if "watch: from car" in l]
+        hashes = {l.split("hash ")[1].split()[0] for l in watched if "hash " in l}
+        if len(watched) < 2 or len(hashes) != 1:
+            return fail("the race watched back from each car did not agree: "
+                        f"{len(watched)} watches, {len(hashes)} different worlds", text)
+        print(f"play_through_check: watched back from {len(watched)} cars, one world")
 
         laps = rows[-1].get("tick", "0")
         print(f"play_through_check: a race ran to the results at tick {laps}")
