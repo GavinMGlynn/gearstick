@@ -2972,17 +2972,17 @@ better done once the reversed routes are being verified too.
       What is left is not code so much as a place: a hosted instance, an
       address the game points at by default (today a player types one), and
       the running of it - **which cannot be finished, only kept up**.
-
-      - [ ] **A window on the server.** It draws its live view in a terminal
-            and is happy with no screen, and both stay true; on a machine
-            with a display it opens a window as well, showing the same
-            facts - who is here, from where, how long, what is flowing - and
-            a log of arrivals and departures a terminal scrolls away, with
-            room for what an operator does next: drop a client, take a track
-            down. *Verification: the window and the terminal report the same
-            numbers from the same race; with no display the server runs
-            exactly as it did; the output test still reads its terminal.*
       *Verification: a time set on one machine is shown, re-raced and
       verified on another with nothing copied by hand; and a service that is
       down leaves every local feature - racing, building, sharing by code -
       exactly as it was.*
+
+- [ ] **A window on the server.** It draws its live view in a terminal and
+      is happy with no screen, and both stay true; on a machine with a
+      display it opens a window as well, showing the same facts - who is
+      here, from where, how long, what is flowing - and a log of arrivals
+      and departures a terminal scrolls away, with room for what an operator
+      does next: drop a client, take a track down.
+      *Verification: the window and the terminal report the same numbers
+      from the same race; with no display the server runs exactly as it
+      did; the output test still reads its terminal.*
