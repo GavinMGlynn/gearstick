@@ -12,7 +12,7 @@ terrain works".
 
 ---
 
-## The honest summary, 2026-09-05
+## The honest summary, 2026-09-06
 
 **There is a game, and it is a race you can win.** Sign in, pick a track from
 thirty, choose a machine and a gearbox, put up to four people on the grid with
@@ -53,9 +53,19 @@ across machines" is a measured fact rather than a design intention. Packages
 build on all three target platforms and are checked by unpacking them
 somewhere else, on a machine with no toolchain, and running what is inside.
 
+**Online, the race is the server's race and it carries the setup now**: each
+driver's gearbox and which way round the track is raced go on the wire, a
+server has a window on a machine with a screen, and a time set on a reversed
+track is verified. Every code item in the plan is done, Phase 22 included -
+vertical drama, mirror mode, split times, a time to beat, overheating, a
+daily track, replay from any car, alternate routes, the server's window, the
+setup on the wire and the flat moments all landed between 2026-09-05 and
+2026-09-06.
+
 **What is still missing**, first as always: no sound on Windows or macOS
-verified by a person, online races give every car the automatic gearbox, and
-`docs/TRANSPORT.md` has never been read by anybody but its author.
+verified by a person; and no hosted server - the game points at no address
+by default, because there is no instance to point at. Both are a person's to
+close, not code's: see "What is left, and who has to do it" in the plan.
 
 ---
 

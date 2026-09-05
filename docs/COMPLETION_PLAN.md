@@ -2529,28 +2529,30 @@ is left behind at the far end of a long track.
 **Everything the game needs in order to be itself is done.** What follows is
 two different kinds of open, and they should not be confused with each other.
 
-**Three items nobody can close by writing code** - listed just below. They are
-the honest end of the original plan.
+**Two items nobody can close by writing code** - listed just below. They are
+the honest end of the plan. The third that used to stand here, the transport
+document read by somebody who had not seen the code, was closed on 2026-09-05.
 
-**Phase 22, at the bottom of this file, is a menu rather than a debt.** It came
-out of comparing this game against its ancestor and its neighbours, and
-nothing in it is required: the game is finished without any of it. It is there
-so that "what next" has an answer that was thought about rather than picked on
-the day.
+**Phase 22, at the bottom of this file, was a menu rather than a debt**, and
+as of 2026-09-06 every code item on it is done. It came out of comparing this
+game against its ancestor and its neighbours; nothing in it was required for
+the game to be itself, and all of it is in.
 
 - **Sound listened to on Windows and macOS** — listed twice, one thing. Everything
   a machine can check is checked: the synthesiser to the sample on every ground
-  and in every machine, and now the device path on all three platforms. What is
+  and in every machine, and the device path on all three platforms. What is
   left is a person with speakers on a Windows machine and a person with speakers
   on a Mac, each saying it sounds right.
-- **The transport has a written specification** — `docs/TRANSPORT.md` is written,
-  the byte sizes it quotes are pinned by a test so it cannot drift from the code,
-  and a client built from it completes a handshake with a real server. What is
-  left is somebody who has **not read `gs_noise.c`** doing that, because the
-  person who wrote the document wrote the code and cannot unsee it.
+- **The central server, hosted** — the decision is made (one server, not a
+  mesh), the server has its window, the setup travels with the race, and a
+  time set on one machine is re-raced and verified on the server. What is
+  left is a place: a machine to run it on, a name to reach it by, and the
+  running of it, which cannot be finished, only kept up. The game points at
+  no address by default until there is one; the day there is, the default is
+  one constant and the verification in the item below is a race between two
+  machines through it.
 
-Everything else in this plan is done, and Phase 22 is a list of things that
-would make it more rather than things that would make it whole.
+Everything else in this plan is done.
 
 ## Phase 21 — Where the tests are not
 
