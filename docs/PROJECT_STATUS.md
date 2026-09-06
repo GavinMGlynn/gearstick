@@ -3557,6 +3557,19 @@ all green. Run against the old camera it fails with the whole diagnosis in one
 line: *the car was off the screen on 8 of 17 looks - at tick 0 it was at
 3.00,5.50 drawn at 640,-24 with the camera on 3.00,5.50*.
 
+**And it was racing flat ground the whole time, 2026-09-06.** The local race
+was pointed at `first-light.gstrack` - the last hand-authored track, gone since
+the shipped set became a draw from a matrix. The client cannot read a track
+that is not there, logs `track: could not read`, and falls back to the first
+track in the library, which is flat where the grid is - the one place the
+camera-on-a-slope fault this check exists for is invisible. It passed anyway,
+because it never read that line. It now names `steep-crossing.gstrack`, whose
+start line sits nearly two tiles up, and fails at once if the client says it
+could not read it - so a future regeneration that renames the track turns the
+tree red rather than quietly racing the flat. Generated names come from their
+seeds; the track to name next is whichever ships with its start height furthest
+from zero.
+
 ### Two more the trace found, in the same afternoon
 
 With the trace in, the next two took minutes rather than hours - which is the

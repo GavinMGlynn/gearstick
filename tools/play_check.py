@@ -299,11 +299,17 @@ def main():
     # and finds the same fault the server's track found.
     local = [game_bin, "--screen", "race", "--autodrive", "--trace"]
     if assets is not None:
-        # A hand-authored track rather than a generated one: generated names
-        # come from their seeds, so a change to the generator renames them all
-        # and a check that hard-codes one silently stops checking anything. This
-        # one is written out by name in tools/make_tracks.c and stays.
-        local += ["--track", os.path.join(assets, "tracks", "first-light.gstrack")]
+        # **The one shipped track whose grid is not at height zero.** The
+        # hand-authored track this used to name left the set when the shipped
+        # thirty became a draw from a matrix, and the client quietly raced the
+        # library's first track instead - flat where the grid is, which is where
+        # the camera fault was invisible. Of the thirty that ship, this one's
+        # start line sits at +1.9 tiles and the others within three quarters of
+        # a tile of zero. Generated names come from their seeds, so a change to
+        # the generator renames them all; when it does, the check below goes red
+        # at "could not read" rather than racing something else, and the track
+        # to name next is the one whose start height is furthest from zero.
+        local += ["--track", os.path.join(assets, "tracks", "steep-crossing.gstrack")]
 
     with tempfile.TemporaryDirectory() as tmp:
         store = os.path.join(tmp, "store")
@@ -312,6 +318,15 @@ def main():
 
         # --- a race on this machine ---------------------------------------
         here = run(local, env, LOCAL_SECONDS, driven_enough)
+        # **The track it was pointed at has to be the track it raced.** The
+        # client falls back to the library when a named track cannot be read,
+        # and logs it; a check that did not read that log raced a default track
+        # for weeks after the named one was renamed, and stayed green.
+        if "track: could not read" in here.text():
+            print("play_check: on this machine: the named track could not be "
+                  "read, so the race below is not the race this check is "
+                  "about\n" + here.text())
+            return 1
         if not check_race("on this machine", here):
             return 1
 
