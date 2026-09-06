@@ -6,12 +6,14 @@ the same activity.
 
 ![The title screen](docs/images/title.png)
 
-> **Status: the game is playable and the platform around it is being built.**
-> Phases 0 to 10 of [`docs/COMPLETION_PLAN.md`](docs/COMPLETION_PLAN.md) are
-> complete — 61 items, each with a verification that was actually run. You can
-> build a track, race up to four people on it, set a lap record and have it
-> remembered. Phases 11 to 14 add a server, a track library, the rest of the
-> feature list and a Windows installer.
+> **Status: the game is playable, and the platform around it is complete but
+> for two things only a person can do.** All 22 phases of
+> [`docs/COMPLETION_PLAN.md`](docs/COMPLETION_PLAN.md) are done — 270 items,
+> each with a verification that was actually run. You can build a track, race up
+> to four people on it locally or online, set a lap record, and have a server
+> re-race it to check it and remember it. What is left is not code: someone
+> listening to the synthesiser on Windows and macOS, and a machine for the
+> central server to live on.
 >
 > [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) is the single source of
 > truth for what works, with the gaps named plainly and first. Nothing here
@@ -112,9 +114,23 @@ The server runs headless and shows you what it is doing:
 ```
 
 ```sh
-gearstick_server --port 47800 --players 4      # the meeting point
-gearstick --server their-host 47800 --name ada # everybody else
+gearstick_server --port 47800 --players 4          # run the meeting point
+gearstick --server their-host 47800 --server-key HEX --name ada  # join by address
+gearstick --online                                 # or join the default one
 ```
+
+**There is one server, by design.** Accounts and records that follow you
+between machines only mean anything if there is a single place they live, so
+peer-to-peer discovery and federation are deliberately out — the reasoning is
+in [`docs/FEATURES.md`](docs/FEATURES.md). The game reads that default server's
+host, port and public key from a one-line `server.txt` — the shipped one, or
+your own in your preference directory — and `gearstick --online` joins it with
+nothing typed. The shipped file names no server yet, because there is no hosted
+one; what it takes to run yours — a systemd unit, a Dockerfile and four commands
+— is in [`deploy/`](deploy/), and the key to paste into `server.txt` is the line
+the server logs when it first starts. On a machine with a display the server
+also opens a window with the same live view, a log of arrivals and a drop button
+beside each client; `--headless` keeps it shut.
 
 Which player you are is the server's decision, not the decision of whoever
 started first — that is the difference between a lobby and a host:
@@ -171,12 +187,14 @@ back a screen.
 walk, every control, and how to report a bug as a file somebody else can run.
 
 ```sh
-gearstick --host 47800 4          # wait for four players in total
-gearstick --join their-host 47800 # join somebody who is waiting
-
-gearstick --shot frame.bmp --shot-at 420   # write one frame and exit
-gearstick --session                        # race by itself, stop on the results
+gearstick                         # single-player, or split-screen with --players
+gearstick --online                # race at the default server named in server.txt
+gearstick --host 47800 4          # or be the meeting point for four, ad hoc,
+gearstick --join their-host 47800 # and join somebody who already is
 ```
+
+Every flag for every mode is in the [command-line reference](#command-line-reference)
+below.
 
 ## The headless driver
 
@@ -193,6 +211,112 @@ gearstick_cli gravity             # the presets
 That `--verify` is the tripwire: it re-races a fixed input log and compares one
 state hash. If the number moves, every ghost time and every shared replay in
 existence just became wrong.
+
+## Command-line reference
+
+Everything below is also printed by `--help` on each program. With no arguments
+`gearstick` opens on the title screen; the flags pick a mode or point it at
+content. Most of the game's flags are for the game itself — the rest are for
+tests, screenshots and the headless tools, grouped last.
+
+### `gearstick` — the game and the construction set
+
+**Modes**
+
+| flag | what it does |
+| --- | --- |
+| *(none)* | title screen → drivers → race; **Tab** opens the construction set |
+| `--editor` | open straight into the construction set |
+| `--heatmap` | open the editor with the analyser already run |
+| `--showroom` | line up every vehicle, to look at the art |
+| `--online` | meet everybody at the default server named in `server.txt` |
+| `--server HOST PORT` | meet everybody at a particular server |
+| `--host PORT [N]` | be the meeting point yourself, for N players (2–4, default 2) |
+| `--join HOST PORT` | join somebody running `--host` |
+
+**Online options**
+
+| flag | what it does |
+| --- | --- |
+| `--server-key HEX` | the 64-hex-character public key of the server or host, which it prints when it starts |
+| `--name NAME` | who to appear as |
+| `--manual` | take the manual gearbox rather than the automatic |
+| `--relay` | route through the server when two peers cannot connect directly |
+
+**Content and view**
+
+| flag | what it does |
+| --- | --- |
+| `--track FILE` | open this `.gstrack` rather than the library's first |
+| `--ghost FILE` | race against a recorded run |
+| `--players N` | one to four, split-screen to match |
+| `--zoom N` | camera zoom, 1.0 being one tile to 64 px |
+
+**For tests, screenshots and tooling**
+
+| flag | what it does |
+| --- | --- |
+| `--shot FILE` | write one frame as a BMP and exit |
+| `--shot-at TICK` | which tick to write it at (default 0) |
+| `--audio-out FILE` | with `--shot`, write the race as a `.wav` |
+| `--ghost-out FILE` | with `--shot`, write the captured run as a ghost |
+| `--session` | drive a whole race by itself and stop on the results |
+| `--keep` | let a session write what it did to the store |
+| `--autodrive` | let the AI drive this machine's car |
+| `--trace` | print what is on screen once a second, as `key=value` |
+| `--screen NAME` | start on a named screen: `login`, `title`, `drivers`, `setup`, `tracks`, `race`, `results`, `records`, `lobby` |
+| `--diverge` | with `--shot`, drive the cars apart to show the split |
+| `--overlay` | start with the painted-gravity overlay on |
+| `--arc` | start with the landing arc on |
+| `--demo-library` | pick a library track, so a screenshot has a selection |
+| `--watch-check` | re-watch the finished race from every car and report |
+
+**In-game keys.** Arrows drive car one, WASD car two, pads one per car (players
+three and four need pads). **Tab** construction set · **H** ghost of your last
+run · **G** painted-gravity overlay · **J** landing arc while airborne · **M**
+music · **R** restart · **Backspace** tow to your last checkpoint · **F5**/**F9**
+save/load a ghost · **Esc** back a screen.
+
+### `gearstick_server` — the meeting point for online races
+
+| flag | what it does |
+| --- | --- |
+| `--port N` | listen on this port (default 47800) |
+| `--players N` | how many to allow, 1 to 4 (default 4) |
+| `--track FILE` | the track this lobby races on |
+| `--reversed` | race that track the other way round |
+| `--store FILE` | where to remember drivers, records and tracks (its SQLite file) |
+| `--key HEX` | this server's 32-byte secret as 64 hex characters; otherwise read from the store, or minted once and kept |
+| `--headless` | no window, even on a machine with a display |
+| `--plain` | no cursor control — for a dumb terminal, a pipe or a file (which get the log rather than the dashboard) |
+| `--timeout N` | drop a client after N ms of silence (default 15000) |
+| `--seconds N` | stop after N seconds (for tests) |
+| `--window-dump` · `--window-shot FILE` · `--window-press LABEL` | dump, capture or drive the window (for tests) |
+
+The address to hand players is `HOST PORT` plus the `--key` line the server logs
+at startup; running one for real is written up in [`deploy/`](deploy/).
+
+### `gearstick_cli` — the simulation with no window on it
+
+Links the simulation and nothing else. Each subcommand runs and exits:
+
+| command | what it does |
+| --- | --- |
+| `selftest [--verify]` | race the fixed scenario and print — or, with `--verify`, check — its state hash |
+| `opponents [--verify]` | race four opponents and print or check the hash |
+| `track FILE` | write the selftest track, read it back, and check it survived the round trip |
+| `circuit FILE` | write the short circuit the AI is proved on, for a server to serve |
+| `validate` | show what the route checker accepts and refuses |
+| `analyse FILE` | which gravities and machines can get round a track |
+| `generate [N]` | make N tracks from seeds and analyse every one |
+| `ai` | race the AI round a circuit in every condition |
+| `pace` | lap times for a cautious, a normal and a quick driver |
+| `roster` | race every vehicle over every condition |
+| `vehicles` | the roster and its numbers |
+| `gravity` | the gravity presets |
+| `import [FILE]` | read a Stunts `.trk` (with no file, make one first) |
+| `code FILE` · `url FILE` | print a track as a pasteable code, or as a link |
+| `decode CODE [FILE]` | read a code, optionally writing the track out |
 
 ## Layout
 
