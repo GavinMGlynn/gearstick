@@ -315,6 +315,14 @@
 // same sentence: one more number on every car.
 // And with the gearbox, the same way and for the same sentence: three new
 // fields per car, every opponent on the automatic the AI has always driven.
-#define GS_OPPONENTS_WORLD_HASH 0x0e71d93f20ced6ebULL
+// And once more when a finished car brakes itself to a stop. Crossing your
+// last line used to leave you coasting the length of the straight until drag
+// caught you; now the car drops its input and is pulled to a standstill in
+// about a third of a second - world state, so every machine and every replay
+// agrees where each car comes to rest. All four opponents finish this race, so
+// where each ends up is different and the hash moves. The physics of *driving*
+// is untouched - a car that has not finished behaves exactly as before, which
+// is why the selftest world hash above did not move. See docs/PROJECT_STATUS.md.
+#define GS_OPPONENTS_WORLD_HASH 0xc50458027644e2a1ULL
 
 #endif // GS_GOLDEN_H

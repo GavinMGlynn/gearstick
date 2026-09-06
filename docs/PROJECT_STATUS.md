@@ -8913,6 +8913,35 @@ does not; a collision is louder than the rumble alone and crosses zero
 more often, which is the edge. Release and sanitised; neither golden
 moved.*
 
+### A finished car brakes itself to a stop, 2026-09-06
+
+**Crossing your last line ends your race, and the car now stops as if it
+noticed.** Before this a car that had finished kept whatever its driver was
+pressing and coasted on down the straight until drag caught it - so winning and
+then waiting for the field read as the game not having registered the win. A car
+with a finish tick now drops its input - a held throttle, an AI still steering
+for a corner it no longer has to make - and is braked to a standstill inside
+about a third of a second (a tenth of its speed kept per tick, the last crawl
+clamped to nothing so it settles rather than drifting on a slope). It is in
+`gs_car_step`, in the simulation, so it is world state: every machine and every
+replay brings each car to rest in the same place, which is what a networked
+finish and a re-raced record both depend on.
+
+**Only finished cars are touched.** A car still racing behaves exactly as
+before - the change is two blocks, both guarded by `finish_tick != 0` - which is
+why the 900-tick selftest world hash, whose scenario has no finish line, did not
+move. The opponents golden did: all four of them finish, and where a finished
+car comes to rest is different, so `GS_OPPONENTS_WORLD_HASH` moved from
+`0x0e71d93f20ced6eb` to `0xc50458027644e2a1` - a deliberate move, noted in
+`src/frontend/cli/golden.h`, that invalidates replays and ghosts of races with
+opponents in them, as any physics change does.
+
+*Verification: `a_finished_car_brakes_to_a_stop_however_hard_it_is_driven` drives
+a stock car flat out across the line with the throttle never released, and finds
+it stopped within half a second and still stopped a second later, having crept
+nowhere. `selftest --verify` and `opponents --verify` pass on the new hash,
+driven twice identically and re-racing exactly; the whole suite is green.*
+
 ### A time set online reaches the records, 2026-09-06
 
 **Racing the real client through a real server to the flag - the tail the

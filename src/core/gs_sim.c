@@ -370,6 +370,12 @@ static gs_fix gs_oil_here(const gs_world *w, uint8_t car, gs_fix x, gs_fix y) {
     return worst;
 }
 
+// A finished car brakes itself to a stop: the speed it keeps each tick, and
+// the crawl below which it is stopped dead. A tenth kept per tick at 120 Hz is
+// a standstill in about a third of a second - "quickly", without a jerk.
+#define GS_FINISH_BRAKE GS_RATIO(9, 10)
+#define GS_FINISH_STILL GS_RATIO(1, 10)
+
 static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
                         uint8_t index) {
     const gs_vehicle_def *v = gs_vehicle(c->vehicle);
@@ -378,6 +384,14 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
     // A wrecked car keeps its position and stops being simulated. It is still
     // there to be looked at, and later to be driven into.
     if (!c->active || c->wrecked) return;
+
+    // **A car that has finished takes no more input.** Its race is run: a held
+    // throttle, or an AI still steering for a corner it no longer has to make,
+    // buys nothing. Cleared here so the tow, the rescue and the driving below
+    // all see an idle stick; the car is then braked to a stop at the end of the
+    // step. It is world state, not a thing a screen does, so every machine and
+    // every replay brings it to rest in the same place.
+    if (c->finish_tick != 0) in = (gs_input)0;
 
     // **The tow truck answers before the physics.** Pressing rescue hands
     // the car to the tow: it freezes and flashes where it was lost - inert,
@@ -831,6 +845,22 @@ static void gs_car_step(gs_world *w, gs_car *c, const gs_track *t, gs_input in,
     // What that plain should *be* is undecided: at the moment it is a
     // continuation of whatever the edge happened to be, which means leaving the
     // track costs nothing. See the tails in docs/COMPLETION_PLAN.md.
+
+    // **And brake it, if its race is run.** After the driving, the drag and the
+    // ground: a finished car sheds most of its speed each tick - a stop inside
+    // about a third of a second, quick enough to read as "you are done" and
+    // gentle enough not to jerk - and the last crawl is clamped to nothing so
+    // it settles where it stops rather than drifting on a slope. Coasting the
+    // length of the straight while the field comes in was the game not looking
+    // like it had noticed you crossed the line.
+    if (c->finish_tick != 0) {
+        c->vx = gs_fix_mul(c->vx, GS_FINISH_BRAKE);
+        c->vy = gs_fix_mul(c->vy, GS_FINISH_BRAKE);
+        if (gs_car_speed(c) < GS_FINISH_STILL) {
+            c->vx = 0;
+            c->vy = 0;
+        }
+    }
 }
 
 // How much of the closing speed comes back out of a collision.

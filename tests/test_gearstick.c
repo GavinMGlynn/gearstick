@@ -5104,6 +5104,47 @@ TEST(a_race_that_is_over_stays_over_until_a_new_one_replaces_it) {
     CHECK(w.winner == GS_NO_WINNER);
 }
 
+// **A finished car brakes itself to a stop, however hard it is still driven.**
+// Before this a car that crossed its last line coasted on down the straight
+// until drag stopped it - the game not looking like it had noticed you won.
+// Now its input is dropped and it is pulled to a standstill quickly. It is
+// world state, not a screen effect, so it happens the same on every machine
+// and in every replay - which is why it is checked here in the simulation.
+TEST(a_finished_car_brakes_to_a_stop_however_hard_it_is_driven) {
+    static gs_track t;
+    gs_track_init(&t, 64, 16, GS_SURF_PAVEMENT);
+    for (uint8_t y = 0; y <= t.h; y++)
+        for (uint8_t x = 0; x <= t.w; x++) gs_track_set_corner(&t, x, y, 0);
+    gs_track_add_gate(&t, GS_INT(6), GS_INT(8), 0, GS_INT(6));
+    gs_track_add_gate(&t, GS_INT(48), GS_INT(8), 0, GS_INT(6));
+
+    gs_world w;
+    gs_world_init(&w, GS_ONE);
+    gs_world_set_mode(&w, GS_MODE_RACE);
+    gs_world_set_laps(&w, 1);
+    gs_world_add_car(&w, &t, (uint8_t)GS_VEH_STOCK_CAR, GS_INT(4), GS_INT(8), 0);
+
+    // Flat out to the line, and the throttle is never released.
+    gs_input go[GS_MAX_CARS] = { (gs_input)GS_IN_ACCEL, 0, 0, 0 };
+    for (uint32_t i = 0; i < (uint32_t)GS_TICK_HZ * 60u && w.car[0].finish_tick == 0; i++) {
+        gs_world_step(&w, &t, go);
+    }
+    CHECK(w.car[0].finish_tick != 0);            // it finished
+    CHECK(gs_car_speed(&w.car[0]) > GS_ONE);     // and was moving fast when it did
+
+    // Half a second on, still on the throttle, it has been braked to a stop.
+    for (uint32_t i = 0; i < (uint32_t)GS_TICK_HZ / 2u; i++) gs_world_step(&w, &t, go);
+    CHECK(gs_car_speed(&w.car[0]) < GS_RATIO(2, 10));
+
+    // And it stays where it stopped rather than creeping off again.
+    const gs_fix sx = w.car[0].x, sy = w.car[0].y;
+    for (uint32_t i = 0; i < (uint32_t)GS_TICK_HZ; i++) gs_world_step(&w, &t, go);
+    CHECK(gs_car_speed(&w.car[0]) < GS_RATIO(2, 10));
+    gs_fix dx = w.car[0].x - sx; if (dx < 0) dx = -dx;
+    gs_fix dy = w.car[0].y - sy; if (dy < 0) dy = -dy;
+    CHECK(dx < GS_RATIO(2, 10) && dy < GS_RATIO(2, 10));
+}
+
 TEST(a_race_ends_when_everybody_has_finished_and_the_first_one_wins) {
     // **A field the cars of the day can get round.** This was forty by sixteen
     // with the gates twenty-four apart, which was room enough when the roster's
@@ -10909,6 +10950,7 @@ int main(void) {
     run_a_lock_survives_being_written_out_and_read_back();
     run_the_race_that_sets_a_record_is_the_race_that_reports_it();
     run_a_race_that_is_over_stays_over_until_a_new_one_replaces_it();
+    run_a_finished_car_brakes_to_a_stop_however_hard_it_is_driven();
     run_a_race_ends_when_everybody_has_finished_and_the_first_one_wins();
     run_every_other_dial_on_the_setup_screen_reaches_the_race();
     run_every_lap_count_the_dial_offers_is_the_race_that_is_run();
