@@ -2998,23 +2998,14 @@ better done once the reversed routes are being verified too.
       re-races to it with the gearbox in its header; a server started
       forward and again reversed tells every client who took which box and
       which way round; and an older recording still reads, as automatic.*
-      *Tail, part done 2026-09-06: racing the real client through a real
-      server to the flag turned up two faults nothing else could see - a
-      networked race never built a recording the server would keep, because
-      the confirmed race was gathered only once it was over and by then gs_net
-      had kept only the last two seconds of it; and the server credited only
-      whoever started on pole, because a submitted time carried no car and it
-      assumed car zero. Both fixed - the recording is gathered as the race
-      runs, and a time now says which car it is for - and a solo online race
-      sets a time the server re-races and keeps, checked by
-      `gearstick_online_record`. And a third fault came with the two-machine
-      version: two cars both finishing could not agree an ending, because each
-      machine stopped at its own predicted finish and neither carried the
-      confirmed race to the shared line. Fixed too - after the flag a machine
-      keeps stepping past its own finish and answering the other until the
-      agreed race is over, first converger included - and `gearstick_two_machines`
-      now races two real clients to the flag through one server, both agreeing
-      one world at one tick and the server re-racing both. The tail is done.*
+      *Tail, done 2026-09-06: two real clients now race to the flag through
+      one server and agree one world - the same hash at the same tick - which
+      each hands in and the server re-races and keeps (`gearstick_two_machines`).
+      Getting there took fixing three faults nothing else could reach: a
+      networked race built no recording the server would keep, the server
+      credited only the pole-sitter, and two cars both finishing could not
+      agree an ending. All fixed, green on every platform; the how is in
+      PROJECT_STATUS.md.*
 
 - [x] **The flat moments.** The finish is an event and three moments
       passed without punctuation: the green light at the start, a
