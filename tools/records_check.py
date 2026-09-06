@@ -15,10 +15,15 @@ that only a race through a real server could show:
     that".
 
 This races one real client, driving itself, to the flag through one real
-server on the short circuit the CLI writes, and asserts the whole path a
-record travels: the recording keeps up (never "fell behind"), the race is
-agreed and submitted, and the server re-races it and keeps it. It is the first
-end-to-end cover of online -> server records; before it, that path had none.
+server on the short circuit the CLI writes, joined the way a shipped copy
+joins: the server's line in a server.txt in the client's own preference
+directory, and --online with nothing typed. It asserts the whole path a record
+travels through the front door that ships: --online reads the address, the
+recording keeps up (never "fell behind"), the race is agreed and submitted, and
+the server re-races it and keeps it. It is the end-to-end cover of the central
+server's own acceptance - a time set through the address that ships, re-raced
+and verified - short only of a public machine to host it, which no test can
+stand in for.
 
 (Two machines that both finish is a further step - see
 tools/two_machines_check.py and PROJECT_STATUS.md: it needs a settle-time fix
@@ -128,12 +133,20 @@ def main():
             if key is None:
                 return fail("the server never announced a key", client, server)
 
+            # Join through the front door that ships: the server's host, port
+            # and key written into a server.txt in the client's own preference
+            # directory, and --online with no address on the command line at
+            # all. This is the exact path a hosted server is reached by.
+            client_env = quiet_env(os.path.join(tmp, "client"))
+            with open(os.path.join(client_env["GEARSTICK_PREF_DIR"],
+                                   "server.txt"), "w") as f:
+                f.write("# the address that ships, for this test\n")
+                f.write(f"127.0.0.1 {port} {key}\n")
             client_proc = subprocess.Popen(
-                [game_bin, "--server", "127.0.0.1", str(port), "--server-key",
-                 key, "--name", NAME, "--screen", "lobby", "--autodrive",
-                 "--trace"],
+                [game_bin, "--online", "--name", NAME, "--screen", "lobby",
+                 "--autodrive", "--trace"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                env=quiet_env(os.path.join(tmp, "client")))
+                env=client_env)
             client = Reader(client_proc.stdout)
 
             deadline = time.monotonic() + SECONDS
@@ -175,9 +188,10 @@ def main():
             return fail("the server never re-raced and verified the time",
                         client, server)
 
-        print(f"records_check: {NAME} raced online to the flag, agreed the race "
-              f"at tick {agreed.group(1)} (hash {agreed.group(2)}), and the "
-              f"server re-raced the recording and kept it, correct")
+        print(f"records_check: {NAME} joined through server.txt with --online, "
+              f"raced to the flag, agreed the race at tick {agreed.group(1)} "
+              f"(hash {agreed.group(2)}), and the server re-raced the recording "
+              f"and kept it, correct")
     return 0
 
 

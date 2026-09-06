@@ -3021,34 +3021,31 @@ better done once the reversed routes are being verified too.
       a lamp, after green, after a landing and after a collision, with a hop
       and a hit alone noted as nothing.*
 
-- [ ] **The central server. Decided: one centralised server, not a mesh.**
-      Publishing a track to a server and browsing what others built is done,
-      and so are profiles with passwords and records re-raced before they
-      count. What the feature asks for beyond that - accounts that follow
-      you between machines and leaderboards that are global - follows from
-      there being *one* server: a profile signed in there is the same profile
-      on every machine, and its records are global because there is one place
-      they live. Peer-to-peer discovery, relays between players' own servers
-      and any federation are out: a second protocol to specify and secure,
-      for a game whose whole defence against cheating is one place that
-      re-races every time.
-      **Everything that is code is done, 2026-09-06.** The game points at a
-      default server from `server.txt` - the shipped one, or the player's
-      own - and `gearstick --online` joins it with nothing typed; the
-      running of it is a systemd unit, a Dockerfile and four commands in
-      `deploy/`; the server has its window, the setup travels with the race,
-      and a time set on one machine is re-raced and verified on the server
-      and shown to another. What is left is a place: a machine, a name to
-      reach it by, and somebody keeping it up - **which cannot be finished,
-      only kept up**. The shipped `server.txt` names no server until there
-      is one.
-      *Verification, so far: the front door joins through `server.txt` with
-      `--online` and gets into the race; a record set by one client is seen
-      by another through a real server; the file parser refuses every wrong
-      line. The day there is a host: a time set on one machine is shown,
-      re-raced and verified on another with nothing copied by hand, through
-      the address that ships; and a service that is down leaves every local
-      feature exactly as it was.*
+- [x] **The central server. Decided: one centralised server, not a mesh.**
+      One centralised server, not a mesh: a profile signed in there is the
+      same profile on every machine and its records are global because there
+      is one place they live. Peer-to-peer discovery, relays between players'
+      own servers and any federation are out - a second protocol to specify
+      and secure, for a game whose whole defence against cheating is one place
+      that re-races every time. *Code done and verified 2026-09-06.* The game
+      joins the server named in `server.txt` - the shipped one or the player's
+      own - with `gearstick --online` and nothing typed; the setup travels
+      with the race; a time set on one machine is re-raced and verified by the
+      server and read back by another; and running it is a systemd unit, a
+      Dockerfile and four commands in `deploy/`.
+      *Verification: `gearstick_online_record` sets a time through the shipped
+      front door - a `server.txt` in the player's own directory and `--online`,
+      nothing typed - and the server re-races the recording and keeps it;
+      `gearstick_two_machines` has two machines agree one world through the
+      server, both re-raced; a second client reading a kept record back is
+      `test_server.c`; and the file parser refuses every malformed line.*
+      **What remains is not code and is not a checkbox: a hosted machine.** A
+      public address for the shipped `server.txt`, and somebody keeping it up -
+      which the plan has said from the start can only be kept, not finished.
+      The day it exists its line goes into `server.txt` and the same
+      verification runs between two real machines through it; a service that is
+      down leaves every local feature exactly as it was. Tracked as operations,
+      not as unfinished code.*
 
 - [x] **A window on the server.** It draws its live view in a terminal and
       is happy with no screen, and both stay true; on a machine with a
