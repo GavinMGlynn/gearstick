@@ -743,6 +743,24 @@ if(GEARSTICK_TESTS)
                              TIMEOUT 200 SKIP_RETURN_CODE 77)
     endif()
 
+    # **And two machines both racing to the flag through one server.** Beyond
+    # the solo record above: two real clients, each its own machine as far as
+    # the game knows, race to the finish and must agree one world - the same
+    # hash at the same tick - which each hands in and the server re-races. This
+    # is what pins the settle-time convergence: the visible race ends on each
+    # machine at its own predicted finish, and only by stepping the confirmed
+    # race past it do the two arrive at one ending.
+    if(Python3_FOUND AND GEARSTICK_SERVER AND TARGET gearstick)
+        add_test(NAME gearstick_two_machines
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/two_machines_check.py
+                         $<TARGET_FILE:gearstick_server>
+                         $<TARGET_FILE:gearstick>
+                         $<TARGET_FILE:gearstick_cli>)
+        set_tests_properties(gearstick_two_machines PROPERTIES
+                             TIMEOUT 400 SKIP_RETURN_CODE 77)
+    endif()
+
     # **The whole game, from the front door to the records.** Everything else
     # checks a piece: the unit tests drive the menu module, the render tests
     # draw its screens, play_check races the real client. What nothing did was

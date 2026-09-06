@@ -8952,15 +8952,26 @@ at all. The whole suite is green at 22/22 with the wire format changed, and the
 golden replay did not move: the recording is built from confirmed inputs, which
 the simulation never reads.*
 
-**What is not done: two machines both finishing.** `tools/two_machines_check.py`
-(kept out of the tree until it can pass) races two real clients to the flag, and
-they cannot agree a shared ending. Each machine stops stepping at its own
-*predicted* finish; if that lands before the true confirmed finish, its confirmed
-world can never reach `over` - the ceiling is the frozen local tick - so both
-give up with `nobody finished agreeing`. The submitted recording is built from
-confirmed inputs, so a fix is determinism-safe, but it is real work in the
-race-finish and reveal path: a machine must keep stepping and revealing through
-settle until the confirmed race ends. That is a separate item, not this one.
+**And two machines both finishing agree one ending now, 2026-09-06.** The
+two-machine version found a third fault under the first two: two cars both
+crossing the line could not agree an ending. Each machine's visible race ends at
+its own *predicted* finish and it stopped stepping there, but the confirmed
+race - the only one that can be handed in - reaches `over` a few ticks later, and
+its ceiling is the frozen local tick, so a machine that stopped short could never
+reach it. `gs_net_settle` now keeps stepping past the machine's own finish with
+no input (a finished car ignores it), a packet per step so every tick is
+revealed with the usual redundancy, until the confirmed race is over - and the
+first machine to agree does not fall silent but keeps answering the other for
+the rest of the settle window, which was the second half of it: whoever finished
+first used to stop sending, and the slower one then waited on reveals that never
+came. All of it is in the frontend's settle, built from confirmed inputs, so the
+simulation and its golden hash are untouched.
+
+*Verification: `tools/two_machines_check.py` (`gearstick_two_machines`) races two
+real self-driving clients to the flag through one real server on the circuit the
+CLI writes; both agree one world - the same hash at the same tick - which each
+hands in and the server re-races and keeps. The whole suite is green at 23/23
+with the netcode changed, and the golden replay did not move.*
 
 ### The central server: everything but the place, 2026-09-06
 

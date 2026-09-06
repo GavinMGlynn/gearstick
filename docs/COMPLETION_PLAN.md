@@ -3007,10 +3007,14 @@ better done once the reversed routes are being verified too.
       assumed car zero. Both fixed - the recording is gathered as the race
       runs, and a time now says which car it is for - and a solo online race
       sets a time the server re-races and keeps, checked by
-      `gearstick_online_record`. What is still not there is two machines both
-      finishing: each stops at its own predicted finish and cannot agree the
-      shared ending, a settle-time fault of its own, so that half of the check
-      waits on that fix.*
+      `gearstick_online_record`. And a third fault came with the two-machine
+      version: two cars both finishing could not agree an ending, because each
+      machine stopped at its own predicted finish and neither carried the
+      confirmed race to the shared line. Fixed too - after the flag a machine
+      keeps stepping past its own finish and answering the other until the
+      agreed race is over, first converger included - and `gearstick_two_machines`
+      now races two real clients to the flag through one server, both agreeing
+      one world at one tick and the server re-racing both. The tail is done.*
 
 - [x] **The flat moments.** The finish is an event and three moments
       passed without punctuation: the green light at the start, a

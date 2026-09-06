@@ -200,6 +200,12 @@ typedef struct gs_app {
     // the agreed race is over too.
     bool        net_settling;
     uint32_t    net_settle_frames;
+    // Submitted once, when this machine's confirmed race first reached `over` -
+    // but the settling does not stop there. The other machine may still be
+    // carrying its own confirmed race to the same line and needs this one to go
+    // on answering with the reveals it owes, so settling runs the whole window
+    // whether or not this machine has already handed its time in.
+    bool        net_submitted;
     bool        quit;
 
     // **What the window was asked to open at, and what the window manager
@@ -753,6 +759,40 @@ static void gs_net_settle(gs_app *a) {
 
     uint8_t buf[GS_WIRE_MTU];
     size_t n;
+
+    // **Keep stepping until the race everybody agreed on ends, not the one this
+    // machine saw end.** The visible race is over here; the confirmed race -
+    // the only one that can be handed in - is a few ticks behind, and the
+    // finish everybody arrives at can be later still than the finish this
+    // machine predicted and stopped at. So step past this machine's own finish
+    // with no input, which a finished car ignores: local_tick moves on so the
+    // confirmed world has room to reach `over`, and this machine commits and
+    // reveals those ticks so the other machine can confirm them too. Without
+    // this each machine stopped at its own predicted finish, and two that both
+    // finished sat forever - "nobody finished agreeing" - neither able to carry
+    // the confirmed race to the shared line.
+    //
+    // A packet per step, exactly as the race loop sends one, so every tick is
+    // revealed in GS_NET_REDUNDANCY consecutive packets and one lost datagram
+    // is not one lost tick. Bounded per frame by that redundancy - a single
+    // packet reveals the last that many ticks, so advancing further in one
+    // frame than a packet can carry would leave a tick unspoken - and bounded
+    // over the race by the window: gs_net_step refuses once it is a windowful
+    // ahead of the confirmed tick, and the next frame's reveals free it.
+    for (uint32_t i = 0; i < GS_NET_REDUNDANCY && !gs_net_confirmed(&a->net)->over;
+         i++) {
+        while ((n = gs_wire_recv(a->wire, buf, sizeof buf)) > 0) {
+            gs_net_receive(&a->net, &a->t, buf, n);
+        }
+        gs_net_local_input(&a->net, (gs_input)0);
+        n = gs_net_packet(&a->net, buf, sizeof buf);
+        gs_wire_send(a->wire, buf, n);
+        if (!gs_net_step(&a->net, &a->t)) break;   // window full: wait for reveals
+    }
+
+    // And once there is nothing left to step - the agreed race is already over,
+    // or the window is full waiting on the other machine - still drain what
+    // arrived and answer it, so its reveals land and this machine's go back out.
     while ((n = gs_wire_recv(a->wire, buf, sizeof buf)) > 0) {
         gs_net_receive(&a->net, &a->t, buf, n);
     }
@@ -762,26 +802,31 @@ static void gs_net_settle(gs_app *a) {
     gs_record_confirmed(a);
 
     const gs_world *agreed = gs_net_confirmed(&a->net);
-    if (agreed->over) {
+    if (agreed->over && !a->net_submitted) {
         // **The ending everybody arrived at, written into the recording.** The
         // server re-races the log and has to land here; a log altered anywhere,
         // in any car's inputs, lands somewhere else.
         gs_replay_set_agreed(&a->recording, gs_net_agreed_hash(&a->net));
         gs_submit_result(a, agreed);
-        a->net_settling = false;
+        a->net_submitted = true;
         // The hash goes on the line so two machines can be held to one world
         // from the outside: tools/two_machines_check.py races two real clients
         // through one server and compares what each of them printed here.
         SDL_Log("net: the race is agreed at tick %u with hash %016llx, and submitted",
                 gs_net_confirmed_tick(&a->net),
                 (unsigned long long)gs_net_agreed_hash(&a->net));
-        return;
+        // Not done here: the settling runs on so this machine keeps answering
+        // the other one, which may still be a few ticks short of the same
+        // ending. Stopping the moment this machine agreed was exactly what left
+        // the *second* machine to finish waiting on reveals that never came.
     }
 
     if (++a->net_settle_frames > GS_NET_SETTLE_FRAMES) {
         a->net_settling = false;
-        SDL_Log("net: nobody finished agreeing what happened - nothing "
-                "submitted, which is better than submitting half a race");
+        if (!a->net_submitted) {
+            SDL_Log("net: nobody finished agreeing what happened - nothing "
+                    "submitted, which is better than submitting half a race");
+        }
     }
 }
 
@@ -2025,6 +2070,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             gs_net_finish(&a->net);
             a->net_settling = true;
             a->net_settle_frames = 0;
+            a->net_submitted = false;
         } else if (a->online && a->server_host != nullptr) {
             gs_submit_result(a, &a->world);
         }
@@ -2109,6 +2155,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             a->net_recorded = 0;
             a->net_settling = false;
             a->net_settle_frames = 0;
+            a->net_submitted = false;
             a->net_started = true;
             a->menu.screen = GS_SCREEN_RACE;
             // **The grid is said out loud**, because "one player" and "two
