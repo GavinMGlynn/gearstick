@@ -403,13 +403,18 @@ bool gs_proto_read_session(const uint8_t *buf, size_t len, uint64_t *nonce) {
 
 size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
                        uint64_t conditions, uint16_t laps, uint8_t vehicle,
-                       uint32_t lap_ticks, uint32_t race_ticks, uint64_t nonce) {
-    if (cap < GS_HEAD + 8 + 8 + 2 + 1 + 4 + 4 + 8) return 0;
+                       uint8_t car, uint32_t lap_ticks, uint32_t race_ticks,
+                       uint64_t nonce) {
+    if (cap < GS_HEAD + 8 + 8 + 2 + 1 + 1 + 4 + 4 + 8) return 0;
     size_t n = gs_head(buf, cap, GS_MSG_RESULT);
     gs_put64(buf + n, track);      n += 8;
     gs_put64(buf + n, conditions); n += 8;
     gs_put16(buf + n, laps);       n += 2;
     buf[n++] = vehicle;
+    // Which car of the recording this time is for - the submitter's own,
+    // net.local, so the server verifies the car this person drove rather than
+    // assuming car 0 and refusing everybody who did not start on pole.
+    buf[n++] = car;
     gs_put32(buf + n, lap_ticks);  n += 4;
     gs_put32(buf + n, race_ticks); n += 4;
     gs_put64(buf + n, nonce);      n += 8;
@@ -418,14 +423,15 @@ size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
 
 bool gs_proto_read_result(const uint8_t *buf, size_t len, uint64_t *track,
                           uint64_t *conditions, uint16_t *laps, uint8_t *vehicle,
-                          uint32_t *lap_ticks, uint32_t *race_ticks,
-                          uint64_t *nonce) {
-    if (!gs_expect(buf, len, GS_MSG_RESULT, GS_HEAD + 35)) return false;
+                          uint8_t *car, uint32_t *lap_ticks,
+                          uint32_t *race_ticks, uint64_t *nonce) {
+    if (!gs_expect(buf, len, GS_MSG_RESULT, GS_HEAD + 36)) return false;
     size_t n = GS_HEAD;
     *track = gs_get64(buf + n);      n += 8;
     *conditions = gs_get64(buf + n); n += 8;
     *laps = gs_get16(buf + n);       n += 2;
     *vehicle = buf[n++];
+    *car = buf[n++];
     *lap_ticks = gs_get32(buf + n);  n += 4;
     *race_ticks = gs_get32(buf + n); n += 4;
     *nonce = gs_get64(buf + n);

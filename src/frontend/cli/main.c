@@ -659,6 +659,38 @@ static void gs_ai_circuit(gs_track *t, gs_surface surface) {
     gs_track_add_gate(t, GS_INT(15), GS_INT(15), (gs_angle)(GS_QUARTER * 3), GS_INT(6));
 }
 
+// **The same circuit, as a file a server can serve.** The shipped set is
+// deliberately long - four to five minutes a lap for the AI - and a served
+// race is three laps, so a check that races two real clients to the flag
+// through a real server needs a track they can finish inside a test. This is
+// the one the AI is proved on above, about twenty-four seconds a lap; the
+// selftest track that `track` writes has no gates at all and cannot be raced.
+static int cmd_circuit(const char *path) {
+    static gs_track t;
+    static uint8_t buf[GS_TRACK_TILES * 4 + 4096];
+
+    gs_ai_circuit(&t, GS_SURF_PAVEMENT);
+    size_t n = gs_track_serialize(&t, buf, sizeof buf);
+    if (n == 0) {
+        printf("FAIL   the circuit did not fit its own buffer\n");
+        return 1;
+    }
+    FILE *f = fopen(path, "wb");
+    if (f == nullptr) {
+        printf("FAIL   could not open %s for writing\n", path);
+        return 1;
+    }
+    size_t wrote = fwrite(buf, 1, n, f);
+    fclose(f);
+    if (wrote != n) {
+        printf("FAIL   wrote %zu of %zu bytes\n", wrote, n);
+        return 1;
+    }
+    printf("circuit %u x %u, %u gates, %zu bytes, hash 0x%016llx\n", t.w, t.h,
+           (unsigned)t.gate_count, n, (unsigned long long)gs_track_hash(&t));
+    return 0;
+}
+
 static int cmd_ai(void) {
     static const struct { const char *name; gs_surface surface; gs_fix gravity; }
     conditions[] = {
@@ -1109,6 +1141,7 @@ static int usage(void) {
            "hash\n"
            "  opponents [--verify] race four opponents and print the state hash\n"
            "  track FILE           write a track, read it back, check it survived\n"
+           "  circuit FILE         write the circuit the AI is raced on, to serve\n"
            "  validate             show what the route checker accepts and refuses\n"
            "  ai                   race the AI round a circuit in every condition\n"
            "  analyse FILE         what gravities and machines can get round a track\n"
@@ -1139,6 +1172,7 @@ int main(int argc, char **argv) {
         return cmd_opponents(verify);
     }
     if (strcmp(argv[1], "track") == 0 && argc > 2) return cmd_track(argv[2]);
+    if (strcmp(argv[1], "circuit") == 0 && argc > 2) return cmd_circuit(argv[2]);
     if (strcmp(argv[1], "validate") == 0) return cmd_validate();
     if (strcmp(argv[1], "ai") == 0) return cmd_ai();
     if (strcmp(argv[1], "pace") == 0) return cmd_pace();

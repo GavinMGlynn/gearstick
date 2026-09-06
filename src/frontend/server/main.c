@@ -785,12 +785,14 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
         uint64_t track = 0, conditions = 0;
         uint16_t laps = 0;
         uint8_t vehicle = 0;
+        uint8_t car = 0;
         uint32_t lap_ticks = 0, race_ticks = 0;
 
         if (at < 0 || gs_srv.store == nullptr) break;
         uint64_t nonce = 0;
         if (!gs_proto_read_result(msg, len, &track, &conditions, &laps,
-                                  &vehicle, &lap_ticks, &race_ticks, &nonce)) {
+                                  &vehicle, &car, &lap_ticks, &race_ticks,
+                                  &nonce)) {
             break;
         }
 
@@ -803,7 +805,11 @@ static void gs_handle_plain(NET_Address *addr, uint16_t port,
         cl->claim.track = track;
         cl->claim.conditions = conditions;
         cl->claim.laps = laps;
-        cl->claim.car = 0;
+        // The car the submitter says they drove; verify bounds it against the
+        // recording's car count, and the driver check below refuses a claim on
+        // a car this person did not drive. Was hard-coded 0, so only whoever
+        // started on pole could ever have a time kept.
+        cl->claim.car = car;
         cl->claim.lap_ticks = lap_ticks;
         cl->claim.race_ticks = race_ticks;
 

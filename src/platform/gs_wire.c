@@ -250,9 +250,9 @@ gs_wire *gs_wire_server(const char *host, uint16_t port, const char *name,
 }
 
 void gs_wire_send_result(gs_wire *w, uint64_t track, uint64_t conditions,
-                         uint16_t laps, uint8_t vehicle, uint32_t lap_ticks,
-                         uint32_t race_ticks, const uint8_t *proof,
-                         size_t proof_len) {
+                         uint16_t laps, uint8_t vehicle, uint8_t car,
+                         uint32_t lap_ticks, uint32_t race_ticks,
+                         const uint8_t *proof, size_t proof_len) {
     if (w == nullptr || !w->via_server) return;
 
     // **The token the server last handed out.** A claim without one, or with a
@@ -262,7 +262,8 @@ void gs_wire_send_result(gs_wire *w, uint64_t track, uint64_t conditions,
     uint8_t buf[GS_PROTO_MTU];
     gs_to_server(w, buf,
                  gs_proto_result(buf, sizeof buf, track, conditions, laps,
-                                 vehicle, lap_ticks, race_ticks, w->session));
+                                 vehicle, car, lap_ticks, race_ticks,
+                                 w->session));
 
     // The claim first, then what backs it. The server holds the one until it
     // has the other, so the order matters and the reverse would be a proof

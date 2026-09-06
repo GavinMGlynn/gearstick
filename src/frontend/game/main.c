@@ -621,10 +621,26 @@ static void gs_start_race(gs_app *a) {
     // which means "not recorded" - and a claim of identity against a blank is
     // refused rather than waved through.
     for (uint8_t i = 0; i < a->world.car_count && i < GS_MAX_CARS; i++) {
-        int8_t who = a->menu.setup.profile[i];
-        const char *name = (who >= 0 && who < (int8_t)a->menu.profiles.count)
-                               ? a->menu.profiles.entry[who].name
-                               : "";
+        const char *name;
+        if (a->online) {
+            // **Online, the roster is the server's and not this screen's.**
+            // Every machine names car i from the same lobby, so the recording
+            // each keeps names the same driver in each car; and the car this
+            // machine drove - net.local - carries this player's own name, which
+            // is what the server checks a submitted time against. Named from the
+            // local setup screen instead, every online car was blank or wrong
+            // and an honest time came back "somebody else drove that".
+            const gs_lobby *lobby =
+                a->wire != nullptr ? gs_wire_lobby(a->wire) : nullptr;
+            name = (lobby != nullptr && i < GS_PROTO_MAX_PLAYERS)
+                       ? lobby->player[i].name
+                       : "";
+        } else {
+            int8_t who = a->menu.setup.profile[i];
+            name = (who >= 0 && who < (int8_t)a->menu.profiles.count)
+                       ? a->menu.profiles.entry[who].name
+                       : "";
+        }
         gs_replay_set_driver(&a->recording, i, name);
     }
 
@@ -693,7 +709,7 @@ static void gs_submit_result(gs_app *a, const gs_world *w) {
     const gs_car *me = &w->car[a->net.local];
 
     gs_wire_send_result(a->wire, gs_track_hash(&a->t), gs_conditions_hash(w),
-                        w->laps_to_win, me->vehicle, me->best_lap,
+                        w->laps_to_win, me->vehicle, a->net.local, me->best_lap,
                         me->finish_tick, proof, n);
 }
 
@@ -753,8 +769,12 @@ static void gs_net_settle(gs_app *a) {
         gs_replay_set_agreed(&a->recording, gs_net_agreed_hash(&a->net));
         gs_submit_result(a, agreed);
         a->net_settling = false;
-        SDL_Log("net: the race is agreed at tick %u, and submitted",
-                gs_net_confirmed_tick(&a->net));
+        // The hash goes on the line so two machines can be held to one world
+        // from the outside: tools/two_machines_check.py races two real clients
+        // through one server and compares what each of them printed here.
+        SDL_Log("net: the race is agreed at tick %u with hash %016llx, and submitted",
+                gs_net_confirmed_tick(&a->net),
+                (unsigned long long)gs_net_agreed_hash(&a->net));
         return;
     }
 
@@ -2175,6 +2195,15 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             gs_view_note_split(a->view, GS_MAX_CARS, &a->t,
                                a->show_ghost ? &a->ghost : nullptr, &seen, &a->world);
         }
+
+        // **The recording keeps up with the race, rather than catching up at
+        // the end.** gs_net holds only the last GS_NET_WINDOW ticks of
+        // confirmed input, so a recording built only once the race is over -
+        // which is what this did - finds every tick before the last two seconds
+        // already gone and can reproduce none of it. Harvested each frame,
+        // while the confirmed ticks are still in the window, it is complete when
+        // the flag falls and there is a real time to hand the server.
+        gs_record_confirmed(a);
         steps = 0;
     }
 

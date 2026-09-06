@@ -161,9 +161,9 @@ void gs_wire_ask_track(gs_wire *w, uint64_t hash);
 // and keeps the time only if they produce it, so a claim without its proof is
 // not a record - it is a sentence nobody checked.
 void gs_wire_send_result(gs_wire *w, uint64_t track, uint64_t conditions,
-                         uint16_t laps, uint8_t vehicle, uint32_t lap_ticks,
-                         uint32_t race_ticks, const uint8_t *proof,
-                         size_t proof_len);
+                         uint16_t laps, uint8_t vehicle, uint8_t car,
+                         uint32_t lap_ticks, uint32_t race_ticks,
+                         const uint8_t *proof, size_t proof_len);
 
 // Ask what stands on a track, and read the answer when it comes.
 void gs_wire_ask_best(gs_wire *w, uint64_t track, uint64_t conditions,

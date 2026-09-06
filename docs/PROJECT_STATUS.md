@@ -8913,6 +8913,55 @@ does not; a collision is louder than the rumble alone and crosses zero
 more often, which is the edge. Release and sanitised; neither golden
 moved.*
 
+### A time set online reaches the records, 2026-09-06
+
+**Racing the real client through a real server to the flag - the tail the
+wire-setup item left - showed the online-to-records path broken two ways that
+no test before it could reach.** The rollback layer is proved in
+`tests/test_wire.c`: peers over real sockets confirm every tick and land on one
+world. What that never exercised is a *networked race producing a recording the
+server keeps*, and both halves of that were wrong.
+
+**The recording was gathered too late to exist.** `gs_record_confirmed` walked
+the confirmed inputs into the replay only in `gs_net_settle`, which runs once
+the race is over - but `gs_net` holds only the last `GS_NET_WINDOW` (256) ticks
+of confirmed input, so by settle time every tick before the last two seconds
+was already gone. The recording came up empty, said `the recording fell behind
+the race` every frame, and submitted nothing. It is gathered each frame now,
+while the confirmed ticks are still in the window, and is complete when the flag
+falls. Bookkeeping only, outside `gs_world_step` - no golden moved.
+
+**And the server credited only the pole-sitter.** A submitted time carried no
+car index, and the server assumed car zero: it checked car zero's driver
+against the claimant, so a two-car race verified the driver in grid slot zero
+and refused everyone else as *somebody else drove that*. Two things were wrong
+under it - the result message now carries the submitter's own car (`net.local`,
+one byte after the vehicle, live client-to-server only so no stored replay
+changes), and the recording of an online race now names its cars from the
+server's lobby roster rather than this machine's setup screen, which had left
+every online car blank or wrong. The server verifies the car the submitter says
+they drove, bounded against the recording, and the existing driver check
+refuses a claim on a car this person did not drive.
+
+*Verification: `gearstick_online_record` (tools/records_check.py) races one
+self-driving client through a real server on the short circuit the CLI writes,
+and holds the whole path a record travels - the recording never falls behind,
+the race is agreed and submitted, and the server re-races the recording and
+keeps it. Before either fix an online race could not produce a verifiable time
+at all. The whole suite is green at 22/22 with the wire format changed, and the
+golden replay did not move: the recording is built from confirmed inputs, which
+the simulation never reads.*
+
+**What is not done: two machines both finishing.** `tools/two_machines_check.py`
+(kept out of the tree until it can pass) races two real clients to the flag, and
+they cannot agree a shared ending. Each machine stops stepping at its own
+*predicted* finish; if that lands before the true confirmed finish, its confirmed
+world can never reach `over` - the ceiling is the frozen local tick - so both
+give up with `nobody finished agreeing`. The submitted recording is built from
+confirmed inputs, so a fix is determinism-safe, but it is real work in the
+race-finish and reveal path: a machine must keep stepping and revealing through
+settle until the confirmed race ends. That is a separate item, not this one.
+
 ### The central server: everything but the place, 2026-09-06
 
 **The game points at a default server now, and the shipped default names

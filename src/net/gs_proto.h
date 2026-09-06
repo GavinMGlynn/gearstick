@@ -174,11 +174,12 @@ bool   gs_proto_read_sealed(const uint8_t *buf, size_t len,
 
 size_t gs_proto_result(uint8_t *buf, size_t cap, uint64_t track,
                        uint64_t conditions, uint16_t laps, uint8_t vehicle,
-                       uint32_t lap_ticks, uint32_t race_ticks, uint64_t nonce);
+                       uint8_t car, uint32_t lap_ticks, uint32_t race_ticks,
+                       uint64_t nonce);
 bool gs_proto_read_result(const uint8_t *buf, size_t len, uint64_t *track,
                           uint64_t *conditions, uint16_t *laps, uint8_t *vehicle,
-                          uint32_t *lap_ticks, uint32_t *race_ticks,
-                          uint64_t *nonce);
+                          uint8_t *car, uint32_t *lap_ticks,
+                          uint32_t *race_ticks, uint64_t *nonce);
 
 size_t gs_proto_want_best(uint8_t *buf, size_t cap, uint64_t track,
                           uint64_t conditions, uint16_t laps);

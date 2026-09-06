@@ -723,6 +723,26 @@ if(GEARSTICK_TESTS)
                              TIMEOUT 240 SKIP_RETURN_CODE 77)
     endif()
 
+    # **Two machines to the flag through one server.** The rollback layer is
+    # proved in tests/test_wire.c: peers over real sockets confirm every tick
+    # and land on one world. What that cannot say is that the *programs* do -
+    # the client somebody runs, with its lobby, its track handed over in
+    # chunks, its countdown, the AI at its wheel and its results screen, raced
+    # against a second copy of itself through the server somebody else runs.
+    # This races two real clients to the flag on a short circuit the CLI
+    # writes, and holds three witnesses to one hash: each client's agreed
+    # race, and the server's own re-race of both recordings.
+    if(Python3_FOUND AND GEARSTICK_SERVER AND TARGET gearstick)
+        add_test(NAME gearstick_online_record
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/records_check.py
+                         $<TARGET_FILE:gearstick_server>
+                         $<TARGET_FILE:gearstick>
+                         $<TARGET_FILE:gearstick_cli>)
+        set_tests_properties(gearstick_online_record PROPERTIES
+                             TIMEOUT 200 SKIP_RETURN_CODE 77)
+    endif()
+
     # **The whole game, from the front door to the records.** Everything else
     # checks a piece: the unit tests drive the menu module, the render tests
     # draw its screens, play_check races the real client. What nothing did was

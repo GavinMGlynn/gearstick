@@ -79,7 +79,7 @@ static void gs_seeds_proto(void) {
     gs_seed("best",        b, gs_proto_best(b, sizeof b, 0xfeedfaceull, 7, 3,
                                             1234, "ada", 5678, "bez"));
     gs_seed("result",      b, gs_proto_result(b, sizeof b, 0xfeedfaceull, 7, 3, 1,
-                                              1234, 5678, 0xdeadbeefull));
+                                              0, 1234, 5678, 0xdeadbeefull));
     gs_seed("track_chunk", b, gs_proto_track_chunk(b, sizeof b, 0xfeedfaceull,
                                                    1, 4, payload,
                                                    (uint16_t)GS_CHUNK_BYTES));

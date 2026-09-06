@@ -1597,7 +1597,7 @@ TEST(a_time_is_kept_only_if_re_racing_it_produces_it) {
     // --- The cheat first, so that a later pass cannot be the earlier one
     // lingering. A time nobody drove, with the recording of the race that was
     // actually driven behind it.
-    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0, 0,
                         honest.lap_ticks / 2, honest.race_ticks / 2,
                         proof, proof_len);
     gs_pump(a, 60);
@@ -1609,7 +1609,7 @@ TEST(a_time_is_kept_only_if_re_racing_it_produces_it) {
     CHECK(gs_wire_best_here(a)->race_ticks == 0);
 
     // --- And now the truth, from the same client and the same recording.
-    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0, 0,
                         honest.lap_ticks, honest.race_ticks, proof, proof_len);
     gs_pump(a, 60);
 
@@ -1628,7 +1628,7 @@ TEST(a_time_is_kept_only_if_re_racing_it_produces_it) {
     // --- A claim with no proof at all is not a record either. Silence is not
     // evidence, and a server that accepted one would be a server where the
     // proof is decoration.
-    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0, 0,
                         1, 1, nullptr, 0);
     gs_pump(a, 60);
     gs_wire_ask_best(a, honest.track, honest.conditions, honest.laps);
@@ -1688,7 +1688,7 @@ TEST(a_time_offered_without_the_servers_token_is_refused) {
     CHECK(gs_wire_session(a) != 0);
 
     // --- The honest submission, with the token it was given.
-    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0, 0,
                         honest.lap_ticks, honest.race_ticks, proof, proof_len);
     gs_pump(a, 80);
 
@@ -1706,7 +1706,7 @@ TEST(a_time_offered_without_the_servers_token_is_refused) {
     // nothing, which is the honest outcome: replaying a submission is not an
     // attack, it is just pointless.
     uint32_t was = gs_wire_best_here(a)->lap_ticks;
-    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0, 0,
                         honest.lap_ticks, honest.race_ticks, proof, proof_len);
     gs_pump(a, 80);
     gs_wire_ask_best(a, honest.track, honest.conditions, honest.laps);
@@ -1768,7 +1768,7 @@ TEST(a_time_offered_with_a_token_the_server_never_issued_is_refused) {
     uint8_t buf[GS_PROTO_MTU];
     gs_client_send(&c, buf,
                    gs_proto_result(buf, sizeof buf, honest.track,
-                                   honest.conditions, honest.laps, 0,
+                                   honest.conditions, honest.laps, 0, 0,
                                    honest.lap_ticks, honest.race_ticks,
                                    c.session ^ 0x5a5a5a5aull));
 
@@ -1820,7 +1820,7 @@ static void gs_client_offer(gs_test_client *c, const gs_claim *claim,
     uint8_t buf[GS_PROTO_MTU];
     gs_client_send(c, buf,
                    gs_proto_result(buf, sizeof buf, claim->track,
-                                   claim->conditions, claim->laps, 0,
+                                   claim->conditions, claim->laps, 0, 0,
                                    claim->lap_ticks, claim->race_ticks, nonce));
 
     uint16_t chunks = gs_carrier_chunks(proof_len);
@@ -2137,7 +2137,7 @@ TEST(a_record_set_on_one_client_is_seen_by_another) {
         SDL_Delay(10);
     }
 
-    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0,
+    gs_wire_send_result(a, honest.track, honest.conditions, honest.laps, 0, 0,
                         honest.lap_ticks, honest.race_ticks, proof, proof_len);
     gs_pump(a, 60);
 

@@ -43,7 +43,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     gs_proto_read_track_chunk(data, size, &u64a, &u16a, &u16b, &chunk_data, &u16c);
     gs_proto_read_proof_chunk(data, size, &u64a, &u16a, &u16b, &chunk_data, &u16c);
     gs_proto_read_session(data, size, &u64a);
-    gs_proto_read_result(data, size, &u64a, &u64b, &u16a, &u8a, &u32a, &u32b, &u64c);
+    gs_proto_read_result(data, size, &u64a, &u64b, &u16a, &u8a, &u8b, &u32a, &u32b, &u64c);
     gs_proto_read_want_best(data, size, &u64a, &u64b, &u16a);
     gs_proto_read_best(data, size, &u64a, &u64b, &u16a, &u32a, name, sizeof name,
                        &u32b, other, sizeof other);

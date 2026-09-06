@@ -2998,9 +2998,19 @@ better done once the reversed routes are being verified too.
       re-races to it with the gearbox in its header; a server started
       forward and again reversed tells every client who took which box and
       which way round; and an older recording still reads, as automatic.*
-      *Tail: a check with two game processes racing to the flag through one
-      server and comparing the worlds they end in is not there; the claim
-      is proved at the rollback layer.*
+      *Tail, part done 2026-09-06: racing the real client through a real
+      server to the flag turned up two faults nothing else could see - a
+      networked race never built a recording the server would keep, because
+      the confirmed race was gathered only once it was over and by then gs_net
+      had kept only the last two seconds of it; and the server credited only
+      whoever started on pole, because a submitted time carried no car and it
+      assumed car zero. Both fixed - the recording is gathered as the race
+      runs, and a time now says which car it is for - and a solo online race
+      sets a time the server re-races and keeps, checked by
+      `gearstick_online_record`. What is still not there is two machines both
+      finishing: each stops at its own predicted finish and cannot agree the
+      shared ending, a settle-time fault of its own, so that half of the check
+      waits on that fix.*
 
 - [x] **The flat moments.** The finish is an event and three moments
       passed without punctuation: the green light at the start, a
