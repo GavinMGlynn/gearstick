@@ -8931,6 +8931,48 @@ preference directory with `--online` and gets into the race, while its
 title half still joins by address, so both spellings are proved; and
 `--online` with the shipped file, which names none, says so and stops.*
 
+### The suite under a memory cap, 2026-09-06
+
+**Every test has a measured peak now, and a ceiling it fails at.** On the
+development machine - WSL2 on a 32 GB laptop - a process that allocates
+without bound does not get killed; the whole virtual machine goes, the
+terminal drops to PowerShell and nothing survives to read. That cost a day in
+August (a test drew forty thousand frames without presenting one) and five
+crash cycles before it was found, and a second unexplained shutdown on this
+date was investigated the slow way first: the transcript's last commands, file
+times, the static size of every test binary from its symbol table, every
+allocation site and every place a frame is drawn without being read back. No
+test was running when the machine went down, and none has an unbounded path.
+
+**The method, so it is never diagnosed by re-running again.** Every test runs
+in its own cgroup scope with a hard ceiling and no swap -
+`systemd-run --user --scope -p MemoryMax=3G -p MemorySwapMax=0 <ctest ...>` -
+and reads the scope's `memory.peak` when it ends. A runaway dies at 3 GB
+instead of taking the machine, and every run reports what it really used.
+Beneath that, the machine itself now has a `.wslconfig` giving WSL 12 GB and
+no swap, so anything that escapes the scope meets the Linux OOM killer and
+dies alone while Windows keeps 20 GB and stays responsive; before this there
+was no `.wslconfig` at all, so WSL had 16 GB and 4 GB of swap to thrash in.
+A teardown is told from a VM death by the files: a shutdown writes
+`.bash_history` and the daemons' exit files in the same second, a death
+writes nothing.
+
+**Measured, release build, page cache included so these are ceilings:** the
+whole suite is nine minutes. `gearstick_render` peaks at 621 MB - its static
+floor alone is 528 MB, four 13 MB walk tables of 8192 states each -
+`gearstick_transport_document` at 226 MB (a Python client and its crypto),
+the unit suite at 116 MB, the server tests at 86 MB, the store at 69 MB, the
+front door at 62 MB, and every other test under 40 MB. The wire tests, which
+hold four machines' rollback state, take 6 MB. Nothing came within a fifth of
+the ceiling, so a suite that does is a regression in the tree, not a fault in
+the machine.
+
+*Verification: all twenty-one registered tests green inside their scopes with
+zero OOM kills recorded in `memory.events`; the cap itself proved on a 300 MB
+allocation under a 100 MB ceiling, killed with exit 137, before and after the
+WSL restart that applied the new configuration; `free` on the restarted
+machine shows 12 GB and no swap.*
+
 
 ## Known risks
 
