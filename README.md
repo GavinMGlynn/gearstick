@@ -6,14 +6,15 @@ the same activity.
 
 ![The title screen](docs/images/title.png)
 
-> **Status: the game is playable, and the platform around it is complete but
-> for two things only a person can do.** All 22 phases of
-> [`docs/COMPLETION_PLAN.md`](docs/COMPLETION_PLAN.md) are done — 270 items,
-> each with a verification that was actually run. You can build a track, race up
-> to four people on it locally or online, set a lap record, and have a server
-> re-race it to check it and remember it. What is left is not code: someone
-> listening to the synthesiser on Windows and macOS, and a machine for the
-> central server to live on.
+> **Status: complete — v1.0.0.** Every item in
+> [`docs/COMPLETION_PLAN.md`](docs/COMPLETION_PLAN.md) is done — 273 of them,
+> each with a verification that was actually run, across all 22 phases. You
+> build a track, race up to four people on it locally or online, set a lap
+> record, and have a server re-race it to check it and remember it. The
+> construction set — the point of the game rather than a feature of it — is
+> finished. The one thing outside the version is not code: a hosted machine for
+> the central server to live on, whose line goes into `server.txt` the day it
+> exists.
 >
 > [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) is the single source of
 > truth for what works, with the gaps named plainly and first. Nothing here

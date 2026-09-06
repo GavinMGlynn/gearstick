@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(gearstick
-    VERSION     0.1.0
+    VERSION     1.0.0
     DESCRIPTION "Gearstick - a Racing Destruction Set-style construction racer in C23 + SDL3"
     # C is the project. CXX is here for exactly one reason: Dear ImGui, which
     # the editor's panels are built on and which is C++ underneath its C API.

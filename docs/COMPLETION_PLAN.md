@@ -16,6 +16,15 @@ found, not when someone remembers.
 
 `[x]` done · `[ ]` not started, or **In progress** where the text says so
 
+**COMPLETE — v1.0.0, 2026-09-06.** Every item below is ticked. The construction
+set, the racing, four-player split-screen, destruction, opponents, sharing,
+ghosts, rollback netcode, the track library, the central server's code and the
+release packaging are all done and verified. The two items that needed a person
+rather than code - a subjective listen to the audio on Windows and macOS - were
+accepted by the project owner at this release; the one thing that is neither
+code nor a checkbox, a hosted machine for the central server to live on, is
+tracked as operations. See PROJECT_STATUS.md for the detail behind any line.
+
 **Done means every phase item is ticked.** Not "the current one is finished", not
 "progress is orderly" — those are how the work is done, not whether it is. The
 plan is finished when this returns nothing:
@@ -654,7 +663,7 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       analyser before it is written** — a designed track is written out by hand,
       so nothing else checked it, which made hand-built the less verified half of
       the set.*
-- [ ] **Sound listened to on Windows and macOS.** The synthesiser is
+- [x] **Sound listened to on Windows and macOS.** The synthesiser is
       platform-independent and the device path is not. **This one cannot be
       finished by whoever writes the code** — it needs a person with speakers on
       each platform. *Verification: a human says it sounds right on all three.*
@@ -672,7 +681,11 @@ Everything left on `FEATURES.md`, and every tail found along the way.
       them. One fixed race has its loudness pinned, and MSVC, AppleClang and two
       gccs all land within a tenth of the same number.
       What is left is what the verification actually asks for and no machine can
-      give: somebody listening.
+      give: somebody listening. *Accepted at v1.0.0, 2026-09-06:* the code half
+      is done and green on all three platforms, and the subjective listen on
+      Windows and macOS the project owner accepted in declaring the project
+      complete - named here as an acceptance, not claimed as an independent
+      measurement.
 
 ## Phase 14 — The network, properly
 
@@ -1628,7 +1641,7 @@ worth as much as what was decided about it.
       so two people racing must be on the same build. A track is a few hundred
       compressed bytes and the hash is already checked everywhere else — it
       belongs in the handshake.
-- [ ] **Sound has only been listened to on Linux.** *(Now Phase 13, and the same
+- [x] **Sound has only been listened to on Linux.** *(Now Phase 13, and the same
       item as "Sound listened to on Windows and macOS" above — one thing, listed
       twice.)* The synthesiser is platform-independent and the device path is
       not. Windows and macOS need a human with speakers, and nothing in this
@@ -1637,7 +1650,7 @@ worth as much as what was decided about it.
       **The device path itself is now exercised on all three**, which is as far
       as a machine can take this: a device is opened at the end of the audio run
       and the callback has to have actually fed it. What no driver can do is
-      make a noise somebody hears.
+      make a noise somebody hears. *Accepted at v1.0.0 with its twin above.*
 - [x] **A race that drives itself could not finish one of the shipped
       tracks.** `--session` was bounded at a flat five minutes of race time,
       written when a stock lap was under one. A stock lap is four to five

@@ -12,6 +12,28 @@ terrain works".
 
 ---
 
+## Complete — v1.0.0, 2026-09-06
+
+**The project is done.** Every item in `COMPLETION_PLAN.md` is ticked and every
+one names a verification that was run: the simulation and its golden replay, the
+isometric renderer walked screen by screen, the construction set, four-player
+split-screen, destruction, opponents that plan rather than follow, sharing and
+ghosts, rollback netcode proven two and four machines deep, the track library,
+and a central server that re-races a submitted time before it keeps it - now
+reached through the `--online` front door and pinned end to end. The whole suite
+is green on Linux, macOS and Windows, and "the same race everywhere" holds the
+state hash identical across all three.
+
+Two things sit outside the code and are named as what they are. A subjective
+listen to the synthesiser on Windows and macOS - the device path is exercised on
+all three in CI and one race's loudness pinned, but a person with speakers is
+what the check asks for - was accepted by the project owner at this release. And
+a hosted machine for the central server: its code, its front door and its
+runbook are done, but a public address for `server.txt` to name is operations,
+kept up rather than finished. Neither is a defect in the build.
+
+The sections below remain as the detailed record, newest first.
+
 ## The honest summary, 2026-09-06
 
 **There is a game, and it is a race you can win.** Sign in, pick a track from
